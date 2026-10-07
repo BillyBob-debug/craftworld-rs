@@ -3,6 +3,9 @@
 !/.gitignore
 !/.claude/
 !/.claude/settings.json
+!/.github/
+!/.github/workflows/
+!/.github/workflows/*.yml
 !/Launch Asset Explorer.cmd
 !/*.md
 !/Cargo.toml
