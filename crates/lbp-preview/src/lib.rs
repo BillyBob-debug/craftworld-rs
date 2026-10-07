@@ -6,6 +6,8 @@ pub use alpha_mix::AlphaDiffuseMix;
 mod animation_base;
 pub use animation_base::AnimationBaseSnapshot;
 mod blend;
+mod blend_mask;
+pub use blend_mask::{blend_factor, BlendDiffuseMask, BLEND_THRESHOLD_BITS};
 mod border_domain;
 pub use blend::DiffuseBlend;
 pub use border_domain::{BorderDomain, INTERIOR_MARGIN};
