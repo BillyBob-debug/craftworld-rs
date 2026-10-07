@@ -8,6 +8,11 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
+def setUpModule():
+    # Ignored local-analysis/ is absent in a fresh clone; the private writers require it.
+    Path("local-analysis").mkdir(exist_ok=True)
+
+
 def location(size, revision, kind="animation", offset=0):
     return {"source_path": "USRDIR/DATA.FARC", "offset": offset, "size": size, "sha1": f"{offset:040x}",
             "inspection": {"confirmed_type": {"name": kind}, "magic_hex": "414e4d62", "header":

@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-07 — Cloud-session prep
+
+Tests create ignored local-analysis/ in setUpModule (fresh-clone fix); added
+[cloud-sessions.md](docs/cloud-sessions.md) (credit scope, cloud vs PC split, multi-agent rules).
+Linux check in a cloud container: all crates test/fmt clean, non-GUI clippy clean.
+Not tested: Windows rerun beyond unittest.
+
 ## 2026-10-07 — D68 official update 01.33 overlay data
 
 All 32 official BCUS98245 updates verified and extracted to ignored

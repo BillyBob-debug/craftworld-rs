@@ -9,6 +9,11 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
+def setUpModule():
+    # Ignored local-analysis/ is absent in a fresh clone; the private writers require it.
+    Path('local-analysis').mkdir(exist_ok=True)
+
+
 def row(kind='plan', revision=919, size=30, offset=1, status='parsed'):
     return {'source_path': 'USRDIR/DATA.FARC', 'offset': offset, 'size': size, 'sha1': f'{offset:040x}',
             'inspection': {'confirmed_type': {'name': kind}, 'magic_hex': '504c4e62' if kind == 'plan' else '4c564c62',
