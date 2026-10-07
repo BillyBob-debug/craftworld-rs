@@ -4,11 +4,18 @@ use serde_json::{json, Value};
 use std::{fs::OpenOptions, io::Write, path::Path};
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().collect();
-    if !(args.len() == 5 || (args.len() == 6 && args[5] == "--animation-base")) {
-        return Err("diffuse_parity SNAPSHOT GAME-DIR ORACLE NEW-JSON".into());
+    if !(args.len() == 5
+        || (args.len() == 6 && ["--animation-base", "--instance-white"].contains(&&*args[5])))
+    {
+        return Err(
+            "diffuse_parity SNAPSHOT GAME-DIR ORACLE NEW-JSON [--animation-base|--instance-white]"
+                .into(),
+        );
     }
     let output = Path::new(&args[4]);
-    let animation_base = args.len() == 6;
+    let animation_base = args.len() == 6 && args[5] == "--animation-base";
+    // D86: supplied white instance color; folded roots are recomputed from oracle rows.
+    let instance_white = args.len() == 6 && args[5] == "--instance-white";
     let allowed = Path::new("local-analysis")
         .canonicalize()
         .map_err(|e| e.to_string())?;
@@ -123,6 +130,30 @@ fn run() -> Result<(), String> {
         }
         let equal = route == sample["diffuse_route"];
         mismatches += usize::from(!equal);
+        if instance_white {
+            let white = lbp_preview::DiffuseTint {
+                bits: [1f32.to_bits(); 4],
+            };
+            if let Ok((derived, Some(p))) = lbp_preview::project_instance_color(&graph.graph, white)
+            {
+                if let Some(root) = p.folded_root {
+                    let selected = lbp_preview::select_solid_diffuse(&derived)
+                        .ok()
+                        .flatten()
+                        .map(|s| s.color.bits);
+                    let expected = oracle_constant_fold(sample, root);
+                    mismatches += usize::from(
+                        root != wire.box_from as usize
+                            || selected.is_none()
+                            || selected != expected,
+                    );
+                    projected += 1;
+                    let projection = json!({"status":"instance_white_folded","folded_root":root,"color_bits":selected,"oracle_fold_bits":expected,"swizzled_color_edges":p.swizzled_color_edges.iter().map(|(n,c)|json!([n,(*c as char).to_string()])).collect::<Vec<_>>()});
+                    rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"route":route,"projection":projection}));
+                    continue;
+                }
+            }
+        }
         let solid = lbp_preview::select_solid_diffuse(&graph.graph);
         let projection = if let Ok(Some(s)) = solid {
             if s.output_index != output
@@ -551,7 +582,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":14,"animation_base_enabled":animation_base,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":15,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -568,6 +599,66 @@ fn run() -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+/// D86 independent recomputation from the oracle's graph rows only (Toolkit
+/// GfxAssembler forms: THING_COLOR = supplied white, COLOR words 0..3, CONSTANT word 0,
+/// MULTIPLY l*r, MIX ((r-l)*w)+l with w = word 0, one-component swizzle).
+fn oracle_constant_fold(sample: &Value, root: usize) -> Option<[u32; 4]> {
+    let boxes = &sample["graph"]["boxes"];
+    let word = |i: u64, k: usize| {
+        boxes[i as usize]["parameters_raw"][k]
+            .as_u64()
+            .map(|v| f32::from_bits(v as u32))
+    };
+    let kind = boxes[root]["type_raw"].as_u64()?;
+    let mut operands: [Option<[f32; 4]>; 2] = [None, None];
+    let mut scalars = 0;
+    for w in sample["graph"]["wires"].as_array()? {
+        if w["box_to"].as_u64() != Some(root as u64) {
+            continue;
+        }
+        let from = w["box_from"].as_u64()?;
+        let port = w["port_to_raw"].as_u64()? as usize;
+        let mut value: [f32; 4] = match boxes[from as usize]["type_raw"].as_u64()? {
+            2 => [1.; 4],
+            3 => [
+                word(from, 0)?,
+                word(from, 1)?,
+                word(from, 2)?,
+                word(from, 3)?,
+            ],
+            4 => {
+                scalars += 1;
+                [word(from, 0)?; 4]
+            }
+            _ => return None,
+        };
+        let swizzle: Vec<u64> = w["swizzle_raw"]
+            .as_array()?
+            .iter()
+            .filter_map(Value::as_u64)
+            .filter(|&c| c != 0)
+            .collect();
+        if let [c] = swizzle[..] {
+            let i = "xyzw"
+                .find(c as u8 as char)
+                .or("rgba".find(c as u8 as char))?;
+            value = [value[i]; 4];
+            scalars += 1;
+        } else if !swizzle.is_empty() {
+            return None;
+        }
+        *operands.get_mut(port)? = Some(value);
+    }
+    let ([Some(l), Some(r)], true) = (operands, scalars < 2) else {
+        return None;
+    };
+    let weight = word(root as u64, 0)?;
+    Some(std::array::from_fn(|i| match kind {
+        10 => (l[i] * r[i]).to_bits(),
+        12 => ((r[i] - l[i]) * weight + l[i]).to_bits(),
+        _ => u32::MAX,
+    }))
 }
 fn main() {
     if let Err(e) = run() {

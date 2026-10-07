@@ -16,6 +16,10 @@ pub struct InstanceProjection {
     pub folded_sampler: Option<[usize; 2]>,
     pub color_nodes: Vec<usize>,
     pub alpha_subtract_samplers: Vec<usize>,
+    /// D86: diffuse root MULTIPLY/MIX folded into one derived COLOR (constant inputs only).
+    pub folded_root: Option<usize>,
+    /// D86: (ThingColor node, swizzle byte) broadcast as one component into the fold.
+    pub swizzled_color_edges: Vec<(usize, u8)>,
 }
 
 /// Bound and validate the selected diffuse ancestry before deriving a graph.
@@ -79,6 +83,8 @@ pub fn project_instance_color(
         folded_sampler: None,
         color_nodes: vec![],
         alpha_subtract_samplers: vec![],
+        folded_root: None,
+        swizzled_color_edges: vec![],
     };
     for (index, node) in graph
         .boxes
@@ -202,6 +208,9 @@ pub fn project_instance_color(
                 }
             }
         }
+    }
+    if !projection.color_nodes.is_empty() && projection.folded_sampler.is_none() {
+        crate::instance_fold::fold_constant_root(&mut derived, root, &mut projection)?;
     }
     derived.wire_count = derived.wires.len();
     let used = !projection.color_nodes.is_empty();
@@ -436,5 +445,160 @@ mod tests {
         original.wires[1].box_from = 5;
         let (derived, _) = project_instance_color(&original, color()).unwrap();
         assert!(crate::select_diffuse(&derived).is_err());
+    }
+    fn solid(g: &GraphMetadata) -> Option<[f32; 4]> {
+        crate::select_solid_diffuse(g)
+            .ok()
+            .flatten()
+            .map(|s| s.color.values())
+    }
+    fn swizzled(mut w: WireMetadata, c: u8) -> WireMetadata {
+        w.swizzle_raw = [c, 0, 0, 0, 0];
+        w
+    }
+    #[test]
+    fn d86_constant_multiply_folds_only_under_supplied_color() {
+        // COLOR × THING: the default route stays unsupported; supplied color folds.
+        let mut original = graph(
+            &[0, 10, 3, 2],
+            vec![edge(2, 1, 0), edge(3, 1, 1), edge(1, 0, 0)],
+        );
+        original.boxes[2].parameters_raw[..4]
+            .copy_from_slice(&[0.5f32, 1., 0.25, 1.].map(f32::to_bits));
+        let before = serde_json::to_value(&original).unwrap();
+        assert!(crate::select_solid_diffuse(&original).unwrap().is_none());
+        assert!(crate::select_diffuse(&original).is_err());
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        assert_eq!(serde_json::to_value(&original).unwrap(), before);
+        let p = p.unwrap();
+        assert_eq!(p.folded_root, Some(1));
+        assert!(p.swizzled_color_edges.is_empty());
+        assert_eq!(solid(&derived), Some([0.5 * 0.2, 0.4, 0.25 * 0.8, 0.25]));
+        // Wire order does not change the projection.
+        let mut permuted = original.clone();
+        permuted.wires.reverse();
+        let (again, q) = project_instance_color(&permuted, color()).unwrap();
+        assert_eq!(q.unwrap(), p);
+        assert_eq!(solid(&again), solid(&derived));
+        // CONSTANT (box 4) broadcasts its scalar word 0.
+        let mut constant = original.clone();
+        constant.boxes[2].type_raw = 4;
+        constant.boxes[2].parameters_raw = [0.5f32.to_bits(), 0, 0, 0, 0, 0, 0, 0];
+        let (derived, _) = project_instance_color(&constant, color()).unwrap();
+        assert_eq!(solid(&derived), Some([0.1, 0.2, 0.4, 0.125]));
+        // Out of preview bounds is an explicit reason, not a silent clamp.
+        let mut bright = original.clone();
+        bright.boxes[2].parameters_raw[0] = 8f32.to_bits();
+        let err = project_instance_color(&bright, color()).unwrap_err();
+        assert!(err.contains("folded supplied instance color"), "{err}");
+        // Not folded: animated root, wired operand, no ThingColor operand, extra input.
+        let mut animated = original.clone();
+        animated.boxes[1].animations[0].name_hex = "0001ab".into();
+        assert!(project_instance_color(&animated, color())
+            .unwrap()
+            .1
+            .unwrap()
+            .folded_root
+            .is_none());
+        let mut wired = original.clone();
+        wired.wires.push(edge(3, 2, 0));
+        assert!(project_instance_color(&wired, color())
+            .map(|(d, _)| solid(&d).is_none())
+            .unwrap_or(true));
+        let colors = graph(
+            &[0, 10, 3, 3, 2],
+            vec![edge(2, 1, 0), edge(3, 1, 1), edge(1, 0, 0), edge(4, 0, 4)],
+        );
+        let (derived, _) = project_instance_color(&colors, color()).unwrap();
+        assert!(solid(&derived).is_none());
+        let mut third = original.clone();
+        third.wires.push(edge(2, 1, 2));
+        let (derived, p) = project_instance_color(&third, color()).unwrap();
+        assert!(p.unwrap().folded_root.is_none() && solid(&derived).is_none());
+    }
+    #[test]
+    fn d86_single_component_thing_swizzle_broadcasts_into_the_fold() {
+        let original = graph(
+            &[0, 10, 2],
+            vec![edge(2, 1, 0), swizzled(edge(2, 1, 1), b'a'), edge(1, 0, 0)],
+        );
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        let p = p.unwrap();
+        assert_eq!(p.swizzled_color_edges, vec![(2, b'a')]);
+        assert_eq!(
+            solid(&derived),
+            Some([0.2, 0.4, 0.8, 0.25].map(|v: f32| v * 0.25))
+        );
+        let x = graph(
+            &[0, 10, 2],
+            vec![edge(2, 1, 0), swizzled(edge(2, 1, 1), b'x'), edge(1, 0, 0)],
+        );
+        let r = graph(
+            &[0, 10, 2],
+            vec![edge(2, 1, 0), swizzled(edge(2, 1, 1), b'r'), edge(1, 0, 0)],
+        );
+        assert_eq!(
+            solid(&project_instance_color(&x, color()).unwrap().0),
+            solid(&project_instance_color(&r, color()).unwrap().0)
+        );
+        for bad in [
+            [b'x', b'y', 0, 0, 0],
+            [b'a', b'x', 0, 0, 0],
+            [b'q', 0, 0, 0, 0],
+            [b'a', 0, 0, 0, b'x'],
+        ] {
+            let mut g = original.clone();
+            g.wires[1].swizzle_raw = bad;
+            let (derived, p) = project_instance_color(&g, color()).unwrap();
+            assert!(p.unwrap().folded_root.is_none());
+            assert!(solid(&derived).is_none());
+        }
+        // Two scalars have no observed color widening rule.
+        let both = graph(
+            &[0, 10, 2],
+            vec![
+                swizzled(edge(2, 1, 0), b'a'),
+                swizzled(edge(2, 1, 1), b'a'),
+                edge(1, 0, 0),
+            ],
+        );
+        assert!(solid(&project_instance_color(&both, color()).unwrap().0).is_none());
+        // THING × THING without swizzle squares the supplied color.
+        let square = graph(
+            &[0, 10, 2],
+            vec![edge(2, 1, 0), edge(2, 1, 1), edge(1, 0, 0)],
+        );
+        assert_eq!(
+            solid(&project_instance_color(&square, color()).unwrap().0),
+            Some([0.2f32, 0.4, 0.8, 0.25].map(|v| v * v))
+        );
+    }
+    #[test]
+    fn d86_static_constant_mix_folds_with_parameter_weight_only() {
+        // Toolkit MIX form ((r - l) * w) + l, l on port 0, r on port 1, w = word 0.
+        let mut original = graph(
+            &[0, 12, 2, 3],
+            vec![edge(2, 1, 1), edge(3, 1, 0), edge(1, 0, 0)],
+        );
+        original.boxes[1].parameters_raw[0] = 0.25f32.to_bits();
+        original.boxes[3].parameters_raw[..4]
+            .copy_from_slice(&[1f32, 0., 0., 1.].map(f32::to_bits));
+        assert!(crate::select_diffuse(&original).is_err());
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        assert_eq!(p.unwrap().folded_root, Some(1));
+        let l = [1f32, 0., 0., 1.];
+        let r = [0.2f32, 0.4, 0.8, 0.25];
+        assert_eq!(
+            solid(&derived),
+            Some(std::array::from_fn(|i| (r[i] - l[i]) * 0.25 + l[i]))
+        );
+        let mut wired_weight = original.clone();
+        wired_weight.boxes.push(node(4));
+        wired_weight.wires.push(edge(4, 1, 2));
+        let (derived, p) = project_instance_color(&wired_weight, color()).unwrap();
+        assert!(p.unwrap().folded_root.is_none() && solid(&derived).is_none());
+        let mut nan = original.clone();
+        nan.boxes[1].parameters_raw[0] = f32::NAN.to_bits();
+        assert!(project_instance_color(&nan, color()).is_err());
     }
 }
