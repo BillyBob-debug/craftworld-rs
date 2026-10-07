@@ -162,8 +162,10 @@ pub(crate) fn read_font_face(
         "glyph index",
     )?;
     let glyph_index = raw
-        .chunks_exact(2)
-        .map(|c| i16::from_be_bytes([c[0], c[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|c| i16::from_be_bytes(*c))
         .collect::<Vec<_>>();
     let raw = read_array(
         fetch,
@@ -174,8 +176,10 @@ pub(crate) fn read_font_face(
         "glyph page",
     )?;
     let glyph_page_used = raw
-        .chunks_exact(4)
-        .map(|c| u32::from_be_bytes(c.try_into().unwrap()))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|c| u32::from_be_bytes(*c))
         .collect::<Vec<_>>();
     let raw = read_array(
         fetch,
@@ -186,7 +190,9 @@ pub(crate) fn read_font_face(
         "glyph",
     )?;
     let glyphs = raw
-        .chunks_exact(GLYPH_RECORD_BYTES)
+        .as_chunks::<GLYPH_RECORD_BYTES>()
+        .0
+        .iter()
         .map(|c| Glyph {
             character: u16::from_be_bytes([c[0], c[1]]),
             advance: i16::from_be_bytes([c[2], c[3]]),
