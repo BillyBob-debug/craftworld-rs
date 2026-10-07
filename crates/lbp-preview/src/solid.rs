@@ -1,4 +1,5 @@
 //! Bounded static COLOR → DIFFUSE projection. Evidence/pin: docs/solid-color-preview.md.
+//! Unwired diffuse (zero per Toolkit's generator, game unverified): docs/unwired-diffuse-preview.md.
 use crate::DiffuseTint;
 use lbp_resource::material::GraphMetadata;
 
@@ -9,6 +10,8 @@ pub struct SolidSelection {
     pub color: DiffuseTint,
     pub ignored_nodes: usize,
     pub ignored_wires: usize,
+    /// No diffuse wire: `color` is zero and `color_index` equals `output_index`.
+    pub unwired_diffuse: bool,
 }
 pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelection>, String> {
     let boxes = &graph.boxes;
@@ -37,6 +40,28 @@ pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelecti
         .iter()
         .filter(|w| w.box_to as usize == output_index && w.port_to_raw == 0)
         .collect();
+    if diffuse.is_empty() {
+        // Only a static, parameterless output; Blender-family nodes (128+) carry
+        // output-parameter colors in the reference reader and stay unsupported.
+        if output.subtype_raw != 0
+            || output.parameters_raw != [0; 8]
+            || output
+                .animations
+                .iter()
+                .any(|a| a.component_value_count != 0 || a.name_hex.bytes().any(|v| v != b'0'))
+            || boxes.iter().any(|b| b.type_raw >= 128)
+        {
+            return Err("Unsupported: unwired diffuse needs a static parameterless output".into());
+        }
+        return Ok(Some(SolidSelection {
+            output_index,
+            color_index: output_index,
+            color: DiffuseTint { bits: [0; 4] },
+            ignored_nodes: boxes.len() - 1,
+            ignored_wires: wires.len(),
+            unwired_diffuse: true,
+        }));
+    }
     if diffuse.len() != 1 {
         return Err("Unsupported: solid diffuse requires one diffuse wire".into());
     }
@@ -70,5 +95,6 @@ pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelecti
         color,
         ignored_nodes: boxes.len() - 2,
         ignored_wires: wires.len() - 1,
+        unwired_diffuse: false,
     }))
 }

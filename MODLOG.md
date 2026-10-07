@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-07 — D63 unwired diffuse as explicit black
+
+Materials with no diffuse wire preview as a labelled black solid (Toolkit generator
+evidence; game default unknown). Other channels stay flagged, Complete blocked.
+48-GUID cohort: +0 viewable/+0 Complete; all-options full diffuse 47→48.
+[unwired-diffuse-preview.md](docs/unwired-diffuse-preview.md), [STATUS.md](STATUS.md).
+
 ## 2026-10-07 — D62 git baseline and subtype-0 animation base
 
 Local git repo with default-deny ignore; baseline commit. Recorded the unlogged D61

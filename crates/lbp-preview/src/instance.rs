@@ -50,6 +50,10 @@ pub fn project_instance_color(
         .iter()
         .filter(|w| w.box_to as usize == outputs[0].0 && w.port_to_raw == 0)
         .collect();
+    if diffuse.is_empty() {
+        // Nothing to project; the unwired-diffuse route decides support.
+        return Ok((graph.clone(), None));
+    }
     if diffuse.len() != 1 {
         return Err("Unsupported: no unique diffuse connection; other material channels require separate support".into());
     }
@@ -377,7 +381,8 @@ mod tests {
         assert!(project_instance_color(&bad, color()).is_err());
         bad = original.clone();
         bad.wires[0].port_to_raw = 4;
-        assert!(project_instance_color(&bad, color()).is_err());
+        // No diffuse wire: nothing projected, left to the unwired-diffuse route.
+        assert!(project_instance_color(&bad, color()).unwrap().1.is_none());
         assert!(project_instance_color(
             &original,
             crate::DiffuseTint {

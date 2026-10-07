@@ -78,8 +78,36 @@ fn run() -> Result<(), String> {
             .graph
             .wires
             .iter()
-            .find(|w| w.box_to as usize == output && w.port_to_raw == 0)
-            .ok_or("diffuse absent")?;
+            .find(|w| w.box_to as usize == output && w.port_to_raw == 0);
+        let Some(wire) = wire else {
+            // Unwired diffuse: oracle route fields are null; projection must be zero.
+            let mut route =
+                json!({"output_index":output,"source_index":null,"source_type":null,"slot":null});
+            if sample["diffuse_route"].get("uv_channel_raw").is_some() {
+                route["uv_channel_raw"] = Value::Null;
+            }
+            let projection = match lbp_preview::select_solid_diffuse(&graph.graph) {
+                Ok(Some(s)) if s.unwired_diffuse => {
+                    mismatches += usize::from(
+                        route != sample["diffuse_route"]
+                            || s.output_index != output
+                            || s.color.bits != [0; 4],
+                    );
+                    projected += 1;
+                    json!({"status":"unwired_projected","output_index":s.output_index,"color_bits":s.color.bits,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+                }
+                Ok(_) => {
+                    mismatches += 1;
+                    json!({"status":"unwired_not_selected"})
+                }
+                Err(e) => {
+                    mismatches += usize::from(route != sample["diffuse_route"]);
+                    json!({"status":"unsupported","reason":e})
+                }
+            };
+            rows.push(json!({"sha1":sha,"route_equal":route == sample["diffuse_route"],"wraps_equal":wraps_equal,"route":route,"projection":projection}));
+            continue;
+        };
         let node = graph
             .graph
             .boxes
@@ -424,7 +452,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":10,"animation_base_enabled":animation_base,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":11,"animation_base_enabled":animation_base,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

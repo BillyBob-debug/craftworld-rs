@@ -2863,3 +2863,25 @@ legacy viewer subtype-0 path, other revisions, corpus totals (unknown).
 Originals read-only; FARC/SFO/MAP untouched. No publication, keys or recovered code.
 Next: decide how to present materials with no diffuse wire (00020c92 prim 1): look
 for evidence of the game's default for an unwired diffuse port before any route.
+
+## D63 — unwired diffuse as explicit black (2026-10-07)
+
+Last open blocker: base_logic_lcd_custom has no diffuse wire (glow/reflect only).
+Pinned Toolkit GfxAssembler::setupPath returns float4(0.0) for an unwired port; the
+game's own behavior is UNKNOWN. Added a narrow labelled zero-diffuse solid route
+(static parameterless output, no Blender nodes). Other-channel samplers stay flagged
+as unrendered, so Complete stays blocked. Rules/evidence: [docs/unwired-diffuse-preview.md](docs/unwired-diffuse-preview.md).
+
+Counts (48-hash cohort, distinct GUID): default 48/43/0 unchanged (00020c92 1/3 → 2/3
+groups); supplied color + animation base 48/47/0 → 48/48/0.
+**+0 newly viewable / +0 newly Complete.** Geometry identical.
+
+Commands (after `. ./scripts/use-local-rust.ps1`; A, G, mesh manifest d61-mesh-samples.json as D62):
+- compatibility_census: d63-default-baseline (stashed) 48/43/0; d63-all-baseline (stashed, --animation-base --instance-rgba 0.25,0.5,0.75,0.5) 48/47/0; d63-default-after 48/43/0; d63-base-after 48/45/0; d63-all-after 48/48/0.
+- diffuse_parity: d63-blocker 8/0 mismatches/1 projected; d63-blocker-base 8/0/5; d63-diffuse 32/0/28; d63-linked 48/0/46; d63-alpha 1/0/1; d63-mirror 5/0/5; d63-animation 2/0/2; d63-bubbles 2/0/2.
+- fmt --check pass; tests pass (preview 21 incl. new cases); Clippy -D warnings pass; python 34 pass.
+- cargo build -p lbp-viewer pass; cargo check -p lbp-bevy-viewer pass. Full Bevy build failed: exe locked by the user's open viewer window (started 08:29), which I did not close.
+- Failed: first test compile missed a DiffuseTint path; PowerShell Set-Content added a BOM to linked.rs (removed); old instance test expected an error for no-diffuse graphs (updated to pass-through).
+
+Not tested: native capture (exe locked), game pixels for unwired diffuse, glow/reflect rendering, corpus count of unwired-diffuse materials.
+Next: relink and capture 00020c92 once the viewer is closed; then widen the cohort (corpus-wide census of which diffuse routes remain unsupported) to pick the next blocker by asset count.
