@@ -2848,6 +2848,7 @@ dependencies = [
  "flate2",
  "lbp-core",
  "serde",
+ "serde_json",
  "sha2",
 ]
 

@@ -5,10 +5,12 @@
 //! Independent layout implementation, MIT knowledge notice in THIRD-PARTY-NOTICES.
 //! Scope: LBP1/2 heads <=0x3f8 (Revisions.LBP2_MAX; header layout unchanged after 0x297),
 //! locally observed through 1016 with update 01.33. Ordinary binary branches 0/LD, plus
-//! DOUBLE11 0x4431 header/dependencies (D77, Vita heads only); SMH common header
+//! DOUBLE11 0x4431 header/dependencies (D77, Vita heads only); FNTb glyph tables
+//! (D79, `font.rs`, no dependency table, bitmaps not inflated); SMH common header
 //! and dependency table only. No payload decompression, extra ALSR interpretation,
 //! texture/static-mesh payload parsing or encryption. Tests use synthetic recipes;
 //! local metadata compared with unmodified pinned Toolkit (see docs/scanner.md).
+use crate::font::{read_font_face, FontLimits, FontSummary};
 use lbp_core::{ByteReader, ContentHash, Error, ErrorKind, Guid, Result};
 use serde::Serialize;
 use std::io::{Read, Seek, SeekFrom};
@@ -162,6 +164,9 @@ pub struct Inspection {
     pub dependency_count_raw: Option<u32>,
     pub dependencies: Vec<Dependency>,
     pub metadata_bytes_read: usize,
+    /// FNTb glyph-table summary (D79); absent for every other type.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub font: Option<FontSummary>,
 }
 struct Reader<'a, R> {
     source: &'a mut R,
@@ -218,6 +223,7 @@ pub fn inspect<R: Read + Seek>(
         dependency_count_raw: None,
         dependencies: Vec::new(),
         metadata_bytes_read: 0,
+        font: None,
     };
     let mut reader = Reader {
         source,
@@ -235,6 +241,7 @@ pub fn inspect<R: Read + Seek>(
         };
         out.reason = Some(e.message);
         out.dependencies.clear(); // never expose a partial table as a complete one
+        out.font = None;
         out.dependency_status = "not_parsed";
     }
     out.metadata_bytes_read = reader.read;
@@ -299,15 +306,31 @@ fn parse<R: Read + Seek>(
             "revision/custom resource outside tested LBP1/2 header scope",
         ));
     }
-    // FNTb (01.33 icon_patch_font.fnt, head 985): the word at +8 does not lead to a
-    // plausible dependency table (count 4292876038), so fonts are not ordinary
-    // serialized resources here. CONFIRMED_FROM_LOCAL_DATA, one sample.
+    // FNTb (D79): not an ordinary serialized resource. The word at +8 is Toolkit's
+    // unused "data offset", not a dependency table (01.33 icon_patch_font.fnt, head 985).
+    // Glyph tables are read under the same metadata budget; bitmaps are never inflated.
     if kind.id == 15 {
+        header.scope = "font_face_header";
+        let size = reader.size;
+        let font = read_font_face(
+            &mut |offset, length| reader.bytes(offset, length),
+            size,
+            FontLimits::default(),
+        );
+        let font = match font {
+            Ok(font) => font,
+            Err(e) => {
+                out.header = Some(header);
+                return Err(e);
+            }
+        };
+        header.compressed = font.compressed;
+        header.payload_offset = u32::try_from(font.data_start).ok();
         out.header = Some(header);
-        return Err(Error::new(
-            ErrorKind::Unsupported,
-            "font face layout is not an ordinary resource header",
-        ));
+        out.font = Some(font.summary());
+        out.status = "metadata_parsed";
+        out.dependency_status = "not_applicable_to_font_face";
+        return Ok(());
     }
     let offset = if revision >= 0x109 {
         Some(ByteReader::new(&reader.bytes(8, 4)?).be_u32()?)

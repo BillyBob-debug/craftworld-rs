@@ -5,6 +5,7 @@
 use serde::Serialize;
 pub mod animation;
 pub mod binary;
+pub mod font;
 pub mod material;
 mod metadata;
 pub mod plan;
