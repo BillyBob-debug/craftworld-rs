@@ -1,4 +1,10 @@
 //! Read-only filesystem catalog. Never follows nested symbolic links/reparse points.
+//!
+//! A source may be layered: the input is an OS path list (`;` on Windows) of game
+//! roots, lowest priority first, e.g. disc then installed update. A file in a later
+//! layer replaces an earlier layer's file with the same case-insensitive relative path
+//! (installed-update semantics, STRONG_INFERENCE; see docs/update-overlay.md). Replaced
+//! files are kept in `shadowed` rather than dropped silently.
 use lbp_core::{Error, ErrorKind, Result};
 use serde::Serialize;
 use std::{
@@ -10,19 +16,34 @@ use std::{
 pub struct SourceFile {
     pub path: String,
     pub size: u64,
+    /// Index into `Source::layers`; 0 is the base (disc) layer.
+    pub layer: usize,
 }
 #[derive(Debug, Serialize)]
 pub struct SkippedEntry {
     pub path: String,
     pub reason: &'static str,
 }
-pub struct Source {
+#[derive(Debug, Clone)]
+pub struct Layer {
     pub selected_root: PathBuf,
     pub game_root: PathBuf,
+}
+pub struct Source {
+    /// Base layer roots, kept for single-root callers.
+    pub selected_root: PathBuf,
+    pub game_root: PathBuf,
+    pub layers: Vec<Layer>,
     pub files: Vec<SourceFile>,
+    /// Lower-layer files replaced by a later layer.
+    pub shadowed: Vec<SourceFile>,
     pub skipped: Vec<SkippedEntry>,
     pub directory_count: usize,
+    /// Lower-cased path -> indices into `files`; `required` runs once per payload read.
+    index: std::collections::HashMap<String, Vec<usize>>,
 }
+
+pub const MAX_LAYERS: usize = 8;
 
 fn is_link(metadata: &fs::Metadata) -> bool {
     if metadata.file_type().is_symlink() {
@@ -83,6 +104,53 @@ impl Source {
         check: impl Fn() -> Result<()>,
     ) -> Result<Self> {
         check()?;
+        let roots: Vec<PathBuf> = std::env::split_paths(input.as_os_str())
+            .filter(|p| !p.as_os_str().is_empty())
+            .collect();
+        if roots.is_empty() {
+            return Err(Error::malformed("--game-dir is empty"));
+        }
+        if roots.len() > MAX_LAYERS {
+            return Err(Error::limit("too many --game-dir layers"));
+        }
+        let mut source = Self {
+            selected_root: PathBuf::new(),
+            game_root: PathBuf::new(),
+            layers: Vec::new(),
+            files: Vec::new(),
+            shadowed: Vec::new(),
+            skipped: Vec::new(),
+            directory_count: 0,
+            index: Default::default(),
+        };
+        let mut total = 0_usize;
+        for root in &roots {
+            let layer = source.discover_layer(root, max_entries, &mut total, &check)?;
+            source.merge_layer(layer);
+        }
+        source.selected_root = source.layers[0].selected_root.clone();
+        source.game_root = source.layers[0].game_root.clone();
+        source.files.sort_by(|a, b| a.path.cmp(&b.path));
+        source
+            .shadowed
+            .sort_by(|a, b| (a.layer, &a.path).cmp(&(b.layer, &b.path)));
+        source.skipped.sort_by(|a, b| a.path.cmp(&b.path));
+        for (i, file) in source.files.iter().enumerate() {
+            source
+                .index
+                .entry(file.path.to_ascii_lowercase())
+                .or_default()
+                .push(i);
+        }
+        Ok(source)
+    }
+    fn discover_layer(
+        &mut self,
+        input: &Path,
+        max_entries: usize,
+        total: &mut usize,
+        check: &impl Fn() -> Result<()>,
+    ) -> Result<Vec<SourceFile>> {
         let selected_root = fs::canonicalize(input)?;
         if !selected_root.is_dir() {
             return Err(Error::malformed(
@@ -93,61 +161,96 @@ impl Source {
             .unwrap_or_else(|| selected_root.clone());
         if matching_directory(&game_root, "USRDIR")?.is_none() {
             return Err(Error::malformed(
-                "expected disc root or PS3_GAME root containing USRDIR",
+                "expected disc root, PS3_GAME root or installed update root containing USRDIR",
             ));
         }
-        let mut source = Self {
+        if self
+            .layers
+            .iter()
+            .any(|l| path_within(&game_root, &l.game_root) || path_within(&l.game_root, &game_root))
+        {
+            return Err(Error::malformed("--game-dir layers overlap"));
+        }
+        let layer = self.layers.len();
+        self.layers.push(Layer {
             selected_root,
             game_root: game_root.clone(),
-            files: Vec::new(),
-            skipped: Vec::new(),
-            directory_count: 1,
-        };
-        let mut pending = vec![game_root];
-        let mut total = 0_usize;
+        });
+        self.directory_count += 1;
+        let mut files = Vec::new();
+        let mut pending = vec![game_root.clone()];
         while let Some(directory) = pending.pop() {
             for item in fs::read_dir(directory)? {
                 check()?;
                 let item = item?;
-                total = total
+                *total = total
                     .checked_add(1)
                     .ok_or_else(|| Error::limit("filesystem count overflow"))?;
-                if total > max_entries {
+                if *total > max_entries {
                     return Err(Error::limit("filesystem entry budget exceeded"));
                 }
                 let path = item.path();
-                let name = relative(&path, &source.game_root)?;
+                let name = relative(&path, &game_root)?;
                 let metadata = fs::symlink_metadata(&path)?;
                 if is_link(&metadata) {
-                    source.skipped.push(SkippedEntry {
+                    self.skipped.push(SkippedEntry {
                         path: name,
                         reason: "symlink_or_reparse_point_not_followed",
                     });
                 } else if metadata.is_dir() {
-                    source.directory_count += 1;
+                    self.directory_count += 1;
                     pending.push(path);
                 } else if metadata.is_file() {
-                    source.files.push(SourceFile {
+                    files.push(SourceFile {
                         path: name,
                         size: metadata.len(),
+                        layer,
                     });
                 } else {
-                    source.skipped.push(SkippedEntry {
+                    self.skipped.push(SkippedEntry {
                         path: name,
                         reason: "non_regular_file_not_read",
                     });
                 }
             }
         }
-        source.files.sort_by(|a, b| a.path.cmp(&b.path));
-        source.skipped.sort_by(|a, b| a.path.cmp(&b.path));
-        Ok(source)
+        Ok(files)
+    }
+    /// Later layer wins per case-insensitive path; same-layer case duplicates stay
+    /// together so `required` still reports them as ambiguous.
+    fn merge_layer(&mut self, files: Vec<SourceFile>) {
+        let replaced: std::collections::BTreeSet<String> =
+            files.iter().map(|f| f.path.to_ascii_lowercase()).collect();
+        let (shadowed, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.files)
+            .into_iter()
+            .partition(|f| replaced.contains(&f.path.to_ascii_lowercase()));
+        self.shadowed.extend(shadowed);
+        self.files = kept;
+        self.files.extend(files);
+    }
+    /// Human-readable root list, base layer first.
+    pub fn describe_roots(&self) -> String {
+        self.layers
+            .iter()
+            .map(|l| l.game_root.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" + ")
+    }
+    /// Case-insensitive lookup that tolerates absence (unlike `required`).
+    pub fn optional(&self, name: &str) -> Result<Option<&SourceFile>> {
+        match self.required(name) {
+            Ok(file) => Ok(Some(file)),
+            Err(_) if !self.index.contains_key(&name.to_ascii_lowercase()) => Ok(None),
+            Err(e) => Err(e),
+        }
     }
     pub fn required(&self, name: &str) -> Result<&SourceFile> {
         let matches: Vec<_> = self
-            .files
-            .iter()
-            .filter(|f| f.path.eq_ignore_ascii_case(name))
+            .index
+            .get(&name.to_ascii_lowercase())
+            .into_iter()
+            .flatten()
+            .map(|&i| &self.files[i])
             .collect();
         match matches.as_slice() {
             [file] => Ok(file),
@@ -163,7 +266,12 @@ impl Source {
         if !safe_relative(&file.path) {
             return Err(Error::malformed("unsafe source-relative path"));
         }
-        let mut checked = self.game_root.clone();
+        let root = &self
+            .layers
+            .get(file.layer)
+            .ok_or_else(|| Error::malformed("source layer absent"))?
+            .game_root;
+        let mut checked = root.clone();
         if is_link(&fs::symlink_metadata(&checked)?) {
             return Err(Error::malformed("source root became a link"));
         }
@@ -175,13 +283,13 @@ impl Source {
                 ));
             }
         }
-        let path = self.game_root.join(&file.path);
+        let path = root.join(&file.path);
         let metadata = fs::symlink_metadata(&path)?;
         if is_link(&metadata) || !metadata.is_file() {
             return Err(Error::malformed("input changed or became non-regular"));
         }
         let canonical = fs::canonicalize(&path)?;
-        if !path_within(&canonical, &self.game_root) {
+        if !path_within(&canonical, root) {
             return Err(Error::malformed("input resolved outside game source"));
         }
         let handle = fs::File::open(canonical)?;
@@ -259,9 +367,9 @@ pub fn check_output(path: &Path, source: &Source) -> Result<PathBuf> {
         .unwrap_or_else(|| Path::new("."));
     let parent = fs::canonicalize(parent)?;
     let destination = parent.join(filename);
-    if path_within(&destination, &source.selected_root)
-        || path_within(&destination, &source.game_root)
-    {
+    if source.layers.iter().any(|l| {
+        path_within(&destination, &l.selected_root) || path_within(&destination, &l.game_root)
+    }) {
         return Err(Error::malformed(
             "JSON output must be outside selected game data",
         ));
@@ -333,6 +441,30 @@ mod tests {
         assert_eq!(source.skipped[0].path, "USRDIR/junction");
         assert_eq!(fs::read(outside.join("sentinel")).unwrap(), b"outside");
         fs::remove_dir(link).unwrap(); // Remove the authored junction only, not its target.
+    }
+    #[test]
+    fn later_layer_replaces_same_path_case_insensitively() {
+        let temp = tempfile::tempdir().unwrap();
+        let disc = temp.path().join("disc");
+        let update = temp.path().join("update");
+        fs::create_dir_all(disc.join("PS3_GAME/USRDIR/OUTPUT")).unwrap();
+        fs::create_dir_all(update.join("USRDIR/output")).unwrap();
+        fs::write(disc.join("PS3_GAME/PARAM.SFO"), b"disc").unwrap();
+        fs::write(disc.join("PS3_GAME/USRDIR/OUTPUT/A.MAP"), b"a").unwrap();
+        fs::write(update.join("PARAM.SFO"), b"update!").unwrap();
+        fs::write(update.join("USRDIR/output/b.map"), b"b").unwrap();
+        let list = std::env::join_paths([&disc, &update]).unwrap();
+        let source = Source::discover(Path::new(&list), 50).unwrap();
+        assert_eq!(source.layers.len(), 2);
+        let sfo = source.required("param.sfo").unwrap();
+        assert_eq!((sfo.layer, sfo.size), (1, 7));
+        assert_eq!(source.open(sfo).unwrap().metadata().unwrap().len(), 7);
+        assert_eq!(source.required("USRDIR/OUTPUT/A.MAP").unwrap().layer, 0);
+        assert_eq!(source.required("USRDIR/OUTPUT/B.MAP").unwrap().layer, 1);
+        assert_eq!(source.shadowed.len(), 1);
+        assert!(source.optional("USRDIR/missing").unwrap().is_none());
+        let overlap = std::env::join_paths([&disc, &disc.join("PS3_GAME")]).unwrap();
+        assert!(Source::discover(Path::new(&overlap), 50).is_err());
     }
     #[test]
     fn map_paths_do_not_become_os_paths() {

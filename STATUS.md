@@ -3016,3 +3016,33 @@ by size inference), EBOOT 01.33, text resources.
 Next: user decision on wiring the overlay (second input root, patch MAP wins per GUID,
 hash lookup across all FARCs), then revision 952..1016 support. Prior D67 Next (two-texture
 x COLOR products) remains open.
+
+## D69 — 01.33 becomes the working input (2026-10-07)
+
+User decision: move to the latest update outright. Disc + installed update are read as
+layers (`--game-dir "game-data/a1-disc;game-data/a1-update-0133"`); patch MAP rows win
+per GUID; heads to LBP2_MAX 0x3f8 accepted. Rules, evidence and tables:
+[docs/update-overlay.md](docs/update-overlay.md) (D69 section).
+
+Counts: MAP rows 36,854 -> 58,124 (rows); parsed headers 16,515 -> 27,624 (inspected
+locations); materials 5,163 -> 8,159, all parse; texture-route 4,306 -> 6,828 (material
+locations). New 48-mesh 01.33 cohort (post-951 meshes, distinct GUID): 48 viewable /
+45 full diffuse / 0 Complete, baseline 0 (absent on 01.00). Existing cohorts unchanged.
+**+48 newly viewable in the tested cohort / +0 newly Complete.** Corpus totals unknown.
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- lbp-cli --game-dir "disc;update" -> d68-inventory-0133-verified.json: 58,124 rows, 33 FARCs, 0 ambiguous, partial false.
+- run-{material,mesh,plan,animation}-oracle.ps1 -Archive patch_01xx.farc on d68-samples-*.json: 66/66 parsed.
+- {material,mesh,plan,animation}_parity + diffuse_parity vs those: 29/0, 18/0, 14/0, 5/0, 29/0 mismatches.
+- compatibility_census on 01.33: d68 new 48/45/0; D61 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0.
+- material_census d68-material-census-0133b.json: 8,159/8,159; diffuse_route_census: texture 6,828, solid 603, unsupported 386.
+- fmt check, Clippy -D warnings (workspace), all tests, python 34, both viewer builds: pass.
+- Native Bevy --select-guid 0002e3db (01.33 Van Gogh costume): non-primary 165v0, 8/8 primitives, 0 failed; image not viewed.
+
+Failed: first overlay census ran 33 s vs 2 s (each 4 KiB read reopened ~2,040 stamped
+files); fixed by checking identity files per read and archives per sweep. Diffuse route
+census aborted on 65 FARC hashes with no MAP row (superseded copies); now counted.
+Not tested: legacy viewer on 01.33, EDAT/EBOOT, text resources, game pixels, corpus-wide
+mesh census.
+Next: rerun the D67 Next item (two-texture x COLOR products) on 01.33, re-ranking
+unsupported diffuse shapes from d68-diffuse-route-shapes-0133.json (386 unsupported).

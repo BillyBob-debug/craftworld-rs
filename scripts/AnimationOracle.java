@@ -26,7 +26,7 @@ public class AnimationOracle {
             Integer.toUnsignedLong(Float.floatToRawIntBits(v.z)),Integer.toUnsignedLong(Float.floatToRawIntBits(v.w)));
     }
     static Map<String,Object> prefix(MemoryInputStream s,int revision)throws IOException {
-        if(revision<888 || revision>951)throw new IOException("unsupported animation prefix revision");
+        if(revision<888 || revision>1016)throw new IOException("unsupported animation prefix revision");
         need(s,14);
         int frames=s.u16(),fps=s.u16(),loop=s.u16(),morphs=s.u8();
         int[] counts=new int[6]; for(int i=0;i<5;i++)counts[i]=s.u8(); counts[5]=s.u16();
@@ -99,7 +99,7 @@ public class AnimationOracle {
                 if(System.nanoTime()>deadline)throw new IOException("oracle time budget");
                 JsonObject q=item.getAsJsonObject();String sha=q.get("sha1").getAsString();Map<String,Object> row=TextureOracle.row("sha1",sha);results.add(row);
                 try {
-                    if(!q.get("source_path").getAsString().equals("USRDIR/DATA.FARC"))throw new IOException("source differs");
+                    if(!TextureOracle.sameArchive(q.get("source_path").getAsString(),args[0]))throw new IOException("source differs");
                     long at=q.get("offset").getAsLong(),size=q.get("size").getAsLong();
                     if(at<0||size<18||size>2*1024*1024||at>f.length()-size||total+size>64*1024*1024)throw new IOException("read budget");
                     byte[] raw=new byte[(int)size];f.seek(at);f.readFully(raw);total+=size;
@@ -107,7 +107,7 @@ public class AnimationOracle {
                     ByteBuffer h=ByteBuffer.wrap(raw);
                     if(h.getInt()!=0x414e4d62)throw new IOException("only clear ANMb");
                     int revision=h.getInt(),end=h.getInt(),branch=h.getInt(),flags=h.get()&255,compressed=h.get()&255;
-                    if(revision<888||revision>951||branch!=0||(flags!=0&&flags!=7)||compressed>1||end<18||end>raw.length-4)
+                    if(revision<888||revision>1016||branch!=0||(flags!=0&&flags!=7)||compressed>1||end<18||end>raw.length-4)
                         throw new IOException("unsupported header/revision");
                     // This corpus has no ANM dependency entries. Do not hand an
                     // unbounded dependency count to the community constructor.

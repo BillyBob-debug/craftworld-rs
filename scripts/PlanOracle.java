@@ -33,7 +33,7 @@ public class PlanOracle {
         return value;
     }
     static Map<String,Object> prefix(byte[] clear,int revision,byte flags)throws Exception {
-        if(revision<893||revision>951||clear.length>EXPANDED)throw new IOException("unsupported revision or budget");
+        if(revision<893||revision>1016||clear.length>EXPANDED)throw new IOException("unsupported revision or budget");
         MemoryInputStream s=new MemoryInputStream(clear,flags);
         long inner=integer(s,flags);int lengthOffset=s.getOffset();
         long size=integer(s,flags);int start=s.getOffset();
@@ -64,7 +64,7 @@ public class PlanOracle {
         if(h.getInt()!=0x504c4e62)throw new IOException("only ordinary clear PLNb; protected input blocked");
         int revision=h.getInt(),end=h.getInt(),branch=h.getInt();
         byte flags=h.get();int compressed=h.get()&255;
-        if(raw.length>2*1024*1024||revision<893||revision>951||branch!=0||
+        if(raw.length>2*1024*1024||revision<893||revision>1016||branch!=0||
                 (flags!=0&&flags!=7)||compressed>1||end<18||end>raw.length-4)
             throw new IOException("unsupported header/revision or stored budget");
         int count=dependencies(raw,end);
@@ -126,7 +126,7 @@ public class PlanOracle {
         try{prefix(new byte[]{(byte)255,(byte)255,(byte)255,(byte)255,16},919,(byte)7);
             throw new AssertionError("integer overflow");}catch(IOException expected){}
         byte[] raw=synthetic((byte)7,true);
-        for(int revision:new int[]{892,952}) {
+        for(int revision:new int[]{892,1017}) {
             byte[] bad=raw.clone();ByteBuffer.wrap(bad).putInt(4,revision);rejected(bad);
         }
         byte[] bad=raw.clone();bad[16]=1;rejected(bad);
@@ -162,7 +162,7 @@ public class PlanOracle {
                 Map<String,Object> r=TextureOracle.row("sha1",sha);rows.add(r);
                 try {
                     long at=q.get("offset").getAsLong(),size=q.get("size").getAsLong();
-                    if(!q.get("source_path").getAsString().equals("USRDIR/DATA.FARC")||at<0||size<18||size>2*1024*1024||
+                    if(!TextureOracle.sameArchive(q.get("source_path").getAsString(),args[0])||at<0||size<18||size>2*1024*1024||
                         at>f.length()-size||total+size>64*1024*1024)throw new IOException("source/read budget");
                     byte[] raw=new byte[(int)size];f.seek(at);f.readFully(raw);total+=size;
                     if(!HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(raw)).equals(sha))throw new IOException("identifier mismatch");

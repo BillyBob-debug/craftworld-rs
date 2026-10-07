@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$Output,
+    [string]$Archive = 'game-data/a1-disc/PS3_GAME/USRDIR/DATA.FARC',
     [string]$SampleManifest = 'local-analysis/d27-plan-samples.json'
 )
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,6 @@ try {
     & "$javaRoot/bin/java.exe" '-Xmx256m' '-Djava.awt.headless=true' -cp "$classes;$jar" PlanInventoryOracle --self-test
     if ($LASTEXITCODE -ne 0) { throw 'Plan inventory synthetic guards failed' }
     & "$javaRoot/bin/java.exe" '-Xmx256m' '-Djava.awt.headless=true' -cp "$classes;$jar" PlanInventoryOracle `
-        game-data/a1-disc/PS3_GAME/USRDIR/DATA.FARC $SampleManifest $Output
+        $Archive $SampleManifest $Output
     if ($LASTEXITCODE -ne 0) { throw 'Plan inventory oracle failed' }
 } finally { Pop-Location }

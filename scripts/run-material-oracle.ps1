@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$Output,
+    [string]$Archive = 'game-data/a1-disc/PS3_GAME/USRDIR/DATA.FARC',
     [string]$SampleManifest = 'local-analysis/d3-material-samples.json',
     [switch]$Graph,
     [switch]$Tail,
@@ -23,6 +24,6 @@ try {
     if ($Tail) { $graphArguments = @('--tail') }
     if ($Diffuse) { $graphArguments = @('--diffuse') }
     & "$javaRoot/bin/java.exe" '-Xmx256m' '-Djava.awt.headless=true' -cp "$classes;$jar" MaterialOracle `
-        game-data/a1-disc/PS3_GAME/USRDIR/DATA.FARC $SampleManifest $Output @graphArguments
+        $Archive $SampleManifest $Output @graphArguments
     if ($LASTEXITCODE -ne 0) { throw 'Material oracle execution failed' }
 } finally { Pop-Location }

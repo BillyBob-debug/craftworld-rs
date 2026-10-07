@@ -285,7 +285,7 @@ fn protection_revision_and_cancellation_before_and_between_tail_records() {
         );
         assert_eq!(calls.get(), threshold);
     }
-    for revision in [919u32, 952] {
+    for revision in [919u32, 0x3f9] {
         let mut unsupported = bytes.clone();
         unsupported[4..8].copy_from_slice(&revision.to_be_bytes());
         assert!(matches!(

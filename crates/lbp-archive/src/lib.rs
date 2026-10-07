@@ -74,6 +74,46 @@ pub fn read_map(data: &[u8], limits: ReadLimits) -> Result<FileMap> {
     Ok(FileMap { revision, rows })
 }
 
+/// Base MAP with an installed update's MAP (`USRDIR/output/brg_patch.map`) applied.
+#[derive(Debug)]
+pub struct OverlayMap {
+    /// Effective rows: unshadowed base rows, then patch rows renumbered after the base.
+    pub rows: Vec<MapRow>,
+    /// Base rows replaced by a patch row with the same GUID (preserved, not dropped).
+    pub shadowed: Vec<MapRow>,
+}
+
+/// Each patch row replaces every base row with the same non-null GUID.
+/// STRONG_INFERENCE from local BCUS98245 01.33 data (1,014 same-GUID rows with new
+/// hashes); no community reader handles the patch MAP. See docs/update-overlay.md.
+pub fn overlay_map(base: FileMap, patch: FileMap) -> Result<OverlayMap> {
+    if base.revision != patch.revision {
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "patch MAP revision differs from base MAP",
+        ));
+    }
+    let offset = base.rows.len();
+    let patched: std::collections::BTreeSet<Guid> = patch
+        .rows
+        .iter()
+        .map(|r| r.guid)
+        .filter(|g| g.0 != 0)
+        .collect();
+    let (shadowed, mut rows): (Vec<_>, Vec<_>) = base
+        .rows
+        .into_iter()
+        .partition(|r| patched.contains(&r.guid));
+    for mut row in patch.rows {
+        row.row_index = row
+            .row_index
+            .checked_add(offset)
+            .ok_or_else(|| Error::limit("MAP row index overflow"))?;
+        rows.push(row);
+    }
+    Ok(OverlayMap { rows, shadowed })
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct ArchiveEntry {
     pub entry_index: usize,

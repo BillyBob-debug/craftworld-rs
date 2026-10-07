@@ -66,7 +66,9 @@ impl<'a> Reader<'a> {
 /// Immutable ordinary ANMb only. Returns prefix diagnostics; opaque bytes never escape.
 pub fn inspect(bytes: &[u8], cancel: impl Fn() -> bool) -> Result<AnimationInspection, Error> {
     let (header, data) = crate::binary::payload(bytes, b"ANMb", MAX_INPUT, MAX_EXPANDED, &cancel)?;
-    if !(888..=951).contains(&header.revision)
+    // 952..=0x3f8: Toolkit d6a2ef80 has no branch-0 condition above 951 for this layout
+    // (docs/update-overlay.md, D68); corroborated on BCUS98245 01.33 by the oracle runs there.
+    if !(888..=crate::LBP2_MAX_REVISION).contains(&header.revision)
         || header.branch_id != Some(0)
         || header.branch_revision != Some(0)
     {

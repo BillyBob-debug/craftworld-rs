@@ -162,7 +162,7 @@ unqualified moving branch:
 | MAP versioned rows | `types/databases/FileDB.java::process`; `FileDBRow.java` | full revision 0x100 MAP consumed with no trailing bytes |
 | resource IDs | `types/data/GUID.java`, `SHA1.java`, `ResourceDescriptor.java`; `io/streams/MemoryInputStream.java::guid` | MAP GUID/SHA1 rows and binary dependencies |
 | resource types/magic | `enums/ResourceType.java`; `types/data/ResourceInfo.java` | MATb/GMTb/LVLb/PLNb/ANMb/MSHb/SMHb/GTF samples |
-| wrappers/revisions/dependencies | `types/SerializedResource.java::process`, `processDependencies`; `enums/SerializationType.java` | clear binary revisions through 951; 24 samples compared with actual Toolkit |
+| wrappers/revisions/dependencies | `types/SerializedResource.java::process`, `processDependencies`; `enums/SerializationType.java` | clear binary revisions through 951; 24 samples compared with actual Toolkit; D69: heads to 0x3f8 (LBP2_MAX), 66 post-951 01.33 samples match the Toolkit oracle |
 | compression | `util/Compressor.java::decompressData`; `enums/CompressionFlags.java`; stream classes | no real payload decompression in this pass |
 | textures | `resources/RTexture.java`, `structs/texture/CellGcmTexture.java`, `util/DDS.java`, `enums/CellGcmEnumForGtf.java` | GTF header dimensions only |
 | meshes | `resources/RMesh.java::serialize`, `RStaticMesh.java`; `structs/mesh/`, `structs/staticmesh/`; `io/exports/MeshExporter.java` | binary headers and material dependencies only |
@@ -220,6 +220,11 @@ Preserve raw rows, GUID conflicts and hash aliases. Toolkit skips duplicate GUID
 an inspector should report them instead. Resource resolution priority for updates,
 mods/saves/patch overlays and hash collisions is **UNKNOWN** for this build until
 tested with explicit additional inputs; do not impose a speculative last-file-wins rule.
+
+D69 update: the official installed update is now an explicit second input. Its
+`USRDIR/output/brg_patch.map` (also 0x100) replaces disc rows by GUID; the disc rows are
+kept as shadowed records. `STRONG_INFERENCE` from 01.01..01.33 local data, see
+[update-overlay.md](update-overlay.md). Mods/saves precedence remains UNKNOWN.
 
 ## Resource wrappers and dependencies
 

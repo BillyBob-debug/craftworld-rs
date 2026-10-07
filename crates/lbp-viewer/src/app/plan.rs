@@ -69,7 +69,7 @@ fn read_bytes(
         return Err("Invalid: truncated plan header".into());
     }
     let revision = u32::from_be_bytes(bytes[4..8].try_into().unwrap());
-    if !(893..=951).contains(&revision)
+    if !(893..=lbp_resource::LBP2_MAX_REVISION).contains(&revision)
         || bytes[12..16] != [0; 4]
         || !matches!(bytes[16], 0 | 7)
         || bytes[17] > 1

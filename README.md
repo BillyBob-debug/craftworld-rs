@@ -62,6 +62,10 @@ contain `PARAM.SFO`, `USRDIR/OUTPUT/BLURAYGUIDS.MAP` and at least one `.FARC` un
 `USRDIR`. The output parent must exist, be outside the selected game directory,
 and the filename must be new. Use `--help` for limits. Original files are opened
 read-only; nested symbolic links and Windows reparse points are skipped.
+To read an installed update over the disc, pass both directories as one path list,
+base first, e.g. `--game-dir 'game-data/a1-disc;game-data/a1-update-0133'` (Windows
+`;`). The update's files and `USRDIR/output/brg_patch.map` rows take precedence; see
+`docs/update-overlay.md`. Viewers and census tools accept the same list.
 The default scan inspects bounded metadata; add `--tables-only` for A1 table reads.
 Schema version 2 includes per-location inspections and dependency catalog links.
 Exit 2 preserves a partial JSON report for malformed/I/O/budget diagnostics;

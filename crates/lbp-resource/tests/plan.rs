@@ -119,7 +119,7 @@ fn every_prefix_blob_wrapper_truncation_rejects_but_tail_is_not_required() {
 }
 #[test]
 fn protected_unknown_branches_flags_and_integer_lengths_are_explicit() {
-    for revision in [892, 952] {
+    for revision in [892, 0x3f9] {
         assert!(matches!(
             plan::inspect(&wire(&recipe(true, b"", b""), revision, true, 0), || false),
             Err(Error::Unsupported(_))

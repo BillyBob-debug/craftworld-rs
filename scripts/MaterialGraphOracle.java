@@ -43,7 +43,7 @@ public class MaterialGraphOracle {
         if(!a.getName().equals(name))throw new IOException("animation name oracle disagreement");
     }
     static Map<String,Object> graph(MemoryInputStream s,Revision revision)throws Exception {
-        if(revision.getVersion()<920||revision.getVersion()>951||revision.getSubVersion()!=0||revision.isVita()||revision.isToolkit())
+        if(revision.getVersion()<920||revision.getVersion()>1016||revision.getSubVersion()!=0||revision.isVita()||revision.isToolkit())
             throw new IOException("unsupported graph revision");
         cwlib.resources.RGfxMaterial routeMaterial=new cwlib.resources.RGfxMaterial();
         int start=s.getOffset(),boxCount=MaterialOracle.count(s,1024);List<Object> boxes=new ArrayList<>();

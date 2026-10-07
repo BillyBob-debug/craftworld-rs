@@ -65,7 +65,7 @@ public class MeshOracle {
                     if(!hash(raw,"SHA-1").equals(sha))throw new IOException("payload identifier mismatch");
                     if(!Arrays.equals(Arrays.copyOf(raw,4),new byte[]{'M','S','H','b'}))throw new IOException("only clear MSHb");
                     ByteBuffer header=ByteBuffer.wrap(raw);int rev=header.getInt(4),end=header.getInt(8),start=12,flags=0;
-                    if(rev<0x189||rev>951||end<18||end>raw.length-4)throw new IOException("header range/revision");
+                    if(rev<0x189||rev>1016||end<18||end>raw.length-4)throw new IOException("header range/revision");
                     int branch=0,branchRevision=0;if(rev>=0x271){branch=Short.toUnsignedInt(header.getShort(start));branchRevision=Short.toUnsignedInt(header.getShort(start+2));start+=4;}
                     if(branch!=0&&!(rev==0x272&&branch==0x4c44))throw new IOException("branch unsupported");
                     if(rev>=0x297||(rev==0x272&&branch==0x4c44&&branchRevision>=0x2)){flags=raw[start++]&255;}

@@ -132,7 +132,7 @@ fn every_wire_truncation_protection_and_unknown_revision() {
             Error::Blocked
         );
     }
-    for rev in [919u32, 952, 0x10000] {
+    for rev in [919u32, 0x3f9, 0x10000] {
         let mut b = wire(&recipe(false), false, 0);
         b[4..8].copy_from_slice(&rev.to_be_bytes());
         assert!(matches!(

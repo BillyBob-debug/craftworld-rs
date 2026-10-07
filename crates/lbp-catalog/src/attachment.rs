@@ -2,7 +2,7 @@
 //! Format provenance: docs/formats.md, A1 readers and their pinned Toolkit citations.
 //! Binding/stability/hex policy is project-authored; see docs/source-attachment.md.
 use crate::{Catalog, LoadControl};
-use lbp_archive::{read_farc, read_map};
+use lbp_archive::{overlay_map, read_farc, read_map};
 use lbp_core::{Error, ReadLimits};
 use lbp_io::{
     sfo,
@@ -61,6 +61,12 @@ struct Approved {
 pub struct AttachedSource {
     source: Source,
     stamps: BTreeMap<String, Stamp>,
+    /// SFO and MAP paths: re-checked on every read. Payload files are checked when
+    /// opened. An update overlay adds ~2,000 loose files, so `check_stable` sweeps the
+    /// identity files and archives only; loose stamps are checked each time one is opened
+    /// (and all stamps once, at attach).
+    identity: Vec<String>,
+    archives: Vec<String>,
     approved: HashMap<LocationKey, Approved>,
     pub validation_bytes: u64,
     pub archive_count: usize,
@@ -211,11 +217,38 @@ impl AttachedSource {
         if !digest(&map_bytes).eq_ignore_ascii_case(&map.sha256) {
             return Err("Source MAP fingerprint differs from snapshot".into());
         }
-        let parsed = read_map(&map_bytes, ReadLimits::default()).map_err(|e| e.to_string())?;
-        if parsed.revision != map.revision
-            || parsed.rows.len() != map.row_count
-            || parsed.rows.len() != snapshot.resources.len()
-        {
+        let mut parsed = read_map(&map_bytes, ReadLimits::default()).map_err(|e| e.to_string())?;
+        if parsed.revision != map.revision || parsed.rows.len() != map.row_count {
+            return Err("Source MAP layout/count differs from snapshot".into());
+        }
+        if let Some(patch) = &snapshot.patch_map {
+            if !patch
+                .path
+                .eq_ignore_ascii_case("USRDIR/output/brg_patch.map")
+            {
+                return Err("Snapshot patch MAP path is unsupported".into());
+            }
+            let bytes = small(
+                &source,
+                &patch.path,
+                ReadLimits::default().max_table_bytes,
+                control,
+                &mut stamps,
+            )?;
+            if !digest(&bytes).eq_ignore_ascii_case(&patch.sha256) {
+                return Err("Source patch MAP fingerprint differs from snapshot".into());
+            }
+            let rows = read_map(&bytes, ReadLimits::default()).map_err(|e| e.to_string())?;
+            if rows.revision != patch.revision || rows.rows.len() != patch.row_count {
+                return Err("Source patch MAP layout/count differs from snapshot".into());
+            }
+            let revision = parsed.revision;
+            parsed = lbp_archive::FileMap {
+                revision,
+                rows: overlay_map(parsed, rows).map_err(|e| e.to_string())?.rows,
+            };
+        }
+        if parsed.rows.len() != snapshot.resources.len() {
             return Err("Source MAP layout/count differs from snapshot".into());
         }
         for row in parsed.rows {
@@ -382,19 +415,38 @@ impl AttachedSource {
             }
             value.blocked |= location.inspection.status == "blocked_encrypted";
         }
+        let identity = [
+            Some(&fingerprint.path),
+            Some(&map.path),
+            snapshot.patch_map.as_ref().map(|m| &m.path),
+        ]
+        .into_iter()
+        .flatten()
+        .map(|p| source_file(&source, p).map(|f| f.path.clone()))
+        .collect::<Result<Vec<_>, _>>()?;
+        let archives = snapshot
+            .archives
+            .iter()
+            .map(|a| source_file(&source, &a.path).map(|f| f.path.clone()))
+            .collect::<Result<Vec<_>, _>>()?;
         let attached = Self {
             source,
             stamps,
+            identity,
+            archives,
             approved,
             validation_bytes: control.bytes_read.load(Ordering::Relaxed),
             archive_count: snapshot.archives.len(),
             entry_count,
         };
-        attached.check_stable_checked(control)?;
+        for path in attached.stamps.keys() {
+            control.check()?;
+            attached.open_stable(path)?;
+        }
         Ok(attached)
     }
     pub fn root(&self) -> String {
-        self.source.game_root.to_string_lossy().into_owned()
+        self.source.describe_roots()
     }
     fn open_stable(&self, path: &str) -> Result<File, String> {
         let entry = source_file(&self.source, path)?;
@@ -409,8 +461,15 @@ impl AttachedSource {
     pub fn check_stable(&self) -> Result<(), String> {
         self.check_stable_checked(&LoadControl::default())
     }
+    fn check_identity(&self, control: &LoadControl) -> Result<(), String> {
+        for path in &self.identity {
+            control.check()?;
+            self.open_stable(path)?;
+        }
+        Ok(())
+    }
     fn check_stable_checked(&self, control: &LoadControl) -> Result<(), String> {
-        for path in self.stamps.keys() {
+        for path in self.identity.iter().chain(&self.archives) {
             control.check()?;
             self.open_stable(path)?;
         }
@@ -450,7 +509,7 @@ impl AttachedSource {
         if relative > key.size {
             return Err("Hex offset lies outside selected resource".into());
         }
-        self.check_stable_checked(control)?;
+        self.check_identity(control)?;
         let mut file = self.open_stable(&key.path)?;
         let before = Stamp::of(&file)?;
         let end = key
@@ -481,7 +540,7 @@ impl AttachedSource {
         if before != Stamp::of(&file)? {
             return Err("Source changed while reading hex page".into());
         }
-        self.check_stable_checked(control)?;
+        self.check_identity(control)?;
         Ok(HexPage {
             relative_offset: relative,
             absolute_offset: absolute,

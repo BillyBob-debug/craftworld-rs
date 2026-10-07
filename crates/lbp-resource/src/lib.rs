@@ -10,6 +10,7 @@ mod metadata;
 pub mod plan;
 pub use metadata::{
     inspect, is_protected_prefix, Dependency, Header, Inspection, InspectionLimits, ResourceType,
+    LBP2_MAX_REVISION,
 };
 
 #[derive(Debug, Clone, Copy, Serialize)]

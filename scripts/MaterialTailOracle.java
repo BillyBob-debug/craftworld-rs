@@ -1,7 +1,7 @@
 // Authored guarded external-reader adapter; no product parser or recovered source.
 // CONFIRMED_FROM_COMMUNITY_CODE: Toolkit d6a2ef80b5a09999f08f23a803b516096055e5c9,
 // RGfxMaterial::serialize, Revisions::GFXMATERIAL_SOUND_ENUM/PARAMETER_ANIMATIONS,
-// Serializer::array, MaterialParameterAnimation::serialize. PS3 heads920–951 only.
+// Serializer::array, MaterialParameterAnimation::serialize. PS3 heads920–1016 only (LBP2_MAX 0x3f8).
 // https://github.com/ennuo/toolkit/blob/d6a2ef80b5a09999f08f23a803b516096055e5c9/lib/cwlib/src/main/java/cwlib/resources/RGfxMaterial.java
 // Per-rule evidence, conflicts and tests: docs/material-tail.md. No key/asset export.
 import cwlib.io.streams.MemoryInputStream;
@@ -22,7 +22,7 @@ public class MaterialTailOracle {
     static Map<String,Object> tail(MemoryInputStream s,Revision revision,BooleanSupplier cancelled)throws Exception {
         check(cancelled);
         int head=revision.getVersion();
-        if(head<920||head>951||revision.getSubVersion()!=0||revision.isVita()||revision.isToolkit())
+        if(head<920||head>1016||revision.getSubVersion()!=0||revision.isVita()||revision.isToolkit())
             throw new IOException("unsupported tail revision");
         int start=s.getOffset();
         if(start<0||start>s.getBuffer().length||s.getBuffer().length-start>MAX_TAIL_BYTES)

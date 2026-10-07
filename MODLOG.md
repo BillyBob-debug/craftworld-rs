@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-07 — D69 01.33 becomes the working input
+
+Disc + update 01.33 read as layers; patch MAP wins per GUID; parsers accept heads to
+LBP2_MAX 1016 (66/66 Toolkit parity). 58,124 assets, 8,159 materials all parse; new
+48-mesh cohort 48/45/0 (+48 viewable in cohort, +0 Complete). Viewer launcher uses 01.33.
+[update-overlay.md](docs/update-overlay.md).
+
 ## 2026-10-07 — Cloud-session prep
 
 Tests create ignored local-analysis/ in setUpModule (fresh-clone fix); added

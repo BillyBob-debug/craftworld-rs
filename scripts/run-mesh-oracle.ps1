@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$Output,
+    [string]$Archive = 'game-data/a1-disc/PS3_GAME/USRDIR/DATA.FARC',
     [string]$SampleManifest = 'local-analysis/d1-mesh-samples.json',
     [switch]$Uv,
     [switch]$Groups
@@ -17,7 +18,7 @@ try {
     New-Item -ItemType Directory -Force -Path $classes | Out-Null
     & "$javaRoot/bin/javac.exe" -cp $jar -d $classes scripts/TextureOracle.java scripts/MeshOracle.java
     if ($LASTEXITCODE -ne 0) { throw 'Mesh oracle compilation failed' }
-    $oracleArgs = @('game-data/a1-disc/PS3_GAME/USRDIR/DATA.FARC', $SampleManifest, $Output)
+    $oracleArgs = @($Archive, $SampleManifest, $Output)
     if ($Uv -and $Groups) { throw 'Choose UV or groups' }
     if ($Uv) { $oracleArgs += '--uv' }
     if ($Groups) { $oracleArgs += '--groups' }

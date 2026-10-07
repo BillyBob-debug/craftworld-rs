@@ -16,6 +16,11 @@ import java.util.zip.Inflater;
 public class TextureOracle {
     static int be16(byte[] b,int p) { return (b[p]&255)*256+(b[p+1]&255); }
     static long le32(byte[] b,int p) {return Integer.toUnsignedLong(java.nio.ByteBuffer.wrap(b,p,4).order(java.nio.ByteOrder.LITTLE_ENDIAN).getInt());}
+    /** Manifest source_path (USRDIR-relative) must name the archive file being read. */
+    static boolean sameArchive(String sourcePath,String archive) {
+        String name=java.nio.file.Path.of(archive).getFileName().toString();
+        return sourcePath.startsWith("USRDIR/")&&sourcePath.toLowerCase().endsWith("/"+name.toLowerCase());
+    }
     static Map<String,Object> row(Object... fields) {
         Map<String,Object> m=new TreeMap<>();for(int i=0;i<fields.length;i+=2)m.put((String)fields[i],fields[i+1]);return m;
     }

@@ -54,7 +54,9 @@ fn prefix(
     data: &[u8],
     cancel: &impl Fn() -> bool,
 ) -> Result<PlanInspection, Error> {
-    if !(893..=951).contains(&header.revision)
+    // 952..=0x3f8: Toolkit d6a2ef80 has no branch-0 condition above 951 for this layout
+    // (docs/update-overlay.md, D68); corroborated on BCUS98245 01.33 by the oracle runs there.
+    if !(893..=crate::LBP2_MAX_REVISION).contains(&header.revision)
         || header.branch_id != Some(0)
         || header.branch_revision != Some(0)
     {

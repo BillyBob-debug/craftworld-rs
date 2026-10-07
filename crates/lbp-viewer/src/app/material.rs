@@ -331,7 +331,7 @@ impl MaterialView {
         }
         if !self.error.is_empty() {
             ui.colored_label(Color32::YELLOW, &self.error);
-            ui.small("Supported: bounded PS3 GMTb prefix, heads 920–951, ordinary branch zero.");
+            ui.small("Supported: bounded PS3 GMTb prefix, heads 920–1016, ordinary branch zero.");
         }
         egui::CollapsingHeader::new("Export cached diagnostic JSON").show(ui, |ui| {
             ui.small("Choose a new .json file under local-analysis. Metadata only; no additional game reads.");

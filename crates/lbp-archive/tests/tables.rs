@@ -149,3 +149,24 @@ fn farc_reads_only_footer_and_index() {
         1
     );
 }
+#[test]
+fn patch_map_rows_replace_same_guid_and_keep_shadowed_rows() {
+    use lbp_archive::overlay_map;
+    use lbp_core::Guid;
+    let limits = ReadLimits::default();
+    let mut base = read_map(&map(&["a.tex", "b.tex", "c.tex"]), limits).unwrap();
+    base.rows[0].guid = Guid(1);
+    base.rows[1].guid = Guid(2);
+    base.rows[2].guid = Guid(0);
+    let mut patch = read_map(&map(&["b2.tex", "z.tex", "n.tex"]), limits).unwrap();
+    patch.rows[0].guid = Guid(2);
+    patch.rows[1].guid = Guid(9);
+    patch.rows[2].guid = Guid(0);
+    let merged = overlay_map(base, patch).unwrap();
+    let paths: Vec<_> = merged.rows.iter().map(|r| r.path.as_str()).collect();
+    assert_eq!(paths, ["a.tex", "c.tex", "b2.tex", "z.tex", "n.tex"]);
+    let indices: Vec<_> = merged.rows.iter().map(|r| r.row_index).collect();
+    assert_eq!(indices, [0, 2, 3, 4, 5]);
+    assert_eq!(merged.shadowed.len(), 1);
+    assert_eq!(merged.shadowed[0].path, "b.tex");
+}

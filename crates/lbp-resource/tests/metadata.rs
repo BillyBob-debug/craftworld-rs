@@ -46,7 +46,7 @@ fn read(data: &[u8]) -> lbp_resource::Inspection {
 #[test]
 fn revision_boundaries_and_leerdammer_flags() {
     for revision in [
-        0x108, 0x109, 0x131, 0x132, 0x188, 0x189, 0x270, 0x271, 0x297, 951,
+        0x108, 0x109, 0x131, 0x132, 0x188, 0x189, 0x270, 0x271, 0x297, 951, 952, 0x3f8,
     ] {
         let result = read(&binary(revision, 0, 0, &[]));
         assert_eq!(
@@ -77,7 +77,7 @@ fn revision_boundaries_and_leerdammer_flags() {
             Some(if branch_revision == 2 { 7 } else { 0 })
         );
     }
-    assert_eq!(read(&binary(952, 0, 0, &[])).status, "unsupported");
+    assert_eq!(read(&binary(0x3f9, 0, 0, &[])).status, "unsupported");
     assert_eq!(read(&binary(900, 0x4431, 1, &[])).status, "unsupported");
 }
 #[test]

@@ -1,5 +1,6 @@
 param(
     [Parameter(Mandatory=$true)][string]$Output,
+    [string]$Archive = 'game-data/a1-disc/PS3_GAME/USRDIR/DATA.FARC',
     [string]$SampleManifest = 'local-analysis/d23-animation-samples.json'
 )
 $ErrorActionPreference = 'Stop'
@@ -17,6 +18,6 @@ try {
     & "$javaRoot/bin/java.exe" '-Xmx256m' '-Djava.awt.headless=true' -cp "$classes;$jar" AnimationOracle --self-test
     if ($LASTEXITCODE -ne 0) { throw 'Animation synthetic guards failed' }
     & "$javaRoot/bin/java.exe" '-Xmx256m' '-Djava.awt.headless=true' -cp "$classes;$jar" AnimationOracle `
-        game-data/a1-disc/PS3_GAME/USRDIR/DATA.FARC $SampleManifest $Output
+        $Archive $SampleManifest $Output
     if ($LASTEXITCODE -ne 0) { throw 'Animation oracle failed' }
 } finally { Pop-Location }

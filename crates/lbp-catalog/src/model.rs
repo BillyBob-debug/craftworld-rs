@@ -15,6 +15,9 @@ pub struct Snapshot {
     pub build_fingerprint: Option<Fingerprint>,
     #[serde(default)]
     pub map: Option<MapInventory>,
+    /// Installed-update MAP applied over `map` (patch rows win per GUID).
+    #[serde(default)]
+    pub patch_map: Option<MapInventory>,
     pub source_scope: String,
     pub payload_integrity: String,
     pub counts: BTreeMap<String, u64>,

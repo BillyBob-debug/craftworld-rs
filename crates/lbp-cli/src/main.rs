@@ -1,7 +1,7 @@
 //! A2 directory metadata scanner: original files are inputs, never output targets.
 use lbp_io::{sfo, source};
 
-use lbp_archive::{read_farc, read_map, ArchiveEntry, MapRow};
+use lbp_archive::{overlay_map, read_farc, read_map, ArchiveEntry, FileMap, MapRow};
 use lbp_core::{ContentHash, Error, ErrorKind, Guid, ReadLimits, Result};
 use lbp_resource::{inspect, type_hint, Inspection, InspectionLimits, TypeHint};
 use serde::Serialize;
@@ -15,7 +15,7 @@ use std::{
     process::ExitCode,
 };
 
-const HELP: &str = "LBP2 A2 asset scanner (read-only; no payload decoding)\n\nUsage: lbp-cli --game-dir PATH [--json NEW_FILE] [--tables-only]\n\nInput: disc root containing PS3_GAME, or PS3_GAME directory.\nOutput parent must exist and be outside the selected game directory. No overwrite.\n\nLimits: --max-table-bytes N (67108864), --max-entries N (1000000),\n        --max-files N (1000000; directories/skipped entries count too),\n        --metadata-bytes N (1048576 per resource), --dependency-limit N (65536),\n        --scan-read-budget N (268435456 resource metadata bytes total).\n\nMAP 0x100, FARC, bounded clear binary headers/dependencies; type hints remain\nseparate from magic-confirmed types. --tables-only disables metadata reads.\nProtected data is blocked. Texture/static-mesh payloads, ISO and GUI are deferred.\nExit: 0 catalog complete within supported scope; 1 fatal; 2 partial metadata\n(malformed/I/O/limit diagnostics preserved in JSON). Unknown/unsupported/blocked\nresources and missing candidates are counted without treating them as corrupt.\n";
+const HELP: &str = "LBP2 A2 asset scanner (read-only; no payload decoding)\n\nUsage: lbp-cli --game-dir PATH [--json NEW_FILE] [--tables-only]\n\nInput: disc root containing PS3_GAME, or PS3_GAME directory. To read an installed\nupdate over the disc, pass an OS path list, base first (Windows: \"DISC;UPDATE\").\nLater layers replace same-path files; USRDIR/output/brg_patch.map rows replace\ndisc MAP rows with the same GUID (replaced rows are kept as shadowed_map_rows).\nOutput parent must exist and be outside the selected game directory. No overwrite.\n\nLimits: --max-table-bytes N (67108864), --max-entries N (1000000),\n        --max-files N (1000000; directories/skipped entries count too),\n        --metadata-bytes N (1048576 per resource), --dependency-limit N (65536),\n        --scan-read-budget N (268435456 resource metadata bytes total).\n\nMAP 0x100, FARC, bounded clear binary headers/dependencies; type hints remain\nseparate from magic-confirmed types. --tables-only disables metadata reads.\nProtected data is blocked. Texture/static-mesh payloads, ISO and GUI are deferred.\nExit: 0 catalog complete within supported scope; 1 fatal; 2 partial metadata\n(malformed/I/O/limit diagnostics preserved in JSON). Unknown/unsupported/blocked\nresources and missing candidates are counted without treating them as corrupt.\n";
 struct Options {
     game_dir: PathBuf,
     json: Option<PathBuf>,
@@ -170,6 +170,11 @@ struct ResourceRow {
     map_path_status: &'static str,
     resolution: &'static str,
     archive_candidates: Vec<ArchiveLocation>,
+    /// Other FARC entries with the same SHA-1 (content-addressed copies, e.g. one per
+    /// update archive). Not ambiguous: the highest-layer, latest-path copy is listed
+    /// in `archive_candidates`; these are preserved for diagnostics only.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    identical_archive_copies: Vec<ArchiveLocation>,
     loose_candidates: Vec<LooseLocation>,
 }
 #[derive(Serialize)]
@@ -187,6 +192,7 @@ struct Counts {
     unique_archive_hashes: usize,
     duplicate_archive_hash_rows: usize,
     map_rows: usize,
+    shadowed_map_rows: usize,
     unique_map_hashes: usize,
     duplicate_guid_rows: usize,
     map_rows_with_archive_candidates: usize,
@@ -194,6 +200,7 @@ struct Counts {
     map_rows_with_loose_candidates: usize,
     map_rows_missing_in_selected_directory: usize,
     ambiguous_resource_rows: usize,
+    identical_archive_copies_collapsed: usize,
     unsafe_map_paths: usize,
     declared_size_mismatch_candidates: usize,
     archive_hashes_without_map_rows: usize,
@@ -219,12 +226,15 @@ struct Inventory {
     source_scope: &'static str,
     payload_integrity: &'static str,
     map: MapInventory,
+    patch_map: Option<MapInventory>,
+    shadowed_map_rows: Vec<MapRow>,
     counts: Counts,
     map_extension_counts: BTreeMap<String, usize>,
     duplicate_guids: Vec<DuplicateGuid>,
     archives: Vec<ArchiveInventory>,
     resources: Vec<ResourceRow>,
     filesystem_files: Vec<SourceFile>,
+    shadowed_filesystem_files: Vec<SourceFile>,
     skipped_filesystem_entries: Vec<source::SkippedEntry>,
 }
 
@@ -256,6 +266,9 @@ fn fingerprint(data: &[u8]) -> String {
     format!("{:x}", Sha256::digest(data))
 }
 
+/// Installed-update MAP (CONFIRMED_FROM_LOCAL_DATA, BCUS98245 01.01..01.33 packages).
+const PATCH_MAP: &str = "USRDIR/output/brg_patch.map";
+
 fn scan(source: Source, options: &Options) -> Result<Inventory> {
     let limits = options.limits;
     let mut resource_inspections = Vec::new();
@@ -270,12 +283,38 @@ fn scan(source: Source, options: &Options) -> Result<Inventory> {
     };
     let map_file = source.required("USRDIR/OUTPUT/BLURAYGUIDS.MAP")?;
     let map_bytes = read_small(&source, map_file, limits.max_table_bytes)?;
-    let mut mapping = read_map(&map_bytes, limits)?;
+    let base_map = read_map(&map_bytes, limits)?;
     let map = MapInventory {
         path: map_file.path.clone(),
-        revision: mapping.revision,
-        row_count: mapping.rows.len(),
+        revision: base_map.revision,
+        row_count: base_map.rows.len(),
         sha256: fingerprint(&map_bytes),
+    };
+    let (mut mapping, patch_map, shadowed_map_rows) = match source
+        .optional(PATCH_MAP)?
+        .filter(|_| source.layers.len() > 1)
+    {
+        Some(file) => {
+            let bytes = read_small(&source, file, limits.max_table_bytes)?;
+            let patch = read_map(&bytes, limits)?;
+            let inventory = MapInventory {
+                path: file.path.clone(),
+                revision: patch.revision,
+                row_count: patch.rows.len(),
+                sha256: fingerprint(&bytes),
+            };
+            let revision = base_map.revision;
+            let merged = overlay_map(base_map, patch)?;
+            (
+                FileMap {
+                    revision,
+                    rows: merged.rows,
+                },
+                Some(inventory),
+                merged.shadowed,
+            )
+        }
+        None => (base_map, None, Vec::new()),
     };
     let mut archives = Vec::new();
     let mut locations: BTreeMap<ContentHash, Vec<ArchiveLocation>> = BTreeMap::new();
@@ -404,6 +443,7 @@ fn scan(source: Source, options: &Options) -> Result<Inventory> {
         unique_archive_hashes: locations.len(),
         duplicate_archive_hash_rows: total_archive_entries - locations.len(),
         map_rows: mapping.rows.len(),
+        shadowed_map_rows: shadowed_map_rows.len(),
         unique_map_hashes: map_hashes.len(),
         duplicate_guid_rows: duplicate_guids
             .iter()
@@ -518,6 +558,11 @@ fn scan(source: Source, options: &Options) -> Result<Inventory> {
             });
         }
     }
+    let archive_layer: BTreeMap<&str, usize> = source
+        .files
+        .iter()
+        .map(|f| (f.path.as_str(), f.layer))
+        .collect();
     let mut resources = Vec::with_capacity(mapping.rows.len());
     mapping.rows.sort_by(|a, b| {
         (a.sha1, a.guid, &a.path, a.row_index).cmp(&(b.sha1, b.guid, &b.path, b.row_index))
@@ -537,6 +582,24 @@ fn scan(source: Source, options: &Options) -> Result<Inventory> {
         for candidate in &mut archive_candidates {
             candidate.declared_size_matches = candidate.size == row.declared_size;
         }
+        // Same SHA-1 in several archives names the same bytes (FARC rows are keyed by
+        // content hash); prefer the update layer, then the latest patch archive name.
+        archive_candidates.sort_by(|a, b| {
+            let rank = |c: &ArchiveLocation| {
+                (
+                    archive_layer.get(c.archive.as_str()).copied(),
+                    c.archive.to_ascii_lowercase(),
+                    c.offset,
+                )
+            };
+            rank(b).cmp(&rank(a))
+        });
+        let identical_archive_copies = if archive_candidates.len() > 1 {
+            archive_candidates.split_off(1)
+        } else {
+            Vec::new()
+        };
+        counts.identical_archive_copies_collapsed += identical_archive_copies.len();
         let safe = source::map_relative(&row.path);
         if safe.is_none() {
             counts.unsafe_map_paths += 1;
@@ -618,6 +681,7 @@ fn scan(source: Source, options: &Options) -> Result<Inventory> {
             },
             resolution,
             archive_candidates,
+            identical_archive_copies,
             loose_candidates,
             map_row: row,
         });
@@ -648,15 +712,24 @@ fn scan(source: Source, options: &Options) -> Result<Inventory> {
         dependency_resolution_counts,
         build,
         build_fingerprint,
-        source_scope: "selected_directory_only_no_update_overlay_assumed",
+        source_scope: if patch_map.is_some() {
+            "disc_with_installed_update_overlay"
+        } else if source.layers.len() > 1 {
+            "layered_directories_without_patch_map"
+        } else {
+            "selected_directory_only_no_update_overlay_assumed"
+        },
         payload_integrity: "archive_identifiers_read_only_payload_hashes_not_verified",
         map,
+        patch_map,
+        shadowed_map_rows,
         counts,
         map_extension_counts,
         duplicate_guids,
         archives,
         resources,
         filesystem_files: source.files,
+        shadowed_filesystem_files: source.shadowed,
         skipped_filesystem_entries: source.skipped,
     })
 }
@@ -711,6 +784,15 @@ fn run() -> Result<bool> {
         "MAP: {} rows, {} distinct hashes, {} duplicate GUID rows (revision {:#x})",
         c.map_rows, c.unique_map_hashes, c.duplicate_guid_rows, inventory.map.revision
     );
+    if let Some(patch) = &inventory.patch_map {
+        println!(
+            "Update overlay: {} ({} rows) replaced {} disc MAP rows; {} disc files shadowed",
+            patch.path,
+            patch.row_count,
+            c.shadowed_map_rows,
+            inventory.shadowed_filesystem_files.len()
+        );
+    }
     println!(
         "FARC: {} archives, {} entries, {} distinct hashes",
         c.archives, c.archive_entries, c.unique_archive_hashes

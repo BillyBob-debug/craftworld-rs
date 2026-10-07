@@ -139,13 +139,19 @@ fn run() -> Result<(), String> {
             *classes.entry("no_hash".into()).or_default() += 1;
             continue;
         };
+        // Archive entries with no MAP row (e.g. disc copies superseded by an update) are
+        // not catalog assets; count them instead of failing the census.
+        if !catalog.by_hash.contains_key(sha) {
+            *classes.entry("no_map_row".into()).or_default() += 1;
+            continue;
+        }
         let key = lbp_preview::resolve(&catalog, None, Some(sha))?;
         if key.size > lbp_resource::material::MAX_INPUT as u64 {
             *classes.entry("over_input_budget".into()).or_default() += 1;
             continue;
         }
         bytes_read = bytes_read.checked_add(key.size).ok_or("total overflow")?;
-        if bytes_read > 64 * 1024 * 1024 {
+        if bytes_read > 128 * 1024 * 1024 {
             return Err("total budget".into());
         }
         let mut data = Vec::with_capacity(key.size as usize);

@@ -15,7 +15,8 @@ use std::{
     time::{Duration, Instant},
 };
 const MAX_LOCATIONS: usize = 20_000;
-const MAX_TOTAL_BYTES: u64 = 64 * 1024 * 1024;
+// 128 MiB since D68: the 01.33 overlay has 8,159 material locations (01.00: 5,163).
+const MAX_TOTAL_BYTES: u64 = 128 * 1024 * 1024;
 #[derive(Default)]
 struct Candidate {
     inspections: BTreeSet<usize>,

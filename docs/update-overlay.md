@@ -73,22 +73,63 @@ heads ≤ 951 (e.g. `lbp-resource` animation 888..951), so most patch resources 
 reported unsupported until those revisions are researched. Disc MAP rows whose hash is
 missing from `DATA.FARC` (4,333) are not supplied by the patch either.
 
-## What a disc + update overlay needs (not implemented)
+## D69 — 01.33 is the working input (2026-10-07)
 
-1. Input: a second root (installed update dir) beside the disc root; paths compared
-   case-insensitively (disc `OUTPUT`/`GAMEDATA`, patch `output`/`gamedata`).
-2. MAP: read disc `BLURAYGUIDS.MAP` and the latest `brg_patch.map`; for each GUID the
-   patch row wins; keep the shadowed disc row as an alias/conflict record (AGENTS rule 7).
-3. Payloads: FARCs are content-addressed, so look a hash up in every
-   `patches/patch_*.farc` plus `DATA.FARC`; order does not change bytes. Keep the source
-   archive per entry for diagnostics.
-4. Loose files: 1,715 patch rows point at loose `USRDIR/gamedata/**` files, not FARCs.
-5. Treat `patch.edat` like disc `DATA.SDAT`: protected container, explicit outcome.
-6. Report patched counts separately from the 01.00 baseline; extend revision support
-   (952..1016) as its own milestone with oracle comparison.
+The user chose to move the project to 01.33 outright. Implemented:
+
+1. **Layered source** (`lbp-io::source`): `--game-dir` is an OS path list, base first
+   (`"game-data/a1-disc;game-data/a1-update-0133"`). A later layer replaces the same
+   case-insensitive relative path; replaced files are kept in `shadowed`
+   (`shadowed_filesystem_files` in JSON; only `PARAM.SFO` here). Overlapping layers are
+   rejected. Lookups are indexed (the overlay has 1,744 files). Rule: STRONG_INFERENCE
+   from installed-update semantics; tested with synthetic layers.
+2. **Patch MAP** (`lbp_archive::overlay_map`): with two or more layers the scanner reads
+   `USRDIR/output/brg_patch.map`; each patch row replaces every disc row with the same
+   non-null GUID; patch rows are renumbered after the disc rows. Replaced rows are kept
+   as `shadowed_map_rows`. JSON adds `patch_map` and `counts.shadowed_map_rows`;
+   `source_scope` becomes `disc_with_installed_update_overlay`. Attach re-verifies the
+   patch MAP fingerprint and the merged rows. STRONG_INFERENCE (no reader handles the
+   patch MAP); synthetic test in `lbp-archive/tests/tables.rs`.
+3. **Identical copies**: the same SHA-1 in several FARCs (1,360 duplicate rows across
+   patch archives) is one asset, not an ambiguity. The scanner lists one candidate
+   (update layer, then latest archive name) and keeps the rest in
+   `identical_archive_copies`. Ambiguous rows 1,445 -> 0.
+4. **Revisions to LBP2_MAX**: resource header gate 951 -> 0x3f8 (1016), and the
+   material (920..), plan (893..) and animation (888..) payload gates likewise.
+   CONFIRMED_FROM_COMMUNITY_CODE: Toolkit `Revisions.LBP2_MAX = 0x3f8`;
+   `SerializedResource.process` has no header condition after 0x297; RGfxMaterial,
+   MaterialBox, RMesh, RAnimation, RPlan and their structs have no branch-0 condition
+   above 0x3b7 (Vita/LBP3 checks need other branches). Branch 0x4431 (116 resources) and
+   `FNTb` fonts (word at +8 is not a dependency offset; one local sample) stay unsupported.
+5. **Read cost**: per-read stability checks now cover the SFO/MAP files plus the file
+   being read; `check_stable` sweeps identity files and archives (loose stamps are
+   checked whenever opened, and all at attach). Before this, each 4 KiB read reopened
+   ~2,040 files and a 26-mesh census took 33 s instead of 2 s.
+6. **Oracle runners** take `-Archive`; Java guards accept heads to 1016; manifests may
+   name any `USRDIR/...` archive matching the file read (`TextureOracle.sameArchive`).
+7. Launcher (`scripts/launch-viewer.ps1`) prefers the 01.33 snapshot and layered dir,
+   falling back to the disc.
+
+Results (`local-analysis/`, all CONFIRMED_FROM_LOCAL_DATA):
+
+| Check | Result |
+|---|---|
+| `d68-inventory-0133-verified.json` scan | 58,124 MAP rows (01.00: 36,854); 33 FARCs; 0 ambiguous; partial false |
+| Header statuses | parsed 27,624 (01.00: 16,515); unsupported 117 (branch 0x4431 116, font 1) |
+| Toolkit oracle, revisions 952..1016 | material 29, mesh 18, plan 14, animation 5: all parsed |
+| Parity vs oracle | material 29/0, mesh 18/0, plan 14/0, animation 5/0, diffuse route 29/0 mismatches |
+| Material census | 8,159 of 8,159 locations: prefix, graph and tail parsed (budget now 128 MiB) |
+| Diffuse route census | 8,094: texture 6,828, solid 603, instance-only 207, animation-only 60, unwired 10, unsupported 386, no MAP row 65 |
+| Mesh census, new cohort `d68-new-mesh-samples.json` (48 post-951 meshes) | 48 viewable / 45 full diffuse / 0 Complete (01.00 baseline: 0, absent) |
+| Existing cohorts on 01.33 | D61 48/43/0, D65 48/38/0, D66 22/7/0, D64 26/23/0: unchanged from D67 |
+| Native Bevy, `--select-guid 0002e3db` (artist_vangogh_to.mol, 01.33 DLC costume) | non-primary 165v0; 8/8 primitives; 1 viewable / 0 Complete / 0 failed; capture written, not viewed |
+
+Counting units: distinct catalog GUIDs (mesh census), material locations (route census).
+Corpus-wide viewable/Complete mesh totals remain unknown (census is cohort-bounded).
 
 ## Not tested
 
-Scanner/viewer on the overlay; EBOOT 01.33; EDAT contents; whether any disc content is
-removed or redirected by the patch beyond GUID replacement; text resources (`..t`).
-Asset-compatibility counts: +0 newly viewable / +0 newly Complete (no code change).
+EBOOT 01.33; EDAT contents; text resources (`..t`); legacy viewer on the overlay;
+game pixels; whether the patch removes disc content beyond GUID replacement; corpus-wide
+mesh census. Superseded disc copies (2,116 archive hashes without MAP rows) are not
+offered as assets.

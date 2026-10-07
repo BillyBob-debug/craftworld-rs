@@ -15,8 +15,10 @@ scan: metadata/open checks are not a sandbox against hostile filesystem races.
 Required inputs: PARAM.SFO, USRDIR/OUTPUT/BLURAYGUIDS.MAP (revision 0x100), and
 one or more FARC files under USRDIR. Unsupported revisions fail explicitly.
 Only SFO, MAP and archive footer/index bytes are read; resource payloads are not.
-Files outside PS3_GAME are not enumerated. Updates, overlays and archive precedence
-are not inferred. MAP paths are validated lexically and matched to the catalog;
+Files outside PS3_GAME are not enumerated. Updates are never inferred; since D68 an
+installed update is read only when passed explicitly as a second layer
+(`--game-dir "DISC;UPDATE"`, see update-overlay.md). Identical-hash copies across
+archives are collapsed to one candidate (others in `identical_archive_copies`). MAP paths are validated lexically and matched to the catalog;
 they are never used directly to open filesystem files.
 
 JSON uses schema_version 1 and milestone A1_directory_tables. Stable sorting,

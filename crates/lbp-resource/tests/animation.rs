@@ -143,7 +143,7 @@ fn prefix_and_blob_truncations_reject_without_consuming_tail_records() {
 }
 #[test]
 fn unsupported_revision_branch_flags_protection_and_length_overflows_are_explicit() {
-    for revision in [844, 887, 952] {
+    for revision in [844, 887, 0x3f9] {
         assert!(matches!(
             animation::inspect(&wire(&recipe(946, true), revision, true, 0), || false),
             Err(Error::Unsupported(_))

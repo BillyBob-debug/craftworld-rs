@@ -33,7 +33,7 @@ public class MaterialOracle {
     }
     static Map<String,Object> prefix(MemoryInputStream s, Revision revision) throws IOException {
         int head=revision.getVersion();
-        if(head<920 || head>951 || revision.getSubVersion()!=0 || revision.isVita() || revision.isToolkit())
+        if(head<920 || head>1016 || revision.getSubVersion()!=0 || revision.isVita() || revision.isToolkit())
             throw new IOException("prefix revision outside current PS3 sample contract");
         RGfxMaterial probe=new RGfxMaterial();
         probe.flags=s.i32();
@@ -140,7 +140,7 @@ public class MaterialOracle {
                     ByteBuffer h=ByteBuffer.wrap(raw);
                     if(h.getInt()!=0x474d5462) throw new IOException("only clear GMTb");
                     int revision=h.getInt(),end=h.getInt(),branch=h.getInt(),flags=h.get()&255,compressed=h.get()&255;
-                    if(revision<920 || revision>951 || branch!=0 || (flags!=0&&flags!=7) || compressed>1 || end<18 || end>raw.length-4)
+                    if(revision<920 || revision>1016 || branch!=0 || (flags!=0&&flags!=7) || compressed>1 || end<18 || end>raw.length-4)
                         throw new IOException("unsupported header/revision");
                     int dependencies=h.getInt(end);
                     if(dependencies<0 || dependencies>4096) throw new IOException("dependency budget");

@@ -23,7 +23,7 @@ public class PlanInventoryOracle {
         throw new IOException("u64 overflow");
     }
     static Map<String,Object> prefix(byte[] clear,int start,int revision,byte flags)throws Exception {
-        if(revision<893||revision>951||clear.length>PlanOracle.EXPANDED)throw new IOException("unsupported inventory prefix revision/budget");
+        if(revision<893||revision>1016||clear.length>PlanOracle.EXPANDED)throw new IOException("unsupported inventory prefix revision/budget");
         PlanOracle.need(clear,start,0);MemoryInputStream s=new MemoryInputStream(clear,flags);
         s.seek(start,MemoryInputStream.SeekMode.Begin);int dateEnd=longEnd(clear,start,flags);
         long encoded=s.u64();if(s.getOffset()!=dateEnd)throw new IOException("date offset disagreement");
@@ -93,7 +93,7 @@ public class PlanInventoryOracle {
                 JsonObject q=item.getAsJsonObject();String sha=q.get("sha1").getAsString();Map<String,Object> row=TextureOracle.row("sha1",sha);rows.add(row);
                 try {
                     long at=q.get("offset").getAsLong(),size=q.get("size").getAsLong();
-                    if(!q.get("source_path").getAsString().equals("USRDIR/DATA.FARC")||at<0||size<18||size>2*1024*1024||
+                    if(!TextureOracle.sameArchive(q.get("source_path").getAsString(),args[0])||at<0||size<18||size>2*1024*1024||
                         at>f.length()-size||total+size>64*1024*1024)throw new IOException("source/read budget");
                     byte[] raw=new byte[(int)size];f.seek(at);f.readFully(raw);total+=size;
                     if(!HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(raw)).equals(sha))throw new IOException("identifier mismatch");

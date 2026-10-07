@@ -3,13 +3,17 @@
 //! cwlib/types/SerializedResource.java::process/processDependencies,
 //! cwlib/enums/{ResourceType,SerializationType,Branch,Revisions}.java.
 //! Independent layout implementation, MIT knowledge notice in THIRD-PARTY-NOTICES.
-//! Scope: locally observed LBP1/2 heads <=951, ordinary binary branches 0/LD; SMH common header
+//! Scope: LBP1/2 heads <=0x3f8 (Revisions.LBP2_MAX; header layout unchanged after 0x297),
+//! locally observed through 1016 with update 01.33. Ordinary binary branches 0/LD; SMH common header
 //! and dependency table only. No payload decompression, extra ALSR interpretation,
 //! texture/static-mesh payload parsing or encryption. Tests use synthetic recipes;
 //! local metadata compared with unmodified pinned Toolkit (see docs/scanner.md).
 use lbp_core::{ByteReader, ContentHash, Error, ErrorKind, Guid, Result};
 use serde::Serialize;
 use std::io::{Read, Seek, SeekFrom};
+
+/// Last LBP2 head (Toolkit `Revisions.LBP2_MAX`); BCUS98245 01.33 tops out here.
+pub const LBP2_MAX_REVISION: u32 = 0x3f8;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub struct ResourceType {
@@ -280,11 +284,21 @@ fn parse<R: Read + Seek>(
         payload_offset: None,
         scope: "ordinary_binary",
     };
-    if revision > 951 || kind.id == 128 {
+    if revision > LBP2_MAX_REVISION || kind.id == 128 {
         out.header = Some(header);
         return Err(Error::new(
             ErrorKind::Unsupported,
             "revision/custom resource outside tested LBP1/2 header scope",
+        ));
+    }
+    // FNTb (01.33 icon_patch_font.fnt, head 985): the word at +8 does not lead to a
+    // plausible dependency table (count 4292876038), so fonts are not ordinary
+    // serialized resources here. CONFIRMED_FROM_LOCAL_DATA, one sample.
+    if kind.id == 15 {
+        out.header = Some(header);
+        return Err(Error::new(
+            ErrorKind::Unsupported,
+            "font face layout is not an ordinary resource header",
         ));
     }
     let offset = if revision >= 0x109 {
