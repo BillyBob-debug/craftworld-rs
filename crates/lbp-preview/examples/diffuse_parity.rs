@@ -4,18 +4,24 @@ use serde_json::{json, Value};
 use std::{fs::OpenOptions, io::Write, path::Path};
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().collect();
-    if !(args.len() == 5
-        || (args.len() == 6 && ["--animation-base", "--instance-white"].contains(&&*args[5])))
+    let flags = args.get(5..).unwrap_or_default();
+    if args.len() < 5
+        || flags.len() > 2
+        || flags
+            .iter()
+            .any(|f| !["--animation-base", "--instance-white"].contains(&f.as_str()))
+        || (flags.len() == 2 && flags[0] == flags[1])
     {
         return Err(
-            "diffuse_parity SNAPSHOT GAME-DIR ORACLE NEW-JSON [--animation-base|--instance-white]"
+            "diffuse_parity SNAPSHOT GAME-DIR ORACLE NEW-JSON [--animation-base] [--instance-white]"
                 .into(),
         );
     }
     let output = Path::new(&args[4]);
-    let animation_base = args.len() == 6 && args[5] == "--animation-base";
+    let animation_base = flags.iter().any(|f| f == "--animation-base");
     // D86: supplied white instance color; folded roots are recomputed from oracle rows.
-    let instance_white = args.len() == 6 && args[5] == "--instance-white";
+    // D88: single texture x instance tint (ThingColor or folded operand).
+    let instance_white = flags.iter().any(|f| f == "--instance-white");
     let allowed = Path::new("local-analysis")
         .canonicalize()
         .map_err(|e| e.to_string())?;
@@ -130,6 +136,8 @@ fn run() -> Result<(), String> {
         }
         let equal = route == sample["diffuse_route"];
         mismatches += usize::from(!equal);
+        let mut instance_selection = None;
+        let mut instance_expected = Value::Null;
         if instance_white {
             let white = lbp_preview::DiffuseTint {
                 bits: [1f32.to_bits(); 4],
@@ -151,6 +159,23 @@ fn run() -> Result<(), String> {
                     let projection = json!({"status":"instance_white_folded","folded_root":root,"color_bits":selected,"oracle_fold_bits":expected,"swizzled_color_edges":p.swizzled_color_edges.iter().map(|(n,c)|json!([n,(*c as char).to_string()])).collect::<Vec<_>>()});
                     rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"route":route,"projection":projection}));
                     continue;
+                }
+                if p.folded_sampler.is_none() && p.alpha_subtract_samplers.is_empty() {
+                    if let Ok(s) =
+                        lbp_preview::select_instance_diffuse(&derived, &p, animation_base)
+                    {
+                        if let (Some(m), Some(c), None, None) = (
+                            s.multiply_index,
+                            s.color_index,
+                            s.second_sample,
+                            s.inner_multiply_index,
+                        ) {
+                            instance_expected =
+                                oracle_instance_tint(sample, &p, m, c, s.sample_index)
+                                    .map_or(Value::Null, |bits| json!({"multiply_index":m,"sample_index":s.sample_index,"color_index":c,"tint_bits":bits}));
+                            instance_selection = Some(s);
+                        }
+                    }
                 }
             }
         }
@@ -206,7 +231,13 @@ fn run() -> Result<(), String> {
             projected += 1;
             json!({"status":"solid_projected","output_index":s.output_index,"color_index":s.color_index,"product_of":s.product_of,"color_bits":s.color.bits,"texture":null,"uv_channel":null,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
         } else {
-            match lbp_preview::select_diffuse_with_animation_base(&graph.graph, animation_base) {
+            let selected = match instance_selection {
+                Some(s) => Ok(s),
+                None => {
+                    lbp_preview::select_diffuse_with_animation_base(&graph.graph, animation_base)
+                }
+            };
+            match selected {
                 Ok(s) => {
                     let sample_node = &graph.graph.boxes[s.sample_index];
                     // D78: the one animated leaf, in any product role, must equal its
@@ -587,8 +618,11 @@ fn run() -> Result<(), String> {
                     } else {
                         match (s.multiply_index, s.color_index) {
                             (Some(multiply), Some(color)) => {
-                                sample["static_diffuse_multiply"]
-                                    == json!({"multiply_index":multiply,"sample_index":s.sample_index,"color_index":color,"tint_bits":s.tint.bits})
+                                (if instance_expected.is_null() {
+                                    &sample["static_diffuse_multiply"]
+                                } else {
+                                    &instance_expected
+                                }) == &json!({"multiply_index":multiply,"sample_index":s.sample_index,"color_index":color,"tint_bits":s.tint.bits})
                             }
                             (None, None) => {
                                 s.sample_index == wire.box_from as usize
@@ -660,10 +694,10 @@ fn run() -> Result<(), String> {
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
         };
-        rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection}));
+        rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection,"instance_white_expected":instance_expected}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":17,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":18,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -838,6 +872,49 @@ fn oracle_constant_fold(sample: &Value, root: usize) -> Option<[u32; 4]> {
         12 => ((r[i] - l[i]) * weight + l[i]).to_bits(),
         _ => u32::MAX,
     }))
+}
+/// D88 independent expectation from the oracle's graph rows only: the root MULTIPLY has
+/// exactly the tint node and the sample on ports 0/1, unswizzled; the tint is the
+/// supplied white for THING_COLOR (type 2) or the oracle-row constant fold of the
+/// folded operand.
+fn oracle_instance_tint(
+    sample: &Value,
+    projection: &lbp_preview::InstanceProjection,
+    multiply: usize,
+    color: usize,
+    texture: usize,
+) -> Option<[u32; 4]> {
+    let boxes = &sample["graph"]["boxes"];
+    let inputs: Vec<_> = sample["graph"]["wires"]
+        .as_array()?
+        .iter()
+        .filter(|w| w["box_to"].as_u64() == Some(multiply as u64))
+        .collect();
+    let edge = |from: usize| {
+        inputs.iter().any(|w| {
+            w["box_from"].as_u64() == Some(from as u64)
+                && w["port_from_raw"] == 0
+                && w["swizzle_raw"] == json!([0, 0, 0, 0, 0])
+        })
+    };
+    let mut ports: Vec<_> = inputs
+        .iter()
+        .filter_map(|w| w["port_to_raw"].as_u64())
+        .collect();
+    ports.sort_unstable();
+    if boxes[multiply]["type_raw"] != 10
+        || ports != [0, 1]
+        || !edge(color)
+        || !edge(texture)
+        || boxes[texture]["type_raw"] != 1
+    {
+        return None;
+    }
+    match boxes[color]["type_raw"].as_u64()? {
+        2 => Some([1f32.to_bits(); 4]),
+        10 | 12 if projection.folded_operand == Some(color) => oracle_constant_fold(sample, color),
+        _ => None,
+    }
 }
 fn main() {
     if let Err(e) = run() {

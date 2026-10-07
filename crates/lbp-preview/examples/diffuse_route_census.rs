@@ -24,10 +24,10 @@ fn classify(graph: &lbp_resource::material::GraphMetadata) -> (String, Option<St
     let white = lbp_preview::DiffuseTint {
         bits: [1f32.to_bits(); 4],
     };
-    if let Ok((derived, Some(_))) = lbp_preview::project_instance_color(graph, white) {
+    if let Ok((derived, Some(p))) = lbp_preview::project_instance_color(graph, white) {
         if matches!(lbp_preview::select_solid_diffuse(&derived), Ok(Some(_)))
             // D89 ADD is refused under a supplied instance color (loader guard).
-            || lbp_preview::select_diffuse_with_animation_base(&derived, true)
+            || lbp_preview::select_instance_diffuse(&derived, &p, true)
                 .is_ok_and(|s| s.texture_add.is_none())
         {
             return ("instance_color_only".into(), Some(reason));
@@ -103,10 +103,10 @@ fn thing_color_reason(
     let reason = match lbp_preview::project_instance_color(graph, white) {
         Err(e) => e,
         Ok((_, None)) => "projection_unused".into(),
-        Ok((derived, Some(_))) => match lbp_preview::select_solid_diffuse(&derived) {
+        Ok((derived, Some(p))) => match lbp_preview::select_solid_diffuse(&derived) {
             Ok(Some(_)) => "projected_selected".into(),
             Err(e) => format!("projected_unselected: {e}"),
-            Ok(None) => match lbp_preview::select_diffuse_with_animation_base(&derived, true) {
+            Ok(None) => match lbp_preview::select_instance_diffuse(&derived, &p, true) {
                 Ok(_) => "projected_selected".into(),
                 Err(e) => format!("projected_unselected: {e}"),
             },

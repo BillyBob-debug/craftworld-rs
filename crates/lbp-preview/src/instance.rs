@@ -20,6 +20,9 @@ pub struct InstanceProjection {
     pub folded_root: Option<usize>,
     /// D86: (ThingColor node, swizzle byte) broadcast as one component into the fold.
     pub swizzled_color_edges: Vec<(usize, u8)>,
+    /// D88: constant ThingColor MULTIPLY/MIX operand of a texture product root, folded
+    /// into a derived COLOR so the existing texture × COLOR routes can tint with it.
+    pub folded_operand: Option<usize>,
 }
 
 /// Bound and validate the selected diffuse ancestry before deriving a graph.
@@ -85,6 +88,7 @@ pub fn project_instance_color(
         alpha_subtract_samplers: vec![],
         folded_root: None,
         swizzled_color_edges: vec![],
+        folded_operand: None,
     };
     for (index, node) in graph
         .boxes
@@ -209,8 +213,11 @@ pub fn project_instance_color(
             }
         }
     }
-    if !projection.color_nodes.is_empty() && projection.folded_sampler.is_none() {
-        crate::instance_fold::fold_constant_root(&mut derived, root, &mut projection)?;
+    if !projection.color_nodes.is_empty()
+        && projection.folded_sampler.is_none()
+        && !crate::instance_fold::fold_constant_root(&mut derived, root, &mut projection)?
+    {
+        crate::instance_fold::fold_constant_operand(&mut derived, root, &mut projection)?;
     }
     derived.wire_count = derived.wires.len();
     let used = !projection.color_nodes.is_empty();
@@ -600,5 +607,122 @@ mod tests {
         let mut nan = original.clone();
         nan.boxes[1].parameters_raw[0] = f32::NAN.to_bits();
         assert!(project_instance_color(&nan, color()).is_err());
+    }
+    fn animate(g: &mut GraphMetadata, index: usize) {
+        let a = &mut g.boxes[index].animations[0];
+        a.name_hex = "616200".into();
+        a.components_raw = 15;
+        a.component_value_count = 4;
+        a.derived_key_count = 1;
+        a.base_value_bits = [2f32, 2., 0., 0.].map(f32::to_bits);
+    }
+    #[test]
+    fn d88_animated_texture_times_thing_needs_both_opt_ins() {
+        // THING × animated sampler: D78 leaves single-texture tints out.
+        let mut original = graph(
+            &[0, 10, 2, 1],
+            vec![edge(2, 1, 0), edge(3, 1, 1), edge(1, 0, 0)],
+        );
+        animate(&mut original, 3);
+        assert!(crate::select_diffuse(&original).is_err());
+        assert!(crate::select_diffuse_with_animation_base(&original, true).is_err());
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        let p = p.unwrap();
+        assert!(p.folded_root.is_none() && p.folded_operand.is_none());
+        // The plain animation-base selector is unchanged for a static COLOR tint.
+        assert!(crate::select_diffuse_with_animation_base(&derived, true).is_err());
+        assert!(crate::select_instance_diffuse(&derived, &p, false).is_err());
+        let s = crate::select_instance_diffuse(&derived, &p, true).unwrap();
+        assert_eq!(s.tint, color());
+        assert_eq!((s.sample_index, s.color_index), (3, Some(2)));
+        assert_eq!(s.multiply_index, Some(1));
+        assert_eq!(s.animation_base.unwrap().sample_index, 3);
+        assert!(s.second_sample.is_none());
+        // A plain static COLOR is not projected, so no instance route applies.
+        let mut plain = original.clone();
+        plain.boxes[2] = node(3);
+        assert!(project_instance_color(&plain, color()).unwrap().1.is_none());
+        assert!(crate::select_diffuse_with_animation_base(&plain, true).is_err());
+        // Rejected: animated MULTIPLY; static sampler stays on the existing route.
+        let mut animated_root = original.clone();
+        animate(&mut animated_root, 1);
+        let (d, q) = project_instance_color(&animated_root, color()).unwrap();
+        assert!(crate::select_instance_diffuse(&d, &q.unwrap(), true).is_err());
+        let still = graph(
+            &[0, 10, 2, 1],
+            vec![edge(2, 1, 0), edge(3, 1, 1), edge(1, 0, 0)],
+        );
+        let (d, q) = project_instance_color(&still, color()).unwrap();
+        let s = crate::select_instance_diffuse(&d, &q.unwrap(), true).unwrap();
+        assert!(s.animation_base.is_none() && s.tint == color());
+        // Two animated leaves under THING stay unsupported.
+        let mut two = graph(
+            &[0, 10, 2, 10, 1, 1],
+            vec![
+                edge(2, 1, 0),
+                edge(3, 1, 1),
+                edge(4, 3, 0),
+                edge(5, 3, 1),
+                edge(1, 0, 0),
+            ],
+        );
+        animate(&mut two, 4);
+        animate(&mut two, 5);
+        two.boxes[5].animations[0].name_hex = "636400".into();
+        let (d, q) = project_instance_color(&two, color()).unwrap();
+        assert!(crate::select_instance_diffuse(&d, &q.unwrap(), true).is_err());
+    }
+    #[test]
+    fn d88_constant_thing_operand_folds_into_texture_tint() {
+        // texture × (THING × COLOR): the operand folds; texture × COLOR selects.
+        let mut original = graph(
+            &[0, 10, 10, 3, 2, 1],
+            vec![
+                edge(2, 1, 1),
+                edge(4, 2, 0),
+                edge(3, 2, 1),
+                edge(5, 1, 0),
+                edge(1, 0, 0),
+            ],
+        );
+        original.boxes[3].parameters_raw[..4]
+            .copy_from_slice(&[0.5f32, 1., 0.25, 1.].map(f32::to_bits));
+        let before = serde_json::to_value(&original).unwrap();
+        assert!(crate::select_diffuse(&original).is_err());
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        assert_eq!(serde_json::to_value(&original).unwrap(), before);
+        let p = p.unwrap();
+        assert_eq!((p.folded_root, p.folded_operand), (None, Some(2)));
+        let s = crate::select_diffuse(&derived).unwrap();
+        assert_eq!(s.tint.values(), [0.2 * 0.5, 0.4, 0.8 * 0.25, 0.25]);
+        assert_eq!((s.sample_index, s.color_index), (5, Some(2)));
+        assert_eq!(
+            crate::select_instance_diffuse(&derived, &p, false).unwrap(),
+            s
+        );
+        // With an animated sampler the folded operand also tints (both opt-ins).
+        let mut moving = original.clone();
+        animate(&mut moving, 5);
+        let (d, q) = project_instance_color(&moving, color()).unwrap();
+        let q = q.unwrap();
+        assert!(crate::select_diffuse_with_animation_base(&d, true).is_err());
+        let s = crate::select_instance_diffuse(&d, &q, true).unwrap();
+        assert_eq!(s.color_index, Some(2));
+        assert!(s.animation_base.is_some());
+        // Not folded: operand also feeds another channel; swizzled root input.
+        let mut shared = original.clone();
+        shared.wires.push(edge(2, 0, 4));
+        let (d, q) = project_instance_color(&shared, color()).unwrap();
+        assert!(q.unwrap().folded_operand.is_none());
+        assert!(crate::select_diffuse(&d).is_err());
+        let mut swizzle = original.clone();
+        swizzle.wires[0].swizzle_raw = [b'a', 0, 0, 0, 0];
+        let (_, q) = project_instance_color(&swizzle, color()).unwrap();
+        assert!(q.unwrap().folded_operand.is_none());
+        // Out of preview bounds is an explicit reason.
+        let mut bright = original.clone();
+        bright.boxes[3].parameters_raw[0] = 8f32.to_bits();
+        let err = project_instance_color(&bright, color()).unwrap_err();
+        assert!(err.contains("folded supplied instance color"), "{err}");
     }
 }
