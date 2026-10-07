@@ -286,7 +286,9 @@ fn run() -> Result<(), String> {
                                     }),
                             }
                         };
-                    let multiply_equal = if let Some(mix) = s.alpha_mix {
+                    let multiply_equal = if let Some(add) = s.texture_add {
+                        add_equal(sample, &s, add, wire.box_from as usize, &transform_equal)?
+                    } else if let Some(mix) = s.alpha_mix {
                         let root = mix.mix_index;
                         let color = s.color_index.ok_or("alpha MIX color index missing")?;
                         let nodes = &sample["graph"]["boxes"];
@@ -653,7 +655,7 @@ fn run() -> Result<(), String> {
                     }
                     projected += 1;
                     // Versioned diagnostics retain all three original selectors/root indices.
-                    json!({"status":"projected","sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+                    json!({"status":"projected","texture_add":s.texture_add.map(|a|json!({"add_index":a.add_index,"addend_index":a.addend_index,"addend_bits":a.addend.map(|c|c.bits),"policy":"linear_sum_clamped"})),"sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
                 }
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
@@ -661,7 +663,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":16,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":17,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -678,6 +680,104 @@ fn run() -> Result<(), String> {
     } else {
         Ok(())
     }
+}
+/// D89: the ADD root and its operands re-read from the oracle's graph rows (Toolkit
+/// GfxAssembler ADD = port 0 + port 1): two samples on ports 0/1, or COLOR on one port
+/// and the sample (directly or through a sample x COLOR MULTIPLY) on the other.
+fn add_equal(
+    sample: &Value,
+    s: &lbp_preview::DiffuseSelection,
+    add: lbp_preview::DiffuseAdd,
+    root: usize,
+    transform_equal: &dyn Fn(usize, lbp_preview::SamplingTransform) -> bool,
+) -> Result<bool, String> {
+    let nodes = &sample["graph"]["boxes"];
+    let wires = sample["graph"]["wires"]
+        .as_array()
+        .ok_or("oracle wires required")?;
+    let into = |target: usize| -> Vec<(u64, u64)> {
+        let mut v: Vec<_> = wires
+            .iter()
+            .filter(|w| w["box_to"].as_u64() == Some(target as u64))
+            .filter(|w| w["port_from_raw"] == 0 && w["swizzle_raw"] == json!([0, 0, 0, 0, 0]))
+            .filter_map(|w| Some((w["port_to_raw"].as_u64()?, w["box_from"].as_u64()?)))
+            .collect();
+        v.sort();
+        v
+    };
+    let all_in = |target: usize| {
+        wires
+            .iter()
+            .filter(|w| w["box_to"].as_u64() == Some(target as u64))
+            .count()
+    };
+    let color_equal = |index: usize, bits: [u32; 4]| {
+        nodes[index]["type_raw"] == 3
+            && all_in(index) == 0
+            && bits
+                .iter()
+                .enumerate()
+                .all(|(i, b)| nodes[index]["parameters_raw"][i].as_u64() == Some(u64::from(*b)))
+    };
+    let leaf_equal =
+        |index: usize, slot: usize, channel: usize, t: lbp_preview::SamplingTransform| {
+            nodes[index]["type_raw"] == 1
+                && nodes[index]["subtype_raw"].as_u64() == Some(u64::from(t.subtype()))
+                && nodes[index]["parameters_raw"][4].as_u64() == Some(channel as u64)
+                && nodes[index]["parameters_raw"][5].as_u64() == Some(slot as u64)
+                && all_in(index) == 0
+                && transform_equal(index, t)
+        };
+    let operands = into(root);
+    let mut ok = add.add_index == root
+        && nodes[root]["type_raw"] == 11
+        && nodes[root]["subtype_raw"] == 0
+        && all_in(root) == 2
+        && operands.len() == 2
+        && operands[0].0 == 0
+        && operands[1].0 == 1
+        && leaf_equal(s.sample_index, s.slot, s.uv_channel, s.uv_transform);
+    match (add.addend, add.addend_index, s.second_sample) {
+        (None, None, Some(second)) => {
+            ok &= operands[0].1 == s.sample_index as u64
+                && operands[1].1 == second.sample_index as u64
+                && s.multiply_index.is_none()
+                && leaf_equal(
+                    second.sample_index,
+                    second.slot,
+                    second.uv_channel,
+                    second.uv_transform,
+                );
+        }
+        (Some(addend), Some(color), None) if ok => {
+            let other = if operands[0].1 == color as u64 {
+                operands[1].1
+            } else {
+                operands[0].1
+            };
+            ok &= operands.iter().any(|o| o.1 == color as u64) && color_equal(color, addend.bits);
+            match (s.multiply_index, s.color_index) {
+                (None, None) => {
+                    ok &= other == s.sample_index as u64 && s.tint.bits == [1f32.to_bits(); 4]
+                }
+                (Some(m), Some(c)) => {
+                    let factors: Vec<_> = into(m).iter().map(|o| o.1).collect();
+                    ok &= other == m as u64
+                        && nodes[m]["type_raw"] == 10
+                        && nodes[m]["subtype_raw"] == 0
+                        && all_in(m) == 2
+                        && factors.len() == 2
+                        && factors.contains(&(s.sample_index as u64))
+                        && factors.contains(&(c as u64))
+                        && c != color
+                        && color_equal(c, s.tint.bits);
+                }
+                _ => ok = false,
+            }
+        }
+        _ => ok = false,
+    }
+    Ok(ok)
 }
 /// D86 independent recomputation from the oracle's graph rows only (Toolkit
 /// GfxAssembler forms: THING_COLOR = supplied white, COLOR words 0..3, CONSTANT word 0,

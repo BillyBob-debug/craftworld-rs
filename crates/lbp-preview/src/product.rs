@@ -79,7 +79,7 @@ fn bake(
 ) -> Result<(u32, u32, Vec<u8>), String> {
     bake_policy([da, db], [a, b], [sa, sb], None, cancelled)
 }
-fn extent(
+pub(crate) fn extent(
     dimensions: [[u32; 2]; 2],
     sources: [&[u8]; 2],
     scales: [[u32; 2]; 2],
