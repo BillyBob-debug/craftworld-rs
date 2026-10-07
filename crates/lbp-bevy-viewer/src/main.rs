@@ -520,12 +520,14 @@ fn load(
                 .and_then(|a| a.texture())
                 .and_then(|a| a.third.as_ref())
                 .map(|third| {
+                    let relative = third.relative.ok_or("Missing third-sample coordinates")?;
                     adapter::image(
                         third.texture.header.width,
                         third.texture.header.height,
                         third.texture.rgba.clone(),
                         true,
                     )
+                    .map(|image| (image, relative))
                 })
                 .transpose()?;
             let fourth_image = asset
@@ -559,8 +561,8 @@ fn load(
             if let Some(second) = second_image {
                 dual::enable(&mut surface, images.add(second));
             }
-            if let Some(third) = third_image {
-                dual::enable_third(&mut surface, images.add(third));
+            if let Some((third, relative)) = third_image {
+                dual::enable_third(&mut surface, images.add(third), relative);
             }
             if let Some(fourth) = fourth_image {
                 dual::enable_fourth(&mut surface, images.add(fourth));
@@ -1025,7 +1027,15 @@ mod tests {
             let second = images.add(adapter::image(1, 1, vec![128; 4], true).unwrap());
             dual::enable(&mut surface, second);
             let third = images.add(adapter::image(1, 1, vec![64; 4], true).unwrap());
-            dual::enable_third(&mut surface, third);
+            dual::enable_third(
+                &mut surface,
+                third,
+                lbp_preview::RelativeSampling {
+                    from_primary: false,
+                    scale: [1., 1.],
+                    offset: [0., 0.],
+                },
+            );
             let fourth = images.add(adapter::image(1, 1, vec![32; 4], true).unwrap());
             dual::enable_fourth(&mut surface, fourth);
             let material = materials.add(surface);

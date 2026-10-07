@@ -2919,3 +2919,30 @@ Not tested: game pixels, filtered/colour-space fidelity of squared products, ext
 geometry oracle for the 26 added meshes, corpus-wide binding (selection only).
 Next: three-texture product with an independent third transform (largest blocker,
 84 meshes blocked by nothing else); needs a three-sampler Bevy path or a bounded bake.
+
+## D65 — three-texture product with independent third transform (2026-10-07)
+
+Largest D64 census blocker. The third sample now re-derives its coordinates as a
+scale/offset of the displayed primary or second coordinates on the same raw channel
+(f64 then one f32 rounding), passed to the Bevy shader as uniform 107. Legacy keeps
+refusing independent-sampling products. Rules/evidence: [docs/third-sample-preview.md](docs/third-sample-preview.md).
+
+Counts (distinct GUID): new cohort d65-third-mesh-samples-pinned.json (48 of 85 meshes
+blocked only by these materials) 48/0/0 -> 48/29/0, groups 92 -> 134 of 235, geometry
+identical. D61 48 cohort 48/43/0 and D64 squared 26/23/0 unchanged.
+**+0 newly viewable / +0 newly Complete.**
+
+Commands (after `. ./scripts/use-local-rust.ps1`):
+- run-material-oracle.ps1 -Diffuse d65-third-material-samples.json -> d65-third-material-oracle.json: 48 records, 466968 bytes.
+- diffuse_parity d65-third 48/0 mismatches/48 projected; d65-diffuse 32/0/29 (was 28: one D46 material now projects), d65-linked 48/0/46, d65-alpha 1/0/1, d65-mirror 5/0/5, d65-square 17/0/17.
+- compatibility_census d65-third-baseline2 (code stashed) 48/0/0; d65-third-after2 48/29/0; d65-cohort48-after 48/43/0; d65-square-after 26/23/0.
+- fmt, Clippy -D warnings, tests (preview 21, bevy 10, legacy 65, others), python 34, both builds: pass.
+- Native: --select-guid 00002c6e (japan_vase_cracked) capture, non-primary 165v0, 2/2 textured, label shows third from second x [0.5,0.5]; clean UTF-8; one image viewed.
+
+Failed: first census run lacked toolkit_commit in the new manifest ("mesh oracle pin
+differs"), rewritten as -pinned. Two test assertions assumed the wrong primary/second
+order; made role-aware. git stash round trip left lib.rs/linked.rs as LF; restored CRLF.
+
+Not tested: game pixels, filtering/mip fidelity, matrix-base thirds, legacy rendering.
+Next: the 8-distinct-material mesh preview budget (78 groups in this cohort alone);
+measure corpus impact before raising it with bounded memory.

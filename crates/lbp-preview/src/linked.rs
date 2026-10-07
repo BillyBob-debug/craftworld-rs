@@ -42,6 +42,81 @@ pub struct Asset {
 pub struct SharedSampleAsset {
     pub texture: lbp_texture::Texture,
     pub texture_key: LocationKey,
+    /// Third sample only: coordinates as a scale/offset of a displayed set.
+    pub relative: Option<RelativeSampling>,
+}
+/// Sampling coordinates re-derived from an already displayed coordinate set on the
+/// same raw channel: `base * scale + offset`. Computed in f64 from two scale/offset
+/// transforms and rounded once to f32; no bit-exact or GPU rounding claim.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct RelativeSampling {
+    /// true: primary sampling coordinates; false: second-sample coordinates.
+    pub from_primary: bool,
+    pub scale: [f32; 2],
+    pub offset: [f32; 2],
+}
+impl RelativeSampling {
+    pub fn is_identity(&self) -> bool {
+        self.scale == [1., 1.] && self.offset == [0., 0.]
+    }
+}
+/// D65: the third sample shares a raw channel with the primary or second sample.
+/// Exact sharing keeps the second coordinates; otherwise both transforms must be
+/// finite scale/offset with nonzero scale and no instance UV subtraction.
+pub(crate) fn relative_third(
+    selection: &DiffuseSelection,
+    subtracted: &[usize],
+) -> Result<RelativeSampling, String> {
+    let third = selection.third_sample.ok_or("Unsupported: third sample")?;
+    let second = selection
+        .second_sample
+        .ok_or("Unsupported: third sample needs a second sample")?;
+    if second.uv_channel == third.uv_channel && second.uv_transform == third.uv_transform {
+        return Ok(RelativeSampling {
+            from_primary: false,
+            scale: [1., 1.],
+            offset: [0., 0.],
+        });
+    }
+    let primary = SamplerSelection {
+        sample_index: selection.sample_index,
+        slot: selection.slot,
+        uv_channel: selection.uv_channel,
+        uv_transform: selection.uv_transform,
+    };
+    let crate::SamplingTransform::ScaleOffset(target) = third.uv_transform else {
+        return Err("Unsupported: independent third texture needs scale/offset".into());
+    };
+    for (base, from_primary) in [(second, false), (primary, true)] {
+        let crate::SamplingTransform::ScaleOffset(t) = base.uv_transform else {
+            continue;
+        };
+        if base.uv_channel != third.uv_channel
+            || subtracted.contains(&base.sample_index)
+            || subtracted.contains(&third.sample_index)
+        {
+            continue;
+        }
+        let [bx, by, box_, boy] = t.values().map(f64::from);
+        let [tx, ty, tox, toy] = target.values().map(f64::from);
+        if bx == 0. || by == 0. {
+            continue;
+        }
+        let (rx, ry) = (tx / bx, ty / by);
+        let values = [rx, ry, tox - box_ * rx, toy - boy * ry].map(|v| v as f32);
+        if values
+            .iter()
+            .any(|v| !v.is_finite() || v.abs() > 1_000_000.)
+        {
+            return Err("Unsupported: third texture relative transform bounds".into());
+        }
+        return Ok(RelativeSampling {
+            from_primary,
+            scale: [values[0], values[1]],
+            offset: [values[2], values[3]],
+        });
+    }
+    Err("Unsupported: third texture needs a scale/offset sample on its channel".into())
 }
 pub struct DualAsset {
     pub texture: lbp_texture::Texture,
@@ -138,7 +213,7 @@ impl MaterialAsset {
             Self::Texture(a) if a.selection.alpha_mix.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.alpha_mix.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.border_domain.map_or_else(||a.wrap.label(),|b|b.label()),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.selection.animation_base.is_some()=>format!("Animation base-value snapshot • local/global rows verified • {} keys per row {:?} • UV{} {} • time/motion unverified • diffuse only",a.selection.animation_base.unwrap().key_counts[0],a.selection.animation_base.unwrap().key_counts,a.selection.uv_channel,a.selection.uv_transform.label()),
             Self::Texture(a) if a.fourth.is_some() => format!("Diffuse only • four-texture nested product • UV{} {} × UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.fourth_sample.unwrap().uv_channel,a.selection.fourth_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Texture(a) if a.third.is_some() => format!("Diffuse only • three-texture nested product • UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) if a.third.is_some() => format!("Diffuse only • three-texture nested product{} • UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.third.as_ref().and_then(|t| t.relative).filter(|r| !r.is_identity() || r.from_primary).map_or(String::new(), |r| format!(" (third from {} coordinates × {:?} + {:?})", if r.from_primary {"primary"} else {"second"}, r.scale, r.offset)),a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture sampling • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.blend.map_or_else(||a.selection.tint.label(),|blend|blend.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture product, second {}, nearest grid {:?}",second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire • black (0,0,0,0) per Toolkit shader generator; game default unverified • other channels not rendered • ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
@@ -615,12 +690,16 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
                 let first_selection = sampler(graph, first)?;
                 let mut second_selection = sampler(graph, second)?;
                 let third = sampler(graph, third)?;
-                if second_selection.uv_channel != third.uv_channel || second_selection.uv_transform != third.uv_transform {
+                let shares = |s: &SamplerSelection| s.uv_channel == third.uv_channel && s.uv_transform == third.uv_transform;
+                if !shares(&second_selection) && shares(&first_selection) {
                     std::mem::swap(&mut first, &mut second);
                     second_selection = first_selection;
                 }
-                if second_selection.uv_channel != third.uv_channel || second_selection.uv_transform != third.uv_transform {
-                    return Err("Unsupported: third texture must share second texture channel and exact transform".into());
+                // D65: otherwise the third texture keeps its own scale/offset, derived
+                // from the displayed coordinates on its channel (relative_third).
+                let scale_offset = |s: &SamplerSelection| matches!(s.uv_transform, crate::SamplingTransform::ScaleOffset(t) if t.values()[..2].iter().all(|v| *v != 0.));
+                if !shares(&second_selection) && ![first_selection, second_selection, third].iter().all(scale_offset) {
+                    return Err("Unsupported: independent third texture needs nonzero scale/offset samplers".into());
                 }
                 second_sample = Some(second_selection);
                 third_sample = Some(third);
@@ -760,6 +839,7 @@ fn load_shared_sample(
     Ok(Box::new(SharedSampleAsset {
         texture,
         texture_key,
+        relative: None,
     }))
 }
 pub fn resolve(
@@ -1085,7 +1165,15 @@ pub(crate) fn load_primitive(
     };
     let third = selection
         .third_sample
-        .map(|s| load_shared_sample(source, catalog, &graph, s.slot, control))
+        .map(|s| {
+            let subtracted = instance_projection
+                .as_ref()
+                .map_or(&[][..], |p| &p.alpha_subtract_samplers[..]);
+            let relative = relative_third(&selection, subtracted)?;
+            let mut shared = load_shared_sample(source, catalog, &graph, s.slot, control)?;
+            shared.relative = Some(relative);
+            Ok::<_, String>(shared)
+        })
         .transpose()?;
     let fourth = selection
         .fourth_sample
@@ -1456,9 +1544,40 @@ mod tests {
         graph.wires[1].port_to_raw = 0; // duplicate root port
         assert!(select_diffuse(&graph).is_err());
         graph.wires[1].port_to_raw = 1;
+        // D65: a third transform differing from the second (here only by -0) is an
+        // independent scale/offset re-derived from coordinates on its channel.
         graph.boxes[4].parameters_raw[3] = (-0f32).to_bits();
-        assert!(select_diffuse(&graph).is_err()); // exact transform bits required
-        graph.boxes[4].parameters_raw[3] = 0;
+        let independent = select_diffuse(&graph).unwrap();
+        let r = relative_third(&independent, &[]).unwrap();
+        // The base is whichever displayed sample shares the channel (box 2 on UV0).
+        assert!(r.is_identity());
+        assert_eq!(r.from_primary, independent.sample_index == 2);
+        assert!(relative_third(&independent, &[4]).is_err());
+        graph.boxes[4].parameters_raw[..4]
+            .copy_from_slice(&[4f32, 2., 0.5, 0.25].map(f32::to_bits));
+        graph.boxes[2].parameters_raw[..4].copy_from_slice(&[2f32, 4., 0.25, 0.].map(f32::to_bits));
+        let selected = select_diffuse(&graph).unwrap();
+        let r = relative_third(&selected, &[]).unwrap();
+        // raw = (b - (0.25, 0)) / (2, 4); third = raw × (4, 2) + (0.5, 0.25)
+        assert_eq!(
+            (r.from_primary, r.scale, r.offset),
+            (selected.sample_index == 2, [2., 0.5], [0., 0.25])
+        );
+        graph.boxes[4].parameters_raw[4] = 1; // UV1: only box 1 shares it
+        let selected = select_diffuse(&graph).unwrap();
+        let r = relative_third(&selected, &[]).unwrap();
+        assert_eq!(
+            (r.from_primary, r.scale, r.offset),
+            (selected.sample_index == 1, [4., 2.], [0.5, 0.25])
+        );
+        graph.boxes[4].parameters_raw[4] = 0;
+        graph.boxes[2].parameters_raw[0] = 0; // zero base scale is not invertible
+        assert!(select_diffuse(&graph).is_err());
+        graph.boxes[2].parameters_raw[..4].copy_from_slice(&[1f32, 1., 0., 0.].map(f32::to_bits));
+        graph.boxes[4].subtype_raw = 1; // matrix third stays unsupported unless shared
+        assert!(select_diffuse(&graph).is_err());
+        graph.boxes[4].subtype_raw = 0;
+        graph.boxes[4].parameters_raw[..4].copy_from_slice(&[1f32, 1., 0., 0.].map(f32::to_bits));
         graph.boxes[4].animations[0].component_value_count = 1;
         assert!(select_diffuse(&graph).is_err());
         graph.boxes[4].animations[0].component_value_count = 0;

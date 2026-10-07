@@ -25,7 +25,7 @@ use lbp_catalog::{
 };
 pub use linked::{
     load, resolve, select_diffuse, select_diffuse_with_animation_base, Asset, DiffuseSelection,
-    MaterialAsset, SolidAsset,
+    MaterialAsset, RelativeSampling, SolidAsset,
 };
 pub use solid::{select_solid_diffuse, SolidSelection};
 pub use tint::DiffuseTint;

@@ -1,6 +1,7 @@
 //! Authored unlit two/three/four-sample extension. Evidence: docs/dual-preview.md,
-//! docs/nested-preview.md, docs/four-product-preview.md. Third shares secondary
-//! coordinates; fourth shares primary coordinates after exact CPU validation.
+//! docs/nested-preview.md, docs/four-product-preview.md, docs/third-sample-preview.md.
+//! Third samples second (or primary, D65) coordinates through a CPU-derived
+//! scale/offset; fourth shares primary coordinates after exact CPU validation.
 use bevy::{
     pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
@@ -22,6 +23,9 @@ pub struct SecondTexture {
     pub fourth_image: Option<Handle<Image>>,
     #[uniform(102)]
     enabled: Vec4,
+    /// Third sample: base coordinates × xy + zw.
+    #[uniform(107)]
+    third_transform: Vec4,
 }
 impl MaterialExtension for SecondTexture {
     fn fragment_shader() -> ShaderRef {
@@ -38,9 +42,19 @@ pub fn enable(material: &mut ViewerMaterial, image: Handle<Image>) {
     material.extension.image = Some(image);
     material.extension.enabled = Vec4::X;
 }
-pub fn enable_third(material: &mut ViewerMaterial, image: Handle<Image>) {
+pub fn enable_third(
+    material: &mut ViewerMaterial,
+    image: Handle<Image>,
+    relative: lbp_preview::RelativeSampling,
+) {
     material.extension.third_image = Some(image);
-    material.extension.enabled.y = 1.;
+    material.extension.enabled.y = if relative.from_primary { 2. } else { 1. };
+    material.extension.third_transform = Vec4::new(
+        relative.scale[0],
+        relative.scale[1],
+        relative.offset[0],
+        relative.offset[1],
+    );
 }
 pub fn enable_fourth(material: &mut ViewerMaterial, image: Handle<Image>) {
     material.extension.fourth_image = Some(image);
@@ -69,6 +83,7 @@ const SOURCE: &str = r#"
 @group(#{MATERIAL_BIND_GROUP}) @binding(104) var third_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(105) var fourth_image: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(106) var fourth_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(107) var<uniform> third_transform: vec4<f32>;
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOutput {
     let pbr = pbr_input_from_standard_material(in, front);
@@ -77,7 +92,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
     if enabled.x > 0.0 {
         color *= textureSample(second_image, second_sampler, in.uv_b);
         if enabled.y > 0.0 {
-            color *= textureSample(third_image, third_sampler, in.uv_b);
+            var third_base = in.uv_b;
+#ifdef VERTEX_UVS_A
+            if enabled.y > 1.5 {
+                third_base = in.uv;
+            }
+#endif
+            color *= textureSample(third_image, third_sampler, third_base * third_transform.xy + third_transform.zw);
         }
 #ifdef VERTEX_UVS_A
         if enabled.z > 0.0 {

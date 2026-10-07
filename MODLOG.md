@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-07 — D65 independent third-texture transform
+
+Nested three-texture products no longer need the third sample to share the second's
+transform; Bevy derives its coordinates from a shared channel. 48-mesh cohort full
+diffuse 0 -> 29; +0 viewable/+0 Complete. Oracle parity 48/0 mismatches.
+[third-sample-preview.md](docs/third-sample-preview.md), [STATUS.md](STATUS.md).
+
 ## 2026-10-07 — D64 corpus route census and same-sample multiply
 
 New selection-only census over 5163 materials ranks blockers by dependent meshes.
