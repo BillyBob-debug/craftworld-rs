@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  # Non-GUI crates only; lbp-bevy-viewer and lbp-viewer are excluded (see docs/d72-ci.md).
+  CRATES: >-
+    -p lbp-core -p lbp-io -p lbp-archive -p lbp-resource -p lbp-texture
+    -p lbp-mesh -p lbp-catalog -p lbp-preview -p lbp-cli
+
+jobs:
+  rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Test
+        run: cargo test -q $CRATES
+      - name: Clippy
+        run: cargo clippy -q $CRATES --all-targets -- -D warnings
+
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      - name: Unit tests
+        run: python3 -m unittest discover -s tests
