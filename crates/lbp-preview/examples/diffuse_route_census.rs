@@ -31,6 +31,85 @@ fn classify(graph: &lbp_resource::material::GraphMetadata) -> (String, Option<St
     ("unsupported".into(), Some(reason))
 }
 
+/// D86 (docs/d86-thing-color.md): why a THING_COLOR material is not instance-color
+/// only. Projection error verbatim, or the derived graph's default-route reason.
+/// Also returns each ThingColor's subtype, parameter words and outgoing wires.
+fn thing_color_reason(
+    graph: &lbp_resource::material::GraphMetadata,
+) -> Option<(String, Vec<String>)> {
+    let n = graph.boxes.len();
+    if n > 1024 || graph.wires.len() > 4096 {
+        return None;
+    }
+    let ok = |v: i32| v >= 0 && (v as usize) < n;
+    let output = graph.boxes.iter().position(|b| b.type_raw == 0)?;
+    let mut seen = vec![false; n];
+    let mut pending: Vec<_> = graph
+        .wires
+        .iter()
+        .filter(|w| ok(w.box_from) && w.box_to as usize == output && w.port_to_raw == 0)
+        .map(|w| w.box_from as usize)
+        .collect();
+    while let Some(i) = pending.pop() {
+        if std::mem::replace(&mut seen[i], true) {
+            continue;
+        }
+        for w in &graph.wires {
+            if ok(w.box_from) && ok(w.box_to) && w.box_to as usize == i {
+                pending.push(w.box_from as usize);
+            }
+        }
+    }
+    let things: Vec<String> = (0..n)
+        .filter(|&i| seen[i] && graph.boxes[i].type_raw == 2)
+        .map(|i| {
+            let b = &graph.boxes[i];
+            let out: Vec<String> = graph
+                .wires
+                .iter()
+                .filter(|w| ok(w.box_from) && ok(w.box_to) && w.box_from as usize == i)
+                .map(|w| {
+                    let sw: String = w
+                        .swizzle_raw
+                        .iter()
+                        .filter(|&&c| c != 0)
+                        .map(|&c| c as char)
+                        .collect();
+                    format!(
+                        "{}:{}{}",
+                        graph.boxes[w.box_to as usize].type_raw, w.port_to_raw, sw
+                    )
+                })
+                .collect();
+            format!(
+                "sub{} params{:?} out[{}]",
+                b.subtype_raw,
+                b.parameters_raw,
+                out.join(",")
+            )
+        })
+        .collect();
+    if things.is_empty() {
+        return None;
+    }
+    let white = lbp_preview::DiffuseTint {
+        bits: [1f32.to_bits(); 4],
+    };
+    let reason = match lbp_preview::project_instance_color(graph, white) {
+        Err(e) => e,
+        Ok((_, None)) => "projection_unused".into(),
+        Ok((derived, Some(_))) => match lbp_preview::select_solid_diffuse(&derived) {
+            Ok(Some(_)) => "projected_selected".into(),
+            Err(e) => format!("projected_unselected: {e}"),
+            Ok(None) => match lbp_preview::select_diffuse_with_animation_base(&derived, true) {
+                Ok(_) => "projected_selected".into(),
+                Err(e) => format!("projected_unselected: {e}"),
+            },
+        },
+    };
+    Some((reason, things))
+}
+
 /// Compact signature of the diffuse ancestry: nodes as type.subtype[+named animations],
 /// edges as from>to:port[swizzle]. Diagnostic grouping only.
 fn shape(graph: &lbp_resource::material::GraphMetadata) -> Option<String> {
@@ -129,6 +208,8 @@ fn run() -> Result<(), String> {
     let mut rows = vec![];
     let mut classes: BTreeMap<String, usize> = BTreeMap::new();
     let mut reasons: BTreeMap<String, usize> = BTreeMap::new();
+    let mut thing_reasons: BTreeMap<String, usize> = BTreeMap::new();
+    let mut thing_nodes: BTreeMap<String, usize> = BTreeMap::new();
     let mut bytes_read = 0u64;
     for location in locations {
         let Some(sha) = location["sha1_candidates"]
@@ -165,23 +246,33 @@ fn run() -> Result<(), String> {
             }
             data.extend(page);
         }
-        let (class, reason, signature) =
+        let (class, reason, signature, thing) =
             match lbp_resource::material::inspect_graph(&data, || control.check().is_err()) {
                 Ok(g) => {
                     let (c, r) = classify(&g.graph);
                     let sig = (c == "unsupported").then(|| shape(&g.graph)).flatten();
-                    (c, r, sig)
+                    let thing = (c == "unsupported")
+                        .then(|| thing_color_reason(&g.graph))
+                        .flatten();
+                    (c, r, sig, thing)
                 }
-                Err(e) => ("graph_not_parsed".into(), Some(e.to_string()), None),
+                Err(e) => ("graph_not_parsed".into(), Some(e.to_string()), None, None),
             };
         *classes.entry(class.clone()).or_default() += 1;
         if let Some(r) = &reason {
             *reasons.entry(format!("{class}: {r}")).or_default() += 1;
         }
-        rows.push(json!({"sha1":sha,"class":class,"reason":reason,"shape":signature}));
+        if let Some((r, nodes)) = &thing {
+            *thing_reasons.entry(r.clone()).or_default() += 1;
+            for node in nodes {
+                *thing_nodes.entry(node.clone()).or_default() += 1;
+            }
+        }
+        let thing_reason = thing.map(|(r, _)| r);
+        rows.push(json!({"sha1":sha,"class":class,"reason":reason,"shape":signature,"thing_color_reason":thing_reason}));
     }
     rows.sort_by(|a, b| a["sha1"].as_str().cmp(&b["sha1"].as_str()));
-    let report = json!({"schema_version":2,"scope":"diffuse_route_selection_only_not_payload_or_asset_count","materials":rows.len(),"archived_bytes_read":bytes_read,"class_counts":classes,"reason_counts":reasons,"materials_detail":rows});
+    let report = json!({"schema_version":3,"scope":"diffuse_route_selection_only_not_payload_or_asset_count","materials":rows.len(),"archived_bytes_read":bytes_read,"class_counts":classes,"reason_counts":reasons,"thing_color_reason_counts":thing_reasons,"thing_color_node_counts":thing_nodes,"materials_detail":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

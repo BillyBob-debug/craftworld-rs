@@ -16,6 +16,7 @@ mod matrix;
 mod product;
 pub use matrix::{SamplingTransform, UvMatrix};
 mod instance;
+mod instance_fold;
 pub use instance::{project_instance_color, InstanceProjection, PreviewOptions};
 mod linked;
 mod solid;
