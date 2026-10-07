@@ -271,6 +271,67 @@ fn run() -> Result<(), String> {
                                     second_node["parameters_raw"][*i].as_u64()
                                         == Some(u64::from(*b))
                                 })
+                    } else if let (Some(inner), None, Some(color), Some(second), Some(root)) = (
+                        s.inner_multiply_index,
+                        s.third_sample,
+                        s.color_index,
+                        s.second_sample,
+                        s.multiply_index,
+                    ) {
+                        // D75: two samples and one static COLOR under two multiplies in
+                        // either nesting; leaves must equal the oracle's root + inner inputs.
+                        let oracle_wires = sample["graph"]["wires"]
+                            .as_array()
+                            .ok_or("oracle wires required")?;
+                        let nodes = &sample["graph"]["boxes"];
+                        let inputs = |target: usize| {
+                            oracle_wires
+                                .iter()
+                                .filter(|w| w["box_to"].as_u64() == Some(target as u64))
+                                .collect::<Vec<_>>()
+                        };
+                        let root_inputs = inputs(root);
+                        let inner_inputs = inputs(inner);
+                        let mut leaves = [s.sample_index, second.sample_index, color];
+                        leaves.sort_unstable();
+                        let mut graph_leaves: Vec<usize> = root_inputs
+                            .iter()
+                            .chain(inner_inputs.iter())
+                            .filter_map(|w| w["box_from"].as_u64())
+                            .map(|v| v as usize)
+                            .filter(|&v| v != inner)
+                            .collect();
+                        graph_leaves.sort_unstable();
+                        let second_node = &nodes[second.sample_index];
+                        root == wire.box_from as usize
+                            && root_inputs.len() == 2
+                            && inner_inputs.len() == 2
+                            && root_inputs
+                                .iter()
+                                .any(|w| w["box_from"].as_u64() == Some(inner as u64))
+                            && graph_leaves == leaves
+                            && [root, inner].iter().all(|i| {
+                                nodes[*i]["type_raw"] == 10 && nodes[*i]["subtype_raw"] == 0
+                            })
+                            && nodes[color]["type_raw"] == 3
+                            && s.tint.bits.iter().enumerate().all(|(i, b)| {
+                                nodes[color]["parameters_raw"][i].as_u64() == Some(u64::from(*b))
+                            })
+                            && second_node["type_raw"] == 1
+                            && second_node["subtype_raw"].as_u64()
+                                == Some(u64::from(second.uv_transform.subtype()))
+                            && second_node["parameters_raw"][4].as_u64()
+                                == Some(second.uv_channel as u64)
+                            && second_node["parameters_raw"][5].as_u64() == Some(second.slot as u64)
+                            && second
+                                .uv_transform
+                                .parameter_indices()
+                                .iter()
+                                .zip(second.uv_transform.bits())
+                                .all(|(i, b)| {
+                                    second_node["parameters_raw"][*i].as_u64()
+                                        == Some(u64::from(*b))
+                                })
                     } else if let (Some(inner), Some(third), Some(second), Some(root)) = (
                         s.inner_multiply_index,
                         s.third_sample,

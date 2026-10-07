@@ -692,18 +692,49 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
         }
         let left = incoming[0].box_from as usize;
         let right = incoming[1].box_from as usize;
+        // Inner multiply of a product of a product; children keep wire order.
+        let nested_inputs = |inner: usize| -> Result<[usize; 2], String> {
+            let nested: Vec<_> = wires
+                .iter()
+                .filter(|w| w.box_to as usize == inner)
+                .collect();
+            if inner == multiply
+                || !unanimated(&boxes[inner])
+                || nested.len() != 2
+                || nested
+                    .iter()
+                    .any(|w| w.port_from_raw != 0 || w.swizzle_raw != [0; 5])
+                || !nested.iter().any(|w| w.port_to_raw == 0)
+                || !nested.iter().any(|w| w.port_to_raw == 1)
+            {
+                return Err("Unsupported: nested product needs one static multiply with unique inputs on ports 0/1".into());
+            }
+            Ok([nested[0].box_from as usize, nested[1].box_from as usize])
+        };
         let (sample, color) = match (boxes[left].type_raw, boxes[right].type_raw) {
+            // D75: (texture × COLOR) × texture. The component-wise product is
+            // commutative, so this is the two-texture product with a static tint.
+            (10, 1) | (1, 10)
+                if {
+                    let inner = if boxes[left].type_raw == 10 { left } else { right };
+                    let [a, b] = nested_inputs(inner)?;
+                    matches!(
+                        (boxes[a].type_raw, boxes[b].type_raw),
+                        (1, 3) | (3, 1)
+                    )
+                } =>
+            {
+                let (inner, outer) = if boxes[left].type_raw == 10 { (left, right) } else { (right, left) };
+                let [a, b] = nested_inputs(inner)?;
+                let (inner_sample, inner_color) = if boxes[a].type_raw == 1 { (a, b) } else { (b, a) };
+                sampler(graph, inner_sample)?;
+                second_sample = Some(sampler(graph, outer)?);
+                inner_multiply_index = Some(inner);
+                (inner_sample, Some(inner_color))
+            }
             (10, 1) | (1, 10) => {
                 let (inner, third) = if boxes[left].type_raw == 10 { (left, right) } else { (right, left) };
-                let nested: Vec<_> = wires.iter().filter(|w| w.box_to as usize == inner).collect();
-                if inner == multiply || !unanimated(&boxes[inner]) || nested.len() != 2
-                    || nested.iter().any(|w| w.port_from_raw != 0 || w.swizzle_raw != [0;5])
-                    || !nested.iter().any(|w| w.port_to_raw == 0)
-                    || !nested.iter().any(|w| w.port_to_raw == 1) {
-                    return Err("Unsupported: nested product needs one static multiply with unique inputs on ports 0/1".into());
-                }
-                let mut first = nested[0].box_from as usize;
-                let mut second = nested[1].box_from as usize;
+                let [mut first, mut second] = nested_inputs(inner)?;
                 if first == second || first == third || second == third {
                     return Err("Unsupported: nested product requires three distinct texture leaves".into());
                 }
@@ -740,6 +771,18 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
                 second_sample = Some(second);
                 (left, None)
             }
+            // D75: (texture × texture) × COLOR; one sample on both inner ports is squared.
+            (10, 3) | (3, 10) => {
+                let (inner, color) = if boxes[left].type_raw == 10 { (left, right) } else { (right, left) };
+                let [a, b] = nested_inputs(inner)?;
+                if boxes[a].type_raw != 1 || boxes[b].type_raw != 1 {
+                    return Err("Unsupported: product × COLOR needs two direct texture samples under the inner multiply".into());
+                }
+                sampler(graph, a)?;
+                second_sample = Some(sampler(graph, b)?);
+                inner_multiply_index = Some(inner);
+                (a, Some(color))
+            }
             (1, 3) => (left, Some(right)),
             (3, 1) => (right, Some(left)),
             _ => {
@@ -759,14 +802,15 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
         sample_index = sample;
         multiply_index = Some(multiply);
         color_index = color;
+        let squared = second_sample.is_some_and(|s| s.sample_index == sample);
+        // Nested routes add the inner multiply, one more leaf and two wires.
+        let nested = usize::from(inner_multiply_index.is_some());
         used_nodes = if third_sample.is_some() {
             6
-        } else if second_sample.is_some_and(|s| s.sample_index == sample) {
-            3
         } else {
-            4
+            4 - usize::from(squared) + 2 * nested
         };
-        used_wires = if third_sample.is_some() { 5 } else { 3 };
+        used_wires = 3 + 2 * nested;
     }
     let selected = sampler(graph, sample_index)?;
     if wire.port_from_raw != 0
@@ -1151,13 +1195,19 @@ pub(crate) fn load_primitive(
                     || control.check().is_err(),
                 )?
             } else {
-                crate::product::pixels(
+                let (width, height, rgba) = crate::product::pixels(
                     &texture,
                     &second_texture,
                     selection.uv_transform,
                     second.uv_transform,
                     || control.check().is_err(),
-                )?
+                )?;
+                // D75: static COLOR of a product of a product, applied to the baked grid.
+                let rgba = selection
+                    .tint
+                    .pixels(&rgba, || control.check().is_err())?
+                    .unwrap_or(rgba);
+                (width, height, rgba)
             };
             Some(Box::new(ProductAsset {
                 texture: second_texture,
@@ -1920,6 +1970,195 @@ mod tests {
         graph.wires.pop();
         graph.boxes[1].animations[0].base_value_bits[0] = f32::INFINITY.to_bits();
         assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+    }
+    #[test]
+    fn two_textures_and_static_color_under_two_multiplies_select_a_tinted_product() {
+        use lbp_resource::material::{AnimationMetadata, BoxMetadata, WireMetadata};
+        let node = |kind, slot: u32| {
+            let mut parameters_raw = [0; 8];
+            if kind == 1 {
+                parameters_raw = [1f32.to_bits(), 1f32.to_bits(), 0, 0, 0, slot, 0, 0];
+            } else if kind == 3 {
+                parameters_raw[..4].copy_from_slice(&[0.5f32, 1., 0.25, 1.].map(f32::to_bits));
+            }
+            BoxMetadata {
+                type_raw: kind,
+                declared_parameter_count: 8,
+                parameters_raw,
+                position_bits: [0; 4],
+                subtype_raw: 0,
+                animations: std::array::from_fn(|_| AnimationMetadata {
+                    base_value_bits: [0; 4],
+                    component_value_count: 0,
+                    component_bytes_sha256: String::new(),
+                    name_hex: "000000".into(),
+                    components_raw: 0,
+                    derived_key_count: 0,
+                }),
+                texture_slot_raw: None,
+                texture_slot_in_range: None,
+            }
+        };
+        let wire = |from, to, port| WireMetadata {
+            box_from: from,
+            box_to: to,
+            port_from_raw: 0,
+            port_to_raw: port,
+            swizzle_raw: [0; 5],
+            from_in_range: true,
+            to_in_range: true,
+        };
+        let tint = [0.5f32, 1., 0.25, 1.];
+        // (T1 × T2) × COLOR: boxes 1/2 samples, 3 inner, 4 COLOR, 5 root.
+        let mut graph = GraphMetadata {
+            box_count: 6,
+            wire_count: 5,
+            boxes: vec![
+                node(0, 0),
+                node(1, 0),
+                node(1, 1),
+                node(10, 0),
+                node(3, 0),
+                node(10, 0),
+            ],
+            wires: vec![
+                wire(1, 3, 0),
+                wire(2, 3, 1),
+                wire(3, 5, 0),
+                wire(4, 5, 1),
+                wire(5, 0, 0),
+            ],
+            graph_start: 0,
+            parsed_graph_bytes: 0,
+            unparsed_bytes: 0,
+        };
+        let s = select_diffuse(&graph).unwrap();
+        assert_eq!(
+            (s.sample_index, s.second_sample.unwrap().sample_index),
+            (1, 2)
+        );
+        assert_eq!(
+            (s.multiply_index, s.inner_multiply_index, s.color_index),
+            (Some(5), Some(3), Some(4))
+        );
+        assert_eq!(s.tint.values(), tint);
+        assert!(s.third_sample.is_none());
+        assert_eq!((s.ignored_nodes, s.ignored_wires), (0, 0));
+        assert!(uses_grid(s)); // same channel, integer scales: Repeat grid bakes the tint
+                               // Either outer input order.
+        graph.wires[2].port_to_raw = 1;
+        graph.wires[3].port_to_raw = 0;
+        assert_eq!(select_diffuse(&graph).unwrap().tint, s.tint);
+        // One sample on both inner ports is that sample squared, then tinted.
+        graph.wires[1].box_from = 1;
+        let squared = select_diffuse(&graph).unwrap();
+        assert_eq!(squared.second_sample.unwrap().sample_index, 1);
+        assert_eq!((squared.ignored_nodes, squared.ignored_wires), (1, 0));
+        graph.wires[1].box_from = 2;
+        // Rejections: animated/wired COLOR, swizzled inner edge, COLOR inside the
+        // inner product with a second COLOR, animated sampler, UV2.
+        graph.boxes[4].animations[0].name_hex = "41".into();
+        assert!(select_diffuse(&graph).is_err());
+        graph.boxes[4].animations[0].name_hex = "00".into();
+        graph.wires.push(wire(2, 4, 0));
+        assert!(select_diffuse(&graph).is_err());
+        graph.wires.pop();
+        graph.wires[0].swizzle_raw[0] = b'r';
+        assert!(select_diffuse(&graph).is_err());
+        graph.wires[0].swizzle_raw = [0; 5];
+        graph.boxes[2].animations[0].component_value_count = 1;
+        assert!(select_diffuse(&graph)
+            .unwrap_err()
+            .contains("sampler must be static"));
+        graph.boxes[2].animations[0].component_value_count = 0;
+        graph.boxes[2].parameters_raw[4] = 2;
+        assert!(select_diffuse(&graph).is_err());
+        graph.boxes[2].parameters_raw[4] = 0;
+        graph.boxes[2] = node(3, 0);
+        assert!(select_diffuse(&graph)
+            .unwrap_err()
+            .contains("two direct texture samples"));
+        graph.boxes[2] = node(1, 1);
+        graph.wires[0].box_from = 5; // cycle through the root
+        assert!(select_diffuse(&graph).is_err());
+        graph.wires[0].box_from = 1;
+
+        // (T1 × COLOR) × T2: the inner COLOR used to reach the sampler rule.
+        graph.boxes = vec![
+            node(0, 0),
+            node(1, 0),
+            node(3, 0),
+            node(10, 0),
+            node(1, 1),
+            node(10, 0),
+        ];
+        graph.wires = vec![
+            wire(1, 3, 0),
+            wire(2, 3, 1),
+            wire(3, 5, 0),
+            wire(4, 5, 1),
+            wire(5, 0, 0),
+        ];
+        let s = select_diffuse(&graph).unwrap();
+        assert_eq!(
+            (s.sample_index, s.second_sample.unwrap().sample_index),
+            (1, 4)
+        );
+        assert_eq!(
+            (s.multiply_index, s.inner_multiply_index, s.color_index),
+            (Some(5), Some(3), Some(2))
+        );
+        assert_eq!(s.tint.values(), tint);
+        assert!(s.third_sample.is_none());
+        assert_eq!((s.ignored_nodes, s.ignored_wires), (0, 0));
+        // Inner port order and outer port order do not change the selection.
+        graph.wires[0].port_to_raw = 1;
+        graph.wires[1].port_to_raw = 0;
+        graph.wires[2].port_to_raw = 1;
+        graph.wires[3].port_to_raw = 0;
+        let swapped = select_diffuse(&graph).unwrap();
+        assert_eq!(
+            (swapped.sample_index, swapped.color_index, swapped.tint),
+            (1, Some(2), s.tint)
+        );
+        // Different channels stay on independent dual sampling.
+        graph.boxes[4].parameters_raw[4] = 1;
+        let pair = select_diffuse(&graph).unwrap();
+        assert_eq!(pair.second_sample.unwrap().uv_channel, 1);
+        assert!(!uses_grid(pair));
+        graph.boxes[4].parameters_raw[4] = 0;
+        // (T × COLOR) × T with one sample: squared and tinted.
+        graph.wires[3].box_from = 1;
+        let squared = select_diffuse(&graph).unwrap();
+        assert_eq!(squared.second_sample.unwrap().sample_index, 1);
+        assert_eq!((squared.ignored_nodes, squared.ignored_wires), (1, 0));
+        graph.wires[3].box_from = 4;
+        // Genuine sampler-rule failures stay unsupported.
+        for (index, raw) in [(1, 2u32), (4, 2)] {
+            graph.boxes[index].parameters_raw[4] = raw;
+            assert!(select_diffuse(&graph)
+                .unwrap_err()
+                .contains("sampler must be static"));
+            graph.boxes[index].parameters_raw[4] = 0;
+        }
+        graph.boxes[4].animations[1].name_hex = "41".into();
+        assert!(select_diffuse(&graph).is_err());
+        graph.boxes[4].animations[1].name_hex = "00".into();
+        graph.boxes[2].animations[0].component_value_count = 1;
+        assert!(select_diffuse(&graph)
+            .unwrap_err()
+            .contains("COLOR must be unanimated"));
+        graph.boxes[2].animations[0].component_value_count = 0;
+        graph.boxes[2].parameters_raw[0] = f32::NAN.to_bits();
+        assert!(select_diffuse(&graph).is_err());
+        graph.boxes[2] = node(3, 0);
+        graph.wires.push(wire(4, 1, 0)); // wired sampler input
+        assert!(select_diffuse(&graph).is_err());
+        graph.wires.pop();
+        graph.wires.push(wire(4, 3, 0)); // third inner input
+        assert!(select_diffuse(&graph).is_err());
+        graph.wires.pop();
+        assert!(select_diffuse(&graph).is_ok());
     }
     #[test]
     fn requested_uv1_preserves_raw_channels_and_never_falls_back_to_uv0() {
