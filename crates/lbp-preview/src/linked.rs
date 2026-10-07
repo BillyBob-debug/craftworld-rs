@@ -240,7 +240,7 @@ impl MaterialAsset {
             Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture sampling • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.texture_alpha_mix.map(|m|m.label()).or(a.selection.blend.map(|blend|blend.label())).unwrap_or_else(||a.selection.tint.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture {}, second {}, nearest grid {:?}",if a.selection.texture_alpha_mix.is_some(){"alpha MIX"}else{"product"},second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire • black (0,0,0,0) per Toolkit shader generator; game default unverified • other channels not rendered • ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Solid(a) => format!("Solid diffuse color {:?} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Solid(a) => format!("Solid diffuse color {:?}{} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),if a.selection.product_of.is_some() {" (COLOR × COLOR product)"} else {""},a.selection.ignored_nodes,a.selection.ignored_wires),
         }
     }
 }
@@ -254,6 +254,8 @@ pub struct DiffuseSelection {
     /// D84 BLEND (box 16) phase 1: COLOR and one sample stepped by its alpha.
     pub blend_mask: Option<crate::BlendDiffuseMask>,
     pub fourth_sample: Option<SamplerSelection>,
+    /// D87: CONST/CONST2 UV scale on sampler port 1, folded into `uv_transform`.
+    pub sampler_scale: Option<crate::SamplerScale>,
     pub deep_multiply_index: Option<usize>,
     pub third_sample: Option<SamplerSelection>,
     /// D83: port-0 sample is `sample_index`, port-1 sample is `second_sample`.
@@ -837,6 +839,11 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
     if boxes[wire.box_from as usize].type_raw == 16 {
         return select_blend(graph, wire.box_from as usize, output_index);
     }
+    if boxes[wire.box_from as usize].type_raw == 1 {
+        if let Some(selection) = crate::small_family::select_scaled_sampler(graph)? {
+            return Ok(selection);
+        }
+    }
     let mut sample_index = wire.box_from as usize;
     let mut tint = crate::DiffuseTint::default();
     let (mut multiply_index, mut color_index) = (None, None);
@@ -1004,6 +1011,7 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
         blend: None,
         blend_mask: None,
         fourth_sample: None,
+        sampler_scale: None,
         deep_multiply_index: None,
         third_sample,
         texture_alpha_mix: None,
@@ -1225,7 +1233,12 @@ pub(crate) fn load_primitive(
     } else {
         None
     };
-    if let Some(selection) = crate::select_solid_diffuse(&graph.graph)? {
+    // D87 solids apply to the original graph only, never an instance-derived one.
+    let solid = match crate::select_solid_diffuse(&graph.graph)? {
+        None if instance_projection.is_none() => crate::select_small_solid(&graph.graph)?,
+        other => other,
+    };
+    if let Some(selection) = solid {
         control.check()?;
         source.check_stable()?;
         return Ok(MaterialAsset::Solid(Box::new(SolidAsset {

@@ -18,6 +18,8 @@ pub use matrix::{SamplingTransform, UvMatrix};
 mod instance;
 pub use instance::{project_instance_color, InstanceProjection, PreviewOptions};
 mod linked;
+mod small_family;
+pub use small_family::{select_small_solid, SamplerScale};
 mod solid;
 mod tint;
 mod wrapping;
