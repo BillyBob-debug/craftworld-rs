@@ -1,0 +1,351 @@
+{
+  "$defs": {
+    "error": {
+      "enum": [
+        null,
+        "cancelled",
+        "blocked_protected",
+        "unsupported_layout",
+        "budget_exceeded",
+        "source_changed",
+        "inspection_failed"
+      ]
+    },
+    "stage": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "metadata": {
+                "type": "null"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "metadata": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "metadata": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "requested_in_current_mode": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "failed",
+            "blocked",
+            "unsupported",
+            "cancelled",
+            "not_available",
+            "not_requested"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "requested_in_current_mode",
+        "error_kind",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "textureMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "expanded_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "header": {
+          "additionalProperties": false,
+          "properties": {
+            "dds": {
+              "anyOf": [
+                {
+                  "additionalProperties": false,
+                  "properties": {
+                    "caps": {
+                      "items": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxItems": 4,
+                      "minItems": 4,
+                      "type": "array"
+                    },
+                    "depth": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "flags": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "fourcc": {
+                      "type": "string"
+                    },
+                    "masks": {
+                      "items": {
+                        "maximum": 4294967295,
+                        "minimum": 0,
+                        "type": "integer"
+                      },
+                      "maxItems": 4,
+                      "minItems": 4,
+                      "type": "array"
+                    },
+                    "pitch_or_linear_size": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "pixel_flags": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "rgb_bits": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "flags",
+                    "pitch_or_linear_size",
+                    "depth",
+                    "pixel_flags",
+                    "fourcc",
+                    "rgb_bits",
+                    "masks",
+                    "caps"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "flags": {
+              "anyOf": [
+                {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "format_raw": {
+              "anyOf": [
+                {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "height": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "mips": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "no_srgb": {
+              "type": "boolean"
+            },
+            "pixel_format": {
+              "enum": [
+                "BC1",
+                "BC3",
+                "BGRA8"
+              ]
+            },
+            "remap": {
+              "anyOf": [
+                {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "width": {
+              "minimum": 1,
+              "type": "integer"
+            },
+            "wrapper": {
+              "enum": [
+                "GTF",
+                "TEX/DDS"
+              ]
+            }
+          },
+          "required": [
+            "pixel_format",
+            "width",
+            "height",
+            "mips",
+            "wrapper",
+            "flags",
+            "remap",
+            "format_raw",
+            "no_srgb",
+            "dds"
+          ],
+          "type": "object"
+        },
+        "top_mip_block_bytes": {
+          "description": "Stored expanded top-mip bytes, including row padding for BGRA8; legacy field name retained.",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "unparsed_after_top_mip": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "header",
+        "expanded_bytes",
+        "top_mip_block_bytes",
+        "unparsed_after_top_mip"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Private cached texture metadata only. Pixels and encoded asset bytes are excluded.",
+  "properties": {
+    "last_request": {
+      "additionalProperties": false,
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "outcome": {
+          "enum": [
+            "complete",
+            "partial",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "outcome",
+        "error_kind"
+      ],
+      "type": "object"
+    },
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_path": {
+          "description": "Normalized source-relative path; the writer additionally rejects traversal, colon and backslash.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_path",
+        "offset",
+        "size"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "scope": {
+      "const": "cached_texture_diagnostic_metadata_not_asset_export"
+    },
+    "source_state": {
+      "const": "validated_at_read_not_rechecked_for_export"
+    },
+    "stages": {
+      "additionalProperties": false,
+      "properties": {
+        "texture": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/stage"
+            },
+            {
+              "properties": {
+                "metadata": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/textureMetadata"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "texture"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "scope",
+    "source_state",
+    "location",
+    "last_request",
+    "stages"
+  ],
+  "title": "Cached texture diagnostic envelope version 1",
+  "type": "object"
+}

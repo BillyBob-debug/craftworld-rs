@@ -1,0 +1,822 @@
+{
+  "$defs": {
+    "error": {
+      "enum": [
+        null,
+        "cancelled",
+        "blocked_protected",
+        "unsupported_layout",
+        "budget_exceeded",
+        "source_changed",
+        "inspection_failed"
+      ]
+    },
+    "stage": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "metadata": {
+                "type": "null"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "metadata": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "available",
+                  "not_available",
+                  "not_requested"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "error_kind": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "failed",
+                  "blocked",
+                  "unsupported",
+                  "cancelled"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "error_kind": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_requested"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "requested_in_current_mode": {
+                "const": false
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "not_available"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "requested_in_current_mode": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "requested_in_current_mode": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "requested_in_current_mode": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "blocked"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "requested_in_current_mode": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "unsupported"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "requested_in_current_mode": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "cancelled"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "requested_in_current_mode": {
+                "const": true
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "cancelled"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "error_kind": {
+                "enum": [
+                  "cancelled"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "blocked"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "error_kind": {
+                "enum": [
+                  "blocked_protected"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "unsupported"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "error_kind": {
+                "enum": [
+                  "unsupported_layout"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "failed"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "error_kind": {
+                "enum": [
+                  "budget_exceeded",
+                  "source_changed",
+                  "inspection_failed"
+                ]
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "metadata": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "requested_in_current_mode": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "failed",
+            "blocked",
+            "unsupported",
+            "cancelled",
+            "not_available",
+            "not_requested"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "requested_in_current_mode",
+        "error_kind",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "planMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compression_flags": {
+          "enum": [
+            0,
+            7
+          ]
+        },
+        "expanded_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "prefix": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 893,
+              "maximum": 951
+            },
+            "inner_revision_raw_u32": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "thing_data_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "thing_data_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "thing_data_start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "parsed_prefix_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "unparsed_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "inventory_tail_start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "inventory_tail_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          },
+          "required": [
+            "revision",
+            "inner_revision_raw_u32",
+            "thing_data_sha256",
+            "thing_data_bytes",
+            "thing_data_start",
+            "parsed_prefix_bytes",
+            "unparsed_bytes",
+            "inventory_tail_start",
+            "inventory_tail_bytes"
+          ]
+        }
+      },
+      "required": [
+        "compression_flags",
+        "expanded_bytes",
+        "prefix"
+      ]
+    },
+    "inventoryMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "date_added_encoded_u64_hex": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{16}$"
+        },
+        "slot_type_raw_u32": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "slot_number_raw_u32": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "highlight_sound_guid_raw_u32": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "colour_raw_u32": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "type_flags_raw_u32": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "sub_type_raw_u32": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "title_key_raw_u32": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "description_key_raw_u32": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        "inventory_prefix_start": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "parsed_inventory_prefix_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "inventory_prefix_end": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "unparsed_after_inventory_prefix": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        }
+      },
+      "required": [
+        "date_added_encoded_u64_hex",
+        "slot_type_raw_u32",
+        "slot_number_raw_u32",
+        "highlight_sound_guid_raw_u32",
+        "colour_raw_u32",
+        "type_flags_raw_u32",
+        "sub_type_raw_u32",
+        "title_key_raw_u32",
+        "description_key_raw_u32",
+        "inventory_prefix_start",
+        "parsed_inventory_prefix_bytes",
+        "inventory_prefix_end",
+        "unparsed_after_inventory_prefix"
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Private cached base and optional inventory scalar metadata with explicit stage outcomes; no payload bytes or normalized date/title semantics.",
+  "properties": {
+    "last_request": {
+      "additionalProperties": false,
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "outcome": {
+          "enum": [
+            "complete",
+            "partial",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "outcome",
+        "error_kind"
+      ],
+      "type": "object"
+    },
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_path": {
+          "description": "Normalized source-relative path; the writer additionally rejects traversal, colon and backslash.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_path",
+        "offset",
+        "size"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 2
+    },
+    "scope": {
+      "const": "cached_plan_diagnostic_metadata_not_asset_export"
+    },
+    "source_state": {
+      "const": "validated_at_read_not_rechecked_for_export"
+    },
+    "stages": {
+      "additionalProperties": false,
+      "properties": {
+        "plan": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/stage"
+            },
+            {
+              "properties": {
+                "metadata": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/planMetadata"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        "inventory": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/stage"
+            },
+            {
+              "properties": {
+                "metadata": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/inventoryMetadata"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "plan",
+        "inventory"
+      ],
+      "type": "object"
+    },
+    "inspection_mode": {
+      "enum": [
+        "plan_prefix",
+        "plan_inventory_prefix"
+      ]
+    }
+  },
+  "required": [
+    "schema_version",
+    "scope",
+    "source_state",
+    "location",
+    "last_request",
+    "stages",
+    "inspection_mode"
+  ],
+  "title": "Cached Plan diagnostic envelope version 2",
+  "type": "object",
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "inspection_mode": {
+            "const": "plan_prefix"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stages": {
+            "properties": {
+              "inventory": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "not_requested"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "stages": {
+            "properties": {
+              "inventory": {
+                "properties": {
+                  "requested_in_current_mode": {
+                    "const": true
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "last_request": {
+            "properties": {
+              "outcome": {
+                "const": "complete"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stages": {
+            "properties": {
+              "plan": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "available"
+                    ]
+                  }
+                }
+              },
+              "inventory": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "available",
+                      "not_requested"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "last_request": {
+                "properties": {
+                  "error_kind": {
+                    "type": "null"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "last_request": {
+            "properties": {
+              "outcome": {
+                "const": "partial"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stages": {
+            "properties": {
+              "plan": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "available"
+                    ]
+                  }
+                }
+              },
+              "inventory": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "failed",
+                      "blocked",
+                      "unsupported",
+                      "cancelled"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "inspection_mode": {
+                "const": "plan_inventory_prefix"
+              },
+              "last_request": {
+                "properties": {
+                  "error_kind": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "last_request": {
+            "properties": {
+              "outcome": {
+                "const": "failed"
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "stages": {
+            "properties": {
+              "plan": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "failed",
+                      "blocked",
+                      "unsupported",
+                      "cancelled"
+                    ]
+                  }
+                }
+              },
+              "inventory": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "not_available",
+                      "not_requested"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "properties": {
+              "last_request": {
+                "properties": {
+                  "error_kind": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "properties": {
+        "stages": {
+          "properties": {
+            "plan": {
+              "properties": {
+                "requested_in_current_mode": {
+                  "const": true
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

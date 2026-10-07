@@ -1,0 +1,316 @@
+{
+  "$defs": {
+    "error": {
+      "enum": [
+        null,
+        "cancelled",
+        "blocked_protected",
+        "unsupported_layout",
+        "budget_exceeded",
+        "source_changed",
+        "inspection_failed"
+      ]
+    },
+    "stage": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "metadata": {
+                "type": "null"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "metadata": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "metadata": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "requested_in_current_mode": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "failed",
+            "blocked",
+            "unsupported",
+            "cancelled",
+            "not_available",
+            "not_requested"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "requested_in_current_mode",
+        "error_kind",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "animationMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compression_flags": {
+          "enum": [
+            0,
+            7
+          ]
+        },
+        "expanded_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "prefix": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 888,
+              "maximum": 951
+            },
+            "frames_raw_u16": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "fps_raw_u16": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "loop_start_raw_u16": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 65535
+            },
+            "morph_count_raw_u8": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "counts": {
+              "type": "array",
+              "minItems": 6,
+              "maxItems": 6,
+              "items": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 65535
+              }
+            },
+            "position_offset_bits": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "position_scale_bits": {
+              "anyOf": [
+                {
+                  "type": "array",
+                  "minItems": 4,
+                  "maxItems": 4,
+                  "items": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 4294967295
+                  }
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "fat_raw_u8": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 255
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "animation_data_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "animation_data_start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "parsed_prefix_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "unparsed_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          },
+          "required": [
+            "revision",
+            "frames_raw_u16",
+            "fps_raw_u16",
+            "loop_start_raw_u16",
+            "morph_count_raw_u8",
+            "counts",
+            "position_offset_bits",
+            "position_scale_bits",
+            "fat_raw_u8",
+            "animation_data_bytes",
+            "animation_data_start",
+            "parsed_prefix_bytes",
+            "unparsed_bytes"
+          ]
+        }
+      },
+      "required": [
+        "compression_flags",
+        "expanded_bytes",
+        "prefix"
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Private mesh prefix/topology summaries only. Geometry, bone arrays, images and payload data are excluded.",
+  "properties": {
+    "last_request": {
+      "additionalProperties": false,
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "outcome": {
+          "enum": [
+            "complete",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "outcome",
+        "error_kind"
+      ],
+      "type": "object"
+    },
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_path": {
+          "description": "Normalized source-relative path; the writer additionally rejects traversal, colon and backslash.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_path",
+        "offset",
+        "size"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "scope": {
+      "const": "cached_animation_diagnostic_metadata_not_asset_export"
+    },
+    "source_state": {
+      "const": "validated_at_read_not_rechecked_for_export"
+    },
+    "stages": {
+      "additionalProperties": false,
+      "properties": {
+        "animation": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/stage"
+            },
+            {
+              "properties": {
+                "metadata": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/animationMetadata"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "animation"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "scope",
+    "source_state",
+    "location",
+    "last_request",
+    "stages"
+  ],
+  "title": "Cached animation diagnostic envelope version 1",
+  "type": "object"
+}

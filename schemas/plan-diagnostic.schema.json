@@ -1,0 +1,255 @@
+{
+  "$defs": {
+    "error": {
+      "enum": [
+        null,
+        "cancelled",
+        "blocked_protected",
+        "unsupported_layout",
+        "budget_exceeded",
+        "source_changed",
+        "inspection_failed"
+      ]
+    },
+    "stage": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "metadata": {
+                "type": "null"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "metadata": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "metadata": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "requested_in_current_mode": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "failed",
+            "blocked",
+            "unsupported",
+            "cancelled",
+            "not_available",
+            "not_requested"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "requested_in_current_mode",
+        "error_kind",
+        "metadata"
+      ],
+      "type": "object"
+    },
+    "planMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "compression_flags": {
+          "enum": [
+            0,
+            7
+          ]
+        },
+        "expanded_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 16777216
+        },
+        "prefix": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "revision": {
+              "type": "integer",
+              "minimum": 893,
+              "maximum": 951
+            },
+            "inner_revision_raw_u32": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "thing_data_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "thing_data_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "thing_data_start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "parsed_prefix_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "unparsed_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "inventory_tail_start": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            },
+            "inventory_tail_bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 16777216
+            }
+          },
+          "required": [
+            "revision",
+            "inner_revision_raw_u32",
+            "thing_data_sha256",
+            "thing_data_bytes",
+            "thing_data_start",
+            "parsed_prefix_bytes",
+            "unparsed_bytes",
+            "inventory_tail_start",
+            "inventory_tail_bytes"
+          ]
+        }
+      },
+      "required": [
+        "compression_flags",
+        "expanded_bytes",
+        "prefix"
+      ]
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Private cached Plan base-prefix metadata only; original payload bytes are excluded.",
+  "properties": {
+    "last_request": {
+      "additionalProperties": false,
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "outcome": {
+          "enum": [
+            "complete",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "outcome",
+        "error_kind"
+      ],
+      "type": "object"
+    },
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_path": {
+          "description": "Normalized source-relative path; the writer additionally rejects traversal, colon and backslash.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_path",
+        "offset",
+        "size"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "scope": {
+      "const": "cached_plan_diagnostic_metadata_not_asset_export"
+    },
+    "source_state": {
+      "const": "validated_at_read_not_rechecked_for_export"
+    },
+    "stages": {
+      "additionalProperties": false,
+      "properties": {
+        "plan": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/stage"
+            },
+            {
+              "properties": {
+                "metadata": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/planMetadata"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "plan"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "scope",
+    "source_state",
+    "location",
+    "last_request",
+    "stages"
+  ],
+  "title": "Cached plan diagnostic envelope version 1",
+  "type": "object"
+}

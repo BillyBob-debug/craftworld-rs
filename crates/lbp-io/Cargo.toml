@@ -1,0 +1,12 @@
+[package]
+name = "lbp-io"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+lbp-core.workspace = true
+serde.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

@@ -1,0 +1,783 @@
+# Development log
+
+## 2026-10-06 — D60 MIRROR and independent product axes
+
+Added typed Mirror mapping and separate two-source GPU sampler axes. Repeat-grid,
+product MIX/shared chain restrictions remain. Candlestick gains1278triangles,
+3/4 to4/4diffuse groups.40GUID cohort:+0newly viewable/+0Complete, full-diffuse
+35 to36. App labels both samplers and retains Viewable/Complete measured counts.
+92tests/fmt/Clippy/builds pass; one second-monitor native test/one image.
+Commands/failures/limits:STATUS.md,[mirror-preview.md](docs/mirror-preview.md).
+Originals read-only; no publication.
+
+## 2026-10-06 — D59 interior-only BORDER preview
+
+Added guarded nearest alpha-MIX preview for BORDER axes whose whole selected UV
+channel stays inside1/4096margin. Original mode/range bits retained,explicit app
+label and separate display axes;no guessed bordercolor or general border support.
+Same39GUIDs:+0newly viewable/+0Complete;polaroid gains32triangle group1/2→2/2,
+full-diffuse34→35. 92tests/fmt/Clippy/both builds pass after fixing a missing
+synthetic fixture field. One native test verified second-monitor placement;one
+image viewed. Commands/evidence/limits:STATUS.md,docs/interior-border-preview.md.
+Originals read-only,no proprietary bundling/publication.
+
+## 2026-10-06 — D58 same-sample alpha MIX
+
+Added fixed COLOR/texture MIX weighted by that texture's alpha,raw metadata and
+nearest-only derived baking/frontends/UI label. Target1and existing32/48pinned
+metadata comparisons0mismatches;91tests/fmt/Clippy/both builds pass after fixing
+an initial misplaced label match arm. Local polaroid remains blocked by BORDER
+wrapping. Same39GUID cohort39viewable/34all-diffuse/0Complete unchanged:
++0newly viewable/+0verifiedComplete,0improved assets;corpus totals unknown.
+Headless,0windows/0images. Evidence/commands:docs/alpha-mix-preview.md,STATUS.md.
+Original inputs read-only,no proprietary bundling/publication.
+
+## 2026-10-06 — D57 constant COLOR/single-texture MIX
+
+Added bounded constant COLOR/single-sampler diffuse MIX,using existing UV/wrap/
+display-buffer and UI labels/counts. Exact weight/input direction retained;RGB
+mixes in linear space,alpha linearly. Same38GUID baseline:38viewable/34full-diffuse/
+0Complete unchanged,+0newly viewable/+0verifiedComplete. Bouncepad gains one
+232triangle casing group0/2→1/2. Target1and existing32/48pinned comparisons have
+0mismatches;diffuse eligibility26→27. 90tests/fmt/Clippy/both builds pass.
+Headless;0windows/0images. Sources/commands/limitations:docs/single-mix-preview.md,
+STATUS.md. No original writes/proprietary bundling/publication.
+
+## 2026-10-06 — D56 local animation base snapshots
+
+Added opt-in stored matrix-animation base snapshots with explicit local-row/time
+labels, raw static/base metadata retention and bounds. Bevy toggling reloads and
+resets verification; snapshots remain separate from Complete. Same37GUIDs:
+geometry boy gains2groups/223triangles4/6→6/6;static full-diffuse34,opt-in35,
++0newly viewable/+0verifiedComplete. 89tests/fmt/Clippy/both builds pass;target2
+and existing48/32pinned records0mismatches. Game time/global uniform behavior
+remain unknown. One native test verified second-monitor placement;one image
+checked labels/counts and rendering. Evidence/commands:docs/animation-base-preview.md,STATUS.md.
+Original inputs read-only; no proprietary bundling or publication.
+
+## 2026-10-06 — D55 static COLOR/product MIX
+
+Added bounded static COLOR/two-texture product MIX,with exact stored weight/input
+direction and linear RGB/alpha before output encoding. Existing nearest grid
+rendering/UI labels reused;Complete remains separate. Same37GUIDs:lamp gains
+one190triangle group3/4→4/4,+0newly viewable/+0verifiedComplete,all-diffuse33→34.
+89tests/fmt/Clippy/both builds pass;targeted static/instance records and existing
+48/32pinned comparisons0mismatches,46/26eligible. Neon ThingColor hypothesis
+rejected;no invented colors. Headless checks,0images/native windows.
+Evidence/commands/limits:docs/static-mix-preview.md,STATUS.md. No original writes/
+proprietary bundling/recovered-source use/publication.
+
+## 2026-10-06 — D54 independent U/V wrapping
+
+Bevy now preserves mixed Repeat/ClampToEdge axes on static single/tinted diffuse
+bindings. App labels each axis;legacy eframe explicitly retains geometry without
+substituting a wrapping mode. Multi-texture products remain Repeat-only. Same37GUID
+baseline:3assets gain3groups/81triangles,+0newly viewable/+0verifiedComplete,
+all-diffuse31→33.87tests/fmt/Clippy/both builds pass;target1and existing48/32pinned
+metadata comparisons0mismatches. Headless descriptor checks;no native/image use.
+Evidence/commands/limits:docs/axis-wrap-preview.md,STATUS.md. No original writes/
+proprietary bundling/recovered-source use/publication.
+
+## 2026-10-06 — D53 four-texture diffuse chain
+
+Bevy supports a fixed three-multiply/four-leaf chain with exact first/fourth and
+second/third coordinate sharing. Fourth texture reuses primary UVs; all four GPU
+images removed on replacement. Handkerchief00007a6d gains1group/98triangles,
+2/3→3/3supported. Same37GUID baseline:+0newly viewable/+0verifiedComplete,
+all-diffuse30→31. App labels four samplers and keeps manual geometry/texture
+confirmations separate.86tests/fmt/Clippy/both builds pass;48/32pinned metadata
+comparisons0mismatches,45/26eligible. Evidence/native verification/limitations:
+docs/four-product-preview.md,STATUS.md. No original writes/proprietary bundling/
+recovered-source use/publication.
+
+Native second-monitor check shows the ornate center motif,3/3supported and1ready
+for review while Complete remains unset. Exactly one image viewed;stderr empty.
+
+## 2026-10-06 — D52 three-texture nested products
+
+Bevy supports exactly two static diffuse multiplies/three distinct texture leaves
+when the third sampler shares exact channel/transform with an inner leaf. Three
+original textures retained, two coordinate arrays; shader samples the third image
+and cleanup owns it. Handkerchief00007a6d gains2groups/160triangles,0/3→2/3;
+same37GUID baseline:+0newly viewable/+0verifiedComplete,37viewable/30all-diffuse
+unchanged. App labels all three samplers and2/3supported; center remains neutral,
+Complete checks unavailable.86tests/fmt/Clippy/both builds pass;48/32pinned metadata
+comparisons0mismatches,44/26eligible. Second-monitor native capture/one image.
+Initial E0308 from misplaced label arm fixed before successful verification;
+Windows sandbox execution/path failures resolved with established reviewed workaround.
+No original writes/proprietary bundling/recovered source/publication. Evidence,
+memory ceilings and limitations:docs/nested-preview.md,STATUS.md.
+
+## 2026-10-06 — D51 independent UV0/UV1 product support
+
+Bevy now supports different original UV channels on static two-texture diffuse
+products. Grid baking stays same-channel; GPU adapter preserves both coordinate
+arrays and indices. Four assets gain4groups/1577triangles; same37GUID baseline
++0newly viewable/+0verifiedComplete,all-diffuse26→30. Circuit board4/4supported,
+app labels UV1×UV0 and1ready for review with Complete unset.86focused tests,
+fmt/Clippy/both builds pass;48/32pinned comparisons0mismatches. Second-monitor
+native check,one image inspected. Legacy geometry fallback and all budgets retained.
+No original writes/proprietary bundling/recovered-source use/publication. Exact
+commands/limitations:latest STATUS.md,docs/channel-pair-preview.md.
+
+## 2026-10-06 — D50 independent static matrix products
+
+Bevy now samples two transformed textures independently for static affine/matrix
+diffuse products; D49 integer grids unchanged. Original matrices/UVs/textures stay
+intact. Secondary GPU image ownership covered by cleanup regression; legacy eframe
+explicitly retains geometry without this route. Same37distinctGUIDs:oneasset gains
+one2000triangle group; full diffuse25→26, +0newly viewable/+0verifiedComplete.
+Tutorial floor5/5supported, app enables review with Complete unset.85focused tests,
+fmt/Clippy/both builds pass; targeted pinned oracle0mismatches. Initial helper-name
+compile error corrected. One native image inspected after second-monitor placement.
+No original writes/proprietary bundling/recovered code use/publication. Exact scope,
+commands/remaining limits in STATUS.md and docs/dual-preview.md.
+
+## 2026-10-06 — D49 bounded two-texture diffuse products
+
+Added static two-sampler multiply using bounded periodic grids, independent repeat
+scales, linearRGB/alpha product and explicit nearest filtering in both frontends.
+Original textures/UVs/raw sampler bits retained; matrix/other-channel/nested/animated
+routes remain unsupported. Same37GUID cohort:7assets gain13groups, full diffuse
+coverage23→25; +0newly viewable/+0verifiedComplete. Tutorial floor now4/5supported,
+Viewable/unverified in app.85focused tests,fmt/Clippy/both builds pass;48/32pinned
+metadata records0mismatches. Native test placed on second monitor before visibility,
+one image inspected. No original writes, proprietary bundling/recovered code use
+or publication. Exact commands/counts/limitations in latest STATUS.md.
+
+## 2026-10-06 — D48 static UV matrix compatibility
+
+Added bounded static subtype-one 2×3 UV matrix sampling to shared CPU preview,
+used and labeled by both frontends. Raw UVs/coefficients preserved; animated,
+wired and unknown subtypes remain explicit unsupported. One tutorial-floor asset
+gains one968triangle texture group; +0newly viewable/+0verifiedComplete in same
+37GUID cohort (37viewable,23all-diffuse). App shows1/5supported and remains
+Viewable/unverified; Complete requires textures and correct geometry.83focused
+tests,fmt,affected-target Clippy and both builds pass. Reused48/32pinned material
+records:0mismatches,36/24eligible. Native test placed on second monitor before
+showing; one image inspected. Launcher starts hidden too. No publication/input
+writes/recovered source use; exact evidence and limits in STATUS.md/matrix-preview.
+
+## 2026-10-05 — C4 BC3 completed
+
+Added independent BC3 top-mip decoding, raw BlockFormat labels and bounded sample
+selector. 35 Toolkit samples agree exactly; BC1 regressions retained. 57 Rust tests,
+Clippy/fmt/native build and four Python checks pass; native RGBA/alpha inspected.
+Documented synthetic Toolkit reversed-color bug; Pillow corroborates the public
+rule while differing in low-endpoint expansion. No decoder translation or data writes.
+
+## 2026-10-05 — C3 completed after resumption
+
+Clear TEX/DDS BC1 top mip verified: 15 pinned Toolkit samples match exact pixels
+and retained DDS fields; GTF and refreshed C1 regressions pass. 53 workspace Rust
+tests, three Python tests, fmt, Clippy and native build pass. Native RGBA/raw-zero
+mips, alpha and unsupported DXT5 captures inspected. Older C1 oracle lacked DDS
+fields; refreshed reference output resolves that comparison failure. Updated
+contracts and next C4 task; no BC3/higher-mip expansion or original data writes.
+
+## 2026-10-05 — C3 partial, user-requested stop
+
+Added TEX/DDS BC1 top mip through shared bounded envelopes/pixels, explicit DDS
+variant rejection, raw metadata and mip-zero handling. Four original TEX tests
+added (11 decoder tests total); seven viewer tests/fmt/affected-target Clippy pass.
+15 pinned Toolkit TEX samples match exact Rust pixels/dimensions/mips/no_srgb.
+Stopped to conserve user usage before native TEX build/QA and GTF oracle regression.
+Resume instructions/evidence in STATUS.md and docs/tex-preview.md. Not marked complete.
+
+## 2026-10-05 — C2 first BC1 texture preview
+
+Added CPU-only lbp-texture, strict bounded GTF envelopes and BC1 top-mip RGBA,
+approved read callbacks/cancellation, synthetic tests and metadata-only parity helper.
+Native preview adds Fit/zoom, RGBA/channel/alpha checkerboard, explicit unsupported
+states and one-resource CPU/GPU cache. Investigated 15/16 initial rounding mismatches:
+normalized nearest RGB565 endpoints now agree with 19 distinct pinned Toolkit samples.
+Workspace 49 tests, final relevant tests/fmt/Clippy/native build pass. Four native
+screenshots inspected on RTX 3080/Vulkan. Unknown tails/higher mips untouched;
+no swizzle copied, original writes, extraction, protected decode or publication.
+Next C3 extends existing BC1 pixels to clear TEX/DDS. Details: docs/texture-preview.md.
+
+## 2026-10-05 — C1 texture census and pinned oracle
+
+Added bounded diagnostic Rust example and authored Java/Python oracle adapters.
+13,624 texture headers: 11,633 GTF / 1,991 TEX, all supported census probes succeed.
+9,817,800 diagnostic bytes read; 22 clear samples decode in pinned Toolkit with
+191 matching fields. Deterministic census/oracle repeats; only ignored metadata
+and digests emitted. Four diagnostic Rust tests and three Python tests added;
+catalog tests/fmt/Clippy and Java synthetic guards pass. Product GUI unchanged.
+Documented local mip-size surplus, demonstrated Toolkit's synthetic mip-1 failure,
+and flagged RPCS3-derived uncompressed swizzle for external-oracle use only.
+Next: plain 2D GTF BC1 top-mip decoder and preview. No original writes, extraction,
+protected decoding or publication. Detailed evidence and fixtures: docs/textures.md.
+
+## 2026-10-05 — B2 source attachment and bounded hex
+
+Split source/SFO into UI-independent lbp-io and shared it with scanner/catalog.
+Added source fingerprint/table/candidate validation, stability stamps and approved
+ranges; UI uses cancellable attachment/hex workers. Hex pages stop at candidate EOF,
+cap payload reads at 4096 bytes and stop at protected markers. Independent virtual
+archive-entry browsing preserves orphan entries, aliases and conflicting hashes.
+Eight new tests; workspace and final catalog checks pass (36 Rust tests total),
+with fmt/Clippy/native build. Existing source
+validated with 4,704,862 metadata bytes; 31,534 FARC entries match. Native entry and
+resource hex views inspected on RTX 3080/Vulkan. No local orphan hashes; orphan
+support verified synthetically. No original writes, extraction, payload decode or
+publication. Next C1 identifies clear texture variants and compares Toolkit oracle.
+
+## 2026-10-05 — B1 native metadata explorer
+
+Added UI-independent lbp-catalog and native lbp-viewer, pinned eframe/egui/wgpu
+dependencies. Snapshot-only browsing supports aliases, archive/type/status filters,
+exact GUID/hash search, selected/raw metadata, outgoing/incoming references and
+history. Cancellable worker handles JSON/indexing; lists virtualize rows. Nine
+authored tests cover catalog bounds/references, cancellation and UI state. All 28
+workspace Rust tests, fmt, Clippy and native build pass. Full existing inventory
+count parity verified; debug load approximately 4.5 s. Native Vulkan screenshots
+inspected on RTX 3080. No manual interactive QA or payload previews claimed.
+Original files untouched, snapshots/screenshots/toolchain ignored, no Git changes.
+Next B2 source attachment/hex/orphan archive entries, before texture milestone C.
+
+## 2026-10-05 — A2 resource metadata and community oracle
+
+Built unmodified pinned Toolkit cwlib from source with ignored local Temurin/Maven;
+added authored read-only Java harness, source-pin checks and metadata comparisons.
+Verified every local MAP/FARC field and 24 clear binary samples/123 normalized
+dependencies. Census found revisions 941–951 beyond the initial 940 sample maximum;
+corroborated each with Toolkit before extending support.
+
+Added bounded resource metadata parser, explicit partial static-mesh handling,
+raw dependency preservation and catalog links. Schema 2 inspects each location once,
+keeps aliases/candidates, separates extension hints and magic, budgets work and
+publishes diagnostic partial output with exit 2 when appropriate. All 31,534 FARC
+entries inspected using 1,462,918 metadata bytes: 16,515 ordinary parsed, 21 static
+partial, 13,862 identified/unparsed, 1,136 unknown. 116,739 raw dependencies, 46
+unresolved in this MAP. Two full inventories byte-identical. 19 Rust and seven
+Python tests pass; fmt/Clippy pass. Original files unchanged; no protected decoding,
+payload implementation or GUI. Failed approaches/cleanup recorded in STATUS.
+
+## 2026-10-05 — A1 directory scanner
+
+Implemented four Rust crates, bounded SFO/MAP/FARC readers, read-only directory
+catalog, alias-preserving candidate resolution, extension hints and deterministic
+atomic/no-overwrite JSON output. Retained pinned Toolkit provenance and notices.
+Added 11 passing Rust synthetic tests; fmt and Clippy (-D warnings) pass. Full
+field parity with the earlier Python table probe and byte-identical inventories
+verified on BCUS98245: 36,854 MAP rows, 31,534 FARC entries, 32,232 archive matches.
+
+Installed ignored project-local GNU Rust plus verified MSYS2 assembler/runtime
+tools after discovering no MSVC installation. Selectively copied three clear
+SFO/MAP/FARC files to ignored game-data/a1-disc, checked metadata and marked copies
+read-only. Original image untouched. Resource headers/dependencies, Java oracle,
+payload decoders and GUI deferred to subsequent milestones. Updated usage,
+architecture, roadmap, scanner contract and handoff. No root Git initialization.
+
+## 2026-10-05 — Reconnaissance and foundation
+
+Read local AI modding guides/templates and worked example; inspected existing workspace
+and read-only game image; verified SFO identity, ISO tree, MAP/FARC tables and 19
+distinct clear resource samples. Researched public community projects and active forks,
+recorded license/provenance constraints and source pins. Added project rules, status,
+research ledger, architecture, format map, community inventory, roadmap and notices;
+extended default-deny ignore rules. Added bounded metadata probes and seven passing
+synthetic tests, including an external TEX-only synthetic oracle.
+
+Failed sample alias experiment was corrected and superseded; see STATUS. No game
+files were modified/extracted, no protected payload decoded, no game executable run,
+no renderer/runtime built, no Rust workspace initialized, and no Git history created.
+
+## 2026-10-05 — D1 independent mesh-prefix diagnostics
+
+Added lbp-mesh and bounded metadata cohort/oracle/parity diagnostics. 36 selected
+prefixes match counts/raw fields/offsets/payload digests/IEEE bounds; 61 Rust tests,
+Clippy/fmt pass. Recovered float JSON presentation mismatch via canonical bits.
+No topology inferred, proprietary fixtures, asset export or original data writes.
+
+## 2026-10-05 — D2 first MSH wireframe
+
+Added independent primitive/descriptor/bone-layout traversal, explicit topology,
+bounded list/strip/restart geometry IR and native Mesh tab with cancellation/cache,
+metadata, orbit/zoom/reset. 36 geometry and36 prefix regressions match pinned
+Toolkit. Native list/strip/static views inspected; fixed missing QA-tab allowlist
+and added early magic preflight. Workspace65tests then final seven mesh/nine viewer
+checks, fmt/Clippy/native build pass. No original data writes or full mesh/pose claim.
+
+## 2026-10-05 — D3 material reference navigation/census
+
+Added alias/conflict-preserving GUID/hash material candidate menus and metadata
+navigation. Header-only census5,163GMTs;32sampleheaders/56normalizeddeps match
+Toolkit. Final67Rusttests,5Pythontests, Clippy/fmt/native build pass. Native controls
+inspected. Fixed source encoding/line-ending edit artifacts; no shader parser or
+original writes. Future material payload work requires a separate verified contract.
+## 2026-10-05 — D4 guarded material prefix evidence
+
+- Added authored MaterialOracle/run-material-oracle and metadata-only consistency
+  report plus3synthetic tests. Pinned Toolkit count/stream helpers only; no full
+  material deserialize, shader byte export or product material parser.
+- 32 samples/232,687 archived bytes accepted; 56 slot references match prior header
+  dependencies. Ten shader offsets per sample, eight wraps per axis, raw nulls kept.
+- Synthetic truncation133 exposed Toolkit fixed-width padding; final-offset guard
+  rejects every fixed/packed truncation. Final Java synthetic checks and3Pythontests
+  pass. Rust unchanged, prior67tests/fmt/Clippy/build not repeated.
+- Added material-prefix provenance/applicability/conflicts/next-task contract;
+  private outputs ignored, originals/references unchanged, no commit/publication.
+
+## 2026-10-05 — D5 independent material prefix reader
+
+Added lbp-resource::material and shared binary decoder factored from authored mesh
+code; mesh now uses shared decoder/error variants. No new crate/UI/shader evaluator.
+32material metadata samples match exactly,36mesh regressions match. Four new
+synthetic integration tests plus full71workspace tests, fmt/Clippy/build pass.
+Initial sandbox fmt/native executable denied OS access; approved run succeeded.
+Updated provenance/applicability/budgets and next native metadata-tab task. Original
+inputs/read-only boundary and ignored private diagnostic reports preserved.
+
+## 2026-10-05 — D6 native material metadata inspection
+
+Added Material tab in MAP/archive views, bounded validated cancellable worker,
+diagnostic metadata/cache and texture-slot candidate navigation. Shared authored
+GUID/hash grouping with meshes; raw nulls/aliases/conflicts retained. No shader or
+opaque-byte export/graph rendering. Three new synthetic cases;74workspace tests,
+13viewer tests/fmt/Clippy/native build pass. Real GMT/unsupported native captures
+inspected. Fixed nonexistent demo helper and headless texture-delta cleanup errors.
+Updated handoff/provenance/usage and next bounded graph-metadata reconnaissance.
+
+## 2026-10-05 — D7 guarded material graph evidence
+
+Added authored MaterialGraphOracle and optional run-material-oracle -Graph mode,
+metadata consistency report/3synthetic tests. Unmodified pinned per-box/wire reader
+corroborates32samples/139boxes/118wires; animation metadata/digests and prefix fields
+agree. Prefix32sample/56reference regression passes, graph repeat byte-identical.
+Recorded ignored parameter count, extreme signed zigzag bug and guarded animation
+mask/division boundary. No Rust/UI code change or proprietary input writes.
+Added material-graph provenance/applicability/test/next-independent-reader contract.
+
+## 2026-10-05 — D8 independent optional graph metadata
+
+Added material/graph.rs and optional inspect_graph API sharing bounded prefix
+expansion without altering prefix schema/UI. Raw boxes/wires, animation metadata/
+digests, slot/range flags and unknown tails retained; correct extreme signed zigzag.
+Five new synthetic cases and79workspace tests/fmt/Clippy/native build pass. Graph32
+andprefix32canonical comparisons pass. Corrected ambiguous test integer type and
+old prefix report label. No original data writes or graph execution/GUI changes.
+Updated source provenance/contracts and next native metadata-table task.
+
+## 2026-10-05 — D9 native graph metadata tables
+
+Added optional Material graph mode, virtualized lists/selected raw metadata,
+slot candidate menus and diagnostic JSON. Independent graph error retains prefix;
+cancellation/reset/cache checks plus unknown/range/layout fixtures pass. No parser
+changes.15viewer/81workspace tests/fmt/Clippy/build pass; real head935native Vulkan
+capture inspected. Input fingerprints/attributes and ignore boundaries verified.
+Updated handoff/research/architecture/format/roadmap. Next bounded material-tail
+oracle investigation, not shader evaluation or textured rendering.
+Final lifecycle refinement queues a graph request made during prefix loading once,
+without automatically retrying cancelled/failed jobs. All final checks repeated
+and pass; native capture preceded this lifecycle-only refinement.
+
+## 2026-10-05 — D10 guarded material tail oracle
+
+Added authored isolated parameter-animation-array oracle, -Tail runner, diagnostic
+consistency report and4synthetic validation cases.32tails fully accounted for;
+30empty arrays and2single animations (241values/keys each), allsound0. Prefix/graph
+metadata unchanged; repeated report byte-identical. Java self-tests and22Python
+tests pass. Rust/UI unchanged. Recorded per-rule source pin/thresholds, strict
+budgets/cancellation, raw/unknown outcomes, null/empty ambiguity and unknown sound/
+animation semantics in material-tail.md. Inputs/reference/ignore boundaries clean.
+Next optional independent tail reader and parity, leaving GUI for a later task.
+
+## 2026-10-05 — D11 independent optional material tail diagnostics
+
+Added tail.rs/inspect_tail and shared internal graph decode/payload continuation,
+reusing bounded animation metadata helper. Prefix/graph APIs and schemas stable;
+raw sound/array summaries/unknown tail counts only. Expanded material_parity with
+--tail canonical comparison. Four synthetic integration cases,85workspace tests,
+fmt/Clippy/native build pass; tail32/graph32/prefix32exact. Inputs/reference/ignore
+boundaries unchanged; no UI or semantics implementation. Next D12 native optional
+metadata inspection, preserving prefix/graph on tail failure.
+
+## 2026-10-05 — D12 optional native material tail inspection
+
+Added explicit tail mode, raw sound and virtualized parameter-animation metadata/
+JSON. Single-expansion successful requests, bounded sequential fallback and
+independent prefix/graph/tail errors; retain earlier cache on deeper cancellation.
+Two new synthetic cases;17viewer/87workspace tests/fmt/Clippy/build pass. Three
+native captures inspected: empty plus both241-key populated tails (masks4/8).
+No parser/oracle change; original input/reference/ignore boundaries unchanged.
+Updated handoff and next bounded coverage census rather than semantics/rendering.
+
+## 2026-10-05 — D13 bounded material metadata coverage
+
+Added diagnostic census and metadata-only bounded follow-up selection.5,163unique
+clear material locations/5,536MAProws;all stages parsed,44,060,339bytesread,zero
+residualtails,18revisions/28rawsounds/arraysup to7. Repeated report byte-identical.
+FourRust/twoPython cases;91Rust tests/fmt/Clippy/build and24Python tests pass.
+Initial32follow-up cap omitted7-recordarray;40selection covers all primaryfeatures.
+Protected snapshot magic/orphan/duplicate tests hardened and final census rerun.
+No parser/viewer change or new external validation. Next40sample pinned-oracle
+comparison, preserving unknown semantics and selected-input scope boundaries.
+
+## 2026-10-05 — D14 broader material oracle parity
+
+Validated40follow-up samples through pinned isolated readers and complete Rust
+metadata parity;0mismatches/failures, repeated external output byte-identical.
+Combined72unique samples cover18revisions/28rawsounds/7arraycounts and29of76graph
+count shapes. Remaining largest component-array boundary is1143versus603validated.
+No source change or new format rule/conflict. Inputs/reference/ignore boundaries
+unchanged; no commits/publishing. Next bounded remaining-shape/boundary oracle set.
+
+
+## 2026-10-05 — D15 count-shape and boundary parity
+
+Added deterministic metadata-only selection/union audit and three synthetic cases.
+48 samples/430,103 bytes: complete pinned-oracle/Rust equality, zero mismatches or
+failures, repeated manifest/oracle byte-identical. Combined 120 samples cover all
+76 observed count pairs and maximum 1,143-component array. All 27 Python tests pass;
+no Rust/parser/adapter/UI changes. Input/publication boundaries unchanged. Next
+native diagnostic graph diagram with raw labels and linked metadata.
+
+
+## 2026-10-05 - D16 native material graph diagram
+
+Added bounded authored graph drawing, selection, pan/zoom/Fit and invalid-link list;
+reexported shared parser caps. Four synthetic tests; 95 workspace tests and final
+21 viewer tests/fmt/Clippy/build pass. Two final native graphs visually inspected.
+Resolved harness/module/encoding issues; game data remains unchanged. Next cached
+material diagnostic JSON export. Evidence: docs/material-diagram.md.
+
+
+## 2026-10-05 - D17 cached material diagnostic export
+
+Added explicit private JSON export, versioned stage envelope/schema, exclusive output
+and bounded writer; no asset rereads. Four synthetic cases and99workspace tests/
+fmt/Clippy/build pass. Native export repeats identically and matches pinned oracle
+fields. Schema validator installed only under ignored analysis; real/invalid schema
+checks pass. Inputs/publication boundaries unchanged. Next cached texture export.
+
+
+## 2026-10-05 - D18 cached texture diagnostic export
+
+Added cached header/count JSON projection and schema; shared private writer/helpers
+now serve Material and Texture. Two new texture cases;101workspace tests/fmt/Clippy/
+build pass. Native GTF/TEX output matches prior validated metadata and shared oracle
+fields; channel-independent repeat and unchanged Material export verified. Schemas
+reject pixels/invalid stages. Inputs/boundaries unchanged. Next cached mesh summaries.
+
+
+## 2026-10-05 - D19 cached mesh diagnostic summaries
+
+Added cached prefix/topology/material-reference JSON projection and schema; excludes
+geometry arrays. Two new tests;103workspace tests/fmt/Clippy/build pass. Native
+list/strip metadata matches prior parser output and pinned canonical oracle;
+unsupported static result explicit. Repeated JSON identical, schema mutations reject
+payload. Inputs/boundaries unchanged. Next bounded route Back/Forward browsing.
+
+## 2026-10-05 - D20 bounded route history
+
+Added shared validated transitions and128-visit Back/Forward across MAP rows, archive
+entries andOverview, tab restoration and filter-clearing restoration. Cancels old
+inspector jobs and prevents stale detail rendering. Five new authored tests;
+108workspace tests/fmt/Clippy/build pass, two native captures inspected. Source
+fingerprints/protection boundaries unchanged. Next keyboard route shortcuts.
+
+## 2026-10-05 - D21 keyboard Back/Forward
+
+Added exact Alt+Left/Right navigation, consumed repeated events and visible help.
+Three new input/editor tests;111workspace tests/fmt/Clippy/build pass. Native help
+and synthetic route roundtrip inspected; no manual native key dispatch claim.
+Inputs unchanged. Next evidence-based32-bit TEX/DDS top-mip support.
+
+## 2026-10-05 - D22 BGRA8 texture preview
+
+Added independently specified32-bit standard-mask DDS pixels and row pitch; strict
+legacy LINEARSIZE exception corroborated locally. Four new tests;115workspace
+tests/fmt/Clippy/build pass. One fresh pinned BGRA oracle and67combined texture
+samples match exactly. Native two-channel captures/schema/deterministic metadata
+repeat pass. Inputs unchanged. Next animation metadata reconnaissance/oracle.
+
+
+## 2026-10-06 - D23 animation reconnaissance
+
+Added snapshot-only census/selector and guarded pinned Java prefix/full-reader oracle.
+748locations/21cohorts;35samples,33modern prefixes,23full-reader field matches,
+10locator skips,2old-layout rejections. Three Python tests/Java synthetics pass;
+deterministic repeat proven. Product unchanged; next independent prefix reader.
+
+
+## 2026-10-06 - D24 animation prefix parser
+
+Added independent CPU ANMb prefix and shared authored integer helper. Four tests;
+119workspace tests/fmt/Clippy/build pass.33exact pinned-oracle prefix matches,
+2explicit old layouts, deterministic repeat and32material regression matches.
+Inputs unchanged. Next bounded native Animation metadata inspector.
+
+
+## 2026-10-06 - D25 native Animation inspection
+
+Added MAP/entry Animation prefix view, bounded source worker/cancel/cache/reset and
+scrollable raw diagnostics. Four viewer tests plus long protection-signature test;
+124workspace tests/fmt/Clippy/build pass. Existing protection helper caller-length
+mismatch fixed after failing test. Four native captures inspected, supported cached
+fields match pinned oracle, old844explicitunsupported. Inputs unchanged. Next cached
+Animation diagnostic export.
+
+
+## 2026-10-06 - D26 cached Animation diagnostic export
+
+Added explicit cached Animation JSON projection/schema, shared private saver/UI and
+QA flag. Two new authored tests;126workspace/43viewer tests/fmt/Clippy/build pass.
+Four native runs: oracle/schema/outcome/repeat pass; five invalid mutations rejected.
+One native PNG inspected. Original data unchanged. Next level/plan reconnaissance.
+
+
+## 2026-10-06 - D27 level/plan census and reader reconnaissance
+
+Added snapshot-only level_plan_report.py plus four synthetic tests and provenance
+map.282levels/7342plans counted; deterministic census and48plan samples spanning28
+modern cohorts. Study pinned RLevel/RPlan/Serializer/Thing/InventoryItemDetails;
+recommend plan prefix oracle first. No asset reads/parsing or Rust changes. Initial
+canonicalization permission failure recorded and resolved with scoped execution.
+
+
+## 2026-10-06 - D28 external plan-prefix oracle
+
+Added authored bounded PlanOracle adapter/runner, sourceprovenance and ignoreallowlist.
+48localmodern prefix probes pass and three reports byte-identical; synthetic guarded
+reader/dependency/overflow/budget cases pass. Initial relative-seek bug fixed before
+corpus read. No original writes, fullThing reader, copiedsource or Rust changes.
+
+
+## 2026-10-06 - D29 independent plan prefix
+
+Added CPUplan metadata/digest reader and bounded read-only oracle-parity example.
+Four synthetic tests;130workspace tests/fmt/Clippy/build pass.48oraclefields exact,
+zero mismatch/failures and deterministic repeat. No originals/dependencies/GUI changed.
+
+
+## 2026-10-06 - D30 native Plan inspection
+
+Added Plan tab/worker/cache/raw/hash/bounds UI and navigation/source reset integration.
+Fourauthored tests;134workspace tests/fmt/Clippy/build pass. Foursupported/oldnative
+captures exit0 and inspected; supportedcached fields matchpinned oracle. No format/
+dependency/original changes. Next cached Plan diagnostic export.
+
+
+## 2026-10-06 - D31 cached Plan diagnostic export
+
+Added explicitcached Plan projection/schema, sharedprivate save/UI/QAcommand and
+twoauthored tests.136workspace tests/fmt/Clippy/build pass. Fournative reports validate,
+supportedfields equal oracle, deterministicrepeat and invalidschema mutations pass.
+Largecapture inspected. Originals unchanged; next inventoryscalar prefix evidence.
+
+
+## 2026-10-06 - D32 bounded plan inventory-prefix evidence
+
+Added authored externaladapter/runner/ignoreallowlist.48prefixprobes+SlotID class
+agreement and syntheticguards pass, deterministicrepeat and priorplanstage unchanged.
+Documented pinned s64 highbit arithmeticshift conflict; retain encodeddatebits.
+No independentRust/GUI/Thing parsing or originalwrites in this milestone.
+
+
+## 2026-10-06 - D33 independent inventory-prefix stage
+
+Added optionalCPUPlanInventoryInspection/rawmetadata, privateprefixhelper and bounded
+read-only parity example. Fournewsynthetictests;140workspace tests/fmt/Clippy/build.
+48inventory/48base fields exactlymatch oracle; repeat and unchangedD29prefixreport.
+Fixednew syntheticzlib encodingcollision, no parserrule weakening. Originalsunmodified.
+
+
+## 2026-10-06 - D34 optional native Plan inventory diagnostics
+
+Added optional Plan inventory UI/worker cache and lifecycle coverage. 143 Rust tests,
+fmt/Clippy/build and native oracle checks pass; five native runs exit0. Base-only v1
+exports remain byte-identical. No original writes, new format rules or dependencies.
+Details and next stage-aware export task: docs/plan-inventory-inspector.md.
+
+
+## 2026-10-06 - D35 Plan export version 2
+
+Added cached base/inventory projections and stage-aware outcomes/refusals; retained
+historical v1 schema.145Rusttests/fmt/Clippy/build pass. Five native exports schema-valid,
+oracle-equal when supported, deterministic repeat; partial/mutation checks pass.
+Originals unchanged. docs/plan-export-v2.md; next deterministic resource sorting.
+
+
+## 2026-10-06 - D36 resource list sorting
+
+Added stable MAP row/path/GUID/SHA1 presentation order and CLI selector, preserving
+aliases, selection and navigation.147tests/fmt/Clippy/build pass; five snapshot-only
+native sort checks match independent expectations. No original writes/format changes.
+Docs: resource-sorting.md. Next corresponding archive-entry sorting.
+
+
+## 2026-10-06 - D37 archive list sorting
+
+Added table/offset/size/SHA1 archive-entry ordering and CLI option, preserving original
+indices/orphans/aliases.149tests/fmt/Clippy/build and five snapshot-only native checks
+pass. Global crossarchive/tie semantics documented; originals unchanged. Next folder
+prefix browsing. docs/archive-sorting.md.
+
+
+## 2026-10-06 - D38 folder-prefix browser
+
+Added literal MAPprefix children/counts/breadcrumbs and CLI startupfolder.152tests,
+fmt/Clippy/build pass; four snapshot-only native count/order/selection checks match.
+Originals unchanged; unusual/budget-exhausted rows preserved. docs/folder-browsing.md.
+Next optional neutral surface mesh preview using already verified geometry.
+
+
+## 2026-10-06 - D39 neutral mesh surfaces
+
+Added optional authored diagnostic flat surfaces from verified stored geometry;
+wireframe remainsdefault.154tests/fmt/Clippy/build pass; four native runs and unchanged
+metadata/schema regression pass. Averagedepth/appearance limits documented; originals
+unchanged. docs/mesh-surface.md. Next focus/preset viewing controls.
+
+## 2026-10-06 — D40 material-linked textured mesh
+
+Superseded further UI polish with first working direct-diffuse mesh slice. Independent
+UV parser matches36oracle samples; one floor texture matches exact pixel metadata.
+Added bounded linked worker, ambiguity/unsupported outcomes and unlit UV0 preview.
+153 Rust tests/67viewer, fmt/Clippy/build pass; four native regressions preserve prior
+JSON bytes/schema. Documented pinned partial-UV getter conflict and resolved compile/
+lint/adapter failures. Originals/reference/ignore/noGit boundaries intact.
+Next D41: primitive ownership and multiple direct-diffuse material groups.
+
+## 2026-10-06 — Bevy frontend decision
+
+Recommend staged Bevy rendering atop D40's verified CPU assets. Recorded shared
+preview/renderer boundaries, source safety, version-verification requirements and
+native acceptance checks in docs/bevy-transition.md. D41 becomes the Bevy floor
+preview; multi-primitive materials follow as D42. No frontend implementation/build
+or dependency mutation in this documentation pass; current explorer left intact.
+
+## 2026-10-06 — next-chat handoff review
+
+Checked current CPU loader boundaries and official Bevy/bevy_egui/Windows setup
+documentation. Refined D41 ordering: minimal toolchain/render gate first, then shared
+loader regression, known asset, minimal controls and adapter/lifecycle evidence.
+Recorded winding/UV/color/alpha/normal display-policy checks. No Rust/dependency/data
+changes or new test/build claims in this review.
+
+## 2026-10-06 — user research-policy revision
+
+Updated AGENTS.md to permit scoped local decryption/decompilation of the user's
+own copy, superseding earlier prohibitions. Preserved read-only originals, ignored
+research outputs and the asset/code-free distribution requirement. Recovered source
+is evidence only, never copied/adapted/translated product code. No protected data or
+executable was processed; no parser behavior changed. Bevy milestone unchanged.
+
+## 2026-10-06 — complete revised handoff prompt
+
+Saved docs/next-chat-prompt.md with the full D41 implementation/verification scope
+and revised decryption/decompilation research permissions. Retained read-only inputs,
+independent product code and exclusion of original assets/recovered source from
+distribution. No Rust, dependency or original-data changes.
+
+## 2026-10-06 — D41 native Bevy preview
+
+Proved Bevy 0.19.1/bevy_egui 0.42.0 native depth rendering on existing GNU Rust,
+then extracted CPU-only lbp-preview and kept eframe diagnostic behavior/export intact.
+Added asynchronous validated source loading, GUID/source reload/cancel, perspective
+camera controls, explicit outcomes, independent Mesh/Image/material adapter and owned
+scene/GPU cleanup. No proprietary assets/code/keys or executable research involved.
+157 workspace /71 focused tests, fmt, Clippy and both native builds pass. Inspected
+synthetic orientation/sampler/depth/opaque-alpha, real floor, unsupported multi-primitive
+fallback and static errors. Eframe export byte-identical to D40. Resolved sandbox
+access/API/Clippy failures and remaining manual-interaction/platform limits in STATUS.
+See docs/bevy-preview.md for exact launch, policy/provenance and user walkthrough.
+
+## 2026-10-06 — D42 primitive/material groups
+
+Retained CPU primitive triangle spans without changing metadata exports. Shared
+bounded per-group direct-diffuse loading caches successes/failures; Bevy merges
+shared bindings for draws while retaining per-primitive diagnostics and neutral
+unsupported geometry. Added partition/cache/adapter tests and multi-group cleanup
+coverage. Pinned oracle: 36 meshes/82 primitives, zero mismatches. 160 workspace
+tests, fmt/Clippy/native builds pass; mixed synthetic, board, Bevy/eframe floor
+captures inspected; eframe JSON unchanged. Product contains no original LBP code,
+assets or keys; no decryption/recovered-source reuse/publication. See
+[contract](docs/primitive-groups.md) and STATUS.md for exact checks/limits.
+
+## 2026-10-06 — D43 diffuse-only projection
+
+Shared preview now selects one unambiguous direct texture diffuse route from a
+larger graph, records/lists ignored nodes/wires, and accepts either zero offset
+sign. Other branches remain unevaluated; selected sampler inputs/animation/transforms
+and unsupported operations reject. Pinned helper parity: 32 established plus a
+separate 48 linked sample set, zero mismatches. Bevy/eframe bottle cap is visibly
+textured; two-group garage light retains neutral unsupported center. 160 workspace
+tests, fmt/Clippy/builds pass; floor metadata unchanged. No proprietary inputs
+modified or code/assets/keys bundled. [Contract](docs/diffuse-projection.md).
+
+## 2026-10-06 — D44 direct-diffuse UV1
+
+Shared preview explicitly selects raw UV0/UV1 without fallback or array mutation;
+frontends label selected channel. Existing UV/graph reader bounds unchanged.
+32/48 material route/channel comparisons and36 mesh UV digests match pinned oracle.
+Bevy Valkyrie shows two distinct UV1/BC3 texture groups; UFO retains unsupported
+neutral groups. Eframe limit explicit; UV0 floor export unchanged. 161 tests,
+fmt/Clippy/build pass after closing only task-owned locked D43 preview. No proprietary
+inputs modified or code/assets/keys bundled. [Contract](docs/uv1-preview.md).
+
+
+## 2026-10-06 — Clickable launcher and searchable Bevy asset menu
+
+Added Launch Asset Explorer.cmd and a checkout-relative PowerShell launcher.
+Bevy now browses catalog rows with search, virtual scrolling, direct selection and
+show/hide files without current previews. Unchecked meshes remain visible; failures
+are source-scoped, aliases preserved and cancelled jobs do not install outcomes.
+Unsupported initial selection retains attachment; GUID is optional for browsing.
+Seven viewer plus14 shared/catalog tests, fmt/Clippy/build and native captures pass.
+Launcher works from Windows temp directory. No game bytes/code/keys bundled or
+original inputs modified. D45 affine sampling remains deferred.
+[Usage and limitations](docs/bevy-preview.md).
+
+
+## 2026-10-06 — D45 static diffuse UV scale/offset
+
+Added bounded static affine sampling on UV0/UV1 with raw UV/material bits preserved
+and separate derived coordinates. Both frontends label transforms; animated/matrix/
+wired sampler routes stay unsupported. Existing32/48 oracle records match with zero
+route/channel/parameter mismatches, enabling three additional material samples.
+Toro2× strap and Clivehalf-scale groups visibly textured; floor export unchanged.
+78 focused tests, fmt/Clippy/build pass. Authored native offset/reflection fixture
+added. No proprietary inputs modified or code/assets/keys bundled.
+[Contract and evidence](docs/affine-preview.md).
+
+## 2026-10-06 — Compatibility status and second-monitor test windows
+
+Bevy browser now displays Viewable/Complete labels, textured primitive coverage,
+and source-session totals for distinct attempted GUIDs. Complete requires visual
+confirmation of all textures and correct geometry; neutral groups/skipped geometry
+block it. Reload resets that asset's confirmation; source changes/restart clear
+counts. Corpus totals remain unknown. No support expansion: +0 viewable/+0 complete.
+Bevy starts hidden, then centers on a non-primary monitor before showing. Recorded
+sparse image viewing and future compatibility-delta reporting in AGENTS.md.
+Nine headless viewer tests, fmt, Clippy and rebuilt launcher target pass. Physical
+placement/visual UI interaction untested; no images viewed or native programs
+opened. Sandbox path/manifest denial resolved by reviewed local execution.
+[Status definitions and limits](docs/bevy-preview.md).
+
+## 2026-10-06 — D46 static texture × COLOR diffuse projection
+
+Added one bounded static texture/color multiply route in either input order.
+Both frontends label tint; raw pixels/UVs retained, optional bounded derived display
+pixels use linear tint with cancellation. Other graphs stay explicit unsupported.
+Pinned helper oracle48/32samples:zero mismatches, four new eligible material hashes.
+Same36-asset baseline: +0newly viewable/+0newly complete; three existing meshes gain
+six textured primitive groups. Separate native vulture shows gray tint/4×tiling.
+81focused tests, fmt/Clippy/both builds pass; native capture selected non-primary
+monitor, one image viewed. Initial fixture/Clippy/sandbox failures fixed; no game
+inputs modified/proprietary assets/code/keys distributed or publication.
+[Rules, counting scope and limitations](docs/tinted-preview.md).
+
+## 2026-10-06 — D47 supported static COLOR-only diffuse
+
+Added explicit solid material IR and both renderer paths without texture/UV reads
+or fallback images. Static finite unanimated direct COLOR→DIFFUSE only; raw bits
+preserved. App separates textured/solid groups and reports ready-for-review assets;
+Complete remains explicit visual verification. Same36-asset baseline:13improved
+assets/23solid groups, all-diffuse15→23, +0newviewable/+0verified complete.
+Pinned48/32route/color comparisons have zero mismatches.81focused tests, fmt,
+Clippy and both builds pass. Fez native capture verified red/black solid groups on
+non-primary monitor; one image inspected. No game input changes/proprietary assets,
+code/keys bundled or publication. [Contract and limits](docs/solid-color-preview.md).

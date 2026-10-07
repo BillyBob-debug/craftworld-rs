@@ -1,0 +1,41 @@
+# Project rules
+
+Build an independent LBP2 Asset Explorer that reads the user's own game data.
+The future compatible runtime is context, not the current implementation scope.
+
+## Boundaries
+
+- Original ZIP, ISO, disc images, extracted game directories, saves, and executable files are read-only. Open inputs in read mode. Never mount with write access or patch them.
+- Local decryption, protected-data inspection and targeted executable disassembly/decompilation of the user's own game copy are permitted research techniques when needed. Preserve original inputs; write derived research material only under ignored local directories. This supersedes the earlier blanket prohibition. Online service modification remains outside the asset-viewer scope.
+- Never publish or commit proprietary game files, assets, decompiler output, reference-repository binaries, or unknown-provenance fixtures. Local diagnostic JSON and byte samples belong only under ignored `local-analysis/`; game trees under ignored `game-data/`.
+- Keep the default-deny `.gitignore`. Check prospective tracked files before publication; extensions alone do not prove provenance. Never force-add game data.
+- Reference repositories remain ignored under `references/`. Do not blindly copy their bundled assets or templates.
+- No commit, push, release, or publishing unless requested. The project's own distribution license is undecided.
+- Decompiled/recovered proprietary code is research evidence, never implementation source. Record independently expressed format/behavior findings and implement from those findings; do not copy, adapt or translate recovered game code into the product. Keep raw decompiler output segregated under ignored `local-analysis/`. Do not claim a strict clean-room process solely because the delivered code contains no copied source.
+- The delivered product must contain no original LBP code, assets or bundled game-specific decryption keys. Runtime assets come from the user's own ISO/game data. Research outputs, decrypted files and local caches are not distributable product files. Direct ISO loading remains a later input feature; current extracted-directory support is a development input path.
+
+## Research and implementation
+
+1. Prefer documented specifications, then existing open-source readers, then controlled local experiments, then targeted decryption/executable investigation when those routes cannot answer a concrete question. Decryption/decompilation is permitted, not required by default. Keep it scoped to the current milestone and record the question, provenance, findings and limitations.
+2. Start by reading `STATUS.md`, `RESEARCH.md`, and the relevant format/architecture documents.
+3. For each format rule, record source URL, pinned commit, class/method or section, evidence category, build/revision applicability, conflicts, and test coverage near the implementation. Use the five labels in `docs/formats.md`.
+4. Do not copy/adapt/translate unlicensed source. MIT-derived source retains notices; GPL/AGPL source requires its obligations and a deliberate licensing decision. Independent specification-based implementation and an external oracle are the default. Public visibility is not reuse permission.
+5. Parsing libraries must not depend on UI/rendering. Keep disk layouts, intermediate representations, and GPU/UI representations separate.
+6. Implement small, reviewable milestones. No GUI, physics, gameplay, multiplayer, or speculative format parser during scanner work.
+7. All lengths/counts/offsets/revisions are untrusted. Use checked arithmetic, strict bounds, decompression budgets, cycle limits, and explicit unsupported/encrypted outcomes. Preserve duplicate MAP aliases and conflicting candidates rather than silently choosing one.
+8. Resource type inferred from extension must remain distinct from type confirmed by magic. Unresolved is not corrupt; not parsed is not empty.
+9. Use deterministic ordering and versioned JSON. Keep timing, absolute paths, and generation timestamps outside the deterministic inventory body.
+10. Compare with pinned community readers where feasible. Commit synthetic recipes and expected metadata only, never original asset bytes. A successful header probe does not prove payload compatibility or visual correctness.
+
+## Verification and handoff
+
+- Open test programs on the user's second (non-primary) monitor. Verify placement before showing a test window; never assume the primary monitor is acceptable. Prefer headless checks when sufficient.
+- Use image viewing sparingly; inspect images only when they resolve a concrete visual question.
+- Every asset-compatibility milestone must report newly viewable assets and newly complete assets, with baseline, counting unit and tested scope. Report unknown totals explicitly; material-route eligibility alone is not an asset count. Complete means all textures are showing and geometry is correct, independently of whether the renderer is finished. Display these distinctions and measured counts in the app.
+- Run the narrow relevant checks, record exact commands and outcomes, and state what was not tested.
+- For Rust changes, use `cargo fmt --check`, relevant tests, and Clippy when a toolchain is available. Do not claim compilation if it is unavailable.
+- Record failed experiments and blockers in `STATUS.md`; do not repeat an unchanged approach without new evidence.
+- Update `STATUS.md` and `MODLOG.md` after meaningful work; update architecture/formats when knowledge changes.
+- Research dates use the user's America/Chicago calendar. Repository commit timestamps may remain explicitly UTC.
+
+The local AI modding guides inform this workflow; their example AGENTS templates are adapted to this user's explicit scope, not copied as unrelated universal rules.

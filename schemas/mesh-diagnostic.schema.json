@@ -1,0 +1,496 @@
+{
+  "$defs": {
+    "error": {
+      "enum": [
+        null,
+        "cancelled",
+        "blocked_protected",
+        "unsupported_layout",
+        "budget_exceeded",
+        "source_changed",
+        "inspection_failed"
+      ]
+    },
+    "meshMetadata": {
+      "additionalProperties": false,
+      "properties": {
+        "bone_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "parsed_geometry_bytes": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "prefix": {
+          "additionalProperties": false,
+          "properties": {
+            "area_scale_bits": {
+              "anyOf": [
+                {
+                  "maximum": 4294967295,
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "attribute_bytes": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "attribute_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "compression_flags": {
+              "maximum": 255,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "counts": {
+              "items": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "maxItems": 7,
+              "minItems": 7,
+              "type": "array"
+            },
+            "expanded_bytes": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "index_bytes": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "index_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "max_uv_bits": {
+              "items": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "min_uv_bits": {
+              "items": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "morph_names_hex": {
+              "items": {
+                "pattern": "^(?:[0-9a-f]{2})*$",
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "parsed_prefix_bytes": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "position_bounds": {
+              "anyOf": [
+                {
+                  "items": {
+                    "items": {
+                      "type": "number"
+                    },
+                    "maxItems": 3,
+                    "minItems": 3,
+                    "type": "array"
+                  },
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "position_bounds_bits": {
+              "anyOf": [
+                {
+                  "items": {
+                    "items": {
+                      "maximum": 4294967295,
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "maxItems": 3,
+                    "minItems": 3,
+                    "type": "array"
+                  },
+                  "maxItems": 2,
+                  "minItems": 2,
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "position_bytes_sha256": {
+              "pattern": "^[0-9a-f]{64}$",
+              "type": "string"
+            },
+            "revision": {
+              "maximum": 4294967295,
+              "minimum": 0,
+              "type": "integer"
+            },
+            "stream_offsets": {
+              "items": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "type": "array"
+            },
+            "unparsed_bytes": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "attribute_bytes",
+            "index_bytes",
+            "expanded_bytes",
+            "parsed_prefix_bytes",
+            "unparsed_bytes",
+            "position_bytes_sha256",
+            "attribute_sha256",
+            "index_sha256",
+            "revision",
+            "compression_flags",
+            "counts",
+            "morph_names_hex",
+            "min_uv_bits",
+            "max_uv_bits",
+            "area_scale_bits",
+            "stream_offsets",
+            "position_bounds",
+            "position_bounds_bits"
+          ],
+          "type": "object"
+        },
+        "primitive_type": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "primitives": {
+          "items": {
+            "additionalProperties": false,
+            "properties": {
+              "alternatives_flags": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "alternatives_guid": {
+                "anyOf": [
+                  {
+                    "maximum": 4294967295,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "alternatives_hash": {
+                "anyOf": [
+                  {
+                    "pattern": "^[0-9a-f]{40}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "alternatives_kind": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "first_index": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "index_count": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "material_flags": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "material_guid": {
+                "anyOf": [
+                  {
+                    "maximum": 4294967295,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "material_hash": {
+                "anyOf": [
+                  {
+                    "pattern": "^[0-9a-f]{40}$",
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "material_kind": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "max_vertex_raw": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "min_vertex_raw": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              },
+              "region": {
+                "maximum": 4294967295,
+                "minimum": 0,
+                "type": "integer"
+              }
+            },
+            "required": [
+              "material_flags",
+              "material_kind",
+              "alternatives_flags",
+              "alternatives_kind",
+              "min_vertex_raw",
+              "max_vertex_raw",
+              "first_index",
+              "index_count",
+              "region",
+              "material_guid",
+              "alternatives_guid",
+              "material_hash",
+              "alternatives_hash"
+            ],
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "triangle_count": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "triangle_indices_sha256": {
+          "pattern": "^[0-9a-f]{64}$",
+          "type": "string"
+        },
+        "unparsed_after_geometry": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "vertex_count": {
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "vertex_count",
+        "bone_count",
+        "primitive_type",
+        "triangle_count",
+        "parsed_geometry_bytes",
+        "unparsed_after_geometry",
+        "prefix",
+        "primitives",
+        "triangle_indices_sha256"
+      ],
+      "type": "object"
+    },
+    "stage": {
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "else": {
+            "properties": {
+              "metadata": {
+                "type": "null"
+              }
+            }
+          },
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "metadata": {
+                "type": "object"
+              }
+            }
+          }
+        }
+      ],
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "metadata": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "requested_in_current_mode": {
+          "type": "boolean"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "failed",
+            "blocked",
+            "unsupported",
+            "cancelled",
+            "not_available",
+            "not_requested"
+          ]
+        }
+      },
+      "required": [
+        "status",
+        "requested_in_current_mode",
+        "error_kind",
+        "metadata"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "description": "Private mesh prefix/topology summaries only. Geometry, bone arrays, images and payload data are excluded.",
+  "properties": {
+    "last_request": {
+      "additionalProperties": false,
+      "properties": {
+        "error_kind": {
+          "$ref": "#/$defs/error"
+        },
+        "outcome": {
+          "enum": [
+            "complete",
+            "partial",
+            "failed"
+          ]
+        }
+      },
+      "required": [
+        "outcome",
+        "error_kind"
+      ],
+      "type": "object"
+    },
+    "location": {
+      "additionalProperties": false,
+      "properties": {
+        "offset": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "size": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "source_path": {
+          "description": "Normalized source-relative path; the writer additionally rejects traversal, colon and backslash.",
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "source_path",
+        "offset",
+        "size"
+      ],
+      "type": "object"
+    },
+    "schema_version": {
+      "const": 1
+    },
+    "scope": {
+      "const": "cached_mesh_diagnostic_metadata_not_asset_export"
+    },
+    "source_state": {
+      "const": "validated_at_read_not_rechecked_for_export"
+    },
+    "stages": {
+      "additionalProperties": false,
+      "properties": {
+        "mesh": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/stage"
+            },
+            {
+              "properties": {
+                "metadata": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/$defs/meshMetadata"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        }
+      },
+      "required": [
+        "mesh"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "schema_version",
+    "scope",
+    "source_state",
+    "location",
+    "last_request",
+    "stages"
+  ],
+  "title": "Cached mesh diagnostic envelope version 1",
+  "type": "object"
+}

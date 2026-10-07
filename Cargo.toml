@@ -1,0 +1,27 @@
+[workspace]
+members = ["crates/lbp-core", "crates/lbp-archive", "crates/lbp-resource", "crates/lbp-io", "crates/lbp-cli", "crates/lbp-catalog", "crates/lbp-viewer", "crates/lbp-texture", "crates/lbp-mesh", "crates/lbp-bevy-viewer", "crates/lbp-preview"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[workspace.dependencies]
+lbp-core = { path = "crates/lbp-core" }
+lbp-io = { path = "crates/lbp-io" }
+lbp-archive = { path = "crates/lbp-archive" }
+lbp-resource = { path = "crates/lbp-resource" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+lbp-catalog = { path = "crates/lbp-catalog" }
+lbp-texture = { path = "crates/lbp-texture" }
+eframe = { version = "0.36.2", default-features = false, features = ["default_fonts", "wgpu", "x11", "wayland"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+lbp-mesh = { path = "crates/lbp-mesh" }
+
+
+lbp-preview = { path = "crates/lbp-preview" }

@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Cached material diagnostic envelope version 1",
+  "description": "Private metadata only. Resource metadata fields retain the independent parser API shapes; this schema validates the export envelope, not every format field.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "scope", "source_state", "location", "last_request", "stages"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "scope": {"const": "cached_material_diagnostic_metadata_not_asset_export"},
+    "source_state": {"const": "validated_at_read_not_rechecked_for_export"},
+    "location": {
+      "type": "object", "additionalProperties": false,
+      "required": ["source_path", "offset", "size"],
+      "properties": {
+        "source_path": {"type": "string", "minLength": 1, "description": "Normalized source-relative path; the writer additionally rejects traversal, colon and backslash."},
+        "offset": {"type": "integer", "minimum": 0},
+        "size": {"type": "integer", "minimum": 0}
+      }
+    },
+    "last_request": {
+      "type": "object", "additionalProperties": false,
+      "required": ["outcome", "error_kind"],
+      "properties": {
+        "outcome": {"enum": ["complete", "partial", "failed"]},
+        "error_kind": {"$ref": "#/$defs/error"}
+      }
+    },
+    "stages": {
+      "type": "object", "additionalProperties": false,
+      "required": ["prefix", "graph", "tail"],
+      "properties": {
+        "prefix": {"$ref": "#/$defs/stage"},
+        "graph": {"$ref": "#/$defs/stage"},
+        "tail": {"$ref": "#/$defs/stage"}
+      }
+    }
+  },
+  "$defs": {
+    "error": {"enum": [null, "cancelled", "blocked_protected", "unsupported_layout", "budget_exceeded", "source_changed", "inspection_failed"]},
+    "stage": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "requested_in_current_mode", "error_kind", "metadata"],
+      "properties": {
+        "status": {"enum": ["available", "failed", "blocked", "unsupported", "cancelled", "not_available", "not_requested"]},
+        "requested_in_current_mode": {"type": "boolean"},
+        "error_kind": {"$ref": "#/$defs/error"},
+        "metadata": {"type": ["object", "null"]}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "available"}}}, "then": {"properties": {"metadata": {"type": "object"}}}, "else": {"properties": {"metadata": {"type": "null"}}}}
+      ]
+    }
+  }
+}

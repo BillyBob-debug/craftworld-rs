@@ -1,0 +1,20 @@
+[package]
+name = "lbp-catalog"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+lbp-core.workspace = true
+lbp-io.workspace = true
+lbp-archive.workspace = true
+lbp-resource.workspace = true
+sha2.workspace = true
+
+[dev-dependencies]
+lbp-mesh.workspace = true
+tempfile.workspace = true
+flate2 = "1"
+lbp-texture.workspace = true
