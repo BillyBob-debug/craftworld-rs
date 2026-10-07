@@ -2968,3 +2968,25 @@ run adapter grouping. rustfmt again left lib.rs as LF; CRLF restored before comm
 Not tested: peak process memory on the largest meshes, legacy viewer, game pixels.
 Next: "third texture needs a scale/offset sample on its channel" (29 groups across the
 D65/D66 cohorts), then rerun the corpus route census to re-rank blockers.
+
+## D67 — third-texture role swap (2026-10-07)
+
+Third samples on a channel neither displayed sample uses now swap the second/third
+roles (commutative componentwise product). Rules/evidence/counts: D67 section of
+[docs/third-sample-preview.md](docs/third-sample-preview.md).
+
+Counts (distinct GUID, baseline D66 runs): D65 cohort 48/30/0 -> 48/38/0; D66 cohort
+22/5/0 -> 22/7/0; D61 48/43/0, D64 26/23/0 unchanged; geometry identical.
+**+0 newly viewable / +0 newly Complete.** Corpus selection: unsupported 366 (D63) -> 235.
+
+Commands (after `. ./scripts/use-local-rust.ps1`):
+- run-material-oracle.ps1 -Diffuse d67-thirdbase-material-samples.json -> d67-thirdbase-material-oracle.json: 18 records, 177564 bytes.
+- diffuse_parity: d67-thirdbase 18/0/18; d67-third 48/0/48; d67-diffuse 32/0/29; d67-linked 48/0/46; d67-square 17/0/17; d67-mirror 5/0/5; d67-alpha 1/0/1.
+- compatibility_census: d67-third-after 48/38/0; d67-many-after 22/7/0; d67-cohort48-after 48/43/0; d67-square-after 26/23/0.
+- diffuse_route_census -> d67-diffuse-route-shapes.json: 5163 materials, 44060339 bytes.
+- fmt, Clippy -D warnings, all tests, python 34, both builds: pass. rustfmt LF drift restored to CRLF.
+- Native (log only, no image): --select-guid 000024dc, non-primary 165v0, label "third from primary coordinates", clean UTF-8, no errors.
+
+Not tested: game pixels, float rounding order of permuted products, legacy viewer.
+Next: two-texture products that also multiply a static COLOR (about 90 materials /
+80 meshes across several shapes; currently mislabelled "sampler must be static").

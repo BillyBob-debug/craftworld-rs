@@ -307,10 +307,20 @@ fn run() -> Result<(), String> {
                                 && sample["graph"]["boxes"][deep]["type_raw"] == 10
                                 && sample["graph"]["boxes"][deep]["subtype_raw"] == 0
                         } else {
-                            has(&root_inputs, inner)
-                                && has(&root_inputs, third.sample_index)
-                                && has(&inner_inputs, s.sample_index)
-                                && has(&inner_inputs, second.sample_index)
+                            // D67: roles may be permuted (commutative product); the three
+                            // leaves must equal the outer leaf plus both inner inputs.
+                            let mut leaves =
+                                [s.sample_index, second.sample_index, third.sample_index];
+                            leaves.sort_unstable();
+                            let mut graph_leaves: Vec<usize> = root_inputs
+                                .iter()
+                                .chain(inner_inputs.iter())
+                                .filter_map(|w| w["box_from"].as_u64())
+                                .map(|v| v as usize)
+                                .filter(|&v| v != inner)
+                                .collect();
+                            graph_leaves.sort_unstable();
+                            has(&root_inputs, inner) && graph_leaves == leaves
                         };
                         root == wire.box_from as usize
                             && root_inputs.len() == 2
@@ -452,7 +462,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":11,"animation_base_enabled":animation_base,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":12,"animation_base_enabled":animation_base,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

@@ -45,3 +45,25 @@ Remaining groups are mostly the separate 8-distinct-material mesh budget (78
 groups), 11 groups whose third channel's base is a matrix, plus texture-size,
 non-Repeat and descriptor limits. D61 48 cohort 48/43/0 and D64 squared cohort
 26/23/0 unchanged. **+0 newly viewable / +0 newly Complete.**
+
+## D67 role swap when the third channel is not displayed — 2026-10-07
+
+18 materials (d67-thirdbase-material-samples.json) put both inner-multiply leaves on
+one channel and the outer leaf on the other, so neither displayed coordinate set
+shared the third's channel ("third texture needs a scale/offset sample on its
+channel"). Toolkit MULTIPLY (GfxAssembler lines 328–347) is a componentwise float4
+product, so leaf order does not change the value in real arithmetic (float rounding
+order may differ; no bit-exact claim). The selector now swaps the second and third
+roles in that case, so primary and second cover both channels and the third derives
+from the primary. diffuse_parity (schema 12) checks the three leaves as a set
+(outer leaf plus both inner inputs) instead of fixed roles. Oracle parity 18/0/18.
+
+Counts (distinct GUID, baseline = D66 runs): D65 third cohort 48/30/0 -> 48/38/0,
+groups 212 -> 223 of 235; D66 many-material cohort 22/5/0 -> 22/7/0, groups 449 ->
+467 of 504; D61 48/43/0 and D64 26/23/0 unchanged; geometry identical.
+**+0 newly viewable / +0 newly Complete.**
+
+Corpus selection census rerun (d67-diffuse-route-shapes.json): texture route 4306,
+solid 459, unwired 7, animation-base-only 34, instance-only 122, unsupported 235
+(D63: 4175 / 366). Mesh dependency view: 2373 all default-selectable (D63: 2269),
+158 need an option, 183 have an unsupported material (D63: 293).

@@ -709,7 +709,7 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
                 }
                 let first_selection = sampler(graph, first)?;
                 let mut second_selection = sampler(graph, second)?;
-                let third = sampler(graph, third)?;
+                let mut third = sampler(graph, third)?;
                 let shares = |s: &SamplerSelection| s.uv_channel == third.uv_channel && s.uv_transform == third.uv_transform;
                 if !shares(&second_selection) && shares(&first_selection) {
                     std::mem::swap(&mut first, &mut second);
@@ -720,6 +720,12 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
                 let scale_offset = |s: &SamplerSelection| matches!(s.uv_transform, crate::SamplingTransform::ScaleOffset(t) if t.values()[..2].iter().all(|v| *v != 0.));
                 if !shares(&second_selection) && ![first_selection, second_selection, third].iter().all(scale_offset) {
                     return Err("Unsupported: independent third texture needs nonzero scale/offset samplers".into());
+                }
+                // D67: the componentwise product is commutative. When both inner leaves
+                // use one channel and the outer leaf the other, swap the second and
+                // third roles so the displayed coordinates cover both channels.
+                if third.uv_channel != first_selection.uv_channel && third.uv_channel != second_selection.uv_channel {
+                    std::mem::swap(&mut second_selection, &mut third);
                 }
                 second_sample = Some(second_selection);
                 third_sample = Some(third);
@@ -1594,6 +1600,19 @@ mod tests {
         graph.boxes[2].parameters_raw[0] = 0; // zero base scale is not invertible
         assert!(select_diffuse(&graph).is_err());
         graph.boxes[2].parameters_raw[..4].copy_from_slice(&[1f32, 1., 0., 0.].map(f32::to_bits));
+        // D67: both inner leaves on UV0 and the outer leaf on UV1: the second and
+        // third roles swap so displayed coordinates cover both channels.
+        let mut split = graph.clone();
+        split.boxes[1].parameters_raw[4] = 0;
+        split.boxes[4].parameters_raw[4] = 1;
+        let swapped = select_diffuse(&split).unwrap();
+        assert_eq!(swapped.second_sample.unwrap().sample_index, 4);
+        assert_eq!(swapped.second_sample.unwrap().uv_channel, 1);
+        let moved = swapped.third_sample.unwrap();
+        assert_eq!(moved.uv_channel, 0);
+        assert!([1, 2].contains(&moved.sample_index));
+        assert_ne!(moved.sample_index, swapped.sample_index);
+        assert!(relative_third(&swapped, &[]).unwrap().from_primary);
         graph.boxes[4].subtype_raw = 1; // matrix third stays unsupported unless shared
         assert!(select_diffuse(&graph).is_err());
         graph.boxes[4].subtype_raw = 0;

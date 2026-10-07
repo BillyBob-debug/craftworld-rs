@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D66, 2026-10-07
+# Current state (overwrite each milestone) — after D67, 2026-10-07
 
 ## Product
 Independent LBP2 Asset Explorer (Rust). Bevy viewer (main) and legacy viewer read
@@ -14,7 +14,7 @@ Parsing crates stay independent of UI/rendering.
 Static textures with scale/offset, matrix UVs, UV0/UV1; Repeat, Clamp, Mirror per
 axis; interior-only BORDER; COLOR solids; texture × COLOR; two- to four-sample
 products, including one sample squared (D64) and an independent third
-transform (D65, Bevy only); constant and alpha MIX. Opt-in: animation base values (matrix two-curve
+transform (D65, Bevy only; roles swap when needed, D67); constant and alpha MIX. Opt-in: animation base values (matrix two-curve
 and, since D62, subtype-0 one-curve scale/offset); user-supplied instance color
 (ThingColor, D61). Unwired diffuse previews as labelled black (D63,
 Toolkit generator evidence; game default unknown). Groups whose other channels need unrendered textures are flagged
@@ -27,11 +27,11 @@ retained-bytes budget (D66).
 - D61–D63 48-GUID cohort (d61-mesh-samples.json): default 48/43/0; animation base
   48/45/0; supplied color + animation base 48/48/0. Corpus totals unknown.
 - D64 squared cohort (d64-square-mesh-samples.json, 26 hashes): 26/23/0.
-- Corpus selection census (5163 materials): 4175 texture, 459 solid, 7 unwired,
-  34 animation-base-only, 122 instance-only, 366 unsupported (not asset counts).
-- D65 third-texture cohort (d65-third-mesh-samples-pinned.json, 48 hashes): 48/30/0 after D66.
-- D66 many-material cohort (d66-many-material-mesh-samples.json, 22 hashes): 22/5/0.
-- D66: +0 newly viewable, +0 newly Complete.
+- Corpus selection census (5163 materials, D67): 4306 texture, 459 solid, 7 unwired,
+  34 animation-base-only, 122 instance-only, 235 unsupported (not asset counts).
+- D65 third-texture cohort (d65-third-mesh-samples-pinned.json, 48 hashes): 48/38/0 after D67.
+- D66 many-material cohort (d66-many-material-mesh-samples.json, 22 hashes): 22/7/0 after D67.
+- D67: +0 newly viewable, +0 newly Complete.
 
 ## Open blockers
 - Glow, reflection and other non-diffuse channels are not rendered.
@@ -39,19 +39,19 @@ retained-bytes budget (D66).
 - BORDER color, CLAMP5, mirror-once 6–8, motion/time, filtering fidelity unknown.
 
 ## Next
-Third textures whose channel base is a matrix or missing ("third texture needs a
-scale/offset sample on its channel", 29 groups in D65/D66 cohorts); then rerun the
-corpus route census to re-rank. Note: the census does not run Bevy draw grouping.
+Two-texture products that also multiply a static COLOR (about 90 materials / 80
+meshes; mislabelled "sampler must be static"). Note: the census does not run Bevy
+draw grouping.
 
 ## Environment
 - Toolchain: `. ./scripts/use-local-rust.ps1` (project-local, windows-gnu).
 - Git: local repo at project root, branch `main`, default-deny `.gitignore`.
-  Baseline d7d33b2 (D60 + unrecorded D61 code); D62-D66 committed after it. No remote.
+  Baseline d7d33b2 (D60 + unrecorded D61 code); D62-D67 committed after it. No remote.
 - Native QA windows on non-primary monitor 165v0, verified in log before showing.
 
 ## Where detail lives
 - Latest full entry: end of `STATUS.md`. Short log: top of `MODLOG.md`.
 - Milestone docs: `docs/instance-preview.md` (D61), `docs/animation-base-preview.md` (D56, D62),
   `docs/unwired-diffuse-preview.md` (D63), `docs/route-census.md` (D64),
-  `docs/third-sample-preview.md` (D65), `docs/material-budget-preview.md` (D66).
+  `docs/third-sample-preview.md` (D65, D67), `docs/material-budget-preview.md` (D66).
 - Format evidence: `docs/formats.md` (grep headings). Rules: `AGENTS.md`.

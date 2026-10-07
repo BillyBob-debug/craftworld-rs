@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-07 — D67 third-texture role swap
+
+Three-texture products whose third channel was not displayed now swap leaf roles
+(commutative product). Cohorts: 30 -> 38 and 5 -> 7 full diffuse; +0 viewable/+0
+Complete. Corpus unsupported materials 366 -> 235 since D63.
+[third-sample-preview.md](docs/third-sample-preview.md).
+
 ## 2026-10-07 — D66 per-mesh material budget
 
 The 8-material cap is now 64 loads within a 640 MiB retained-bytes budget; Bevy draws
