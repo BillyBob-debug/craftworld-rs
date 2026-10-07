@@ -377,14 +377,23 @@ fn run() -> Result<(), String> {
                                             == Some(u64::from(base.row_bits[row][c]))
                                     })
                             }) && s.uv_transform.bits()
-                                == [
-                                    base.row_bits[0][0],
-                                    base.row_bits[0][1],
-                                    base.row_bits[0][2],
-                                    base.row_bits[1][0],
-                                    base.row_bits[1][1],
-                                    base.row_bits[1][2],
-                                ]
+                                == if base.subtype_raw == 1 {
+                                    vec![
+                                        base.row_bits[0][0],
+                                        base.row_bits[0][1],
+                                        base.row_bits[0][2],
+                                        base.row_bits[1][0],
+                                        base.row_bits[1][1],
+                                        base.row_bits[1][2],
+                                    ]
+                                } else {
+                                    // Independent recomputation of (uv - zw) * xy.
+                                    let [x, y, z, w] = base.row_bits[0].map(f32::from_bits);
+                                    vec![x, y, -(z * x), -(w * y)]
+                                        .into_iter()
+                                        .map(f32::to_bits)
+                                        .collect()
+                                }
                         });
                     if s.output_index != output
                         || !base_equal
@@ -407,7 +416,7 @@ fn run() -> Result<(), String> {
                     }
                     projected += 1;
                     // Versioned diagnostics retain all three original selectors/root indices.
-                    json!({"status":"projected","alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"animation_base":s.animation_base.map(|b|json!({"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+                    json!({"status":"projected","alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
                 }
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
@@ -415,7 +424,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":9,"animation_base_enabled":animation_base,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":10,"animation_base_enabled":animation_base,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

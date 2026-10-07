@@ -69,3 +69,27 @@ prepared. This measures preparation coverage, not visual correctness. Corpus
 totals are unknown. One native Bevy check is scoped to this snapshot and its UI;
 it cannot establish game animation fidelity. Research files remain ignored;
 original game inputs are read-only. No proprietary product files or publication.
+
+## D62 subtype-0 scale/offset base value — 2026-10-07
+
+- `CONFIRMED_FROM_COMMUNITY_CODE`: same Toolkit pin, GfxAssembler lines 191–196:
+  a subtype-0 sampler with only its first animation named samples at
+  `(uv - t.zw) * t.xy`, ignoring the static scale/offset parameters.
+- `CONFIRMED_FROM_LOCAL_DATA`: eve_flooor_pipe2_bubbles 00015f7d
+  (e000b17efb46987b04acfebe1e6de246f896bc77) has one curve `b1`, mask 8 (W only),
+  101 values / 101 keys, base (1, 1, 0, 3), empty second binding, UV0 slot 0,
+  Repeat/Repeat. Its local curve matches one global declaration.
+- Rule: the selector also accepts subtype 0 with exactly one named curve (mask
+  1–15, value count divisible by its lane count, keys = values / lanes) and a fully
+  empty second binding. Base `(x, y, z, w)` becomes scale `(x, y)` and offset
+  `(-(z·x), -(w·y))`: one rounded product per axis, no fused-op or GPU rounding
+  claim. Global reconciliation checks only named bindings. Snapshot JSON carries
+  `subtype_raw`; census schema 8, parity schema 10.
+- Tests: asymmetric base, global match/missing, uneven lane mask, mask over 15,
+  named or nonzero second binding, wired sampler, infinite base.
+
+Counts, 48-hash D61 cohort, animation-base mode: 48 viewable / 44 → 45 full diffuse
+/ 0 Complete (00015fa4 eve_floor_pipe2, 3/4 → 4/4 groups, +4 triangles). With the
+supplied D61 color as well: 46 → 47. Default mode unchanged 43. **+0 newly viewable
+/ +0 newly Complete.** The bubbles base offset is a whole number under Repeat, so
+this frame matches untransformed UVs; motion and game time stay unknown.

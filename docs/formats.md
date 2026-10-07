@@ -603,3 +603,12 @@ documented with pin, applicability, conflicts and coverage in
 
 D60 retains MIRROR2 and independent two-source addressing; rule evidence,
 applicability/conflicts/coverage: [mirror-preview.md](mirror-preview.md). No new disk layout.
+
+## D61–D62 sampler inputs, ThingColor and subtype-0 animation
+
+`CONFIRMED_FROM_COMMUNITY_CODE` (Toolkit d6a2ef80…, GfxAssembler): THING_COLOR (box 2) is the
+per-instance color input. Subtype-0 sampler input ports add (0), multiply (1) and
+subtract (2) after static scale/offset; with one named animation the sampled UV is
+`(uv - t.zw) * t.xy`. Local data confirms ThingColor variant 8 and a W-only
+subtype-0 curve. Instance values in the game remain unknown. Details:
+[instance-preview.md](instance-preview.md), [animation-base-preview.md](animation-base-preview.md).

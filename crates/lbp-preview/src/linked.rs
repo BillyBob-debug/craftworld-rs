@@ -1668,6 +1668,52 @@ mod tests {
         graph.wires.pop();
         graph.wires[0].box_from = -1;
         assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+
+        // Subtype 0: one masked curve, base (scale X/Y, subtracted offset X/Y).
+        graph.wires[0].box_from = 1;
+        graph.boxes[1].subtype_raw = 0;
+        graph.boxes[1].parameters_raw = [1f32.to_bits(), 1f32.to_bits(), 0, 0, 0, 0, 0, 0];
+        graph.boxes[1].animations[1] = node(1).animations[1].clone();
+        let a = &mut graph.boxes[1].animations[0];
+        (
+            a.components_raw,
+            a.component_value_count,
+            a.derived_key_count,
+        ) = (8, 5, 5);
+        a.base_value_bits = [2., 4., 0.5, -3.].map(f32::to_bits);
+        let base = select_diffuse_with_animation_base(&graph, true).unwrap();
+        assert!(select_diffuse(&graph).is_err());
+        assert_eq!(base.uv_transform.subtype(), 0);
+        assert_eq!(base.animation_base.unwrap().subtype_raw, 0);
+        assert_eq!(
+            base.uv_transform
+                .sampling(&[[1., -0.5], [0.5, 3.]], || false)
+                .unwrap(),
+            [[1., 10.], [0., 24.]]
+        );
+        let mut verified = base;
+        let globals = graph.boxes[1].animations[..1].to_vec();
+        crate::animation_base::verify_global(&graph, &mut verified, &globals).unwrap();
+        assert!(verified.animation_base.unwrap().global_rows_verified);
+        assert!(crate::animation_base::verify_global(&graph, &mut verified, &[]).is_err());
+        // Uneven lanes, a populated second binding, or wired inputs stay unsupported.
+        graph.boxes[1].animations[0].components_raw = 3;
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[1].animations[0].components_raw = 0x18;
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[1].animations[0].components_raw = 8;
+        graph.boxes[1].animations[1].name_hex = "633100".into();
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[1].animations[1].name_hex = "000000".into();
+        graph.boxes[1].animations[1].base_value_bits[0] = 1;
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[1].animations[1].base_value_bits[0] = 0;
+        assert!(select_diffuse_with_animation_base(&graph, true).is_ok());
+        graph.wires.push(wire(0, 1, 2));
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.wires.pop();
+        graph.boxes[1].animations[0].base_value_bits[0] = f32::INFINITY.to_bits();
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
     }
     #[test]
     fn requested_uv1_preserves_raw_channels_and_never_falls_back_to_uv0() {

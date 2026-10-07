@@ -2802,3 +2802,64 @@ no Git repository; no staging/commit/push/publication. No proprietary files/keys
 recovered source bundled; no strict clean-room claim.
 D60 complete. Next: inspect selected diffuse blockers among the remaining4partial
 samples and choose a bounded evidenced route; do not infer Complete from coverage.
+
+## D61 — supplied instance color and texture review (code 2026-10-06, recorded 2026-10-07)
+
+Code was written 2026-10-06 but the session ended before docs/STATUS. Recorded
+2026-10-07 after re-running checks. Opt-in user-supplied linear RGBA for ThingColor
+(never a game default), port-2 alpha UV subtraction, one nested tint fold, and an
+"other required texture slots unrendered" review flag that blocks Complete.
+Evidence/rules: [docs/instance-preview.md](docs/instance-preview.md).
+
+Counts (distinct catalog GUID; 48-hash cohort = D60's 40 + 8 catalog-linked meshes):
+before code 48/43/0 (viewable/full diffuse/Complete); default after 48/43/0;
+supplied white 45; supplied (0.25,0.5,0.75,0.5) + animation base 46.
+**+0 newly viewable / +0 newly Complete.** Supplied-color coverage is preview only.
+
+Evidence files (local-analysis/, from 2026-10-06): d61-compatibility-{baseline,final,
+reviewed}.json, d61-instance-{white,final,reviewed}.json, d61-blocker-material-oracle.json
+(6 records), d61-mesh-{geometry,groups,uv}-parity-final.json: 48 compared/0 mismatches,
+d61-global-animation-evidence.json. Exact 2026-10-06 command lines were not recorded.
+Re-check 2026-10-07: fmt pass; tests lbp-preview 21, bevy 10, legacy 65 pass; Clippy
+and build pass. Not tested then: native window, real instance colors, game pixels.
+
+## D62 — git baseline, partial-sample blockers, subtype-0 animation base (2026-10-07)
+
+Git: local repo initialized at the project root with the existing default-deny
+.gitignore; 230 authored files staged (no file over 200 KB, no game/reference/
+local-analysis content); baseline commit d7d33b2. Local only, no remote, no push.
+The baseline includes the D61 code (see above).
+
+Blockers on D60's 4 partial samples (d62-blocker-material-oracle.json, 8 records):
+- 00012fd4 bounce pad, 00002d94 neon lifebar: ThingColor instance input. Covered
+  only with a supplied color (D61); real game value unknown.
+- 0001da30 geometry boy: animation base (D56) + ThingColor.
+- 00020c92 logic LCD: prim 2 ThingColor alpha on sampler port 2 (D61, supplied);
+  prim 1 base_logic_lcd_custom 3d32e960… has NO diffuse wire (uses outputs 4
+  self-illumination and 6 reflect). What the game shows for unwired diffuse is
+  UNKNOWN; not invented. This is the only blocker left with every option on.
+- Added in the 48 cohort: 00015fa4 eve_floor_pipe2 bubbles used a subtype-0
+  single-curve animated sampler. Implemented this milestone.
+
+Change: animation-base selector accepts subtype 0 with one named curve, base
+(x,y,z,w) → scale (x,y), offset (-(z·x), -(w·y)) per Toolkit GfxAssembler 191–196.
+Rules/evidence: [docs/animation-base-preview.md](docs/animation-base-preview.md) D62 section.
+
+Counts (48-hash cohort, distinct GUID): default 48/43/0 → 48/43/0; animation base
+48/44/0 → 48/45/0 (00015fa4 3/4 → 4/4 groups, +4 triangles); supplied color +
+animation base 46 → 47. **+0 newly viewable / +0 newly Complete.** Geometry identical.
+
+Commands (after `. ./scripts/use-local-rust.ps1`; A=a2-inventory-verified.json, G=game-data/a1-disc):
+- run-material-oracle.ps1 -Diffuse d62-blocker-material-samples.json → d62-blocker-material-oracle.json: 8 records, synthetic checks pass, known ZigZag conflict unchanged.
+- Same for d62-bubbles-material-samples.json → d62-bubbles-material-oracle.json: 2 records.
+- compatibility_census A G d61-mesh-samples.json: d62-base-baseline.json (code stashed, --animation-base) 48/44/0; d62-default-after 48/43/0; d62-base-after 48/45/0; d62-instance-base-after (--instance-rgba 0.25,0.5,0.75,0.5 --animation-base) 48/47/0.
+- diffuse_parity: d62-bubbles-base-parity (--animation-base) 2 compared/0 mismatches/2 projected; d62-bubbles-static-parity 2/0/0; d62-animation-parity (D56 oracle, --animation-base) 2/0/2; d62-diffuse 32/0/28; d62-linked 48/0/46; d62-alpha 1/0/1; d62-mirror 5/0/5.
+- First parity run on the 8-record blocker oracle failed "diffuse absent" (LCD material has no diffuse); rerun on a bubbles/fan-only manifest.
+- cargo fmt --all --check pass; cargo test (preview 21, bevy 10, legacy 65, resource/catalog suites) pass; python unittest 34 pass; Clippy -D warnings pass; build pass.
+- Native: lbp-bevy-viewer --select-guid 00015fa4 --animation-base --qa-capture d62-bevy-bubbles-base.png, hidden start; log confirms non-primary monitor 165v0 before showing; 4/4 groups, labels show subtype-0 derived UV × (1,1) + (-0,-3); no shader errors. One image viewed; Complete checks stay locked.
+
+Not tested: game pixels, motion/time, real instance colors, unwired-diffuse behavior,
+legacy viewer subtype-0 path, other revisions, corpus totals (unknown).
+Originals read-only; FARC/SFO/MAP untouched. No publication, keys or recovered code.
+Next: decide how to present materials with no diffuse wire (00020c92 prim 1): look
+for evidence of the game's default for an unwired diffuse port before any route.

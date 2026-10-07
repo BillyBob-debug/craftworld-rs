@@ -99,7 +99,7 @@ pub fn load_mesh_groups(
 ) -> Result<GroupedMesh, String> {
     load_mesh_groups_with_animation_base(source, catalog, key, control, false)
 }
-/// Opt-in diagnostic snapshot of stored local matrix animation base rows.
+/// Opt-in diagnostic snapshot of stored local sampler animation base values.
 pub fn load_mesh_groups_with_animation_base(
     source: &AttachedSource,
     catalog: &Catalog,

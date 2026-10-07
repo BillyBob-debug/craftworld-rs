@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-07 — D62 git baseline and subtype-0 animation base
+
+Local git repo with default-deny ignore; baseline commit. Recorded the unlogged D61
+(supplied instance color, texture review). Opt-in animation base now covers one-curve
+scale/offset samplers. 48-GUID cohort: +0 viewable/+0 Complete; base mode full
+diffuse 44→45. Only blocker left with all options on: a material with no diffuse
+wire. [STATUS.md](STATUS.md), [animation-base-preview.md](docs/animation-base-preview.md).
+
 ## 2026-10-06 — D60 MIRROR and independent product axes
 
 Added typed Mirror mapping and separate two-source GPU sampler axes. Repeat-grid,

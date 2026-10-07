@@ -2,6 +2,8 @@
 //! Sources/bounds/unknown timing: docs/animation-base-preview.md.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct AnimationBaseSnapshot {
+    /// 1: two matrix-row curves; 0: one scale/offset curve, second row empty.
+    pub subtype_raw: u32,
     pub global_rows_verified: bool,
     pub static_matrix_bits: [u32; 6],
     pub row_bits: [[u32; 4]; 2],
@@ -51,7 +53,7 @@ pub(crate) fn select(
     if wire.port_from_raw != 0
         || wire.swizzle_raw != [0; 5]
         || sample.type_raw != 1
-        || sample.subtype_raw != 1
+        || sample.subtype_raw > 1
         || sample.parameters_raw[4] > 1
         || graph
             .wires
@@ -59,22 +61,31 @@ pub(crate) fn select(
             .any(|w| w.box_to as usize == sample_index)
     {
         return Err(
-            "Unsupported: animation base only supports direct unwired matrix UV0/UV1 sampler"
-                .into(),
+            "Unsupported: animation base only supports direct unwired UV0/UV1 sampler".into(),
         );
     }
-    for a in &sample.animations {
+    // Subtype 1: two XYZ matrix-row curves. Subtype 0: one curve whose base
+    // vector is (scale X/Y, subtracted offset X/Y); the second binding is empty.
+    let named = if sample.subtype_raw == 1 { 2 } else { 1 };
+    for a in &sample.animations[..named] {
         let name = a.name_hex.as_bytes();
+        let mask = a.components_raw;
+        let lanes = mask.count_ones() as usize;
+        let valid_mask = if sample.subtype_raw == 1 {
+            mask == 7
+        } else {
+            (1..=15).contains(&mask)
+        };
         if name.len() != 6
             || &name[4..] != b"00"
             || !name[..4].iter().all(u8::is_ascii_hexdigit)
-            || a.components_raw != 7
+            || !valid_mask
             || a.component_value_count == 0
             || a.component_value_count > 4096
-            || !a.component_value_count.is_multiple_of(3)
-            || a.derived_key_count != a.component_value_count / 3
+            || !a.component_value_count.is_multiple_of(lanes)
+            || a.derived_key_count != a.component_value_count / lanes
         {
-            return Err("Unsupported: animation base needs two named XYZ row curves".into());
+            return Err("Unsupported: animation base needs named masked curves".into());
         }
         for offset in [0, 2] {
             let value = u8::from_str_radix(&a.name_hex[offset..offset + 2], 16)
@@ -84,18 +95,37 @@ pub(crate) fn select(
             }
         }
     }
-    if sample.animations[0].name_hex == sample.animations[1].name_hex {
-        return Err("Unsupported: animation base row names must differ".into());
-    }
     let rows = sample.animations.each_ref().map(|a| a.base_value_bits);
-    let uv_transform = crate::SamplingTransform::Matrix(crate::UvMatrix {
-        bits: [
-            rows[0][0], rows[0][1], rows[0][2], rows[1][0], rows[1][1], rows[1][2],
-        ],
-    });
+    let uv_transform = if sample.subtype_raw == 1 {
+        if sample.animations[0].name_hex == sample.animations[1].name_hex {
+            return Err("Unsupported: animation base row names must differ".into());
+        }
+        crate::SamplingTransform::Matrix(crate::UvMatrix {
+            bits: [
+                rows[0][0], rows[0][1], rows[0][2], rows[1][0], rows[1][1], rows[1][2],
+            ],
+        })
+    } else {
+        let empty = &sample.animations[1];
+        if empty.name_hex.bytes().any(|b| b != b'0')
+            || empty.component_value_count != 0
+            || empty.components_raw != 0
+            || empty.derived_key_count != 0
+            || empty.base_value_bits != [0; 4]
+        {
+            return Err("Unsupported: scale/offset animation base needs one curve".into());
+        }
+        // (uv - zw) * xy, expressed as uv * xy + (-(z * x), -(w * y)). A single
+        // rounded product per axis; no fused-operation or GPU rounding claim.
+        let [sx, sy, zx, zy] = rows[0].map(f32::from_bits);
+        crate::SamplingTransform::ScaleOffset(crate::UvTransform {
+            bits: [sx, sy, -(zx * sx), -(zy * sy)].map(f32::to_bits),
+        })
+    };
     uv_transform.validate()?;
     Ok(crate::DiffuseSelection {
         animation_base: Some(AnimationBaseSnapshot {
+            subtype_raw: sample.subtype_raw,
             global_rows_verified: false,
             static_matrix_bits: [
                 sample.parameters_raw[0],
@@ -129,7 +159,8 @@ pub(crate) fn verify_global(
     let Some(snapshot) = selection.animation_base.as_mut() else {
         return Ok(());
     };
-    for local in &graph.boxes[selection.sample_index].animations {
+    let named = if snapshot.subtype_raw == 1 { 2 } else { 1 };
+    for local in &graph.boxes[selection.sample_index].animations[..named] {
         let matches = globals
             .iter()
             .filter(|a| a.name_hex == local.name_hex)
