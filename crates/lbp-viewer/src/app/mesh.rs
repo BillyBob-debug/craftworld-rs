@@ -171,9 +171,10 @@ impl MeshView {
                                         Some(lbp_preview::TextureAddress::MirroredRepeat) => {
                                             egui::TextureOptions::LINEAR_MIRRORED_REPEAT
                                         }
-                                        Some(lbp_preview::TextureAddress::ClampToEdge) => {
-                                            egui::TextureOptions::LINEAR
-                                        }
+                                        Some(
+                                            lbp_preview::TextureAddress::ClampToEdge
+                                            | lbp_preview::TextureAddress::Clamp,
+                                        ) => egui::TextureOptions::LINEAR,
                                         None => unreachable!(
                                             "mixed axes rejected before image installation"
                                         ),

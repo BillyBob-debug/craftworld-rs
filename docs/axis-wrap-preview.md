@@ -55,3 +55,6 @@ No original writes,proprietary assets/code/keys,recovered source or publication.
 
 D60 adds MIRROR2 and independent two-source axes; earlier unsupported statements
 above describe D54. [Current scope](mirror-preview.md).
+
+D82 accepts legacy CLAMP (5) as edge-clamped display and keeps mirror-once 6-8
+refused. [Current scope](d82-wrap-modes.md).

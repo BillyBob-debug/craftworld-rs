@@ -83,7 +83,7 @@ mod tests {
         assert_eq!(addressing(raw, true).unwrap().raw(), [3, 3]);
         assert!(addressing(raw, false).is_err());
         assert_eq!(addressing([Some(4), Some(2)], true).unwrap().raw(), [3, 2]);
-        assert!(addressing([Some(4), Some(5)], true).is_err());
+        assert!(addressing([Some(4), Some(6)], true).is_err());
         assert!(addressing([Some(4), None], true).is_err());
         for v in [
             0.,
