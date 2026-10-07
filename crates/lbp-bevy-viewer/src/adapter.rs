@@ -125,7 +125,10 @@ pub fn image_axes(
     let address = |axis| match axis {
         lbp_preview::TextureAddress::Repeat => ImageAddressMode::Repeat,
         lbp_preview::TextureAddress::MirroredRepeat => ImageAddressMode::MirrorRepeat,
-        lbp_preview::TextureAddress::ClampToEdge => ImageAddressMode::ClampToEdge,
+        // Raw 5 legacy CLAMP: edge-clamped display approximation (docs/d82-wrap-modes.md).
+        lbp_preview::TextureAddress::ClampToEdge | lbp_preview::TextureAddress::Clamp => {
+            ImageAddressMode::ClampToEdge
+        }
     };
     image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
         address_mode_u: address(wrap.u),
@@ -328,7 +331,18 @@ mod tests {
         }
         assert!(image(u32::MAX, 2, vec![], true).is_err());
         assert!(image(2, 2, vec![0; 15], true).is_err());
-        for raw in [[1, 3], [3, 1], [2, 2], [1, 2], [2, 1], [2, 3], [3, 2]] {
+        for raw in [
+            [1, 3],
+            [3, 1],
+            [2, 2],
+            [1, 2],
+            [2, 1],
+            [2, 3],
+            [3, 2],
+            [5, 1],
+            [2, 5],
+            [5, 5],
+        ] {
             let wrap = lbp_preview::TextureWrapping::from_raw(Some(raw[0]), Some(raw[1])).unwrap();
             let i = image_axes(2, 2, vec![255; 16], wrap).unwrap();
             let ImageSampler::Descriptor(s) = i.sampler else {
