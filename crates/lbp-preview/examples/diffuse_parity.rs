@@ -140,6 +140,42 @@ fn run() -> Result<(), String> {
             match lbp_preview::select_diffuse_with_animation_base(&graph.graph, animation_base) {
                 Ok(s) => {
                     let sample_node = &graph.graph.boxes[s.sample_index];
+                    // D78: the one animated leaf, in any product role, must equal its
+                    // base-row transform; every static leaf must equal its parameters.
+                    let transform_equal =
+                        |index: usize, transform: lbp_preview::SamplingTransform| {
+                            match s.animation_base {
+                                Some(base) if base.sample_index == index => {
+                                    transform.bits()
+                                        == if base.subtype_raw == 1 {
+                                            vec![
+                                                base.row_bits[0][0],
+                                                base.row_bits[0][1],
+                                                base.row_bits[0][2],
+                                                base.row_bits[1][0],
+                                                base.row_bits[1][1],
+                                                base.row_bits[1][2],
+                                            ]
+                                        } else {
+                                            // Independent recomputation of (uv - zw) * xy.
+                                            let [x, y, z, w] = base.row_bits[0].map(f32::from_bits);
+                                            vec![x, y, -(z * x), -(w * y)]
+                                                .into_iter()
+                                                .map(f32::to_bits)
+                                                .collect()
+                                        }
+                                }
+                                _ => transform
+                                    .parameter_indices()
+                                    .iter()
+                                    .zip(transform.bits())
+                                    .all(|(i, b)| {
+                                        sample["graph"]["boxes"][index]["parameters_raw"][*i]
+                                            .as_u64()
+                                            == Some(u64::from(*b))
+                                    }),
+                            }
+                        };
                     let multiply_equal = if let Some(mix) = s.alpha_mix {
                         let root = mix.mix_index;
                         let color = s.color_index.ok_or("alpha MIX color index missing")?;
@@ -262,15 +298,7 @@ fn run() -> Result<(), String> {
                             && second_node["parameters_raw"][4].as_u64()
                                 == Some(second.uv_channel as u64)
                             && second_node["parameters_raw"][5].as_u64() == Some(second.slot as u64)
-                            && second
-                                .uv_transform
-                                .parameter_indices()
-                                .iter()
-                                .zip(second.uv_transform.bits())
-                                .all(|(i, b)| {
-                                    second_node["parameters_raw"][*i].as_u64()
-                                        == Some(u64::from(*b))
-                                })
+                            && transform_equal(second.sample_index, second.uv_transform)
                     } else if let (Some(inner), None, Some(color), Some(second), Some(root)) = (
                         s.inner_multiply_index,
                         s.third_sample,
@@ -323,15 +351,7 @@ fn run() -> Result<(), String> {
                             && second_node["parameters_raw"][4].as_u64()
                                 == Some(second.uv_channel as u64)
                             && second_node["parameters_raw"][5].as_u64() == Some(second.slot as u64)
-                            && second
-                                .uv_transform
-                                .parameter_indices()
-                                .iter()
-                                .zip(second.uv_transform.bits())
-                                .all(|(i, b)| {
-                                    second_node["parameters_raw"][*i].as_u64()
-                                        == Some(u64::from(*b))
-                                })
+                            && transform_equal(second.sample_index, second.uv_transform)
                     } else if let (Some(inner), Some(third), Some(second), Some(root)) = (
                         s.inner_multiply_index,
                         s.third_sample,
@@ -403,15 +423,7 @@ fn run() -> Result<(), String> {
                                             == Some(leaf.uv_channel as u64)
                                         && node["parameters_raw"][5].as_u64()
                                             == Some(leaf.slot as u64)
-                                        && leaf
-                                            .uv_transform
-                                            .parameter_indices()
-                                            .iter()
-                                            .zip(leaf.uv_transform.bits())
-                                            .all(|(i, b)| {
-                                                node["parameters_raw"][*i].as_u64()
-                                                    == Some(u64::from(*b))
-                                            })
+                                        && transform_equal(leaf.sample_index, leaf.uv_transform)
                                 })
                     } else {
                         match (s.multiply_index, s.color_index) {
@@ -445,77 +457,46 @@ fn run() -> Result<(), String> {
                                         == Some(second.uv_channel as u64)
                                     && node["parameters_raw"][5].as_u64()
                                         == Some(second.slot as u64)
-                                    && second
-                                        .uv_transform
-                                        .parameter_indices()
-                                        .iter()
-                                        .zip(second.uv_transform.bits())
-                                        .all(|(i, b)| {
-                                            node["parameters_raw"][*i].as_u64()
-                                                == Some(u64::from(*b))
-                                        })
+                                    && transform_equal(second.sample_index, second.uv_transform)
                             }),
                             _ => false,
                         }
                     };
-                    let base_equal =
-                        s.animation_base.is_none_or(|base| {
-                            let animations =
-                                &sample["graph"]["boxes"][s.sample_index]["animations"];
-                            [0, 1, 2, 3, 6, 7].iter().zip(base.static_matrix_bits).all(
+                    let base_equal = s.animation_base.is_none_or(|base| {
+                        let leaves = [Some(s.sample_index)].into_iter().chain(
+                            [s.second_sample, s.third_sample, s.fourth_sample]
+                                .map(|l| l.map(|l| l.sample_index)),
+                        );
+                        let node = &sample["graph"]["boxes"][base.sample_index];
+                        leaves.flatten().any(|l| l == base.sample_index)
+                            && node["subtype_raw"].as_u64() == Some(u64::from(base.subtype_raw))
+                            && [0, 1, 2, 3, 6, 7].iter().zip(base.static_matrix_bits).all(
                                 |(i, bits)| {
-                                    sample["graph"]["boxes"][s.sample_index]["parameters_raw"][*i]
-                                        .as_u64()
-                                        == Some(u64::from(bits))
+                                    node["parameters_raw"][*i].as_u64() == Some(u64::from(bits))
                                 },
-                            ) && (0..2).all(|row| {
-                                animations[row]["derived_key_count"].as_u64()
+                            )
+                            && (0..2).all(|row| {
+                                node["animations"][row]["derived_key_count"].as_u64()
                                     == Some(base.key_counts[row] as u64)
                                     && (0..4).all(|c| {
-                                        animations[row]["base_value_bits"][c].as_u64()
+                                        node["animations"][row]["base_value_bits"][c].as_u64()
                                             == Some(u64::from(base.row_bits[row][c]))
                                     })
-                            }) && s.uv_transform.bits()
-                                == if base.subtype_raw == 1 {
-                                    vec![
-                                        base.row_bits[0][0],
-                                        base.row_bits[0][1],
-                                        base.row_bits[0][2],
-                                        base.row_bits[1][0],
-                                        base.row_bits[1][1],
-                                        base.row_bits[1][2],
-                                    ]
-                                } else {
-                                    // Independent recomputation of (uv - zw) * xy.
-                                    let [x, y, z, w] = base.row_bits[0].map(f32::from_bits);
-                                    vec![x, y, -(z * x), -(w * y)]
-                                        .into_iter()
-                                        .map(f32::to_bits)
-                                        .collect()
-                                }
-                        });
+                            })
+                    });
                     if s.output_index != output
                         || !base_equal
                         || !multiply_equal
                         || s.slot != sample_node.parameters_raw[5] as usize
                         || s.uv_channel != sample_node.parameters_raw[4] as usize
                         || s.uv_transform.subtype() != sample_node.subtype_raw
-                        || (s.animation_base.is_none()
-                            && s.uv_transform
-                                .parameter_indices()
-                                .iter()
-                                .zip(s.uv_transform.bits())
-                                .any(|(i, bits)| {
-                                    sample["graph"]["boxes"][s.sample_index]["parameters_raw"][*i]
-                                        .as_u64()
-                                        != Some(u64::from(*bits))
-                                }))
+                        || !transform_equal(s.sample_index, s.uv_transform)
                     {
                         mismatches += 1;
                     }
                     projected += 1;
                     // Versioned diagnostics retain all three original selectors/root indices.
-                    json!({"status":"projected","alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+                    json!({"status":"projected","alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
                 }
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
@@ -523,7 +504,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":12,"animation_base_enabled":animation_base,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":13,"animation_base_enabled":animation_base,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

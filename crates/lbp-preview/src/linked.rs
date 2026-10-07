@@ -321,12 +321,35 @@ fn sampler(graph: &GraphMetadata, index: usize) -> Result<SamplerSelection, Stri
         uv_transform,
     })
 }
+/// Product leaves. Static samplers first; with the animation-base opt-in, at most
+/// one distinct leaf may instead use its named base rows (D78, docs/d78-animated-product.md).
+struct Leaves {
+    animated: bool,
+    base: Option<crate::AnimationBaseSnapshot>,
+}
+impl Leaves {
+    fn sample(&mut self, graph: &GraphMetadata, index: usize) -> Result<SamplerSelection, String> {
+        let error = match sampler(graph, index) {
+            Ok(selection) => return Ok(selection),
+            Err(error) if !self.animated => return Err(error),
+            Err(error) => error,
+        };
+        let (selection, snapshot) =
+            crate::animation_base::sampler(graph, index).map_err(|_| error)?;
+        if self.base.is_some_and(|b| b.sample_index != index) {
+            return Err("Unsupported: animation base allows one animated product sampler".into());
+        }
+        self.base = Some(snapshot);
+        Ok(selection)
+    }
+}
 // Structurally fixed chain: ((A × B) × C) × D. No recursive traversal.
 // D shares A's exact coordinates, C shares B's. Evidence: docs/four-product-preview.md.
 fn four_chain(
     graph: &GraphMetadata,
     root: usize,
     output: usize,
+    leaves: &mut Leaves,
 ) -> Result<Option<DiffuseSelection>, String> {
     let children = |index: usize| {
         graph
@@ -378,10 +401,10 @@ fn four_chain(
         }
     }
     let bottom = children(deep);
-    let mut first = sampler(graph, bottom[0].box_from as usize)?;
-    let mut second = sampler(graph, bottom[1].box_from as usize)?;
-    let third = sampler(graph, third)?;
-    let fourth = sampler(graph, fourth)?;
+    let mut first = leaves.sample(graph, bottom[0].box_from as usize)?;
+    let mut second = leaves.sample(graph, bottom[1].box_from as usize)?;
+    let third = leaves.sample(graph, third)?;
+    let fourth = leaves.sample(graph, fourth)?;
     if [
         first.sample_index,
         second.sample_index,
@@ -611,6 +634,15 @@ fn select_static_mix(
     Ok(selection)
 }
 pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String> {
+    select_products(
+        graph,
+        &mut Leaves {
+            animated: false,
+            base: None,
+        },
+    )
+}
+fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<DiffuseSelection, String> {
     let boxes = &graph.boxes;
     let wires = &graph.wires;
     if boxes.len() > 1024 || wires.len() > 4096 {
@@ -652,7 +684,7 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
         return Err("Unsupported: diffuse output must be static and unswizzled".into());
     }
     if boxes[wire.box_from as usize].type_raw == 10 {
-        if let Some(selection) = four_chain(graph, wire.box_from as usize, output_index)? {
+        if let Some(selection) = four_chain(graph, wire.box_from as usize, output_index, leaves)? {
             return Ok(selection);
         }
     }
@@ -727,8 +759,8 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
                 let (inner, outer) = if boxes[left].type_raw == 10 { (left, right) } else { (right, left) };
                 let [a, b] = nested_inputs(inner)?;
                 let (inner_sample, inner_color) = if boxes[a].type_raw == 1 { (a, b) } else { (b, a) };
-                sampler(graph, inner_sample)?;
-                second_sample = Some(sampler(graph, outer)?);
+                leaves.sample(graph, inner_sample)?;
+                second_sample = Some(leaves.sample(graph, outer)?);
                 inner_multiply_index = Some(inner);
                 (inner_sample, Some(inner_color))
             }
@@ -738,9 +770,9 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
                 if first == second || first == third || second == third {
                     return Err("Unsupported: nested product requires three distinct texture leaves".into());
                 }
-                let first_selection = sampler(graph, first)?;
-                let mut second_selection = sampler(graph, second)?;
-                let mut third = sampler(graph, third)?;
+                let first_selection = leaves.sample(graph, first)?;
+                let mut second_selection = leaves.sample(graph, second)?;
+                let mut third = leaves.sample(graph, third)?;
                 let shares = |s: &SamplerSelection| s.uv_channel == third.uv_channel && s.uv_transform == third.uv_transform;
                 if !shares(&second_selection) && shares(&first_selection) {
                     std::mem::swap(&mut first, &mut second);
@@ -766,8 +798,8 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
             (1, 1) => {
                 // Same sample on both ports is that sample squared: identical
                 // coordinates, so the existing product path is exact per texel.
-                sampler(graph, left)?;
-                let second = sampler(graph, right)?;
+                leaves.sample(graph, left)?;
+                let second = leaves.sample(graph, right)?;
                 second_sample = Some(second);
                 (left, None)
             }
@@ -778,8 +810,8 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
                 if boxes[a].type_raw != 1 || boxes[b].type_raw != 1 {
                     return Err("Unsupported: product × COLOR needs two direct texture samples under the inner multiply".into());
                 }
-                sampler(graph, a)?;
-                second_sample = Some(sampler(graph, b)?);
+                leaves.sample(graph, a)?;
+                second_sample = Some(leaves.sample(graph, b)?);
                 inner_multiply_index = Some(inner);
                 (a, Some(color))
             }
@@ -812,7 +844,7 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
         };
         used_wires = 3 + 2 * nested;
     }
-    let selected = sampler(graph, sample_index)?;
+    let selected = leaves.sample(graph, sample_index)?;
     if wire.port_from_raw != 0
         || wire.swizzle_raw != [0; 5]
         || output.subtype_raw != 0
@@ -822,7 +854,7 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
     }
     Ok(DiffuseSelection {
         alpha_mix: None,
-        animation_base: None,
+        animation_base: leaves.base,
         blend: None,
         fourth_sample: None,
         deep_multiply_index: None,
@@ -852,7 +884,18 @@ pub fn select_diffuse_with_animation_base(
     match select_diffuse(graph) {
         Ok(selection) => Ok(selection),
         Err(error) if !animation_base => Err(error),
-        Err(_) => crate::animation_base::select(graph),
+        Err(_) => crate::animation_base::select(graph).or_else(|_| {
+            let mut leaves = Leaves {
+                animated: true,
+                base: None,
+            };
+            let selection = select_products(graph, &mut leaves)?;
+            // D78 scope: products of two or more texture samples only.
+            match (selection.animation_base, selection.second_sample) {
+                (Some(_), Some(_)) => Ok(selection),
+                _ => Err("Unsupported: animation base product needs 2+ textures and one animated sampler".into()),
+            }
+        }),
     }
 }
 fn binding(
@@ -1969,6 +2012,184 @@ mod tests {
         assert!(select_diffuse_with_animation_base(&graph, true).is_err());
         graph.wires.pop();
         graph.boxes[1].animations[0].base_value_bits[0] = f32::INFINITY.to_bits();
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+    }
+    #[test]
+    fn animation_base_opt_in_selects_one_animated_leaf_of_a_static_product() {
+        use lbp_resource::material::{AnimationMetadata, BoxMetadata, WireMetadata};
+        let node = |kind, slot: u32| {
+            let mut parameters_raw = [0; 8];
+            if kind == 1 {
+                parameters_raw = [1f32.to_bits(), 1f32.to_bits(), 0, 0, 0, slot, 0, 0];
+            } else if kind == 3 {
+                parameters_raw[..4].copy_from_slice(&[0.5f32, 1., 0.25, 1.].map(f32::to_bits));
+            }
+            BoxMetadata {
+                type_raw: kind,
+                declared_parameter_count: 8,
+                parameters_raw,
+                position_bits: [0; 4],
+                subtype_raw: 0,
+                animations: std::array::from_fn(|_| AnimationMetadata {
+                    base_value_bits: [0; 4],
+                    component_value_count: 0,
+                    component_bytes_sha256: String::new(),
+                    name_hex: "000000".into(),
+                    components_raw: 0,
+                    derived_key_count: 0,
+                }),
+                texture_slot_raw: None,
+                texture_slot_in_range: None,
+            }
+        };
+        let wire = |from, to, port| WireMetadata {
+            box_from: from,
+            box_to: to,
+            port_from_raw: 0,
+            port_to_raw: port,
+            swizzle_raw: [0; 5],
+            from_in_range: true,
+            to_in_range: true,
+        };
+        // Subtype-0 scale/offset curve (D62 rule): base (2, 4, 0.5, -3), mask XYZW.
+        let animate = |graph: &mut GraphMetadata, index: usize, name: &str| {
+            let a = &mut graph.boxes[index].animations[0];
+            a.name_hex = name.into();
+            (
+                a.components_raw,
+                a.component_value_count,
+                a.derived_key_count,
+            ) = (15, 8, 2);
+            a.base_value_bits = [2., 4., 0.5, -3.].map(f32::to_bits);
+        };
+        let derived = [2f32, 4., -(0.5f32 * 2.), -(-3f32 * 4.)].map(f32::to_bits);
+        // T1 × T2: boxes 1/2 samples, 3 root multiply.
+        let mut graph = GraphMetadata {
+            box_count: 4,
+            wire_count: 3,
+            boxes: vec![node(0, 0), node(1, 0), node(1, 1), node(10, 0)],
+            wires: vec![wire(1, 3, 0), wire(2, 3, 1), wire(3, 0, 0)],
+            graph_start: 0,
+            parsed_graph_bytes: 0,
+            unparsed_bytes: 0,
+        };
+        let plain = select_diffuse(&graph).unwrap();
+        assert!(plain.animation_base.is_none());
+        assert_eq!(
+            select_diffuse_with_animation_base(&graph, true).unwrap(),
+            plain
+        );
+        animate(&mut graph, 1, "623100");
+        assert!(select_diffuse(&graph).is_err());
+        assert!(select_diffuse_with_animation_base(&graph, false).is_err());
+        let s = select_diffuse_with_animation_base(&graph, true).unwrap();
+        let base = s.animation_base.unwrap();
+        assert_eq!((base.sample_index, base.subtype_raw), (1, 0));
+        assert_eq!(
+            (base.key_counts, base.global_rows_verified),
+            ([2, 0], false)
+        );
+        assert_eq!(s.uv_transform.bits(), derived);
+        let second = s.second_sample.unwrap();
+        assert_eq!((second.sample_index, second.slot), (2, 1));
+        assert_eq!(
+            second.uv_transform.bits(),
+            [1f32.to_bits(), 1f32.to_bits(), 0, 0]
+        );
+        assert_eq!(
+            (s.multiply_index, s.ignored_nodes, s.ignored_wires),
+            (Some(3), 0, 0)
+        );
+        // A nonzero base offset leaves the grid; both samplers stay independent (D50).
+        assert!(!uses_grid(s));
+        let mut verified = s;
+        let globals = graph.boxes[1].animations[..1].to_vec();
+        crate::animation_base::verify_global(&graph, &mut verified, &globals).unwrap();
+        assert!(verified.animation_base.unwrap().global_rows_verified);
+        assert!(crate::animation_base::verify_global(&graph, &mut verified, &[]).is_err());
+
+        // The animated leaf may be the second sample; the primary stays static.
+        graph.boxes[1] = node(1, 0);
+        animate(&mut graph, 2, "633100");
+        let s = select_diffuse_with_animation_base(&graph, true).unwrap();
+        assert_eq!(s.animation_base.unwrap().sample_index, 2);
+        assert_eq!(s.second_sample.unwrap().uv_transform.bits(), derived);
+        assert_eq!(
+            s.uv_transform.bits(),
+            [1f32.to_bits(), 1f32.to_bits(), 0, 0]
+        );
+        let mut verified = s;
+        let globals = graph.boxes[2].animations[..1].to_vec();
+        crate::animation_base::verify_global(&graph, &mut verified, &globals).unwrap();
+        // Two distinct animated leaves are not taken.
+        animate(&mut graph, 1, "623100");
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[1] = node(1, 0);
+        // One animated sample on both ports is that sample squared.
+        graph.wires[0].box_from = 2;
+        let squared = select_diffuse_with_animation_base(&graph, true).unwrap();
+        assert_eq!(squared.second_sample.unwrap().sample_index, 2);
+        assert_eq!(squared.animation_base.unwrap().sample_index, 2);
+        graph.wires[0].box_from = 1;
+        // Rejections: animated multiply, wired or UV2 animated sampler, bad curve.
+        graph.boxes[3].animations[0].name_hex = "643100".into();
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[3].animations[0].name_hex = "000000".into();
+        graph.wires.push(wire(1, 2, 0));
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.wires.pop();
+        graph.boxes[2].parameters_raw[4] = 2;
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[2].parameters_raw[4] = 0;
+        graph.boxes[2].animations[0].component_value_count = 7;
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[2].animations[0].component_value_count = 8;
+        assert!(select_diffuse_with_animation_base(&graph, true).is_ok());
+
+        // One animated texture × COLOR is not a 2+ texture product (out of D78 scope).
+        graph.boxes[1] = node(3, 0);
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[1] = node(1, 0);
+        // D75 shape (T1 × T2) × COLOR with the animated leaf keeps its tint.
+        graph.boxes.extend([node(3, 0), node(10, 0)]);
+        graph.wires[2] = wire(3, 5, 0);
+        graph.wires.extend([wire(4, 5, 1), wire(5, 0, 0)]);
+        let tinted = select_diffuse_with_animation_base(&graph, true).unwrap();
+        assert!(select_diffuse(&graph).is_err());
+        assert_eq!(tinted.tint.values(), [0.5, 1., 0.25, 1.]);
+        assert_eq!(
+            (tinted.inner_multiply_index, tinted.color_index),
+            (Some(3), Some(4))
+        );
+        assert_eq!(tinted.animation_base.unwrap().sample_index, 2);
+        // An animated COLOR is still rejected.
+        graph.boxes[4].animations[0].name_hex = "653100".into();
+        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        graph.boxes[4].animations[0].name_hex = "000000".into();
+
+        // Three-texture product: the animated scale/offset leaf may be the
+        // independent third sample (D65 rule unchanged).
+        graph.boxes[4] = node(1, 2);
+        graph.boxes[2] = node(1, 1);
+        animate(&mut graph, 4, "663100");
+        let three = select_diffuse_with_animation_base(&graph, true).unwrap();
+        assert!(select_diffuse(&graph).is_err());
+        let third = three.third_sample.unwrap();
+        assert_eq!(third.sample_index, 4);
+        assert_eq!(third.uv_transform.bits(), derived);
+        assert_eq!(three.animation_base.unwrap().sample_index, 4);
+        // A matrix (subtype 1) animated leaf cannot be the independent third.
+        graph.boxes[4].subtype_raw = 1;
+        for (i, name) in ["663100", "673100"].into_iter().enumerate() {
+            let a = &mut graph.boxes[4].animations[i];
+            a.name_hex = name.into();
+            (
+                a.components_raw,
+                a.component_value_count,
+                a.derived_key_count,
+            ) = (7, 3, 1);
+            a.base_value_bits = [1f32.to_bits(), 0, 0, 0];
+        }
         assert!(select_diffuse_with_animation_base(&graph, true).is_err());
     }
     #[test]
