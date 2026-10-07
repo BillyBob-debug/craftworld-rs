@@ -235,7 +235,7 @@ impl MaterialAsset {
             Self::Texture(a) if a.fourth.is_some() => format!("Diffuse only • four-texture nested product • UV{} {} × UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.fourth_sample.unwrap().uv_channel,a.selection.fourth_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.third.is_some() => format!("Diffuse only • three-texture nested product{} • UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.third.as_ref().and_then(|t| t.relative).filter(|r| !r.is_identity() || r.from_primary).map_or(String::new(), |r| format!(" (third from {} coordinates × {:?} + {:?})", if r.from_primary {"primary"} else {"second"}, r.scale, r.offset)),a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture sampling • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.blend.map_or_else(||a.selection.tint.label(),|blend|blend.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture product, second {}, nearest grid {:?}",second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.texture_alpha_mix.map(|m|m.label()).or(a.selection.blend.map(|blend|blend.label())).unwrap_or_else(||a.selection.tint.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture {}, second {}, nearest grid {:?}",if a.selection.texture_alpha_mix.is_some(){"alpha MIX"}else{"product"},second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire • black (0,0,0,0) per Toolkit shader generator; game default unverified • other channels not rendered • ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) => format!("Solid diffuse color {:?} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),a.selection.ignored_nodes,a.selection.ignored_wires),
         }
@@ -251,6 +251,8 @@ pub struct DiffuseSelection {
     pub fourth_sample: Option<SamplerSelection>,
     pub deep_multiply_index: Option<usize>,
     pub third_sample: Option<SamplerSelection>,
+    /// D83: port-0 sample is `sample_index`, port-1 sample is `second_sample`.
+    pub texture_alpha_mix: Option<crate::TextureAlphaMix>,
     pub inner_multiply_index: Option<usize>,
     pub second_sample: Option<SamplerSelection>,
     pub output_index: usize,
@@ -483,6 +485,9 @@ fn select_alpha_mix(
         match (graph.boxes[left].type_raw, graph.boxes[right].type_raw) {
             (3, 1) => (left, right, true),
             (1, 3) => (right, left, false),
+            (1, 1) => {
+                return select_texture_alpha_mix(graph, root, output, [left, right], edges[2]);
+            }
             _ => return Err("Unsupported: alpha MIX needs COLOR and one texture sample".into()),
         };
     if edges[2].box_from as usize != sample
@@ -516,6 +521,52 @@ fn select_alpha_mix(
         ignored_wires: graph.wires.len() - 4,
         ..Default::default()
     })
+}
+// D83: two static texture samples on ports 0/1, factor = alpha of one of them.
+// Toolkit MIX: (port1 - port0) * port2 + port0. Baked on the Repeat nearest grid only.
+fn select_texture_alpha_mix(
+    graph: &GraphMetadata,
+    root: usize,
+    output: usize,
+    [left, right]: [usize; 2],
+    factor: &lbp_resource::material::WireMetadata,
+) -> Result<DiffuseSelection, String> {
+    let factor_port = if left == right {
+        return Err("Unsupported: two-texture alpha MIX needs two distinct samples".into());
+    } else if factor.box_from as usize == left {
+        0
+    } else if factor.box_from as usize == right {
+        1
+    } else {
+        return Err(
+            "Unsupported: two-texture alpha MIX factor must reuse a port 0/1 sample".into(),
+        );
+    };
+    let first = sampler(graph, left)?;
+    let second = sampler(graph, right)?;
+    let selection = DiffuseSelection {
+        texture_alpha_mix: Some(crate::TextureAlphaMix {
+            mix_index: root,
+            factor_port,
+            unused_weight_bits: graph.boxes[root].parameters_raw[0],
+        }),
+        output_index: output,
+        sample_index: left,
+        slot: first.slot,
+        uv_channel: first.uv_channel,
+        uv_transform: first.uv_transform,
+        second_sample: Some(second),
+        ignored_nodes: graph.boxes.len() - 4,
+        ignored_wires: graph.wires.len() - 4,
+        ..Default::default()
+    };
+    if !uses_grid(selection) {
+        return Err(
+            "Unsupported: two-texture alpha MIX requires same-channel integer Repeat grid samplers"
+                .into(),
+        );
+    }
+    Ok(selection)
 }
 // Single-sample evidence and derived-pixel policy: docs/single-mix-preview.md.
 // Endpoints/output already validated. Depth is fixed; no recursive graph evaluation.
@@ -859,6 +910,7 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
         fourth_sample: None,
         deep_multiply_index: None,
         third_sample,
+        texture_alpha_mix: None,
         inner_multiply_index,
         second_sample,
         output_index,
@@ -1139,7 +1191,10 @@ pub(crate) fn load_primitive(
         && instance_projection
             .as_ref()
             .is_none_or(|p| p.alpha_subtract_samplers.is_empty() && p.nested_tint.is_none());
-    if selection.blend.is_some() && selection.second_sample.is_some() && !use_grid {
+    if (selection.blend.is_some() || selection.texture_alpha_mix.is_some())
+        && selection.second_sample.is_some()
+        && !use_grid
+    {
         return Err("Unsupported: product MIX requires Repeat grid".into());
     }
     let mut sampling_uv = if use_grid {
@@ -1228,7 +1283,16 @@ pub(crate) fn load_primitive(
         )
         .map_err(|e| e.to_string())?;
         if use_grid {
-            let (width, height, rgba) = if let Some(blend) = selection.blend {
+            let (width, height, rgba) = if let Some(mix) = selection.texture_alpha_mix {
+                crate::product::pixels_alpha_mixed(
+                    &texture,
+                    &second_texture,
+                    selection.uv_transform,
+                    second.uv_transform,
+                    mix,
+                    || control.check().is_err(),
+                )?
+            } else if let Some(blend) = selection.blend {
                 crate::product::pixels_blended(
                     &texture,
                     &second_texture,
@@ -2447,5 +2511,117 @@ mod tests {
             .contains("Ambiguous"));
         assert!(resolve(&catalog, Some(0), None).is_err());
         assert!(resolve(&catalog, Some(u32::MAX), None).is_err());
+    }
+    #[test]
+    fn two_texture_alpha_mix_selects_grid_samples_and_rejects_other_shapes() {
+        use lbp_resource::material::{AnimationMetadata, BoxMetadata, WireMetadata};
+        let node = |kind, slot: u32| {
+            let mut parameters_raw = [0; 8];
+            if kind == 1 {
+                parameters_raw = [1f32.to_bits(), 1f32.to_bits(), 0, 0, 0, slot, 0, 0];
+            } else if kind == 3 {
+                parameters_raw[..4].copy_from_slice(&[0.5f32, 1., 0.25, 1.].map(f32::to_bits));
+            }
+            BoxMetadata {
+                type_raw: kind,
+                declared_parameter_count: 8,
+                parameters_raw,
+                position_bits: [0; 4],
+                subtype_raw: 0,
+                animations: std::array::from_fn(|_| AnimationMetadata {
+                    base_value_bits: [0; 4],
+                    component_value_count: 0,
+                    component_bytes_sha256: String::new(),
+                    name_hex: "000000".into(),
+                    components_raw: 0,
+                    derived_key_count: 0,
+                }),
+                texture_slot_raw: None,
+                texture_slot_in_range: None,
+            }
+        };
+        let wire = |from, to, port, alpha: bool| WireMetadata {
+            box_from: from,
+            box_to: to,
+            port_from_raw: 0,
+            port_to_raw: port,
+            swizzle_raw: if alpha { [b'a', 0, 0, 0, 0] } else { [0; 5] },
+            from_in_range: true,
+            to_in_range: true,
+        };
+        // Local 01.33 shape: base T1 on port 0, overlay T2 on port 1 and its alpha on port 2.
+        let mut graph = GraphMetadata {
+            box_count: 5,
+            wire_count: 5,
+            boxes: vec![node(0, 0), node(1, 0), node(1, 1), node(12, 0), node(1, 2)],
+            wires: vec![
+                wire(1, 3, 0, false),
+                wire(2, 3, 1, false),
+                wire(2, 3, 2, true),
+                wire(3, 0, 0, false),
+                wire(4, 0, 2, false),
+            ],
+            graph_start: 0,
+            parsed_graph_bytes: 0,
+            unparsed_bytes: 0,
+        };
+        graph.boxes[1].parameters_raw[..2].copy_from_slice(&[5f32, 4.].map(f32::to_bits));
+        graph.boxes[3].parameters_raw[0] = f32::NAN.to_bits();
+        let s = select_diffuse(&graph).unwrap();
+        let mix = s.texture_alpha_mix.unwrap();
+        assert_eq!(
+            (mix.mix_index, mix.factor_port, mix.unused_weight_bits),
+            (3, 1, f32::NAN.to_bits())
+        );
+        assert_eq!((s.sample_index, s.slot), (1, 0));
+        assert_eq!(
+            s.second_sample.map(|t| (t.sample_index, t.slot)),
+            Some((2, 1))
+        );
+        assert!(s.alpha_mix.is_none() && s.blend.is_none() && s.multiply_index.is_none());
+        assert_eq!((s.ignored_nodes, s.ignored_wires), (1, 1));
+        assert!(uses_grid(s));
+        // Wire order does not matter; factor from port 0 is recorded.
+        graph.wires.reverse();
+        assert_eq!(select_diffuse(&graph).unwrap(), s);
+        graph.wires.reverse();
+        graph.wires[2].box_from = 1;
+        assert_eq!(
+            select_diffuse(&graph)
+                .unwrap()
+                .texture_alpha_mix
+                .unwrap()
+                .factor_port,
+            0
+        );
+        // Factor from a third sample, or a non-alpha swizzle, is rejected.
+        graph.wires[2].box_from = 4;
+        assert!(select_diffuse(&graph).is_err());
+        graph.wires[2].box_from = 2;
+        graph.wires[2].swizzle_raw[0] = b'r';
+        assert!(select_diffuse(&graph).is_err());
+        graph.wires[2].swizzle_raw[0] = b'a';
+        // Same sample on both ports is rejected.
+        graph.wires[0].box_from = 2;
+        assert!(select_diffuse(&graph).is_err());
+        graph.wires[0].box_from = 1;
+        // Different UV channels or non-integer scale leave the grid: unsupported.
+        graph.boxes[2].parameters_raw[4] = 1;
+        assert!(select_diffuse(&graph).unwrap_err().contains("Repeat grid"));
+        graph.boxes[2].parameters_raw[4] = 0;
+        graph.boxes[2].parameters_raw[0] = 70f32.to_bits();
+        assert!(select_diffuse(&graph).is_err());
+        graph.boxes[2].parameters_raw[0] = 1f32.to_bits();
+        // Animated or wired samplers and animated MIX stay unsupported.
+        graph.boxes[2].animations[0].name_hex = "623100".into();
+        assert!(select_diffuse(&graph).is_err());
+        graph.boxes[2].animations[0].name_hex = "000000".into();
+        graph.boxes[3].subtype_raw = 1;
+        assert!(select_diffuse(&graph).is_err());
+        graph.boxes[3].subtype_raw = 0;
+        graph.wires.push(wire(4, 1, 0, false));
+        assert!(select_diffuse(&graph).is_err());
+        graph.wires.pop();
+        assert_eq!(select_diffuse(&graph).unwrap(), s);
     }
 }

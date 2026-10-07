@@ -2,7 +2,7 @@
 //! Supported format/predicate evidence remains docs/textured-mesh.md.
 mod affine;
 mod alpha_mix;
-pub use alpha_mix::AlphaDiffuseMix;
+pub use alpha_mix::{AlphaDiffuseMix, TextureAlphaMix};
 mod animation_base;
 pub use animation_base::AnimationBaseSnapshot;
 mod blend;
