@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 — Batch: local D85, D86, D87 merged
+
+D85 opt-in corpus census modes. D86 constant THING_COLOR folds under a supplied color
+(8). D87 CONST4, COLOR x COLOR, TEX with CONST UV scale (25). Unsupported 207 -> 174;
+corpus all-diffuse 3,657 -> 3,665. +0 viewable / +0 Complete. Parity 0 mismatches.
+
 ## 2026-10-07 — Batch: local D81-D84 + audit fixes merged
 
 D81 corpus census on 01.33: 4,257 of 4,261 mesh GUIDs viewable, 3,657 all-diffuse, 0

@@ -3173,3 +3173,36 @@ a "1.99.0" pin would force a download).
 Not tested: native viewer on the 2 alpha-MIX materials, CI viewer job on GitHub.
 Next: remaining MIX shapes need per-sample UVs; BLEND needs non-0.15/0.16 threshold
 evidence; animated-sampler products with 2+ animated leaves; THING_COLOR (D80 proposal).
+
+## Batch 2026-10-07f — local D85, D86, D87 merged (2026-10-07)
+
+Local subagents on plan usage (own worktrees; resumed once after a session restart).
+Detail: [d85-optin-corpus-census.md](docs/d85-optin-corpus-census.md),
+[d86-thing-color.md](docs/d86-thing-color.md), [d87-small-families.md](docs/d87-small-families.md).
+
+- D85: corpus_mesh_census gains --animation-base and --instance-rgba (shared parser
+  with compatibility_census); default output byte-identical.
+- D86: under a supplied instance color, a static diffuse-root MULTIPLY/MIX of two
+  constants (ThingColor/COLOR/CONSTANT) folds to one COLOR. 8 materials; default unchanged.
+- D87: CONST4 alone (9) and COLOR x COLOR (7) as solid colors; TEX with CONST/CONST2 on
+  sampler port 1 (9) folded into the sampler scale. 25 materials.
+- Route census on 01.33 (material locations, 8,094): texture 6,940 -> 6,949, solid
+  603 -> 619, instance-only 228 -> 236, unsupported 207 -> 174.
+- Corpus mesh census on 01.33 (distinct catalog GUID, 4,261; baseline D81/D85):
+  viewable 4,257 in every mode; all-diffuse default 3,657 -> 3,665, --animation-base
+  3,709 -> 3,717, both opt-ins (RGBA 0.25,0.5,0.75,0.5) 3,932 -> 3,954. Complete 0.
+**+0 newly viewable / +0 newly Complete** (all-diffuse +8 default).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests lbp-preview (42)/-resource/-viewer/-bevy-viewer/-cli, both viewer builds, python OK.
+- diffuse_route_census -> b87-diffuse-route-shapes-0133.json: counts above.
+- diffuse_parity: d86 disc 5/0/5 and patch_0128 3/0/3 (--instance-white), d86 disc default 5/0/0; d87 oracles 6/0/6, 1/0/1, 18/0/18; regressions d83-alpha2 8/0/2, d75 48/0/41, d78 --animation-base 38/0/36, d68 patch_0120 26/0/20, d64 17/0/17, d65 48/0/48, d67 18/0/18, d46-diffuse 32/0/29, d46-linked 48/0/46.
+- compatibility_census: d68-new 48/45/0, D61 48/43/0, D75 48/44/0 (unchanged).
+- corpus_mesh_census -> b87-corpus-{default,anim,both}.json: counts above.
+
+Failed: session restart stopped all three agents once (resumed from their worktrees).
+D87 merge conflicted in diffuse_parity's report line (D86 and D87 both bumped schema
+to 15); kept D86's instance_white field, schema now 16.
+Not tested: viewer captures, real instance colors (D86 materials can't be Complete).
+Next: THING_COLOR shapes with textures under the instance color; ADD (8); UV channel
+raw 2 (4); remaining MIX per-sample UVs; BLEND thresholds.
