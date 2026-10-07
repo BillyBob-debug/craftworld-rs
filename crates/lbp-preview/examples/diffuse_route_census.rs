@@ -9,7 +9,10 @@ fn classify(graph: &lbp_resource::material::GraphMetadata) -> (String, Option<St
     let default = match lbp_preview::select_solid_diffuse(graph) {
         Ok(Some(s)) if s.unwired_diffuse => return ("unwired_black".into(), None),
         Ok(Some(_)) => return ("solid_color".into(), None),
-        Ok(None) | Err(_) => lbp_preview::select_diffuse(graph),
+        Ok(None) | Err(_) => match lbp_preview::select_small_solid(graph) {
+            Ok(Some(_)) => return ("solid_color".into(), None),
+            _ => lbp_preview::select_diffuse(graph),
+        },
     };
     let reason = match default {
         Ok(_) => return ("texture_route".into(), None),

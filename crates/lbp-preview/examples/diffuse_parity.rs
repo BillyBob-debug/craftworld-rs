@@ -155,18 +155,56 @@ fn run() -> Result<(), String> {
             }
         }
         let solid = lbp_preview::select_solid_diffuse(&graph.graph);
+        // D87: CONST4 alone and COLOR × COLOR, original graph only.
+        let solid = match solid {
+            Ok(None) => lbp_preview::select_small_solid(&graph.graph),
+            other => other,
+        };
         let projection = if let Ok(Some(s)) = solid {
-            if s.output_index != output
-                || s.color_index != wire.box_from as usize
-                || s.color.bits.iter().enumerate().any(|(i, b)| {
-                    sample["graph"]["boxes"][s.color_index]["parameters_raw"][i].as_u64()
-                        != Some(u64::from(*b))
-                })
-            {
+            let nodes = &sample["graph"]["boxes"];
+            let param = |node: usize, i: usize| {
+                nodes[node]["parameters_raw"][i]
+                    .as_u64()
+                    .map(|v| f32::from_bits(v as u32))
+            };
+            let color_equal = if let Some([l, r]) = s.product_of {
+                // Independent f32 recomputation of the oracle's two COLOR inputs.
+                let oracle_wires = sample["graph"]["wires"]
+                    .as_array()
+                    .ok_or("oracle wires required")?;
+                let inputs: Vec<_> = oracle_wires
+                    .iter()
+                    .filter(|w| w["box_to"].as_u64() == Some(s.color_index as u64))
+                    .collect();
+                let edge = |source: usize, port: u64| {
+                    inputs.iter().any(|w| {
+                        w["box_from"].as_u64() == Some(source as u64)
+                            && w["port_to_raw"].as_u64() == Some(port)
+                            && w["port_from_raw"] == 0
+                            && w["swizzle_raw"] == json!([0, 0, 0, 0, 0])
+                    })
+                };
+                inputs.len() == 2
+                    && edge(l, 0)
+                    && edge(r, 1)
+                    && nodes[s.color_index]["type_raw"] == 10
+                    && nodes[l]["type_raw"] == 3
+                    && nodes[r]["type_raw"] == 3
+                    && (0..4).all(|i| match (param(l, i), param(r, i)) {
+                        (Some(a), Some(b)) => (a * b).to_bits() == s.color.bits[i],
+                        _ => false,
+                    })
+            } else {
+                matches!(nodes[s.color_index]["type_raw"].as_u64(), Some(3 | 7))
+                    && s.color.bits.iter().enumerate().all(|(i, b)| {
+                        nodes[s.color_index]["parameters_raw"][i].as_u64() == Some(u64::from(*b))
+                    })
+            };
+            if s.output_index != output || s.color_index != wire.box_from as usize || !color_equal {
                 mismatches += 1;
             }
             projected += 1;
-            json!({"status":"solid_projected","output_index":s.output_index,"color_index":s.color_index,"color_bits":s.color.bits,"texture":null,"uv_channel":null,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+            json!({"status":"solid_projected","output_index":s.output_index,"color_index":s.color_index,"product_of":s.product_of,"color_bits":s.color.bits,"texture":null,"uv_channel":null,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
         } else {
             match lbp_preview::select_diffuse_with_animation_base(&graph.graph, animation_base) {
                 Ok(s) => {
@@ -195,6 +233,47 @@ fn run() -> Result<(), String> {
                                                 .map(f32::to_bits)
                                                 .collect()
                                         }
+                                }
+                                // D87: sampler port-1 CONST/CONST2 scale, recomputed
+                                // from the oracle's sampler and constant parameters.
+                                _ if s.sampler_scale.is_some() && index == s.sample_index => {
+                                    let scale = s.sampler_scale.unwrap();
+                                    let nodes = &sample["graph"]["boxes"];
+                                    let raw = |node: usize, i: usize| {
+                                        nodes[node]["parameters_raw"][i]
+                                            .as_u64()
+                                            .map(|v| f32::from_bits(v as u32))
+                                    };
+                                    let c = scale.const_index;
+                                    let factor = match nodes[c]["type_raw"].as_u64() {
+                                        Some(4) => raw(c, 0).zip(raw(c, 0)),
+                                        Some(5) => raw(c, 0).zip(raw(c, 1)),
+                                        _ => None,
+                                    };
+                                    let wired =
+                                        sample["graph"]["wires"].as_array().is_some_and(|w| {
+                                            let into: Vec<_> = w
+                                                .iter()
+                                                .filter(|w| {
+                                                    w["box_to"].as_u64() == Some(index as u64)
+                                                })
+                                                .collect();
+                                            into.len() == 1
+                                                && into[0]["box_from"].as_u64() == Some(c as u64)
+                                                && into[0]["port_to_raw"] == 1
+                                                && into[0]["swizzle_raw"] == json!([0, 0, 0, 0, 0])
+                                        });
+                                    match (
+                                        factor,
+                                        (0..4).map(|i| raw(index, i)).collect::<Option<Vec<_>>>(),
+                                    ) {
+                                        (Some((fx, fy)), Some(p)) if wired => {
+                                            transform.bits()
+                                                == [p[0] * fx, p[1] * fy, p[2] * fx, p[3] * fy]
+                                                    .map(f32::to_bits)
+                                        }
+                                        _ => false,
+                                    }
                                 }
                                 _ => transform
                                     .parameter_indices()
@@ -574,7 +653,7 @@ fn run() -> Result<(), String> {
                     }
                     projected += 1;
                     // Versioned diagnostics retain all three original selectors/root indices.
-                    json!({"status":"projected","alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+                    json!({"status":"projected","sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
                 }
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
@@ -582,7 +661,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":15,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":16,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
