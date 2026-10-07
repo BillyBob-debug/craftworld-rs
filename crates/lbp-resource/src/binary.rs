@@ -149,6 +149,11 @@ pub fn payload(
         });
     }
     let h = metadata.header.ok_or(Error::Invalid("header absent"))?;
+    // D77: DOUBLE11 headers are metadata-only; Vita payloads add fields (e.g. Toolkit
+    // D1_VERTEX_COLORS in RMesh) that no payload reader here implements.
+    if h.branch_id == Some(crate::DOUBLE11_BRANCH_ID) {
+        return Err(Error::Unsupported("DOUBLE11 branch payload"));
+    }
     let flags = h.compression_flags.ok_or(Error::Invalid("flags absent"))?;
     if !matches!(flags, 0 | 7) {
         return Err(Error::Unsupported("serialization flags"));
