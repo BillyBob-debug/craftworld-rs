@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 — Batch: local D81-D84 + audit fixes merged
+
+D81 corpus census on 01.33: 4,257 of 4,261 mesh GUIDs viewable, 3,657 all-diffuse, 0
+Complete. D82 legacy CLAMP 5 (0 users). D83 two-texture alpha MIX (unsupported 209 ->
+207). D84 BLEND phase 1 (0 selected). CI pinned to Rust 1.99.0. +0 viewable / +0 Complete.
+
 ## 2026-10-07 — Batch: cloud D79, D80, D78 merged
 
 D79 FNTb header reader (01.33 unsupported resources 1 -> 0; clippy fix on PC). D80

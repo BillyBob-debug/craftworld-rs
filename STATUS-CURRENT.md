@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after batch D79/D80/D78, 2026-10-07
+# Current state (overwrite each milestone) — after batch D81-D84, 2026-10-07
 
 ## Product
 Independent LBP2 Asset Explorer (Rust). Bevy viewer (main) and legacy viewer read
@@ -24,28 +24,33 @@ Unwired diffuse previews as labelled black (D63). Up to 64 materials per mesh wi
 Two textures x static COLOR under two multiplies (D75). Vita branch 0x4431 headers
 parse; payloads refused (D77). FNTb font headers and glyph tables (D79).
 Animation-base opt-in also covers 2+ texture products with one animated leaf (D78).
+Two-texture alpha MIX on the Repeat grid (D83). Static BLEND phase 1, 0 users (D84).
+Legacy CLAMP 5 edge-clamped (D82).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).
 - D69 new cohort d68-new-mesh-samples.json (48 post-951 meshes): 48/45/0.
-- Corpus selection census on 01.33 after D78 (8,094 material locations with MAP rows):
-  6,938 texture, 603 solid, 10 unwired, 106 animation-base-only, 228 instance-only, 209
+- Corpus mesh census on 01.33 (D81, all 4,261 mesh GUIDs): 4,257 viewable, 3,657
+  all-diffuse, 0 Complete. This is the baseline for newly viewable/Complete from now on.
+- Corpus selection census on 01.33 after D83 (8,094 material locations with MAP rows):
+  6,940 texture, 603 solid, 10 unwired, 106 animation-base-only, 228 instance-only, 207
   unsupported (after D75: 60 / 225 / 258; before D75: 6,828 texture, 386 unsupported) (01.00: 5,163 / 4,306 / 459 / 7 / 34 / 122 / 235). Not asset counts.
 - D69: +48 newly viewable in the tested cohort, +0 newly Complete; corpus totals unknown.
 - Batch D72/D71/D73: tests and CI only, +0 viewable / +0 Complete.
 - Batch D77/D76/D75: +0 viewable / +0 Complete; D75 cohort (48 meshes) 48/0/0 -> 48/44/0.
 - Batch D79/D80/D78: +0 viewable / +0 Complete; cohorts unchanged.
+- Batch D81-D84: +0 viewable / +0 Complete vs the D81 corpus baseline.
 
 ## Open blockers
 - Glow, reflection and other non-diffuse channels are not rendered.
 - ThingColor assets need a supplied color; real instance values unknown.
-- BORDER color, CLAMP5, mirror-once 6–8, motion/time, filtering fidelity unknown.
+- BORDER color, mirror-once 6–8 (0 users on 01.33), motion/time, filtering fidelity unknown.
 - No unsupported resource headers left on 01.33. Vita (0x4431) payloads refused;
   FNTb +8 word meaning unknown; patch.edat not decrypted.
 
 ## Next
-MIX (14) and BLEND (14, D76 rule) route work, run locally. D81 corpus-wide mesh
-census and D82 wrap modes are in progress on local branches.
+Top open items by count: THING_COLOR 99 (D80 proposal), animated products with 2+
+animated leaves, remaining MIX (per-sample UVs), BLEND thresholds. See docs/backlog.md.
 
 ## Environment
 - Toolchain: `. ./scripts/use-local-rust.ps1` (project-local, windows-gnu).
@@ -53,7 +58,8 @@ census and D82 wrap modes are in progress on local branches.
   default-deny `.gitignore`. CI: `.github/workflows/ci.yml` (D72).
 - Workflow: `docs/workflow.md`. On demand; from 2026-10-07 batches run as local agents
   on plan usage (no new cloud sessions). Agents push `cloud/*` or `claude/*` branches; the PC Integrator verifies and merges passing ones into main without asking
-  (owner approval 2026-10-07). Daily task LBP2-DailyBatch exists but is disabled.
+  (owner approval 2026-10-07). Daily task LBP2-DailyBatch is disabled; its script was
+  removed (PR #13). CI pinned to Rust 1.99.0.
 - Native QA windows on non-primary monitor 165v0, verified in log before showing.
 
 ## Where detail lives

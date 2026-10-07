@@ -1,25 +1,24 @@
-# Batch report — 2026-10-07d (Integrator)
+# Batch report — 2026-10-07e (Integrator)
 
 ## Merged
-- D79 `origin/cloud/D79-fntb` (PR #11): FNTb font header reader. First check failed
-  Clippy 1.99 (`chunks_exact_to_as_chunks`, font.rs 165/177/189); fixed on the branch
-  by the Integrator (e328bf1), then merged. 01.33 scan: unsupported resources 1 -> 0.
-- D80 `origin/cloud/D80-thing-color-research`: THING_COLOR research doc (docs only).
-- D78 `origin/claude/d78-animated-product-7erb3i`: animation-base opt-in for 2+ texture
-  products. Route census unsupported 258 -> 209 (+46 animation-base-only, +3
-  instance-only). Toolkit parity on the 49 changed materials: 0 mismatches. Merged
-  with CRLF kept in linked.rs and compatibility_census.rs (branch had converted to LF).
+- D81 `cloud/D81-corpus-census`: corpus_mesh_census. 01.33: 4,257 of 4,261 mesh GUIDs
+  viewable, 3,657 all-diffuse, 0 Complete.
+- D82 `cloud/D82-wrap-modes`: legacy CLAMP 5 edge-clamped; mirror-once refused. 0 users.
+- D83 `cloud/D83-mix-shapes`: two-texture alpha MIX on the Repeat grid. Route
+  unsupported 209 -> 207; parity 8/0 (2 projected).
+- D84 `cloud/D84-blend-route`: static BLEND phase 1; 0 materials selected. Merge
+  conflict in linked.rs tests resolved by keeping both tests.
+- PR #13 `claude/audit-fixes`: CI Rust 1.99.0 + --locked, viewer check, workflow doc.
 
-Checks on merged main: fmt, workspace Clippy -D warnings, tests (lbp-resource,
-lbp-cli, lbp-preview), both viewer builds, diffuse parity regressions unchanged.
+Checks on merged main: fmt, workspace Clippy -D warnings, tests for 7 crates, both
+viewer builds, Python 34 OK, diffuse parity regressions unchanged, cohorts unchanged.
 
 ## Failed
-None after the D79 fix.
+None.
 
 ## Counts
-+0 newly viewable / +0 newly Complete. Cohorts unchanged: d68-new 48/45/0, D61
-48/43/0, D75 48/44/0 (distinct GUID; viewable/all-diffuse/Complete).
++0 newly viewable / +0 newly Complete. Corpus (D81 tool, after batch): 4,257 viewable /
+3,657 all-diffuse / 0 Complete of 4,261 mesh GUIDs.
 
 ## Backlog
-Refreshed: animated-sampler products mostly moved to the animation-base opt-in; next
-MIX (14), BLEND (14).
+MIX 14 -> 12, BLEND 14 unchanged (thresholds), see docs/backlog.md.

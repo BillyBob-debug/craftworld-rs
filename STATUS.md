@@ -3138,3 +3138,38 @@ Failed: first D79 merge failed Clippy; reset and re-merged after the fix.
 Not tested: native viewer, real glyph semantics (FNTb +8 word unknown), animated
 playback, game pixels.
 Next: MIX (14) and BLEND (14, D76 rule) on the PC; D81 corpus census and D82 wrap modes in progress.
+
+## Batch 2026-10-07e — local D81, D82, D83, D84 + audit fixes merged (2026-10-07)
+
+First batch run as local subagents on plan usage (own worktrees). Detail:
+[d81-corpus-census.md](docs/d81-corpus-census.md), [d82-wrap-modes.md](docs/d82-wrap-modes.md),
+[d83-mix-shapes.md](docs/d83-mix-shapes.md), [d84-blend-route.md](docs/d84-blend-route.md).
+
+- D81: new `corpus_mesh_census` example. First corpus-wide totals on 01.33 (distinct
+  catalog GUID, 4,261 mesh GUIDs / 4,245 hashes): viewable 4,257, all-diffuse 3,657,
+  Complete 0 (not certified). 2 hashes over the triangle limit, 2 without geometry,
+  37 unmapped hashes excluded. Matches compatibility_census on D61 (48/43/0).
+- D82: legacy CLAMP (raw 5) shown edge-clamped; mirror-once 6-8 stay refused (meaning
+  unknown). 0 material locations on 01.33 use raw 5-8.
+- D83: two-texture alpha MIX on the Repeat grid. Route census texture 6,938 -> 6,940,
+  unsupported 209 -> 207. Parity on the 8 alpha-MIX materials: 0 mismatches, 2 projected.
+- D84: static BLEND phase 1 (D76 rule, thresholds 0.15/0.16). Selects 0 of the 14
+  BLEND materials (none use those thresholds; all masks unswizzled); reasons only.
+- Audit fixes (PR #13): CI pinned to Rust 1.99.0 with --locked, viewer check job,
+  workflow doc rewritten for on-demand PC batches, daily-batch script removed.
+**+0 newly viewable / +0 newly Complete** vs the D81 baseline (post-batch corpus rerun:
+4,257 / 3,657 / 0, unchanged).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests lbp-preview/-resource/-viewer/-bevy-viewer/-cli/-archive/-io, both viewer builds, python 34 OK.
+- diffuse_route_census -> d84b-diffuse-route-shapes-0133.json: texture 6,940, solid 603, unwired 10, anim-base 106, instance 228, unsupported 207.
+- diffuse_parity: d83-alpha2 8/0/2; d75 DATA-1 48/0/41; d78 DATA --animation-base 38/0/36; d68 patch_0120 26/0/20; d64-square 17/0/17; d65-third 48/0/48; d67-thirdbase 18/0/18; d46-diffuse 32/0/29; d46-linked 48/0/46.
+- compatibility_census: d68-new 48/45/0, D61 48/43/0, D75 48/44/0 (unchanged).
+- corpus_mesh_census -> b84-corpus-mesh-census-0133.json: 4,257 / 3,657 / 0, 241 s.
+
+Failed: D84 merge conflicted in linked.rs tests (both added a test at the same place);
+kept both. rust-toolchain.toml not added (local rustup names the toolchain "stable";
+a "1.99.0" pin would force a download).
+Not tested: native viewer on the 2 alpha-MIX materials, CI viewer job on GitHub.
+Next: remaining MIX shapes need per-sample UVs; BLEND needs non-0.15/0.16 threshold
+evidence; animated-sampler products with 2+ animated leaves; THING_COLOR (D80 proposal).
