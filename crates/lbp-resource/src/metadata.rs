@@ -4,7 +4,8 @@
 //! cwlib/enums/{ResourceType,SerializationType,Branch,Revisions}.java.
 //! Independent layout implementation, MIT knowledge notice in THIRD-PARTY-NOTICES.
 //! Scope: LBP1/2 heads <=0x3f8 (Revisions.LBP2_MAX; header layout unchanged after 0x297),
-//! locally observed through 1016 with update 01.33. Ordinary binary branches 0/LD; SMH common header
+//! locally observed through 1016 with update 01.33. Ordinary binary branches 0/LD, plus
+//! DOUBLE11 0x4431 header/dependencies (D77, Vita heads only); SMH common header
 //! and dependency table only. No payload decompression, extra ALSR interpretation,
 //! texture/static-mesh payload parsing or encryption. Tests use synthetic recipes;
 //! local metadata compared with unmodified pinned Toolkit (see docs/scanner.md).
@@ -14,6 +15,13 @@ use std::io::{Read, Seek, SeekFrom};
 
 /// Last LBP2 head (Toolkit `Revisions.LBP2_MAX`); BCUS98245 01.33 tops out here.
 pub const LBP2_MAX_REVISION: u32 = 0x3f8;
+/// DOUBLE11 (Vita) branch, D77. CONFIRMED_FROM_COMMUNITY_CODE: Toolkit `Branch.DOUBLE11`
+/// ID 0x4431; `Revision.isVita` heads 0x3c1..=0x3e2; `Revisions.D1_MAX` = 0x87.
+/// `SerializedResource.process` reads the same branch/flags/compressed fields for every
+/// branch at head >= 0x297. Header and dependency table only (docs/d77-branch-4431.md).
+pub const DOUBLE11_BRANCH_ID: u16 = 0x4431;
+pub const DOUBLE11_HEADS: std::ops::RangeInclusive<u32> = 0x3c1..=0x3e2;
+pub const DOUBLE11_MAX_BRANCH_REVISION: u16 = 0x87;
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
 pub struct ResourceType {
@@ -340,7 +348,25 @@ fn parse<R: Read + Seek>(
         header.compression_flags = Some(flags);
         header.compressed = Some(compressed);
         header.payload_offset = Some(position as u32);
-        if header.branch_id != Some(0) && !(revision == 0x272 && header.branch_id == Some(0x4c44)) {
+        if header.branch_id == Some(DOUBLE11_BRANCH_ID) {
+            let in_head = DOUBLE11_HEADS.contains(&revision);
+            let in_branch = header.branch_revision <= Some(DOUBLE11_MAX_BRANCH_REVISION);
+            if !(in_head && in_branch) {
+                out.header = Some(header);
+                return Err(Error::new(
+                    ErrorKind::Unsupported,
+                    if in_head {
+                        "branch 0x4431 revision above Toolkit D1_MAX"
+                    } else {
+                        "branch 0x4431 head outside Toolkit Vita range 0x3c1..=0x3e2"
+                    },
+                ));
+            }
+            // Header layout matches ordinary heads >= 0x297; payloads stay branch-0 only.
+            header.scope = "double11_branch_header";
+        } else if header.branch_id != Some(0)
+            && !(revision == 0x272 && header.branch_id == Some(0x4c44))
+        {
             out.header = Some(header);
             return Err(Error::new(
                 ErrorKind::Unsupported,

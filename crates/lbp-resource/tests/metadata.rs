@@ -242,3 +242,83 @@ fn d73_gate_heads_952_1000_0x3f8_accepted_0x3f9_up_unsupported_not_corrupt() {
         "table_absent_in_revision"
     );
 }
+#[test]
+fn d77_double11_header_gate_vita_heads_and_d1_max_only() {
+    // Toolkit d6a2ef80: Revision.isVita heads 0x3c1..=0x3e2, Revisions.D1_MAX 0x87.
+    let ordinary = read(&binary(0x3e2, 0, 0, &[(3, 1), (0, 7)]));
+    for (revision, branch_revision) in [(0x3c1, 0), (0x3c1, 0x87), (0x3e2, 0x28), (0x3e2, 0x87)] {
+        let r = read(&binary(
+            revision,
+            0x4431,
+            branch_revision,
+            &[(3, 1), (0, 7)],
+        ));
+        assert_eq!(
+            r.status, "metadata_parsed",
+            "head {revision:#x} rev {branch_revision:#x}: {:?}",
+            r.reason
+        );
+        let (h, o) = (r.header.unwrap(), ordinary.header.clone().unwrap());
+        assert_eq!(h.scope, "double11_branch_header");
+        assert_eq!(
+            (h.branch_id, h.branch_revision),
+            (Some(0x4431), Some(branch_revision))
+        );
+        assert_eq!(
+            (h.compression_flags, h.compressed, h.payload_offset),
+            (o.compression_flags, o.compressed, o.payload_offset)
+        );
+        assert_eq!(r.dependencies.len(), 2);
+        assert_eq!(r.dependencies[1].type_id, 7);
+    }
+    // Outside the Vita head range or above D1_MAX: unsupported with header kept, not corrupt.
+    for (revision, branch_revision, reason) in [
+        (0x3c0, 0, "head outside"),
+        (0x3e3, 0, "head outside"),
+        (0x3f8, 0x87, "head outside"),
+        (0x297, 0, "head outside"),
+        (0x3e2, 0x88, "above Toolkit D1_MAX"),
+        (0x3c1, u16::MAX, "above Toolkit D1_MAX"),
+    ] {
+        let r = read(&binary(revision, 0x4431, branch_revision, &[(3, 1)]));
+        assert_eq!(r.status, "unsupported", "head {revision:#x}");
+        assert!(
+            r.reason.as_deref().unwrap().contains(reason),
+            "{:?}",
+            r.reason
+        );
+        assert_eq!(r.header.unwrap().branch_id, Some(0x4431));
+        assert!(r.dependencies.is_empty());
+    }
+    // Other non-zero branches (Toolkit MIZUKI 0x4d5a, LD off its head) stay unsupported.
+    for (revision, branch) in [(0x3e2, 0x4d5a), (0x3e2, 0x4c44), (0x3e2, 0x3144)] {
+        let r = read(&binary(revision, branch, 0, &[]));
+        assert_eq!(r.status, "unsupported", "branch {branch:#x}");
+        assert_eq!(
+            r.reason.as_deref(),
+            Some("branch outside tested LBP1/2 scope")
+        );
+    }
+    // Truncation inside an accepted DOUBLE11 header stays malformed.
+    let raw = binary(0x3e2, 0x4431, 0x87, &[(3, 1)]);
+    for end in 0..raw.len() {
+        assert_eq!(read(&raw[..end]).status, "malformed", "end {end}");
+    }
+}
+#[test]
+fn d77_double11_payloads_are_never_decoded() {
+    use lbp_resource::binary::{payload, Error};
+    let mut raw = binary(0x3e2, 0x4431, 0x28, &[]);
+    raw[17] = 0; // uncompressed, so only the branch gate can refuse it
+    assert_eq!(
+        payload(&raw, b"MATb", 1 << 20, 1 << 20, &|| false).err(),
+        Some(Error::Unsupported("DOUBLE11 branch payload"))
+    );
+    raw[12..14].copy_from_slice(&0_u16.to_be_bytes());
+    raw[14..16].copy_from_slice(&0_u16.to_be_bytes());
+    let (header, data) = payload(&raw, b"MATb", 1 << 20, 1 << 20, &|| false).unwrap();
+    assert_eq!(
+        (header.branch_id, data.as_slice()),
+        (Some(0), b"BODY".as_slice())
+    );
+}
