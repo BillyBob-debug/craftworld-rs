@@ -137,7 +137,9 @@ impl Asset {
             .map_or_else(|| self.wrap.raw(), |b| b.source_wrap_raw)
     }
     pub fn nearest_sampling(&self) -> bool {
-        self.product.is_some() || self.selection.alpha_mix.is_some()
+        self.product.is_some()
+            || self.selection.alpha_mix.is_some()
+            || self.selection.blend_mask.is_some()
     }
     pub fn display_extent(&self) -> [u32; 2] {
         self.product.as_ref().map_or(
@@ -230,6 +232,7 @@ impl MaterialAsset {
     }
     fn source_label(&self) -> String {
         match self {
+            Self::Texture(a) if a.selection.blend_mask.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.blend_mask.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.selection.alpha_mix.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.alpha_mix.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.border_domain.map_or_else(||a.wrap.label(),|b|b.label()),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.selection.animation_base.is_some()=>format!("Animation base-value snapshot • local/global rows verified • {} keys per row {:?} • UV{} {} • time/motion unverified • diffuse only",a.selection.animation_base.unwrap().key_counts[0],a.selection.animation_base.unwrap().key_counts,a.selection.uv_channel,a.selection.uv_transform.label()),
             Self::Texture(a) if a.fourth.is_some() => format!("Diffuse only • four-texture nested product • UV{} {} × UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.fourth_sample.unwrap().uv_channel,a.selection.fourth_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
@@ -248,6 +251,8 @@ pub struct DiffuseSelection {
     pub alpha_mix: Option<crate::AlphaDiffuseMix>,
     pub animation_base: Option<crate::AnimationBaseSnapshot>,
     pub blend: Option<crate::DiffuseBlend>,
+    /// D84 BLEND (box 16) phase 1: COLOR and one sample stepped by its alpha.
+    pub blend_mask: Option<crate::BlendDiffuseMask>,
     pub fourth_sample: Option<SamplerSelection>,
     pub deep_multiply_index: Option<usize>,
     pub third_sample: Option<SamplerSelection>,
@@ -684,6 +689,93 @@ fn select_static_mix(
     }
     Ok(selection)
 }
+// D84 BLEND (box 16) phase 1, rule from docs/d76-blend.md; scope: docs/d84-blend-route.md.
+// Fixed depth: three direct inputs, no recursion. Checks run in a fixed order so the
+// census reason names the first unmet condition.
+fn select_blend(
+    graph: &GraphMetadata,
+    root: usize,
+    output: usize,
+) -> Result<DiffuseSelection, String> {
+    let static_node = |node: &lbp_resource::material::BoxMetadata| {
+        node.subtype_raw == 0
+            && node
+                .animations
+                .iter()
+                .all(|a| a.component_value_count == 0 && a.name_hex.bytes().all(|b| b == b'0'))
+    };
+    if !static_node(&graph.boxes[root]) {
+        return Err("Unsupported: BLEND root must be static subtype 0".into());
+    }
+    let mut edges: Vec<_> = graph
+        .wires
+        .iter()
+        .filter(|w| w.box_to as usize == root)
+        .collect();
+    edges.sort_by_key(|w| w.port_to_raw);
+    if edges.len() != 3
+        || edges.iter().enumerate().any(|(i, w)| {
+            w.port_to_raw as usize != i
+                || w.port_from_raw != 0
+                || (i < 2 && w.swizzle_raw != [0; 5])
+        })
+    {
+        return Err(
+            "Unsupported: BLEND needs exactly unswizzled ports 0/1 and a mask on port 2".into(),
+        );
+    }
+    let [left, right, mask] = [0, 1, 2].map(|i| edges[i].box_from as usize);
+    if [left, right]
+        .iter()
+        .any(|&i| !matches!(graph.boxes[i].type_raw, 1 | 3))
+    {
+        return Err("Unsupported: BLEND phase 1 inputs must be COLOR or texture samples".into());
+    }
+    // Only the first mask component is used (E3). RGB channel space is unknown (E10).
+    if !matches!(edges[2].swizzle_raw, [b'a' | b'w', 0, 0, 0, 0]) {
+        return Err(
+            "Unsupported: BLEND mask must be a sample alpha (RGB mask space unknown)".into(),
+        );
+    }
+    if mask != left && mask != right || graph.boxes[mask].type_raw != 1 {
+        return Err("Unsupported: BLEND mask must reuse the port 0/1 texture sample".into());
+    }
+    let p = &graph.boxes[root].parameters_raw;
+    let threshold_bits = [p[0], p[1]];
+    if threshold_bits != crate::BLEND_THRESHOLD_BITS {
+        return Err("Unsupported: BLEND thresholds other than 0.15/0.16".into());
+    }
+    let (color, color_first) = match (graph.boxes[left].type_raw, graph.boxes[right].type_raw) {
+        (3, 1) => (left, true),
+        (1, 3) => (right, false),
+        _ => return Err("Unsupported: BLEND phase 1 needs COLOR and one texture sample".into()),
+    };
+    if !static_node(&graph.boxes[color]) || graph.wires.iter().any(|w| w.box_to as usize == color) {
+        return Err("Unsupported: BLEND COLOR must be static and unwired".into());
+    }
+    let selected = sampler(graph, mask)?;
+    let blend = crate::BlendDiffuseMask {
+        blend_index: root,
+        color: crate::DiffuseTint {
+            bits: graph.boxes[color].parameters_raw[..4].try_into().unwrap(),
+        },
+        color_first,
+        threshold_bits,
+    };
+    blend.validate()?;
+    Ok(DiffuseSelection {
+        blend_mask: Some(blend),
+        output_index: output,
+        sample_index: mask,
+        slot: selected.slot,
+        uv_channel: selected.uv_channel,
+        uv_transform: selected.uv_transform,
+        color_index: Some(color),
+        ignored_nodes: graph.boxes.len() - 4,
+        ignored_wires: graph.wires.len() - 4,
+        ..Default::default()
+    })
+}
 pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String> {
     select_products(
         graph,
@@ -741,6 +833,9 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
     }
     if boxes[wire.box_from as usize].type_raw == 12 {
         return select_static_mix(graph, wire.box_from as usize, output_index);
+    }
+    if boxes[wire.box_from as usize].type_raw == 16 {
+        return select_blend(graph, wire.box_from as usize, output_index);
     }
     let mut sample_index = wire.box_from as usize;
     let mut tint = crate::DiffuseTint::default();
@@ -907,6 +1002,7 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
         alpha_mix: None,
         animation_base: leaves.base,
         blend: None,
+        blend_mask: None,
         fourth_sample: None,
         deep_multiply_index: None,
         third_sample,
@@ -1241,6 +1337,8 @@ pub(crate) fn load_primitive(
     .map_err(|e| e.to_string())?;
     let tinted_rgba = if let Some(mix) = selection.alpha_mix {
         Some(mix.pixels(&texture.rgba, || control.check().is_err())?)
+    } else if let Some(mask) = selection.blend_mask {
+        Some(mask.pixels(&texture.rgba, || control.check().is_err())?)
     } else if let Some(blend) = selection
         .blend
         .filter(|_| selection.second_sample.is_none())
@@ -2623,5 +2721,167 @@ mod tests {
         assert!(select_diffuse(&graph).is_err());
         graph.wires.pop();
         assert_eq!(select_diffuse(&graph).unwrap(), s);
+    }
+    #[test]
+    fn blend_phase_one_selects_color_and_one_sample_stepped_by_its_alpha() {
+        use lbp_resource::material::{AnimationMetadata, BoxMetadata, WireMetadata};
+        let node = |kind, slot: u32| {
+            let mut parameters_raw = [0; 8];
+            match kind {
+                1 => parameters_raw = [1f32.to_bits(), 1f32.to_bits(), 0, 0, 0, slot, 0, 0],
+                3 => parameters_raw[..4].copy_from_slice(&[0.5f32, 1., 0.25, 1.].map(f32::to_bits)),
+                16 => parameters_raw[..2].copy_from_slice(&crate::BLEND_THRESHOLD_BITS),
+                _ => {}
+            }
+            BoxMetadata {
+                type_raw: kind,
+                declared_parameter_count: 8,
+                parameters_raw,
+                position_bits: [0; 4],
+                subtype_raw: 0,
+                animations: std::array::from_fn(|_| AnimationMetadata {
+                    base_value_bits: [0; 4],
+                    component_value_count: 0,
+                    component_bytes_sha256: String::new(),
+                    name_hex: "000000".into(),
+                    components_raw: 0,
+                    derived_key_count: 0,
+                }),
+                texture_slot_raw: None,
+                texture_slot_in_range: None,
+            }
+        };
+        let wire = |from, to, port, swizzle: &[u8]| {
+            let mut swizzle_raw = [0; 5];
+            swizzle_raw[..swizzle.len()].copy_from_slice(swizzle);
+            WireMetadata {
+                box_from: from,
+                box_to: to,
+                port_from_raw: 0,
+                port_to_raw: port,
+                swizzle_raw,
+                from_in_range: true,
+                to_in_range: true,
+            }
+        };
+        // T1: COLOR(port 0) + sample(port 1) + same sample alpha(port 2).
+        // Boxes: 0 output, 1 BLEND, 2 COLOR, 3 sample slot 4, 4 second sample slot 5.
+        let base = GraphMetadata {
+            box_count: 5,
+            wire_count: 4,
+            boxes: vec![node(0, 0), node(16, 0), node(3, 0), node(1, 4), node(1, 5)],
+            wires: vec![
+                wire(1, 0, 0, &[]),
+                wire(2, 1, 0, &[]),
+                wire(3, 1, 1, &[]),
+                wire(3, 1, 2, b"a"),
+            ],
+            graph_start: 0,
+            parsed_graph_bytes: 0,
+            unparsed_bytes: 0,
+        };
+        let selection = select_diffuse(&base).unwrap();
+        let mask = selection.blend_mask.unwrap();
+        assert_eq!((mask.blend_index, mask.color_first), (1, true));
+        assert_eq!(mask.color.values(), [0.5, 1., 0.25, 1.]);
+        assert_eq!(
+            (
+                selection.sample_index,
+                selection.slot,
+                selection.color_index
+            ),
+            (3, 4, Some(2))
+        );
+        assert_eq!((selection.ignored_nodes, selection.ignored_wires), (1, 0));
+        assert!(selection.alpha_mix.is_none() && selection.blend.is_none());
+        assert!(selection.second_sample.is_none());
+        // T10: wire order does not matter; `w` is the alpha component too.
+        let mut g = base.clone();
+        g.wires.reverse();
+        g.wires[0].swizzle_raw[0] = b'w';
+        assert_eq!(select_diffuse(&g).unwrap().blend_mask, Some(mask));
+        // Direction: sample on port 0, COLOR on port 1.
+        let mut g = base.clone();
+        g.wires[1].port_to_raw = 1;
+        g.wires[2].port_to_raw = 0;
+        assert!(!select_diffuse(&g).unwrap().blend_mask.unwrap().color_first);
+        let reason = |g: &GraphMetadata| select_diffuse(g).unwrap_err();
+        // T4: missing mask, extra wire, duplicate port, source port 1.
+        let mut g = base.clone();
+        g.wires.pop();
+        assert!(reason(&g).contains("exactly unswizzled ports 0/1"));
+        let mut g = base.clone();
+        g.wires.push(wire(4, 1, 3, &[]));
+        assert!(reason(&g).contains("exactly unswizzled ports 0/1"));
+        let mut g = base.clone();
+        g.wires[1].port_to_raw = 1;
+        assert!(reason(&g).contains("exactly unswizzled ports 0/1"));
+        let mut g = base.clone();
+        g.wires[3].port_from_raw = 1;
+        assert!(reason(&g).contains("exactly unswizzled ports 0/1"));
+        let mut g = base.clone();
+        g.wires[2].swizzle_raw[0] = b'x';
+        assert!(reason(&g).contains("exactly unswizzled ports 0/1"));
+        // T5: thresholds must be the exact 0.15/0.16 bits.
+        for bits in [
+            [0, 1f32.to_bits()],
+            [0x3e19_999a, 0x3e2e_147b],
+            [0x3e19_999b, 0x3e23_d70a],
+        ] {
+            let mut g = base.clone();
+            g.boxes[1].parameters_raw[..2].copy_from_slice(&bits);
+            assert_eq!(
+                reason(&g),
+                "Unsupported: BLEND thresholds other than 0.15/0.16"
+            );
+        }
+        // T6: RGB, multi-component and unknown mask swizzles; mask from another sample.
+        for swizzle in [&b""[..], b"r", b"x", b"xy", b"aa", b"q"] {
+            let mut g = base.clone();
+            g.wires[3].swizzle_raw = [0; 5];
+            g.wires[3].swizzle_raw[..swizzle.len()].copy_from_slice(swizzle);
+            assert!(reason(&g).contains("RGB mask space unknown"), "{swizzle:?}");
+        }
+        let mut g = base.clone();
+        g.wires[3].box_from = 4;
+        assert!(reason(&g).contains("mask must reuse"));
+        // T2/T3 (phase 1): two texture samples are not implemented yet.
+        let mut g = base.clone();
+        g.wires[1].box_from = 4;
+        assert_eq!(
+            reason(&g),
+            "Unsupported: BLEND phase 1 needs COLOR and one texture sample"
+        );
+        // T7: animated/subtype-1 root, wired COLOR, invalid COLOR, animated sampler.
+        let mut g = base.clone();
+        g.boxes[1].subtype_raw = 1;
+        assert!(reason(&g).contains("root must be static"));
+        let mut g = base.clone();
+        g.boxes[1].animations[0].name_hex = "000001".into();
+        assert!(reason(&g).contains("root must be static"));
+        let mut g = base.clone();
+        g.wires.push(wire(4, 2, 0, &[]));
+        assert!(reason(&g).contains("COLOR must be static and unwired"));
+        for bad in [1.5f32, f32::NAN] {
+            let mut g = base.clone();
+            g.boxes[2].parameters_raw[0] = bad.to_bits();
+            assert!(reason(&g).contains("outside finite 0..1"));
+        }
+        let mut g = base.clone();
+        g.boxes[3].animations[0].component_value_count = 1;
+        assert!(reason(&g).contains("sampler must be static"));
+        // T8: products, MIX or THING_COLOR under a BLEND input.
+        for kind in [10, 12, 2] {
+            let mut g = base.clone();
+            g.boxes[2] = node(kind, 0);
+            assert_eq!(
+                reason(&g),
+                "Unsupported: BLEND phase 1 inputs must be COLOR or texture samples"
+            );
+        }
+        // Animation-base opt-in does not widen BLEND.
+        let mut g = base.clone();
+        g.boxes[3].animations[0].name_hex = "000001".into();
+        assert!(select_diffuse_with_animation_base(&g, true).is_err());
     }
 }
