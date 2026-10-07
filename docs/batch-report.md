@@ -1,22 +1,22 @@
-# Batch report — 2026-10-07b (Integrator)
+# Batch report — 2026-10-07c (Integrator)
 
 ## Merged
-- D72 `origin/cloud/D72-ci` (PR #4): GitHub Actions CI.
-- D71 `origin/claude/batch-driver-lbp2-assets-9zli9f`: FARC, MAP and SFO bounds tests.
-- D73 `origin/cloud/D73-revision-gate-tests` (PR #5): 01.33 revision-gate tests.
+- D77 `origin/cloud/D77-branch-4431` (PR #8): Vita 0x4431 header gate. 01.33 scan:
+  116/116 now `metadata_parsed`; unsupported 117 -> 1.
+- D76 `origin/cloud/D76-blend-research` (PR #7): BLEND research doc (docs only).
+- D75 `origin/claude/d75-two-tex-color-erbljt` (PR #9): two textures x static COLOR.
+  Route census unsupported 386 -> 258 (texture +110, instance-only +18). Toolkit
+  diffuse parity on all 128 changed materials: 0 mismatches. Regressions unchanged.
 
-Each verified alone and again on merged main: fmt, test and clippy (-D warnings) for
-lbp-core, lbp-io, lbp-archive, lbp-resource; Python unittest 34 OK (1 skipped).
+Checks on merged main: fmt, workspace Clippy -D warnings, tests (lbp-resource,
+lbp-mesh, lbp-cli, lbp-preview), both viewer builds.
 
 ## Failed
 None.
 
-## Skipped
-- D74 `origin/cloud/D74-bounds-tests` (PR #6): closed as a duplicate of D71.
-
 ## Counts
-+0 newly viewable / +0 newly Complete (no parser or viewer change). Route census
-unchanged since D69: unsupported 386 of 8,094 material locations.
++0 newly viewable / +0 newly Complete. D75 cohort (48 meshes, distinct GUID): all-diffuse
+0 -> 44. A second 26-mesh part could not be censused (meshes without MAP rows).
 
 ## Backlog
-Unchanged. Item 1 (two textures × static COLOR) stays on the PC.
+Refreshed (docs/backlog.md): rank 1 done; next ranks 2 (65), 4 (14), 5 BLEND (14, D76 rule ready).

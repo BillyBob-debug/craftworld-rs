@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 — Batch: cloud D77, D76, D75 merged
+
+D77 Vita 0x4431 headers parse (01.33 unsupported 117 -> 1). D76 BLEND research doc.
+D75 two textures x COLOR: route census unsupported 386 -> 258, Toolkit parity 128/0.
++0 viewable / +0 Complete; D75 cohort 0 -> 44 all-diffuse.
+
 ## 2026-10-07 — Batch: cloud D72, D71, D73 merged
 
 First on-demand cloud batch, verified on the PC and merged: D72 GitHub Actions CI, D71

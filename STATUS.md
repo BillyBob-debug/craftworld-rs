@@ -3072,3 +3072,37 @@ Not tested: viewer builds, oracle/parity runs (no format code changed), CI run o
 Note: an earlier PC-local batch-driver session produced D70/D71 on a local branch; only
 its pushed D71 was merged here.
 Next: unchanged — two textures x static COLOR (docs/backlog.md item 1), done on the PC.
+
+## Batch 2026-10-07c — cloud D77, D76, D75 merged (2026-10-07)
+
+Cloud implementers built three branches; the PC Integrator verified them on 01.33 and
+merged all three (standing approval). Detail: [d77-branch-4431.md](docs/d77-branch-4431.md),
+[d76-blend.md](docs/d76-blend.md), [d75-two-tex-color.md](docs/d75-two-tex-color.md).
+
+- D77: branch 0x4431 (Vita DOUBLE11) headers read at heads 0x3c1..=0x3e2, branch rev
+  <= 0x87; payloads refused. 01.33 scan (resource locations): metadata_parsed
+  27,624 -> 27,740, unsupported 117 -> 1 (FNTb font). 116/116 now pass the gate.
+- D76: BLEND research doc only (proposed rule, test plan); no code.
+- D75: two textures x static COLOR under two multiplies. Route census on 01.33
+  (material locations, 8,094): texture 6,828 -> 6,938, instance-only 207 -> 225,
+  unsupported 386 -> 258; no other class changed. Doc predicted 273..358; the
+  sampler-rule shapes all qualified (COLOR was mislabelled as a sampler).
+- Counts (distinct catalog GUID): new D75 cohort d75-mesh-samples.json (48 of 74 meshes
+  using D75 materials): 48/0/0 -> 48/44/0 (viewable/all-diffuse/Complete). Cohorts
+  d68-new 48/45/0, D61 48/43/0, D64 26/23/0 unchanged.
+**+0 newly viewable / +0 newly Complete**; +44 newly all-diffuse in the D75 cohort.
+Corpus totals unknown.
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests lbp-resource/lbp-mesh/lbp-cli/lbp-preview, both viewer builds: pass.
+- lbp-cli --game-dir "disc;update" -> d77-inventory-0133.json: exit 0, partial false, unsupported 1.
+- diffuse_route_census -> d75-diffuse-route-shapes-0133.json: counts above.
+- run-material-oracle.ps1 -Diffuse on the 128 changed materials (12 manifests d75-samples-*, max 48 each) + diffuse_parity: 128 compared, 0 mismatches, 110 projected.
+- diffuse_parity regressions: d64-square 17/0/17, d65-third 48/0/48, d67-thirdbase 18/0/18, d46-diffuse 32/0/29, d46-linked 48/0/46, d68 patch_0120 26/0/20, patch_0131 3/0/3.
+- compatibility_census baseline = worktree at b905b17 (pre-D75), after = merged main.
+
+Failed: one oracle run hit the 48-sample budget (split); d75-mesh-samples-2.json (26
+meshes) failed "sample absent from catalog" (meshes without MAP rows), not counted.
+Not tested: native viewer capture, legacy viewer on 01.33, game pixels, Vita payloads.
+Next: backlog rank 2 (animated-sampler products, 65) or rank 4 (MIX, 14); D76 BLEND
+rule ready for implementation.
