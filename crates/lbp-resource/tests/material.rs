@@ -208,3 +208,24 @@ fn budgets_cancel_and_unaccounted_chunk_bytes() {
         Error::Budget
     );
 }
+#[test]
+fn d73_widened_gate_accepts_952_and_0x3f8_same_layout_and_rejects_above() {
+    // Gate proof only (D69): head 951 layout reused; not payload compatibility on 01.33 files.
+    for rev in [951u32, 952, 1000, 0x3f8] {
+        for compact in [false, true] {
+            let mut b = wire(&recipe(compact), compact, 0);
+            b[4..8].copy_from_slice(&rev.to_be_bytes());
+            let p = material::inspect(&b, || false).unwrap().prefix;
+            assert_eq!(p.shader_count, 10, "revision {rev}");
+            assert_eq!(p.scalars.flags, 0x10000);
+        }
+    }
+    for rev in [0x3f9u32, 0x3fa, 0x10000, 919] {
+        let mut b = wire(&recipe(false), false, 0);
+        b[4..8].copy_from_slice(&rev.to_be_bytes());
+        assert!(
+            matches!(material::inspect(&b, || false), Err(Error::Unsupported(_))),
+            "{rev}"
+        );
+    }
+}

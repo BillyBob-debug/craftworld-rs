@@ -225,3 +225,32 @@ fn input_expansion_budgets_and_cancellation_before_and_after_inflation() {
         Error::Budget
     );
 }
+#[test]
+fn d73_widened_gate_accepts_952_and_0x3f8_same_layout_and_rejects_above() {
+    // Gate proof only (D69): head 951 layout reused; not payload compatibility on 01.33 files.
+    for revision in [951, 952, 1000, 0x3f8] {
+        for compact in [false, true] {
+            let p =
+                animation::inspect(&wire(&recipe(951, compact), revision, compact, 0), || false)
+                    .unwrap()
+                    .prefix;
+            assert_eq!(
+                p.counts,
+                [255, 17, 254, 13, 0, 65535],
+                "revision {revision}"
+            );
+            assert_eq!(p.fat_raw_u8, Some(255));
+            assert_eq!(p.animation_data_bytes, 8);
+        }
+    }
+    for revision in [0x3f9, 0x3fa, 0x10000] {
+        assert!(matches!(
+            animation::inspect(&wire(&recipe(951, true), revision, true, 0), || false),
+            Err(Error::Unsupported(_))
+        ));
+    }
+    assert!(matches!(
+        animation::inspect(&wire(&recipe(946, true), 887, true, 0), || false),
+        Err(Error::Unsupported(_))
+    ));
+}

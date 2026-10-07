@@ -294,3 +294,23 @@ fn protection_revision_and_cancellation_before_and_between_tail_records() {
         ));
     }
 }
+#[test]
+fn d73_widened_gate_accepts_952_and_0x3f8_same_layout_and_rejects_above() {
+    // Gate proof only (D69): head 951 layout reused; not payload compatibility on 01.33 files.
+    let p = recipe(true, 2);
+    for rev in [951u32, 952, 1000, 0x3f8] {
+        let mut b = wire(&p.data, true, 0);
+        b[4..8].copy_from_slice(&rev.to_be_bytes());
+        let t = inspect_tail(&b, || false).unwrap().tail;
+        assert_eq!(t.parameter_animation_count, 2, "revision {rev}");
+        assert_eq!(t.tail_start, p.start);
+    }
+    for rev in [0x3f9u32, 0x3fa, 0x10000, 919] {
+        let mut b = wire(&p.data, true, 0);
+        b[4..8].copy_from_slice(&rev.to_be_bytes());
+        assert!(
+            matches!(inspect_tail(&b, || false), Err(Error::Unsupported(_))),
+            "{rev}"
+        );
+    }
+}

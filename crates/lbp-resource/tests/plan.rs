@@ -321,3 +321,43 @@ fn inventory_parent_errors_and_stage_cancellation_remain_distinct() {
         Err(Error::Unsupported(_))
     ));
 }
+#[test]
+fn d73_widened_gate_accepts_952_and_0x3f8_same_layout_and_rejects_above() {
+    // Gate proof only (D69): head 951 layout reused; not payload compatibility on 01.33 files.
+    for revision in [951, 952, 1000, 0x3f8] {
+        for compact in [false, true] {
+            let input = wire(
+                &recipe(compact, b"authored", b"unknown-inventory"),
+                revision,
+                compact,
+                0,
+            );
+            let p = plan::inspect(&input, || false).unwrap().prefix;
+            assert_eq!(p.thing_data_bytes, 8, "revision {revision}");
+            assert_eq!(p.inventory_tail_bytes, 17);
+            let tail = inventory_tail(compact, 1);
+            let input = wire(&recipe(compact, b"authored", &tail), revision, compact, 0);
+            assert!(plan::inspect_inventory(&input, || false)
+                .unwrap()
+                .inventory
+                .is_ok());
+        }
+    }
+    for revision in [0x3f9, 0x3fa, 0x10000] {
+        let input = wire(&recipe(true, b"", b""), revision, true, 0);
+        assert!(matches!(
+            plan::inspect(&input, || false),
+            Err(Error::Unsupported(_))
+        ));
+        assert!(matches!(
+            plan::inspect_inventory(&input, || false),
+            Err(Error::Unsupported(_))
+        ));
+    }
+    // Lower bound unchanged.
+    let input = wire(&recipe(true, b"", b""), 892, true, 0);
+    assert!(matches!(
+        plan::inspect(&input, || false),
+        Err(Error::Unsupported(_))
+    ));
+}
