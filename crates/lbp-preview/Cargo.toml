@@ -11,4 +11,5 @@ lbp-resource.workspace = true
 lbp-texture.workspace = true
 
 [dev-dependencies]
+flate2 = "1"
 serde_json.workspace = true
