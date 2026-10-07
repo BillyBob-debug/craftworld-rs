@@ -1,5 +1,7 @@
 //! Shared bounded CPU preview preparation. No GUI, GPU, decryption or executable tools.
 //! Supported format/predicate evidence remains docs/textured-mesh.md.
+mod add;
+pub use add::DiffuseAdd;
 mod affine;
 mod alpha_mix;
 pub use alpha_mix::{AlphaDiffuseMix, TextureAlphaMix};

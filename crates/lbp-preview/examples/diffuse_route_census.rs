@@ -26,7 +26,9 @@ fn classify(graph: &lbp_resource::material::GraphMetadata) -> (String, Option<St
     };
     if let Ok((derived, Some(_))) = lbp_preview::project_instance_color(graph, white) {
         if matches!(lbp_preview::select_solid_diffuse(&derived), Ok(Some(_)))
-            || lbp_preview::select_diffuse_with_animation_base(&derived, true).is_ok()
+            // D89 ADD is refused under a supplied instance color (loader guard).
+            || lbp_preview::select_diffuse_with_animation_base(&derived, true)
+                .is_ok_and(|s| s.texture_add.is_none())
         {
             return ("instance_color_only".into(), Some(reason));
         }

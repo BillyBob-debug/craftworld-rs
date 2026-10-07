@@ -238,7 +238,7 @@ impl MaterialAsset {
             Self::Texture(a) if a.fourth.is_some() => format!("Diffuse only • four-texture nested product • UV{} {} × UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.fourth_sample.unwrap().uv_channel,a.selection.fourth_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.third.is_some() => format!("Diffuse only • three-texture nested product{} • UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.third.as_ref().and_then(|t| t.relative).filter(|r| !r.is_identity() || r.from_primary).map_or(String::new(), |r| format!(" (third from {} coordinates × {:?} + {:?})", if r.from_primary {"primary"} else {"second"}, r.scale, r.offset)),a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture sampling • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.texture_alpha_mix.map(|m|m.label()).or(a.selection.blend.map(|blend|blend.label())).unwrap_or_else(||a.selection.tint.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture {}, second {}, nearest grid {:?}",if a.selection.texture_alpha_mix.is_some(){"alpha MIX"}else{"product"},second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.texture_alpha_mix.map(|m|m.label()).or(a.selection.texture_add.map(|m|format!("{} after {}",m.label(),a.selection.tint.label()))).or(a.selection.blend.map(|blend|blend.label())).unwrap_or_else(||a.selection.tint.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture {}, second {}, nearest grid {:?}",if a.selection.texture_alpha_mix.is_some(){"alpha MIX"}else if a.selection.texture_add.is_some(){"ADD"}else{"product"},second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire • black (0,0,0,0) per Toolkit shader generator; game default unverified • other channels not rendered • ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) => format!("Solid diffuse color {:?}{} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),if a.selection.product_of.is_some() {" (COLOR × COLOR product)"} else {""},a.selection.ignored_nodes,a.selection.ignored_wires),
         }
@@ -260,6 +260,8 @@ pub struct DiffuseSelection {
     pub third_sample: Option<SamplerSelection>,
     /// D83: port-0 sample is `sample_index`, port-1 sample is `second_sample`.
     pub texture_alpha_mix: Option<crate::TextureAlphaMix>,
+    /// D89: ADD root (two-texture grid sum, or texture [× COLOR] + COLOR).
+    pub texture_add: Option<crate::DiffuseAdd>,
     pub inner_multiply_index: Option<usize>,
     pub second_sample: Option<SamplerSelection>,
     pub output_index: usize,
@@ -281,7 +283,7 @@ pub struct SamplerSelection {
     pub uv_channel: usize,
     pub uv_transform: crate::SamplingTransform,
 }
-fn uses_grid(selection: DiffuseSelection) -> bool {
+pub(crate) fn uses_grid(selection: DiffuseSelection) -> bool {
     selection.third_sample.is_none()
         && selection.second_sample.is_some_and(|second| {
             selection.uv_channel == second.uv_channel
@@ -300,7 +302,7 @@ fn grid_with_wrapping(
         && primary == crate::TextureWrapping::uniform(true)
         && secondary == Some(crate::TextureWrapping::uniform(true))
 }
-fn sampler(graph: &GraphMetadata, index: usize) -> Result<SamplerSelection, String> {
+pub(crate) fn sampler(graph: &GraphMetadata, index: usize) -> Result<SamplerSelection, String> {
     let sample = &graph.boxes[index];
     let p = &sample.parameters_raw;
     if sample.type_raw != 1
@@ -839,6 +841,9 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
     if boxes[wire.box_from as usize].type_raw == 16 {
         return select_blend(graph, wire.box_from as usize, output_index);
     }
+    if boxes[wire.box_from as usize].type_raw == 11 {
+        return crate::add::select_add(graph, wire.box_from as usize, output_index);
+    }
     if boxes[wire.box_from as usize].type_raw == 1 {
         if let Some(selection) = crate::small_family::select_scaled_sampler(graph)? {
             return Ok(selection);
@@ -1015,6 +1020,7 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
         deep_multiply_index: None,
         third_sample,
         texture_alpha_mix: None,
+        texture_add: None,
         inner_multiply_index,
         second_sample,
         output_index,
@@ -1252,6 +1258,9 @@ pub(crate) fn load_primitive(
         })));
     }
     let (descriptor, wrap, mut selection) = binding(&graph, options.animation_base)?;
+    if selection.texture_add.is_some() && instance_projection.is_some() {
+        return Err("Unsupported: D89 ADD applies to the original graph only, not under a supplied instance color".into());
+    }
     if selection.animation_base.is_some() {
         let tail = lbp_resource::material::inspect_tail(&bytes, || control.check().is_err())
             .map_err(|e| e.to_string())?;
@@ -1300,7 +1309,9 @@ pub(crate) fn load_primitive(
         && instance_projection
             .as_ref()
             .is_none_or(|p| p.alpha_subtract_samplers.is_empty() && p.nested_tint.is_none());
-    if (selection.blend.is_some() || selection.texture_alpha_mix.is_some())
+    if (selection.blend.is_some()
+        || selection.texture_alpha_mix.is_some()
+        || selection.texture_add.is_some())
         && selection.second_sample.is_some()
         && !use_grid
     {
@@ -1357,6 +1368,8 @@ pub(crate) fn load_primitive(
         .filter(|_| selection.second_sample.is_none())
     {
         blend.pixels(&texture.rgba, || control.check().is_err())?
+    } else if let Some(add) = selection.texture_add.filter(|a| a.addend.is_some()) {
+        Some(add.pixels(selection.tint, &texture.rgba, || control.check().is_err())?)
     } else {
         selection
             .tint
@@ -1401,6 +1414,14 @@ pub(crate) fn load_primitive(
                     selection.uv_transform,
                     second.uv_transform,
                     mix,
+                    || control.check().is_err(),
+                )?
+            } else if selection.texture_add.is_some() {
+                crate::add::pixels_sum(
+                    &texture,
+                    &second_texture,
+                    selection.uv_transform,
+                    second.uv_transform,
                     || control.check().is_err(),
                 )?
             } else if let Some(blend) = selection.blend {
