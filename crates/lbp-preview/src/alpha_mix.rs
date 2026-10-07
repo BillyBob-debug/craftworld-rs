@@ -8,6 +8,24 @@ pub struct AlphaDiffuseMix {
     /// Preserved metadata; the wired factor overrides this value.
     pub unused_weight_bits: u32,
 }
+/// Two-texture MIX (port 0 / port 1 samples) whose port-2 factor is the alpha of
+/// one of those same samples. Baked on the nearest product grid: docs/d83-mix-shapes.md.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextureAlphaMix {
+    pub mix_index: usize,
+    /// MIX input port (0 or 1) whose sample also feeds port 2 with swizzle `a`.
+    pub factor_port: u8,
+    /// Preserved metadata; the wired factor overrides this value.
+    pub unused_weight_bits: u32,
+}
+impl TextureAlphaMix {
+    pub fn label(self) -> String {
+        format!(
+            "two-texture MIX weighted by port {} sample alpha • nearest grid",
+            self.factor_port
+        )
+    }
+}
 impl AlphaDiffuseMix {
     pub fn label(self) -> String {
         format!(

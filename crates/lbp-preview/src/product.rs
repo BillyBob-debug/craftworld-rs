@@ -79,20 +79,14 @@ fn bake(
 ) -> Result<(u32, u32, Vec<u8>), String> {
     bake_policy([da, db], [a, b], [sa, sb], None, cancelled)
 }
-fn bake_policy(
+fn extent(
     dimensions: [[u32; 2]; 2],
     sources: [&[u8]; 2],
     scales: [[u32; 2]; 2],
-    blend: Option<crate::DiffuseBlend>,
-    cancelled: impl Fn() -> bool,
-) -> Result<(u32, u32, Vec<u8>), String> {
-    if let Some(blend) = blend {
-        blend.validate()?;
-    }
+) -> Result<(u32, u32, u64), String> {
     let [da, db] = dimensions;
-    let [a, b] = sources;
     let [sa, sb] = scales;
-    for (d, p) in [(da, a), (db, b)] {
+    for (d, p) in dimensions.iter().zip(sources) {
         if d.contains(&0)
             || d.iter().any(|n| *n > 4096)
             || u64::from(d[0]) * u64::from(d[1]) > lbp_texture::MAX_PIXELS as u64
@@ -110,6 +104,105 @@ fn bake_policy(
     if count > lbp_texture::MAX_PIXELS as u64 {
         return Err("Unsupported: texture product pixel budget".into());
     }
+    Ok((width, height, count))
+}
+/// D83: `(port1 - port0) * w + port0` on the nearest grid, `w` = factor sample alpha.
+/// `a` is the port-0 sample, `b` port 1. RGB in linear space, alpha linear,
+/// matching the D58 policy (docs/alpha-mix-preview.md, docs/d83-mix-shapes.md).
+pub(crate) fn pixels_alpha_mixed(
+    a: &lbp_texture::Texture,
+    b: &lbp_texture::Texture,
+    ta: SamplingTransform,
+    tb: SamplingTransform,
+    mix: crate::TextureAlphaMix,
+    cancelled: impl Fn() -> bool,
+) -> Result<(u32, u32, Vec<u8>), String> {
+    bake_alpha_mix(
+        [
+            [a.header.width, a.header.height],
+            [b.header.width, b.header.height],
+        ],
+        [&a.rgba, &b.rgba],
+        [scales(ta)?, scales(tb)?],
+        mix.factor_port,
+        cancelled,
+    )
+}
+fn bake_alpha_mix(
+    dimensions: [[u32; 2]; 2],
+    sources: [&[u8]; 2],
+    scales: [[u32; 2]; 2],
+    factor_port: u8,
+    cancelled: impl Fn() -> bool,
+) -> Result<(u32, u32, Vec<u8>), String> {
+    if factor_port > 1 {
+        return Err("Unsupported: alpha MIX factor port".into());
+    }
+    let (width, height, count) = extent(dimensions, sources, scales)?;
+    if cancelled() {
+        return Err("Cancelled".into());
+    }
+    let [da, db] = dimensions;
+    let [a, b] = sources;
+    let [sa, sb] = scales;
+    let linear: [f64; 256] = std::array::from_fn(|i| {
+        let c = i as f64 / 255.;
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    });
+    let encode = |c: f64| {
+        let c = if c <= 0.0031308 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1. / 2.4) - 0.055
+        };
+        (c * 255.).round().clamp(0., 255.) as u8
+    };
+    let mut output = Vec::with_capacity(count as usize * 4);
+    for y in 0..height {
+        for x in 0..width {
+            if output.len().is_multiple_of(16384) && cancelled() {
+                return Err("Cancelled".into());
+            }
+            let index = |d: [u32; 2], s: [u32; 2]| {
+                let px = ((u64::from(x) * u64::from(d[0]) * u64::from(s[0]) / u64::from(width))
+                    % u64::from(d[0])) as usize;
+                let py = ((u64::from(y) * u64::from(d[1]) * u64::from(s[1]) / u64::from(height))
+                    % u64::from(d[1])) as usize;
+                (py * d[0] as usize + px) * 4
+            };
+            let (i, j) = (index(da, sa), index(db, sb));
+            let w = f64::from(if factor_port == 0 { a[i + 3] } else { b[j + 3] }) / 255.;
+            for c in 0..3 {
+                let (l, r) = (linear[a[i + c] as usize], linear[b[j + c] as usize]);
+                output.push(encode((r - l) * w + l));
+            }
+            let (l, r) = (f64::from(a[i + 3]) / 255., f64::from(b[j + 3]) / 255.);
+            output.push((((r - l) * w + l) * 255.).round().clamp(0., 255.) as u8);
+        }
+    }
+    if cancelled() {
+        return Err("Cancelled".into());
+    }
+    Ok((width, height, output))
+}
+fn bake_policy(
+    dimensions: [[u32; 2]; 2],
+    sources: [&[u8]; 2],
+    scales: [[u32; 2]; 2],
+    blend: Option<crate::DiffuseBlend>,
+    cancelled: impl Fn() -> bool,
+) -> Result<(u32, u32, Vec<u8>), String> {
+    if let Some(blend) = blend {
+        blend.validate()?;
+    }
+    let [da, db] = dimensions;
+    let [a, b] = sources;
+    let [sa, sb] = scales;
+    let (width, height, count) = extent(dimensions, sources, scales)?;
     if cancelled() {
         return Err("Cancelled".into());
     }
@@ -285,5 +378,43 @@ mod tests {
             )
             .is_err());
         }
+    }
+    #[test]
+    fn two_texture_alpha_mix_grid_endpoints_factor_port_and_cancel() {
+        // Port 0: opaque red 1x1 at scale 2; port 1: transparent white, half-alpha blue.
+        let red = [255, 0, 0, 255];
+        let top = [255, 255, 255, 0, 0, 0, 255, 128];
+        let run = |port: u8, cancel: &dyn Fn() -> bool| {
+            bake_alpha_mix(
+                [[1, 1], [2, 1]],
+                [&red, &top],
+                [[2, 1], [1, 1]],
+                port,
+                cancel,
+            )
+        };
+        let (width, height, pixels) = run(1, &|| false).unwrap();
+        assert_eq!((width, height), (2, 1));
+        assert_eq!(pixels, [255, 0, 0, 255, 187, 0, 188, 191]);
+        // Factor from port 0 (opaque): result is port 1 everywhere.
+        assert_eq!(run(0, &|| false).unwrap().2, top);
+        assert!(run(2, &|| false).is_err());
+        assert_eq!(run(1, &|| true).unwrap_err(), "Cancelled");
+        let calls = std::cell::Cell::new(0);
+        assert_eq!(
+            run(1, &|| {
+                calls.set(calls.get() + 1);
+                calls.get() > 1
+            })
+            .unwrap_err(),
+            "Cancelled"
+        );
+        assert!(
+            bake_alpha_mix([[1, 1], [2, 1]], [&red, &top[..4]], [[1, 1]; 2], 1, || {
+                false
+            })
+            .is_err()
+        );
+        assert!(bake_alpha_mix([[1, 1]; 2], [&red, &red], [[17, 1], [1, 1]], 1, || false).is_err());
     }
 }
