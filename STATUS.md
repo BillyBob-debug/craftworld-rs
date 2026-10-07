@@ -2990,3 +2990,29 @@ Commands (after `. ./scripts/use-local-rust.ps1`):
 Not tested: game pixels, float rounding order of permuted products, legacy viewer.
 Next: two-texture products that also multiply a static COLOR (about 90 materials /
 80 meshes across several shapes; currently mislabelled "sampler must be static").
+
+## D68 — official update 01.33 acquired as a separate overlay input (2026-10-07)
+
+User asked for the newest game version. Disc/ISO left untouched (read-only rule); all 32
+official packages 01.01..01.33 from Sony's update server were verified and extracted in
+order into ignored `game-data/a1-update-0133/` (1,742 files, 3.71 GB; APP_VER 01.33).
+Evidence, tables and overlay plan: [docs/update-overlay.md](docs/update-overlay.md).
+
+Counts (patch MAP vs disc MAP, distinct GUID): 23,229 patch rows = 21,270 new GUIDs,
+1,014 replaced hashes, 945 unchanged. 32 accumulating `patches/patch_NNNN.farc`
+(22,353 unique hashes, 21,437 not on disc). 9,665 reachable binary resources use
+revisions 952..1016, beyond current readers (<= 951).
+**+0 newly viewable / +0 newly Complete** (no code change; overlay not wired in).
+
+Commands (scripts under ignored `local-analysis/lbp2-update-lists/`):
+- ver.xml fetch: 32 packages, 4,047,336,256 bytes.
+- dl.py: 32/32 verified (SHA-1 of file minus 32-byte footer == XML == footer).
+- pkgx.exe (csc build of pkgx.cs) x32 in version order: all succeeded.
+- compare.py: SFO, MAP, FARC coverage counts above. revisions.py: revision histogram.
+
+Failed: whole-file SHA-1 never matches Sony's XML (cost one aborted download pass).
+Not tested: scanner/viewer on the overlay, `patch.edat` (NPDRM, holds 528 .ff/.sbu rows
+by size inference), EBOOT 01.33, text resources.
+Next: user decision on wiring the overlay (second input root, patch MAP wins per GUID,
+hash lookup across all FARCs), then revision 952..1016 support. Prior D67 Next (two-texture
+x COLOR products) remains open.

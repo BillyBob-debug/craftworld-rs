@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-07 — D68 official update 01.33 overlay data
+
+All 32 official BCUS98245 updates verified and extracted to ignored
+`game-data/a1-update-0133` (disc untouched). Patch MAP: 21,270 new GUIDs, 1,014 replaced;
+9,665 resources at revisions 952..1016. No code change; +0 viewable/+0 Complete.
+[update-overlay.md](docs/update-overlay.md).
+
 ## 2026-10-07 — D67 third-texture role swap
 
 Three-texture products whose third channel was not displayed now swap leaf roles

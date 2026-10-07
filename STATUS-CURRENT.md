@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D67, 2026-10-07
+# Current state (overwrite each milestone) — after D68, 2026-10-07
 
 ## Product
 Independent LBP2 Asset Explorer (Rust). Bevy viewer (main) and legacy viewer read
@@ -7,6 +7,8 @@ Parsing crates stay independent of UI/rendering.
 
 ## Inputs (read-only)
 - `game-data/a1-disc` extracted BCUS98245 01.00; `USRDIR/DATA.FARC` 1023990298 bytes.
+- `game-data/a1-update-0133` official updates 01.01..01.33 extracted in order (D68);
+  not yet read by any tool. Packages in `local-analysis/lbp2-update-pkgs/`.
 - Snapshot `local-analysis/a2-inventory-verified.json` (~119 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
@@ -32,6 +34,8 @@ retained-bytes budget (D66).
 - D65 third-texture cohort (d65-third-mesh-samples-pinned.json, 48 hashes): 48/38/0 after D67.
 - D66 many-material cohort (d66-many-material-mesh-samples.json, 22 hashes): 22/7/0 after D67.
 - D67: +0 newly viewable, +0 newly Complete.
+- D68 (data only): +0 / +0. Update adds 21,270 GUIDs, replaces 1,014; 9,665 resources
+  at revisions 952..1016 (readers stop at 951).
 
 ## Open blockers
 - Glow, reflection and other non-diffuse channels are not rendered.
@@ -39,7 +43,8 @@ retained-bytes budget (D66).
 - BORDER color, CLAMP5, mirror-once 6–8, motion/time, filtering fidelity unknown.
 
 ## Next
-Two-texture products that also multiply a static COLOR (about 90 materials / 80
+User decision pending: wire disc + 01.33 overlay ([update-overlay.md](docs/update-overlay.md)),
+then revisions 952..1016. Otherwise: Two-texture products that also multiply a static COLOR (about 90 materials / 80
 meshes; mislabelled "sampler must be static"). Note: the census does not run Bevy
 draw grouping.
 
@@ -53,5 +58,6 @@ draw grouping.
 - Latest full entry: end of `STATUS.md`. Short log: top of `MODLOG.md`.
 - Milestone docs: `docs/instance-preview.md` (D61), `docs/animation-base-preview.md` (D56, D62),
   `docs/unwired-diffuse-preview.md` (D63), `docs/route-census.md` (D64),
-  `docs/third-sample-preview.md` (D65, D67), `docs/material-budget-preview.md` (D66).
+  `docs/third-sample-preview.md` (D65, D67), `docs/material-budget-preview.md` (D66),
+  `docs/update-overlay.md` (D68).
 - Format evidence: `docs/formats.md` (grep headings). Rules: `AGENTS.md`.
