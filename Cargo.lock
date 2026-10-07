@@ -2834,6 +2834,7 @@ dependencies = [
 name = "lbp-preview"
 version = "0.1.0"
 dependencies = [
+ "flate2",
  "lbp-catalog",
  "lbp-mesh",
  "lbp-resource",
