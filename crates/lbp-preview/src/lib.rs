@@ -7,6 +7,7 @@ mod animation_base;
 pub use animation_base::AnimationBaseSnapshot;
 mod blend;
 mod border_domain;
+pub mod census;
 pub use blend::DiffuseBlend;
 pub use border_domain::{BorderDomain, INTERIOR_MARGIN};
 mod matrix;
