@@ -2885,3 +2885,37 @@ Commands (after `. ./scripts/use-local-rust.ps1`; A, G, mesh manifest d61-mesh-s
 
 Not tested: native capture (exe locked), game pixels for unwired diffuse, glow/reflect rendering, corpus count of unwired-diffuse materials.
 Next: relink and capture 00020c92 once the viewer is closed; then widen the cohort (corpus-wide census of which diffuse routes remain unsupported) to pick the next blocker by asset count.
+
+## D64 — corpus route census and same-sample multiply (2026-10-07)
+
+D63 follow-up: Bevy relinked after the user closed the viewer; capture of 00020c92
+(d63-bevy-lcd-unwired.png) placed on non-primary 165v0, black unwired label, no
+shader errors (log only, image not viewed).
+
+New diagnostic `diffuse_route_census` over all 5163 materials: 4175 texture, 459 solid,
+7 unwired, 34 animation-base-only, 122 instance-only, 366 unsupported. Mesh-weighted
+ranking and shapes: [docs/route-census.md](docs/route-census.md). Implemented the
+cheapest exact gap: one sample wired to both multiply ports (texel squared).
+
+Counts (distinct GUID): new 26-hash squared cohort 26/0/0 -> 26/23/0 (groups 36 -> 65
+of 68, geometry identical); D61 48 cohort 48/43/0 unchanged.
+**+0 newly viewable / +0 newly Complete.**
+
+Commands (after `. ./scripts/use-local-rust.ps1`):
+- diffuse_route_census A G d60-material-wrap-census-final.json -> d63-diffuse-route-census.json and d63-diffuse-route-shapes.json: 5163 materials, 44060339 bytes. First run failed "Hex page size must be 1..4096" (page 65536), fixed.
+- run-material-oracle.ps1 -Diffuse d64-square-material-samples.json -> d64-square-material-oracle.json: 17 records.
+- diffuse_parity d64-square 17/0 mismatches/17 projected; regressions d64-diffuse 32/0/28, d64-linked 48/0/46, d64-alpha 1/0/1, d64-mirror 5/0/5, d64-blocker 8/0/1.
+- compatibility_census: d64-square-baseline (linked.rs stashed) 26/0/0; d64-square-after 26/23/0; d64-cohort48-after 48/43/0. A combined 74-sample manifest failed the 48-sample census budget; split instead.
+- fmt, Clippy -D warnings, tests (preview 21), python 34, both builds: pass.
+- Native: --select-guid 0000454e (snow_lake) capture, non-primary 165v0, 4/4 textured; one image viewed.
+
+Bug found: that image showed mojibake bullets in labels. The D63 PowerShell
+Get-Content/Set-Content round trip had double-encoded 11 non-ASCII lines in linked.rs
+(committed in 923c4f7). Repaired by reversing cp1252 -> UTF-8; diff to D62 shows only
+intended text; recapture log d64-bevy-qa2.out.txt has clean bullets. CLAUDE.md now
+forbids PowerShell text rewrites of source.
+
+Not tested: game pixels, filtered/colour-space fidelity of squared products, external
+geometry oracle for the 26 added meshes, corpus-wide binding (selection only).
+Next: three-texture product with an independent third transform (largest blocker,
+84 meshes blocked by nothing else); needs a three-sampler Bevy path or a bounded bake.

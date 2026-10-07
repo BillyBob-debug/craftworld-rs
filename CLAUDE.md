@@ -69,5 +69,8 @@ latest exact commands are in the latest STATUS entry.
 - Commit at each milestone (user asked for git); no push/publish unless asked.
 - Output filenames under `local-analysis/` must be new; tools refuse to overwrite.
 - Write docs as UTF-8 explicitly (a cp1252 default broke a write before).
+- Never rewrite source/docs with PowerShell Get-Content/Set-Content/Out-File: Windows
+  PowerShell 5.1 reads UTF-8 as cp1252 and double-encodes non-ASCII (broke D63 labels).
+  Use the Edit tool or Python with explicit UTF-8 and preserved line endings.
 - Native test windows go on the non-primary monitor; verify placement first.
 - After meaningful work, append to STATUS.md and MODLOG.md within the budget above.

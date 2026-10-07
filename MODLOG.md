@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-07 — D64 corpus route census and same-sample multiply
+
+New selection-only census over 5163 materials ranks blockers by dependent meshes.
+Same sample on both multiply ports now previews (texel squared). 26-mesh cohort
+full diffuse 0 -> 23; +0 viewable/+0 Complete. Fixed D63 label mojibake in linked.rs.
+[route-census.md](docs/route-census.md), [STATUS.md](STATUS.md).
+
 ## 2026-10-07 — D63 unwired diffuse as explicit black
 
 Materials with no diffuse wire preview as a labelled black solid (Toolkit generator

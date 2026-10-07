@@ -1,6 +1,6 @@
 //! Bounded CPU-only direct-diffuse slice. Independent interpretation; no shader code.
 //! Evidence/pin/applicability/conflicts: docs/textured-mesh.md and docs/affine-preview.md.
-//! Static COLOR Ã— texture routes: docs/tinted-preview.md (independent bounded projection).
+//! Static COLOR × texture routes: docs/tinted-preview.md (independent bounded projection).
 //! Two-texture nearest-grid products: docs/product-preview.md.
 //! Independent static matrix/affine products: docs/dual-preview.md.
 //! Bounded three-texture nested product: docs/nested-preview.md.
@@ -135,14 +135,14 @@ impl MaterialAsset {
     }
     fn source_label(&self) -> String {
         match self {
-            Self::Texture(a) if a.selection.alpha_mix.is_some() => format!("Diffuse only â€¢ {} â€¢ UV{} {} â€¢ {} â€¢ ignores {} nodes / {} wires",a.selection.alpha_mix.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.border_domain.map_or_else(||a.wrap.label(),|b|b.label()),a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Texture(a) if a.selection.animation_base.is_some()=>format!("Animation base-value snapshot â€¢ local/global rows verified â€¢ {} keys per row {:?} â€¢ UV{} {} â€¢ time/motion unverified â€¢ diffuse only",a.selection.animation_base.unwrap().key_counts[0],a.selection.animation_base.unwrap().key_counts,a.selection.uv_channel,a.selection.uv_transform.label()),
-            Self::Texture(a) if a.fourth.is_some() => format!("Diffuse only â€¢ four-texture nested product â€¢ UV{} {} Ã— UV{} {} Ã— UV{} {} Ã— UV{} {} â€¢ linear filtering â€¢ ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.fourth_sample.unwrap().uv_channel,a.selection.fourth_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Texture(a) if a.third.is_some() => format!("Diffuse only â€¢ three-texture nested product â€¢ UV{} {} Ã— UV{} {} Ã— UV{} {} â€¢ linear filtering â€¢ ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Texture(a) if a.dual.is_some() => format!("Diffuse only â€¢ independent two-texture sampling â€¢ UV{} {} ({}) / UV{} {} ({}) | linear filtering â€¢ ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Texture(a) => format!("Diffuse only â€¢ UV{} â€¢ {} â€¢ {} â€¢ {}Ã—{} {} â€¢ {} â€¢ {} â€¢ ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.blend.map_or_else(||a.selection.tint.label(),|blend|blend.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture product, second {}, nearest grid {:?}",second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire â€¢ black (0,0,0,0) per Toolkit shader generator; game default unverified â€¢ other channels not rendered â€¢ ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Solid(a) => format!("Solid diffuse color {:?} â€¢ no diffuse texture required â€¢ ignores {} nodes / {} wires",a.selection.color.values(),a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) if a.selection.alpha_mix.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.alpha_mix.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.border_domain.map_or_else(||a.wrap.label(),|b|b.label()),a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) if a.selection.animation_base.is_some()=>format!("Animation base-value snapshot • local/global rows verified • {} keys per row {:?} • UV{} {} • time/motion unverified • diffuse only",a.selection.animation_base.unwrap().key_counts[0],a.selection.animation_base.unwrap().key_counts,a.selection.uv_channel,a.selection.uv_transform.label()),
+            Self::Texture(a) if a.fourth.is_some() => format!("Diffuse only • four-texture nested product • UV{} {} × UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.fourth_sample.unwrap().uv_channel,a.selection.fourth_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) if a.third.is_some() => format!("Diffuse only • three-texture nested product • UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture sampling • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.blend.map_or_else(||a.selection.tint.label(),|blend|blend.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture product, second {}, nearest grid {:?}",second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire • black (0,0,0,0) per Toolkit shader generator; game default unverified • other channels not rendered • ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Solid(a) => format!("Solid diffuse color {:?} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),a.selection.ignored_nodes,a.selection.ignored_wires),
         }
     }
 }
@@ -226,7 +226,7 @@ fn sampler(graph: &GraphMetadata, index: usize) -> Result<SamplerSelection, Stri
         uv_transform,
     })
 }
-// Structurally fixed chain: ((A Ã— B) Ã— C) Ã— D. No recursive traversal.
+// Structurally fixed chain: ((A × B) × C) × D. No recursive traversal.
 // D shares A's exact coordinates, C shares B's. Evidence: docs/four-product-preview.md.
 fn four_chain(
     graph: &GraphMetadata,
@@ -627,7 +627,9 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
                 inner_multiply_index = Some(inner);
                 (first, None)
             }
-            (1, 1) if left != right => {
+            (1, 1) => {
+                // Same sample on both ports is that sample squared: identical
+                // coordinates, so the existing product path is exact per texel.
                 sampler(graph, left)?;
                 let second = sampler(graph, right)?;
                 second_sample = Some(second);
@@ -652,7 +654,13 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
         sample_index = sample;
         multiply_index = Some(multiply);
         color_index = color;
-        used_nodes = if third_sample.is_some() { 6 } else { 4 };
+        used_nodes = if third_sample.is_some() {
+            6
+        } else if second_sample.is_some_and(|s| s.sample_index == sample) {
+            3
+        } else {
+            4
+        };
         used_wires = if third_sample.is_some() { 5 } else { 3 };
     }
     let selected = sampler(graph, sample_index)?;
@@ -1244,7 +1252,7 @@ mod tests {
         graph.boxes[2].type_raw = 0;
         assert!(select_diffuse(&graph).is_err());
 
-        // One bounded multiply: texture Ã— unwired static color in either input order.
+        // One bounded multiply: texture × unwired static color in either input order.
         graph.boxes[2] = node(3);
         graph.boxes[2].parameters_raw[..4].copy_from_slice(&[0.5, 1., 0.25, 1.].map(f32::to_bits));
         graph.boxes.push(node(10));
@@ -1276,7 +1284,9 @@ mod tests {
         assert!(select_diffuse(&graph).is_err());
         graph.wires.pop();
         graph.wires[1].box_from = 1;
-        assert!(select_diffuse(&graph).is_err());
+        // D64: the same sample on both ports is supported as that sample squared.
+        let same = select_diffuse(&graph).unwrap();
+        assert_eq!(same.second_sample.unwrap().sample_index, same.sample_index);
         graph.wires[1].box_from = 3;
         assert!(select_diffuse(&graph).is_err());
         graph.wires[1].box_from = 2;
@@ -1381,6 +1391,20 @@ mod tests {
         unwired.boxes[1].type_raw = 1;
         unwired.boxes[0].animations[0].name_hex = "623100".into();
         assert!(crate::select_solid_diffuse(&unwired).is_err());
+        // One sample feeding both multiply ports is that sample squared.
+        let mut square = graph.clone();
+        square.boxes = vec![node(0), node(1), node(10)];
+        square.wires = vec![wire(1, 2, 0), wire(1, 2, 1), wire(2, 0, 0)];
+        let squared = select_diffuse(&square).unwrap();
+        let second = squared.second_sample.unwrap();
+        assert_eq!((squared.sample_index, second.sample_index), (1, 1));
+        assert_eq!(second.uv_transform, squared.uv_transform);
+        assert_eq!((squared.ignored_nodes, squared.ignored_wires), (0, 0));
+        square.wires[1].swizzle_raw[0] = b'a';
+        assert!(select_diffuse(&square).is_err());
+        square.wires[1].swizzle_raw[0] = 0;
+        square.wires[1].port_to_raw = 0;
+        assert!(select_diffuse(&square).is_err());
         graph.wires.push(wire(1, 2, 0));
         assert!(crate::select_solid_diffuse(&graph).is_err());
         graph.wires.pop();
