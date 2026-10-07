@@ -22,7 +22,7 @@ pub struct Asset {
     pub border_domain: Option<crate::BorderDomain>,
     /// Fourth source shares the primary sampler coordinates.
     pub fourth: Option<Box<SharedSampleAsset>>,
-    /// Third source shares the second sampler coordinates; no coordinate fallback.
+    /// Third source samples second or primary coordinates via `relative`; no fallback.
     pub third: Option<Box<SharedSampleAsset>>,
     pub dual: Option<Box<DualAsset>>,
     pub product: Option<Box<ProductAsset>>,
@@ -164,6 +164,26 @@ pub enum MaterialAsset {
     Solid(Box<SolidAsset>),
 }
 impl MaterialAsset {
+    /// Heap bytes retained for display: decoded and derived pixels plus coordinate
+    /// arrays. Used for the per-mesh aggregate budget; small metadata is ignored.
+    pub fn retained_bytes(&self) -> usize {
+        let Self::Texture(a) = self else {
+            return 0;
+        };
+        let uv = |v: &Vec<[f32; 2]>| v.len() * std::mem::size_of::<[f32; 2]>();
+        a.texture.rgba.len()
+            + a.tinted_rgba.as_ref().map_or(0, Vec::len)
+            + uv(&a.sampling_uv)
+            + uv(&a.uv)
+            + a.product
+                .as_ref()
+                .map_or(0, |p| p.texture.rgba.len() + p.rgba.len())
+            + a.dual
+                .as_ref()
+                .map_or(0, |d| d.texture.rgba.len() + uv(&d.sampling_uv))
+            + a.third.as_ref().map_or(0, |t| t.texture.rgba.len())
+            + a.fourth.as_ref().map_or(0, |t| t.texture.rgba.len())
+    }
     pub fn texture(&self) -> Option<&Asset> {
         match self {
             Self::Texture(a) => Some(a),

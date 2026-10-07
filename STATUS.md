@@ -2946,3 +2946,25 @@ order; made role-aware. git stash round trip left lib.rs/linked.rs as LF; restor
 Not tested: game pixels, filtering/mip fidelity, matrix-base thirds, legacy rendering.
 Next: the 8-distinct-material mesh preview budget (78 groups in this cohort alone);
 measure corpus impact before raising it with bounded memory.
+
+## D66 — per-mesh material budget (2026-10-07)
+
+Replaced the 8-distinct-material count with a 64-load cap plus a 640 MiB retained-bytes
+aggregate (the old implied total); Bevy draw cap 9 -> 65. Policy and worst cases:
+[docs/material-budget-preview.md](docs/material-budget-preview.md).
+
+Counts (distinct GUID): new cohort d66-many-material-mesh-samples.json (all 22 meshes
+with >8 materials) 22/0/0 -> 22/5/0, groups 157 -> 449 of 504; D65 cohort 48/29/0 ->
+48/30/0, groups 134 -> 212 of 235; D61 48/43/0 and D64 26/23/0 unchanged. Geometry
+identical. **+0 newly viewable / +0 newly Complete.** No mesh hit the memory budget.
+
+Commands (after `. ./scripts/use-local-rust.ps1`):
+- compatibility_census: d66-many-baseline (lib.rs/linked.rs stashed) 22/0/0; d66-many-after 22/5/0; d66-third-after 48/30/0; d66-cohort48-after 48/43/0; d66-square-after 26/23/0.
+- fmt, Clippy -D warnings, tests (preview 21, bevy 11 incl. new draw-budget test, legacy 65, others), python 34, both builds: pass.
+- Native: --select-guid 0001d050 (cosmos_room_default_lbp2, 59 primitives) first capture FAILED "material draw budget" (Bevy adapter cap 9 not covered by the census); after raising MAX_DRAWS, d66-bevy-many2.png: non-primary 165v0, 58/59 groups, 1 neutral, 24 s incl. startup; one image viewed.
+
+Failed: the census reported 0001d050 viewable while Bevy refused it; the census does not
+run adapter grouping. rustfmt again left lib.rs as LF; CRLF restored before commit.
+Not tested: peak process memory on the largest meshes, legacy viewer, game pixels.
+Next: "third texture needs a scale/offset sample on its channel" (29 groups across the
+D65/D66 cohorts), then rerun the corpus route census to re-rank blockers.

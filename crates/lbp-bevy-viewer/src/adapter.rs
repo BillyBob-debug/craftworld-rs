@@ -136,6 +136,9 @@ pub fn image_axes(
     });
     Ok(image)
 }
+/// Distinct material draws per mesh: lbp-preview's 64-load cap plus one neutral bucket.
+/// GPU image memory stays bounded by lbp-preview's 640 MiB retained-bytes budget.
+pub const MAX_DRAWS: usize = 65;
 /// Validate the complete primitive partition before grouping draws by shared binding.
 /// Preserve triangle order, overlapping source ownership, and one neutral bucket.
 pub fn buckets<T>(
@@ -165,7 +168,8 @@ pub fn buckets<T>(
                 out.push((asset, Vec::new()));
                 out.len() - 1
             });
-        if out.len() > 9 {
+        // D66: one draw per distinct material (preview cap 64) plus one neutral bucket.
+        if out.len() > MAX_DRAWS {
             return Err("Unsupported: material draw budget".into());
         }
         out[index].1.extend_from_slice(&triangles[range.clone()]);
@@ -179,6 +183,21 @@ pub type Bucket<T> = (Option<std::sync::Arc<T>>, Vec<[u32; 3]>);
 #[cfg(test)]
 mod group_tests {
     use super::*;
+    #[test]
+    fn draw_budget_allows_64_materials_and_one_neutral_bucket() {
+        let triangles = vec![[0, 1, 2]; 66];
+        let ranges: Vec<_> = (0..66).map(|i| i..i + 1).collect();
+        let mut bindings: Vec<Result<std::sync::Arc<usize>, String>> =
+            (0..64).map(|i| Ok(std::sync::Arc::new(i))).collect();
+        bindings.push(Err("neutral".into()));
+        bindings.push(Err("neutral again".into()));
+        assert_eq!(
+            buckets(&triangles, &ranges, &bindings).unwrap().len(),
+            MAX_DRAWS
+        );
+        bindings[65] = Ok(std::sync::Arc::new(64));
+        assert!(buckets(&triangles, &ranges, &bindings).is_err());
+    }
     #[test]
     fn mixed_bindings_preserve_ownership_and_shared_full_mesh_alignment() {
         let a = std::sync::Arc::new(1);

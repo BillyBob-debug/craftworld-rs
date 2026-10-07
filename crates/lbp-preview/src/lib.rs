@@ -85,12 +85,15 @@ pub struct GroupedMesh {
     pub geometry: lbp_mesh::Geometry,
     pub bindings: Vec<Result<std::sync::Arc<MaterialAsset>, String>>,
 }
-/// At most eight distinct material loads; each may decode four bounded textures.
-/// <=512 MiB raw pixels plus <=128 MiB derived tint/product pixels, <=522 MiB
-/// stored input reads, <=1296 MiB cumulative expansion including repeated UV decode and optional
-/// global animation declaration checks. Derived graph metadata clones are bounded
-/// by 1024 boxes / 4096 wires per material (no key arrays copied).
-/// The parser's 4096 primitive cap is retained; failures stay explicit per group.
+/// D66: at most 64 distinct material loads per mesh, and the retained display bytes
+/// of successful loads (decoded + derived pixels and coordinate arrays) may total at
+/// most 640 MiB, the same aggregate the earlier eight-material count implied
+/// (512 MiB raw + 128 MiB derived). A load that would exceed it fails explicitly
+/// for its groups and is not retained. Each load keeps its own per-material read,
+/// decompression and pixel limits, so worst-case stored reads and expansion scale
+/// with the 64-load cap (docs/material-budget-preview.md). Derived graph metadata
+/// clones are bounded by 1024 boxes / 4096 wires per material (no key arrays
+/// copied). The parser's 4096 primitive cap is retained; failures stay explicit.
 pub fn load_mesh_groups(
     source: &AttachedSource,
     catalog: &Catalog,
@@ -134,6 +137,7 @@ pub fn load_mesh_groups_with_options(
         LocationKey,
         Result<std::sync::Arc<MaterialAsset>, String>,
     > = std::collections::HashMap::new();
+    let mut retained = 0usize;
     let mut bindings = Vec::with_capacity(geometry.metadata.primitives.len());
     for primitive in &geometry.metadata.primitives {
         control.check()?;
@@ -149,11 +153,17 @@ pub fn load_mesh_groups_with_options(
                 primitive.material_hash.as_deref(),
             )
             .and_then(|material_key| {
-                cached_binding(&mut cache, material_key, || {
-                    linked::load_primitive(
-                        source, catalog, &geometry, &data, primitive, control, options,
-                    )
-                })
+                cached_binding(
+                    &mut cache,
+                    &mut retained,
+                    material_key,
+                    MaterialAsset::retained_bytes,
+                    || {
+                        linked::load_primitive(
+                            source, catalog, &geometry, &data, primitive, control, options,
+                        )
+                    },
+                )
             })
         };
         bindings.push(result);
@@ -163,18 +173,30 @@ pub fn load_mesh_groups_with_options(
     Ok(GroupedMesh { geometry, bindings })
 }
 
+const MAX_MATERIAL_LOADS: usize = 64;
+const MAX_RETAINED_BYTES: usize = 640 * 1024 * 1024;
+
 fn cached_binding<T>(
     cache: &mut std::collections::HashMap<LocationKey, Result<std::sync::Arc<T>, String>>,
+    retained: &mut usize,
     key: LocationKey,
+    size: impl Fn(&T) -> usize,
     load: impl FnOnce() -> Result<T, String>,
 ) -> Result<std::sync::Arc<T>, String> {
     if let Some(result) = cache.get(&key) {
         return result.clone();
     }
-    if cache.len() >= 8 {
-        return Err("Unsupported: eight distinct material preview budget".into());
+    if cache.len() >= MAX_MATERIAL_LOADS {
+        return Err("Unsupported: 64 distinct material preview budget".into());
     }
-    let result = load().map(std::sync::Arc::new);
+    let result = load().and_then(|value| {
+        let total = retained
+            .checked_add(size(&value))
+            .filter(|&t| t <= MAX_RETAINED_BYTES)
+            .ok_or("Unsupported: mesh preview memory budget (640 MiB retained)")?;
+        *retained = total;
+        Ok(std::sync::Arc::new(value))
+    });
     cache.insert(key, result.clone());
     result
 }
@@ -184,30 +206,67 @@ mod tests {
     #[test]
     fn repeated_bindings_share_success_failure_and_budget_without_new_reads() {
         let mut cache = std::collections::HashMap::new();
+        let mut retained = 0;
+        let size = |_: &usize| 1;
         let key = |n| LocationKey {
             path: format!("authored-{n}"),
             offset: 0,
             size: 1,
         };
-        let first = cached_binding(&mut cache, key(0), || Ok(42)).unwrap();
-        let repeat = cached_binding(&mut cache, key(0), || panic!("duplicate read")).unwrap();
+        let first = cached_binding(&mut cache, &mut retained, key(0), size, || Ok(42)).unwrap();
+        let repeat = cached_binding(&mut cache, &mut retained, key(0), size, || {
+            panic!("duplicate read")
+        })
+        .unwrap();
         assert!(std::sync::Arc::ptr_eq(&first, &repeat));
         assert_eq!(
-            cached_binding(&mut cache, key(1), || Err("Unsupported graph".into())).unwrap_err(),
+            cached_binding(&mut cache, &mut retained, key(1), size, || Err(
+                "Unsupported graph".into()
+            ))
+            .unwrap_err(),
             "Unsupported graph"
         );
         assert_eq!(
-            cached_binding(&mut cache, key(1), || panic!("duplicate failed read")).unwrap_err(),
+            cached_binding(&mut cache, &mut retained, key(1), size, || panic!(
+                "duplicate failed read"
+            ))
+            .unwrap_err(),
             "Unsupported graph"
         );
-        for n in 2..8 {
-            cached_binding(&mut cache, key(n), || Ok(n)).unwrap();
+        for n in 2..MAX_MATERIAL_LOADS {
+            cached_binding(&mut cache, &mut retained, key(n), size, || Ok(n)).unwrap();
         }
+        assert_eq!(retained, MAX_MATERIAL_LOADS - 1); // failures retain nothing
+        assert!(cached_binding(
+            &mut cache,
+            &mut retained,
+            key(MAX_MATERIAL_LOADS),
+            size,
+            || panic!("count budget must precede read")
+        )
+        .unwrap_err()
+        .contains("budget"));
         assert!(
-            cached_binding(&mut cache, key(8), || panic!("budget must precede read"))
-                .unwrap_err()
-                .contains("budget")
+            cached_binding(&mut cache, &mut retained, key(0), size, || panic!(
+                "cached after budget"
+            ))
+            .is_ok()
         );
-        assert!(cached_binding(&mut cache, key(0), || panic!("cached after budget")).is_ok());
+        // Aggregate retained bytes: an over-budget load fails, is cached as failed,
+        // and leaves the total unchanged; later small loads still fit.
+        let mut cache = std::collections::HashMap::new();
+        let mut retained = MAX_RETAINED_BYTES - 10;
+        let big = |v: &usize| *v;
+        assert!(
+            cached_binding(&mut cache, &mut retained, key(0), big, || Ok(11))
+                .unwrap_err()
+                .contains("memory budget")
+        );
+        assert_eq!(retained, MAX_RETAINED_BYTES - 10);
+        assert!(
+            cached_binding(&mut cache, &mut retained, key(0), big, || panic!("cached")).is_err()
+        );
+        assert!(cached_binding(&mut cache, &mut retained, key(1), big, || Ok(10)).is_ok());
+        assert_eq!(retained, MAX_RETAINED_BYTES);
     }
 }

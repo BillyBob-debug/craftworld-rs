@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 — D66 per-mesh material budget
+
+The 8-material cap is now 64 loads within a 640 MiB retained-bytes budget; Bevy draws
+9 -> 65. 22 many-material meshes: groups 157 -> 449 of 504, full diffuse 0 -> 5;
++0 viewable/+0 Complete. [material-budget-preview.md](docs/material-budget-preview.md).
+
 ## 2026-10-07 — D65 independent third-texture transform
 
 Nested three-texture products no longer need the third sample to share the second's
