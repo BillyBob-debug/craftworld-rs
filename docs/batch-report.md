@@ -1,22 +1,25 @@
-# Batch report — 2026-10-07c (Integrator)
+# Batch report — 2026-10-07d (Integrator)
 
 ## Merged
-- D77 `origin/cloud/D77-branch-4431` (PR #8): Vita 0x4431 header gate. 01.33 scan:
-  116/116 now `metadata_parsed`; unsupported 117 -> 1.
-- D76 `origin/cloud/D76-blend-research` (PR #7): BLEND research doc (docs only).
-- D75 `origin/claude/d75-two-tex-color-erbljt` (PR #9): two textures x static COLOR.
-  Route census unsupported 386 -> 258 (texture +110, instance-only +18). Toolkit
-  diffuse parity on all 128 changed materials: 0 mismatches. Regressions unchanged.
+- D79 `origin/cloud/D79-fntb` (PR #11): FNTb font header reader. First check failed
+  Clippy 1.99 (`chunks_exact_to_as_chunks`, font.rs 165/177/189); fixed on the branch
+  by the Integrator (e328bf1), then merged. 01.33 scan: unsupported resources 1 -> 0.
+- D80 `origin/cloud/D80-thing-color-research`: THING_COLOR research doc (docs only).
+- D78 `origin/claude/d78-animated-product-7erb3i`: animation-base opt-in for 2+ texture
+  products. Route census unsupported 258 -> 209 (+46 animation-base-only, +3
+  instance-only). Toolkit parity on the 49 changed materials: 0 mismatches. Merged
+  with CRLF kept in linked.rs and compatibility_census.rs (branch had converted to LF).
 
 Checks on merged main: fmt, workspace Clippy -D warnings, tests (lbp-resource,
-lbp-mesh, lbp-cli, lbp-preview), both viewer builds.
+lbp-cli, lbp-preview), both viewer builds, diffuse parity regressions unchanged.
 
 ## Failed
-None.
+None after the D79 fix.
 
 ## Counts
-+0 newly viewable / +0 newly Complete. D75 cohort (48 meshes, distinct GUID): all-diffuse
-0 -> 44. A second 26-mesh part could not be censused (meshes without MAP rows).
++0 newly viewable / +0 newly Complete. Cohorts unchanged: d68-new 48/45/0, D61
+48/43/0, D75 48/44/0 (distinct GUID; viewable/all-diffuse/Complete).
 
 ## Backlog
-Refreshed (docs/backlog.md): rank 1 done; next ranks 2 (65), 4 (14), 5 BLEND (14, D76 rule ready).
+Refreshed: animated-sampler products mostly moved to the animation-base opt-in; next
+MIX (14), BLEND (14).

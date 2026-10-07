@@ -3106,3 +3106,35 @@ meshes) failed "sample absent from catalog" (meshes without MAP rows), not count
 Not tested: native viewer capture, legacy viewer on 01.33, game pixels, Vita payloads.
 Next: backlog rank 2 (animated-sampler products, 65) or rank 4 (MIX, 14); D76 BLEND
 rule ready for implementation.
+
+## Batch 2026-10-07d — cloud D79, D80, D78 merged (2026-10-07)
+
+Last cloud batch (later batches run locally on plan usage, owner request). Detail:
+[d79-fntb-font.md](docs/d79-fntb-font.md), [d80-thing-color.md](docs/d80-thing-color.md),
+[d78-animated-product.md](docs/d78-animated-product.md).
+
+- D79: FNTb font face header + glyph table reader. 01.33 scan (resource locations):
+  metadata_parsed 27,740 -> 27,741, unsupported 1 -> 0. Clippy 1.99 rejected three
+  `chunks_exact` calls; fixed on the branch by the Integrator (e328bf1), then merged.
+- D80: THING_COLOR research doc only (instance-color sources, supplied-color proposal).
+- D78: animation-base opt-in extended to 2+ texture products (one animated leaf).
+  Route census on 01.33 (material locations, 8,094): unsupported 258 -> 209,
+  animation-base-only 60 -> 106, instance-only 225 -> 228; texture route unchanged
+  (6,938; opt-in). Branch had converted linked.rs and compatibility_census.rs to LF;
+  merged with CRLF kept.
+- Counts (distinct catalog GUID, default and --animation-base): d68-new 48/45/0,
+  D61 48/43/0, D75 cohort 48/44/0, all unchanged.
+**+0 newly viewable / +0 newly Complete.** Corpus totals unknown (D81 running).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests lbp-resource/lbp-cli/lbp-preview, both viewer builds: pass.
+- lbp-cli on 01.33 -> d79-inventory-0133.json: exit 0, partial false, no unsupported.
+- diffuse_route_census -> d78-diffuse-route-shapes-0133.json: counts above.
+- run-material-oracle.ps1 -Diffuse on the 49 changed materials (6 manifests d78-samples-*) + diffuse_parity --animation-base: 49 compared, 0 mismatches, 46 projected.
+- diffuse_parity regressions (default): d75 DATA-1 48/0/41, d64-square 17/0/17, d65-third 48/0/48, d67-thirdbase 18/0/18, d46-diffuse 32/0/29, d46-linked 48/0/46, d68 patch_0120 26/0/20.
+- compatibility_census: cohorts above.
+
+Failed: first D79 merge failed Clippy; reset and re-merged after the fix.
+Not tested: native viewer, real glyph semantics (FNTb +8 word unknown), animated
+playback, game pixels.
+Next: MIX (14) and BLEND (14, D76 rule) on the PC; D81 corpus census and D82 wrap modes in progress.

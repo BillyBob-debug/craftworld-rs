@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 — Batch: cloud D79, D80, D78 merged
+
+D79 FNTb header reader (01.33 unsupported resources 1 -> 0; clippy fix on PC). D80
+THING_COLOR research doc. D78 animation-base opt-in for 2+ texture products: route
+unsupported 258 -> 209, parity 49/0. +0 viewable / +0 Complete.
+
 ## 2026-10-07 — Batch: cloud D77, D76, D75 merged
 
 D77 Vita 0x4431 headers parse (01.33 unsupported 117 -> 1). D76 BLEND research doc.
