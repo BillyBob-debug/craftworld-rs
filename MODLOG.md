@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 — Batch: local D88, D89, D90 merged
+
+D88 textured THING_COLOR under the instance color (8). D89 ADD shapes (4). D90 texture
+census: 22,973 of 23,247 texture hashes decode. Unsupported materials 174 -> 162; corpus
+all-diffuse 3,665 -> 3,669. +0 viewable / +0 Complete. Parity 0 mismatches.
+
 ## 2026-10-07 — Batch: local D85, D86, D87 merged
 
 D85 opt-in corpus census modes. D86 constant THING_COLOR folds under a supplied color

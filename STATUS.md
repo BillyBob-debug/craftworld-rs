@@ -3206,3 +3206,37 @@ to 15); kept D86's instance_white field, schema now 16.
 Not tested: viewer captures, real instance colors (D86 materials can't be Complete).
 Next: THING_COLOR shapes with textures under the instance color; ADD (8); UV channel
 raw 2 (4); remaining MIX per-sample UVs; BLEND thresholds.
+
+## Batch 2026-10-07g — local D88, D89, D90 merged (2026-10-07)
+
+Local subagents on plan usage. Detail: [d88-thing-color-textured.md](docs/d88-thing-color-textured.md),
+[d89-add-uv2.md](docs/d89-add-uv2.md), [d90-texture-census.md](docs/d90-texture-census.md).
+
+- D88: under a supplied instance color, THING x animated texture (7; also needs the
+  animation-base opt-in) and texture x (THING x COLOR) (1). Default unchanged.
+- D89: ADD of two textures on the Repeat grid and texture x COLOR + COLOR (4 locations).
+  ADD refused under a supplied instance color. UV channel raw 2 stays unsupported
+  (conflicting Toolkit evidence; documented).
+- D90: new corpus_texture_census. 01.33: 22,973 of 23,247 texture hashes decode (23,195
+  of 23,477 GUIDs); 274 unsupported (GTF 0x85 A8R8G8B8 187, 0x81 B8 80, 0xa5 3, cubes 4).
+  Oracle: 16 Rust-decoded samples 0 mismatches; Toolkit also decodes 0x85/0x81/0xa5.
+- Route census on 01.33 (material locations, 8,094): texture 6,949 -> 6,953,
+  instance-only 236 -> 244, unsupported 174 -> 162; solid 619 unchanged.
+- Corpus mesh census (distinct catalog GUID, 4,261; viewable 4,257 in every mode):
+  all-diffuse default 3,665 -> 3,669, --animation-base 3,717 -> 3,721, --instance-rgba
+  3,894 -> 3,899 (baseline rerun on 2ef7fce by D88), both 3,954 -> 3,967. Complete 0.
+**+0 newly viewable / +0 newly Complete** (all-diffuse +4 default).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests lbp-preview (47)/-resource/-viewer/-bevy-viewer/-cli, both viewer builds, python OK.
+- diffuse_route_census -> b90-diffuse-route-shapes-0133.json: counts above.
+- diffuse_parity: d89 5/0/2, 1/0/1, 1/0/1; d88 (--animation-base --instance-white) 4/0/4, 1/0/1, 2/0/2, 1/0/1; d86 --instance-white 5/0/5, 3/0/3; d87 6/0/6, 18/0/18; regressions d83 8/0/2, d75 48/0/41, d78 38/0/36, d68 26/0/20, d64 17/0/17, d65 48/0/48, d67 18/0/18, d46 32/0/29 and 48/0/46.
+- compatibility_census: d68-new 48/45/0, D61 48/43/0, D75 48/44/0 (unchanged).
+- corpus_mesh_census -> b90-corpus-{default,anim,inst,both}.json: counts above.
+- corpus_texture_census (D90 agent) -> d90-texture-census-0133.json, repeat byte-identical.
+
+Failed: D88 merge conflicted with D89 in linked.rs (binding call) and
+diffuse_route_census (instance-only check); kept both. diffuse_parity schema 18.
+Not tested: viewer captures, real instance colors, ADD sum vs game (linear clamp is policy).
+Next: GTF 0x85/0x81 texture decode (267 hashes, Toolkit-confirmed); THING_COLOR in
+sampler ports (14) and 2+ animated samplers (12); BLEND thresholds (38 with THING).
