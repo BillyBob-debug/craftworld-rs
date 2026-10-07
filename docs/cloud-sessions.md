@@ -4,6 +4,10 @@ Written 2026-10-07 (America/Chicago). Purpose: let several Claude Code cloud ses
 work on this repo in parallel while game-data work stays on the Windows PC.
 AGENTS.md stays authoritative; nothing here relaxes it.
 
+Status 2026-10-07 14:50 CT: the owner moved new batches to the PC under plan limits;
+no new cloud sessions unless the owner asks again. The batch process itself is in
+`docs/workflow.md`.
+
 ## 1. Credit and what it pays for
 
 - $250 cloud-session credit (Max promo), claimed 2026-10-07. Expires 2026-11-05
@@ -73,8 +77,10 @@ Create a cloud environment at claude.ai/code for this repo
 
 - Network: Limited/default is enough for crates.io. Add `github.com` and
   `codeload.github.com` if sessions should clone Toolkit for format research.
-- Setup script: none required (the default image already has cargo, rustfmt,
-  clippy, Python 3 and Java). Optional: `rustup component add rustfmt clippy || true`.
+- Setup script: `rustup toolchain install 1.99.0 --profile minimal -c rustfmt,clippy`
+  and run checks with `cargo +1.99.0`. The default image ships an older Rust (1.97 on
+  2026-10-07) whose Clippy misses lints that CI (pinned 1.99.0) rejects; D79 failed
+  CI this way.
 - Toolkit for format research: inside the session, from the repo root
   (lands in ignored `references/`, never committed):
 
@@ -95,7 +101,8 @@ python3 -m unittest discover -s tests
 ## 6. Multi-agent rules
 
 - One task = one cloud session = one branch `cloud/<D-number>-<slug>` = one PR.
-  Never push to `main`; the user merges after PC verification.
+  The cloud CLI may name the branch `claude/*` instead; both are verified.
+  Never push to `main`; the PC Integrator merges after PC verification.
 - Reserve D-numbers before fanning out so parallel sessions don't collide
   (e.g. note "D64 reserved: <task>" in the session prompt).
 - Shared handoff files conflict under parallel edits. Cloud sessions write full
@@ -119,12 +126,7 @@ python3 -m unittest discover -s tests
 3. Run the oracle/parity command named in the PR body against `game-data/`.
 4. Record counts and results in STATUS.md/MODLOG.md, merge, push `main`.
 
-## 8. Good first cloud tasks
+## 8. Cloud task ideas
 
-- Revisions 952-1016: diff Toolkit's revision-gated fields (pinned commit) for each
-  resource type the explorer reads; write the table into docs/formats.md style
-  with evidence labels; add reader branches + synthetic tests.
-- GitHub Actions CI on ubuntu-latest: fmt, test, clippy for non-GUI crates, Python
-  unittest (needs the user's OK for a workflow file; `.gitignore` must allow
-  `.github/workflows/*.yml`).
-- Bounds/fuzz tests for FARC, MAP, SFO and resource headers.
+The original first tasks (revision gates 952-1016, CI, bounds tests) are done (D69,
+D71-D73). Use `docs/backlog.md` for current candidates.
