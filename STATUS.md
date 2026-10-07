@@ -3046,3 +3046,29 @@ Not tested: legacy viewer on 01.33, EDAT/EBOOT, text resources, game pixels, cor
 mesh census.
 Next: rerun the D67 Next item (two-texture x COLOR products) on 01.33, re-ranking
 unsupported diffuse shapes from d68-diffuse-route-shapes-0133.json (386 unsupported).
+
+## Batch 2026-10-07b — cloud D72, D71, D73 merged (2026-10-07)
+
+First on-demand batch: cloud agents built three branches; the PC Integrator verified
+and merged them (owner's standing approval, 2026-10-07). Details per milestone:
+[d72-ci.md](docs/d72-ci.md), [d71-container-bounds-tests.md](docs/d71-container-bounds-tests.md),
+[d73-revision-gate-tests.md](docs/d73-revision-gate-tests.md).
+
+- D72: GitHub Actions CI (ubuntu-latest: fmt, non-GUI test/clippy, Python unittest).
+- D71: synthetic FARC, MAP and SFO bounds/mutation tests (lbp-archive, lbp-io, lbp-core).
+- D73: synthetic tests for the 01.33 revision gates 952..=0x3f8 (lbp-resource).
+- D74 (PR #6) closed as a duplicate of D71; not merged.
+**+0 newly viewable / +0 newly Complete** (tests and CI only; no parser or viewer change).
+
+Commands (after `. ./scripts/use-local-rust.ps1`), each branch alone in a separate
+worktree, then again on merged main:
+- cargo fmt --all --check: pass.
+- cargo test -q -p lbp-core/-p lbp-io/-p lbp-archive/-p lbp-resource: pass (merged: 2/19/20/38 passed).
+- cargo clippy -q (those four crates) --all-targets -D warnings: pass.
+- python -m unittest discover -s tests: 34 run, OK (1 skipped).
+- git merge-tree: no conflicts among the three branches.
+
+Not tested: viewer builds, oracle/parity runs (no format code changed), CI run on GitHub.
+Note: an earlier PC-local batch-driver session produced D70/D71 on a local branch; only
+its pushed D71 was merged here.
+Next: unchanged — two textures x static COLOR (docs/backlog.md item 1), done on the PC.

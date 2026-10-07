@@ -1,17 +1,22 @@
-# Batch report — 2026-10-07 (Integrator)
+# Batch report — 2026-10-07b (Integrator)
 
 ## Merged
-None. `git branch -r --no-merged origin/main` listed no `origin/cloud/*` branches
-(remote has only `main`).
+- D72 `origin/cloud/D72-ci` (PR #4): GitHub Actions CI.
+- D71 `origin/claude/batch-driver-lbp2-assets-9zli9f`: FARC, MAP and SFO bounds tests.
+- D73 `origin/cloud/D73-revision-gate-tests` (PR #5): 01.33 revision-gate tests.
+
+Each verified alone and again on merged main: fmt, test and clippy (-D warnings) for
+lbp-core, lbp-io, lbp-archive, lbp-resource; Python unittest 34 OK (1 skipped).
 
 ## Failed
 None.
 
+## Skipped
+- D74 `origin/cloud/D74-bounds-tests` (PR #6): closed as a duplicate of D71.
+
 ## Counts
-Unchanged since D69 (see STATUS-CURRENT.md): 01.33 route census over 8,094 material
-locations: texture 6,828, solid 603, unwired 10, animation-base only 60,
-instance-color only 207, unsupported 386. No new viewer cohort counts this batch.
++0 newly viewable / +0 newly Complete (no parser or viewer change). Route census
+unchanged since D69: unsupported 386 of 8,094 material locations.
 
 ## Backlog
-`docs/backlog.md` created from `d68-diffuse-route-shapes-0133.json` (first refresh).
-Top item: two textures × static COLOR (113 of 386 unsupported materials).
+Unchanged. Item 1 (two textures × static COLOR) stays on the PC.

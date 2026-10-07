@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 — Batch: cloud D72, D71, D73 merged
+
+First on-demand cloud batch, verified on the PC and merged: D72 GitHub Actions CI, D71
+FARC/MAP/SFO bounds tests, D73 01.33 revision-gate tests. +0 viewable / +0 Complete.
+D74 closed as duplicate of D71.
+
 ## 2026-10-07 — D69 01.33 becomes the working input
 
 Disc + update 01.33 read as layers; patch MAP wins per GUID; parsers accept heads to

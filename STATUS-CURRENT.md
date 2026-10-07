@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D69, 2026-10-07
+# Current state (overwrite each milestone) — after batch D72/D71/D73, 2026-10-07
 
 ## Product
 Independent LBP2 Asset Explorer (Rust). Bevy viewer (main) and legacy viewer read
@@ -29,6 +29,7 @@ Unwired diffuse previews as labelled black (D63). Up to 64 materials per mesh wi
   texture, 603 solid, 10 unwired, 60 animation-base-only, 207 instance-only, 386
   unsupported (01.00: 5,163 / 4,306 / 459 / 7 / 34 / 122 / 235). Not asset counts.
 - D69: +48 newly viewable in the tested cohort, +0 newly Complete; corpus totals unknown.
+- Batch D72/D71/D73: tests and CI only, +0 viewable / +0 Complete.
 
 ## Open blockers
 - Glow, reflection and other non-diffuse channels are not rendered.
@@ -43,11 +44,16 @@ draw grouping.
 
 ## Environment
 - Toolchain: `. ./scripts/use-local-rust.ps1` (project-local, windows-gnu).
-- Git: local repo at project root, branch `main`, default-deny `.gitignore`. No remote.
+- Git: branch `main`, remote origin github.com/chilladept/lbp2-asset-explorer (private),
+  default-deny `.gitignore`. CI: `.github/workflows/ci.yml` (D72).
+- Workflow: `docs/workflow.md`. On demand: cloud agents push `cloud/*` or `claude/*`
+  branches; the PC Integrator verifies and merges passing ones into main without asking
+  (owner approval 2026-10-07). Daily task LBP2-DailyBatch exists but is disabled.
 - Native QA windows on non-primary monitor 165v0, verified in log before showing.
 
 ## Where detail lives
 - Latest full entry: end of `STATUS.md`. Short log: top of `MODLOG.md`.
+- Last batch: `docs/batch-report.md`; ranked backlog: `docs/backlog.md`.
 - Update/overlay: `docs/update-overlay.md` (D68 data, D69 code). Earlier milestone docs:
   `docs/third-sample-preview.md` (D65, D67), `docs/material-budget-preview.md` (D66),
   `docs/route-census.md` (D64), `docs/unwired-diffuse-preview.md` (D63).
