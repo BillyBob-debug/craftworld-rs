@@ -2,6 +2,7 @@
 //! MIX whose two inputs are all constants (projected ThingColor, static COLOR, CONSTANT,
 //! optionally one-component swizzled) into one derived COLOR for the solid route.
 //! Operation forms, evidence labels, pin and limits: docs/d86-thing-color.md.
+//! D88 applies the same fold to one direct operand of a texture product root.
 use lbp_resource::material::GraphMetadata;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -83,9 +84,77 @@ pub(crate) fn fold_constant_root(
     root: usize,
     projection: &mut crate::InstanceProjection,
 ) -> Result<bool, String> {
+    let Some(swizzled) = fold_constant_node(derived, root, &projection.color_nodes)? else {
+        return Ok(false);
+    };
+    projection.folded_root = Some(root);
+    projection.swizzled_color_edges = swizzled;
+    Ok(true)
+}
+
+/// D88 (docs/d88-thing-color-textured.md): one direct operand of a static diffuse root
+/// MULTIPLY that is itself a foldable constant MULTIPLY/MIX holding a projected
+/// ThingColor, e.g. `texture × (ThingColor × COLOR)`. The operand must feed only the
+/// root on port 0 or 1, unswizzled, so no other branch sees the derived COLOR. The
+/// existing texture × COLOR selectors then decide; nothing else is evaluated.
+pub(crate) fn fold_constant_operand(
+    derived: &mut GraphMetadata,
+    root: usize,
+    projection: &mut crate::InstanceProjection,
+) -> Result<bool, String> {
+    let node = &derived.boxes[root];
+    if node.type_raw != 10 || !is_static(node) {
+        return Ok(false);
+    }
+    let inputs: Vec<_> = derived
+        .wires
+        .iter()
+        .filter(|w| w.box_to as usize == root)
+        .collect();
+    let mut ports: Vec<_> = inputs.iter().map(|w| w.port_to_raw).collect();
+    ports.sort_unstable();
+    if ports != [0, 1]
+        || inputs
+            .iter()
+            .any(|w| w.port_from_raw != 0 || w.swizzle_raw != [0; 5])
+    {
+        return Ok(false);
+    }
+    let candidates: Vec<usize> = inputs
+        .iter()
+        .map(|w| w.box_from as usize)
+        .filter(|&i| {
+            i != root
+                && matches!(derived.boxes[i].type_raw, 10 | 12)
+                && derived
+                    .wires
+                    .iter()
+                    .filter(|w| w.box_from as usize == i)
+                    .count()
+                    == 1
+        })
+        .collect();
+    for operand in candidates {
+        if let Some(swizzled) = fold_constant_node(derived, operand, &projection.color_nodes)? {
+            projection.folded_operand = Some(operand);
+            projection.swizzled_color_edges = swizzled;
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+/// Folds `root` in place into a derived COLOR when it is a static two-input
+/// MULTIPLY/MIX of constants with at least one projected ThingColor. Returns the
+/// swizzled ThingColor edges, or None when the shape does not match.
+fn fold_constant_node(
+    derived: &mut GraphMetadata,
+    root: usize,
+    color_nodes: &[usize],
+) -> Result<Option<Vec<(usize, u8)>>, String> {
     let node = &derived.boxes[root];
     if !(node.type_raw == 10 || node.type_raw == 12) || !is_static(node) {
-        return Ok(false);
+        return Ok(None);
     }
     let inputs: Vec<_> = derived
         .wires
@@ -96,19 +165,19 @@ pub(crate) fn fold_constant_root(
     ports.sort_unstable();
     // Both operands wired once; a wired MIX weight (port 2) is not folded.
     if ports != [0, 1] {
-        return Ok(false);
+        return Ok(None);
     }
     if !inputs
         .iter()
-        .any(|w| projection.color_nodes.contains(&(w.box_from as usize)))
+        .any(|w| color_nodes.contains(&(w.box_from as usize)))
     {
-        return Ok(false);
+        return Ok(None);
     }
     let mut operands = [None, None];
     let mut swizzled = vec![];
     for wire in &inputs {
-        let Some((value, thing)) = operand(derived, wire, &projection.color_nodes) else {
-            return Ok(false);
+        let Some((value, thing)) = operand(derived, wire, color_nodes) else {
+            return Ok(None);
         };
         operands[wire.port_to_raw as usize] = Some(value);
         if let Some(component) = thing {
@@ -116,11 +185,11 @@ pub(crate) fn fold_constant_root(
         }
     }
     let [Some(l), Some(r)] = operands else {
-        return Ok(false);
+        return Ok(None);
     };
     // A scalar result has no observed widening rule to a color; keep it unsupported.
     if matches!((l, r), (Operand::Scalar(_), Operand::Scalar(_))) {
-        return Ok(false);
+        return Ok(None);
     }
     let (l, r) = (broadcast(l), broadcast(r));
     let weight = f32::from_bits(node.parameters_raw[0]);
@@ -144,9 +213,7 @@ pub(crate) fn fold_constant_root(
     derived.wires.retain(|w| w.box_to as usize != root);
     swizzled.sort_unstable();
     swizzled.dedup();
-    projection.folded_root = Some(root);
-    projection.swizzled_color_edges = swizzled;
-    Ok(true)
+    Ok(Some(swizzled))
 }
 
 #[cfg(test)]

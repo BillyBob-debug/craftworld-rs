@@ -1054,11 +1054,32 @@ pub fn select_diffuse_with_animation_base(
         }),
     }
 }
-fn binding(
-    g: &GraphInspection,
+/// D88: the same D78 product search, for `instance_textured` to filter.
+pub(crate) fn select_animated_products(graph: &GraphMetadata) -> Result<DiffuseSelection, String> {
+    select_products(
+        graph,
+        &mut Leaves {
+            animated: true,
+            base: None,
+        },
+    )
+}
+fn binding<'a>(
+    g: &'a GraphInspection,
     animation_base: bool,
-) -> Result<(&TextureDescriptor, crate::TextureWrapping, DiffuseSelection), String> {
-    let selection = select_diffuse_with_animation_base(&g.graph, animation_base)?;
+    instance: Option<&crate::InstanceProjection>,
+) -> Result<
+    (
+        &'a TextureDescriptor,
+        crate::TextureWrapping,
+        DiffuseSelection,
+    ),
+    String,
+> {
+    let selection = match instance {
+        Some(p) => crate::instance_textured::select_instance_diffuse(&g.graph, p, animation_base)?,
+        None => select_diffuse_with_animation_base(&g.graph, animation_base)?,
+    };
     let slot = selection.slot;
     let prefix = &g.material.prefix;
     let texture = prefix
@@ -1251,7 +1272,8 @@ pub(crate) fn load_primitive(
             )?,
         })));
     }
-    let (descriptor, wrap, mut selection) = binding(&graph, options.animation_base)?;
+    let (descriptor, wrap, mut selection) =
+        binding(&graph, options.animation_base, instance_projection.as_ref())?;
     if selection.animation_base.is_some() {
         let tail = lbp_resource::material::inspect_tail(&bytes, || control.check().is_err())
             .map_err(|e| e.to_string())?;
