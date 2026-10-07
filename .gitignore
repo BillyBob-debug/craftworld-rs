@@ -1,6 +1,8 @@
 # Default deny: only authored source, docs and synthetic fixture recipes.
 *
 !/.gitignore
+!/.claude/
+!/.claude/settings.json
 !/Launch Asset Explorer.cmd
 !/*.md
 !/Cargo.toml

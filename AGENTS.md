@@ -17,7 +17,7 @@ The future compatible runtime is context, not the current implementation scope.
 ## Research and implementation
 
 1. Prefer documented specifications, then existing open-source readers, then controlled local experiments, then targeted decryption/executable investigation when those routes cannot answer a concrete question. Decryption/decompilation is permitted, not required by default. Keep it scoped to the current milestone and record the question, provenance, findings and limitations.
-2. Start by reading `STATUS.md`, `RESEARCH.md`, and the relevant format/architecture documents.
+2. Start by reading `STATUS-CURRENT.md`, then only the relevant sections of `STATUS.md` (latest entry), `RESEARCH.md`, and the format/architecture documents; find sections by heading rather than reading these large files whole.
 3. For each format rule, record source URL, pinned commit, class/method or section, evidence category, build/revision applicability, conflicts, and test coverage near the implementation. Use the five labels in `docs/formats.md`.
 4. Do not copy/adapt/translate unlicensed source. MIT-derived source retains notices; GPL/AGPL source requires its obligations and a deliberate licensing decision. Independent specification-based implementation and an external oracle are the default. Public visibility is not reuse permission.
 5. Parsing libraries must not depend on UI/rendering. Keep disk layouts, intermediate representations, and GPU/UI representations separate.

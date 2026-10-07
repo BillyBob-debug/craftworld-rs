@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./target/**)",
+      "Read(./*.zip)",
+      "Read(./Cargo.lock)",
+      "Read(./game-data/**)"
+    ]
+  }
+}
