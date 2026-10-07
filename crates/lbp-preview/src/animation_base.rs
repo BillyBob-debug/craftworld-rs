@@ -4,6 +4,8 @@
 pub struct AnimationBaseSnapshot {
     /// 1: two matrix-row curves; 0: one scale/offset curve, second row empty.
     pub subtype_raw: u32,
+    /// Graph index of the animated sampler; a product leaf when D78 selects it.
+    pub sample_index: usize,
     pub global_rows_verified: bool,
     pub static_matrix_bits: [u32; 6],
     pub row_bits: [[u32; 4]; 2],
@@ -48,11 +50,33 @@ pub(crate) fn select(
         return Err("Unsupported: animation base needs static direct diffuse output".into());
     }
     let wire = diffuse[0];
-    let sample_index = wire.box_from as usize;
+    if wire.port_from_raw != 0 || wire.swizzle_raw != [0; 5] {
+        return Err(
+            "Unsupported: animation base only supports direct unwired UV0/UV1 sampler".into(),
+        );
+    }
+    let (selected, snapshot) = sampler(graph, wire.box_from as usize)?;
+    Ok(crate::DiffuseSelection {
+        animation_base: Some(snapshot),
+        output_index,
+        sample_index: selected.sample_index,
+        slot: selected.slot,
+        uv_channel: selected.uv_channel,
+        uv_transform: selected.uv_transform,
+        ignored_nodes: graph.boxes.len() - 2,
+        ignored_wires: graph.wires.len() - 1,
+        ..Default::default()
+    })
+}
+
+/// One unwired UV0/UV1 sampler with named base rows. Endpoints must already be
+/// validated. Also used for one animated leaf of a static product (D78).
+pub(crate) fn sampler(
+    graph: &lbp_resource::material::GraphMetadata,
+    sample_index: usize,
+) -> Result<(crate::linked::SamplerSelection, AnimationBaseSnapshot), String> {
     let sample = &graph.boxes[sample_index];
-    if wire.port_from_raw != 0
-        || wire.swizzle_raw != [0; 5]
-        || sample.type_raw != 1
+    if sample.type_raw != 1
         || sample.subtype_raw > 1
         || sample.parameters_raw[4] > 1
         || graph
@@ -123,9 +147,16 @@ pub(crate) fn select(
         })
     };
     uv_transform.validate()?;
-    Ok(crate::DiffuseSelection {
-        animation_base: Some(AnimationBaseSnapshot {
+    Ok((
+        crate::linked::SamplerSelection {
+            sample_index,
+            slot: sample.parameters_raw[5] as usize,
+            uv_channel: sample.parameters_raw[4] as usize,
+            uv_transform,
+        },
+        AnimationBaseSnapshot {
             subtype_raw: sample.subtype_raw,
+            sample_index,
             global_rows_verified: false,
             static_matrix_bits: [
                 sample.parameters_raw[0],
@@ -137,16 +168,8 @@ pub(crate) fn select(
             ],
             row_bits: rows,
             key_counts: sample.animations.each_ref().map(|a| a.derived_key_count),
-        }),
-        output_index,
-        sample_index,
-        slot: sample.parameters_raw[5] as usize,
-        uv_channel: sample.parameters_raw[4] as usize,
-        uv_transform,
-        ignored_nodes: graph.boxes.len() - 2,
-        ignored_wires: graph.wires.len() - 1,
-        ..Default::default()
-    })
+        },
+    ))
 }
 
 /// Reconcile both local bindings against unique global curve declarations.
@@ -160,7 +183,7 @@ pub(crate) fn verify_global(
         return Ok(());
     };
     let named = if snapshot.subtype_raw == 1 { 2 } else { 1 };
-    for local in &graph.boxes[selection.sample_index].animations[..named] {
+    for local in &graph.boxes[snapshot.sample_index].animations[..named] {
         let matches = globals
             .iter()
             .filter(|a| a.name_hex == local.name_hex)
