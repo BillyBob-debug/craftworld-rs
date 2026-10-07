@@ -6,8 +6,15 @@
 //! certified (needs a visual check). Mesh inspections whose hash has no MAP row are
 //! excluded and counted. Optional `--hashes MANIFEST` restricts to a sample manifest
 //! (`samples[].sha1`) for cross-checks against compatibility_census.
+//! D85: opt-in `--animation-base` and `--instance-rgba R,G,B,A` (parsed by
+//! `lbp_preview::census`, same values as compatibility_census). Without them the output
+//! is unchanged (schema 1); with them the report is schema 2, the scope names the
+//! opt-ins and `preview_options` records them.
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
-use lbp_preview::census::{coverage, geometry_available, CorpusTally, MeshOutcome};
+use lbp_preview::census::{
+    apply_preview_flag, coverage, geometry_available, preview_scope_suffix, CorpusTally,
+    MeshOutcome,
+};
 use serde_json::{json, Value};
 use std::{
     collections::{BTreeMap, BTreeSet},
@@ -25,15 +32,19 @@ fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().collect();
     if args.len() < 4 {
         return Err(
-            "corpus_mesh_census SNAPSHOT GAME-DIR NEW-JSON [--hashes MANIFEST] [--max-seconds N]"
+            "corpus_mesh_census SNAPSHOT GAME-DIR NEW-JSON [--hashes MANIFEST] [--max-seconds N] [--animation-base] [--instance-rgba R,G,B,A]"
                 .into(),
         );
     }
     let output = Path::new(&args[3]);
     let mut cohort: Option<(String, BTreeSet<String>)> = None;
     let mut max_seconds = 7200u64;
+    let mut options = lbp_preview::PreviewOptions::default();
     let mut flags = args[4..].iter();
     while let Some(flag) = flags.next() {
+        if apply_preview_flag(&mut options, flag, || flags.next().map(String::as_str))? {
+            continue;
+        }
         match flag.as_str() {
             "--hashes" => {
                 let path = flags.next().ok_or("manifest required")?;
@@ -148,11 +159,7 @@ fn run() -> Result<(), String> {
                     return Err("aggregate mesh input budget".into());
                 }
                 match lbp_preview::load_mesh_groups_with_options(
-                    &source,
-                    &catalog,
-                    &key,
-                    &control,
-                    lbp_preview::PreviewOptions::default(),
+                    &source, &catalog, &key, &control, options,
                 ) {
                     Err(e) => MeshOutcome::Failed(e),
                     Ok(preview) => {
@@ -180,15 +187,21 @@ fn run() -> Result<(), String> {
         });
     }
     source.check_stable()?;
+    let suffix = preview_scope_suffix(&options);
     let scope = match &cohort {
-        Some((name, _)) => format!("cohort_manifest:{name}"),
-        None => "corpus_all_mesh_map_rows".into(),
+        Some((name, _)) => format!("cohort_manifest:{name}{suffix}"),
+        None => format!("corpus_all_mesh_map_rows{suffix}"),
     };
-    let report = json!({
-        "schema_version": 1,
+    let opt_in = !suffix.is_empty();
+    let mut report = json!({
+        "schema_version": if opt_in { 2 } else { 1 },
         "tool": "corpus_mesh_census",
         "scope": scope,
-        "scope_note": "MAP rows with confirmed type mesh (snapshot), one load per content hash, default PreviewOptions (no animation base, no supplied instance color)",
+        "scope_note": if opt_in {
+            "MAP rows with confirmed type mesh (snapshot), one load per content hash, opt-in PreviewOptions recorded in preview_options (supplied values, not verified game instances)"
+        } else {
+            "MAP rows with confirmed type mesh (snapshot), one load per content hash, default PreviewOptions (no animation base, no supplied instance color)"
+        },
         "asset_unit": "distinct_catalog_guid",
         "definitions": {"viewable":"mesh loads and has a nonzero-area triangle (geometry availability, not visual fidelity)","all_diffuse":"viewable and every nonempty primitive group has a loaded diffuse binding (binding coverage, not visual verification)","complete":"not certified; requires manual visual check"},
         "budgets": {"max_mesh_hashes": MAX_MESH_HASHES, "max_aggregate_mesh_bytes": MAX_AGGREGATE_MESH_BYTES, "per_mesh_input_bytes": lbp_mesh::MAX_INPUT, "max_seconds": max_seconds},
@@ -216,6 +229,15 @@ fn run() -> Result<(), String> {
         "all_diffuse_guid_list": tally.all_diffuse_guids,
         "meshes": rows
     });
+    if opt_in {
+        report["preview_options"] = json!({
+            "animation_base_enabled": options.animation_base,
+            "animation_time": null,
+            "supplied_instance_color_bits": options.instance_color.map(|c| c.bits),
+            "supplied_instance_rgba": options.instance_color.map(|c| c.values()),
+            "verified_game_instance": false
+        });
+    }
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

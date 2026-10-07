@@ -16,20 +16,10 @@ fn run() -> Result<(), String> {
         match flag.as_str() {
             "--animation-base" => options.animation_base = true,
             "--instance-rgba" => {
-                let values = flags
-                    .next()
-                    .ok_or("RGBA required")?
-                    .split(',')
-                    .map(str::parse::<f32>)
-                    .collect::<Result<Vec<_>, _>>()
-                    .map_err(|_| "invalid RGBA")?;
-                let values: [f32; 4] =
-                    values.try_into().map_err(|_| "four RGBA values required")?;
-                let color = lbp_preview::DiffuseTint {
-                    bits: values.map(f32::to_bits),
-                };
-                color.validate()?;
-                options.instance_color = Some(color);
+                // Shared with corpus_mesh_census (D85); same values and errors as before.
+                options.instance_color = Some(lbp_preview::census::parse_instance_rgba(
+                    flags.next().ok_or("RGBA required")?,
+                )?);
             }
             _ => return Err("unknown option".into()),
         }

@@ -5,10 +5,65 @@
 //! confirms geometry availability, not pose or visual fidelity. "All-diffuse" =
 //! viewable and every nonempty primitive group has a loaded diffuse binding; this is
 //! binding coverage, not visual completeness (Complete stays a manual check).
+//! D85: opt-in preview flags (`--animation-base`, `--instance-rgba R,G,B,A`) are parsed
+//! here so corpus_mesh_census and compatibility_census accept the same values.
+use crate::{DiffuseTint, PreviewOptions};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Longest reason key kept in tallies; longer messages are cut at a char boundary.
 pub const MAX_REASON_CHARS: usize = 160;
+
+/// Parses `R,G,B,A` as a supplied linear instance color (finite, each in 0..=1).
+pub fn parse_instance_rgba(text: &str) -> Result<DiffuseTint, String> {
+    let values = text
+        .split(',')
+        .map(str::parse::<f32>)
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "invalid RGBA")?;
+    let values: [f32; 4] = values.try_into().map_err(|_| "four RGBA values required")?;
+    let color = DiffuseTint {
+        bits: values.map(f32::to_bits),
+    };
+    color.validate()?;
+    Ok(color)
+}
+
+/// Applies one opt-in preview flag. Returns `Ok(false)` when `flag` is not a preview
+/// flag (the caller handles it); repeated preview flags are rejected.
+pub fn apply_preview_flag<'a>(
+    options: &mut PreviewOptions,
+    flag: &str,
+    next: impl FnOnce() -> Option<&'a str>,
+) -> Result<bool, String> {
+    match flag {
+        "--animation-base" => {
+            if options.animation_base {
+                return Err("repeated --animation-base".into());
+            }
+            options.animation_base = true;
+        }
+        "--instance-rgba" => {
+            if options.instance_color.is_some() {
+                return Err("repeated --instance-rgba".into());
+            }
+            options.instance_color = Some(parse_instance_rgba(next().ok_or("RGBA required")?)?);
+        }
+        _ => return Ok(false),
+    }
+    Ok(true)
+}
+
+/// Scope suffix naming the enabled opt-ins in a fixed order; empty for defaults.
+pub fn preview_scope_suffix(options: &PreviewOptions) -> String {
+    let mut s = String::new();
+    if options.animation_base {
+        s.push_str("+animation_base");
+    }
+    if options.instance_color.is_some() {
+        s.push_str("+instance_rgba");
+    }
+    s
+}
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MeshCoverage {
@@ -222,5 +277,50 @@ mod tests {
         assert_eq!(t.failed_by_reason["boom"], 2);
         assert_eq!(t.partial_by_neutral_reason.len(), 2);
         assert_eq!((t.nonempty_groups, t.supported_groups), (6, 5));
+    }
+    #[test]
+    fn instance_rgba_parses_four_bounded_values() {
+        let c = parse_instance_rgba("0.25,0.5,0.75,0.5").unwrap();
+        assert_eq!(c.values(), [0.25, 0.5, 0.75, 0.5]);
+        assert_eq!(
+            parse_instance_rgba("0,0,0,1").unwrap().values(),
+            [0., 0., 0., 1.]
+        );
+        for bad in [
+            "",
+            "0.1,0.2,0.3",
+            "0.1,0.2,0.3,0.4,0.5",
+            "a,0,0,0",
+            "0, 0,0,0",
+        ] {
+            assert!(parse_instance_rgba(bad).is_err(), "{bad}");
+        }
+        for out in ["1.5,0,0,0", "-0.1,0,0,0", "NaN,0,0,0", "inf,0,0,0"] {
+            assert!(parse_instance_rgba(out).is_err(), "{out}");
+        }
+    }
+    #[test]
+    fn preview_flags_set_options_and_scope_suffix() {
+        let mut o = PreviewOptions::default();
+        assert_eq!(preview_scope_suffix(&o), "");
+        assert!(!apply_preview_flag(&mut o, "--hashes", || None).unwrap());
+        assert!(
+            apply_preview_flag(&mut o, "--instance-rgba", || Some("0.25,0.5,0.75,0.5")).unwrap()
+        );
+        assert_eq!(preview_scope_suffix(&o), "+instance_rgba");
+        assert!(apply_preview_flag(&mut o, "--animation-base", || None).unwrap());
+        assert!(o.animation_base);
+        assert_eq!(
+            o.instance_color.unwrap().bits,
+            [0.25f32, 0.5, 0.75, 0.5].map(f32::to_bits)
+        );
+        assert_eq!(preview_scope_suffix(&o), "+animation_base+instance_rgba");
+        // Repeats and a missing value are errors, not silent overrides.
+        assert!(apply_preview_flag(&mut o, "--animation-base", || None).is_err());
+        assert!(apply_preview_flag(&mut o, "--instance-rgba", || Some("0,0,0,0")).is_err());
+        let mut fresh = PreviewOptions::default();
+        assert!(apply_preview_flag(&mut fresh, "--instance-rgba", || None).is_err());
+        assert!(apply_preview_flag(&mut fresh, "--instance-rgba", || Some("2,0,0,0")).is_err());
+        assert!(fresh.instance_color.is_none());
     }
 }
