@@ -216,3 +216,29 @@ fn texture_text_and_static_mesh_scope_are_explicit() {
     assert_eq!(result.header.unwrap().compressed, None);
     assert_eq!(result.dependencies.len(), 1);
 }
+#[test]
+fn d73_gate_heads_952_1000_0x3f8_accepted_0x3f9_up_unsupported_not_corrupt() {
+    // Gate proof only (D69); layout identical to head 951.
+    let base = read(&binary(951, 0, 0, &[(3, 1)]));
+    for revision in [952, 1000, 0x3f8] {
+        let r = read(&binary(revision, 0, 0, &[(3, 1)]));
+        assert_eq!(
+            r.status, "metadata_parsed",
+            "revision {revision}: {:?}",
+            r.reason
+        );
+        let (h, b) = (r.header.unwrap(), base.header.clone().unwrap());
+        assert_eq!(h.compression_flags, b.compression_flags);
+        assert_eq!(h.compressed, b.compressed);
+        assert_eq!(r.dependency_status, base.dependency_status);
+    }
+    for revision in [0x3f9, 0x3fa, 0x10000, u32::MAX] {
+        let r = read(&binary(revision, 0, 0, &[(3, 1)]));
+        assert_eq!(r.status, "unsupported", "revision {revision}");
+    }
+    // Lower bound unchanged: pre-0x109 revisions still have no dependency table.
+    assert_eq!(
+        read(&binary(0x108, 0, 0, &[])).dependency_status,
+        "table_absent_in_revision"
+    );
+}
