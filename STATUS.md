@@ -3792,3 +3792,13 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   My Moon is locked for the new profile (Pod menu stays on Story); waiting for the user.
 - Checks: fmt; lbp-script-vm, lbp-ui-script tests; workspace Clippy -D warnings.
 **+0 newly viewable / +0 newly Complete.**
+
+## D146 — UI objects constructed (PR #41) (2026-10-08)
+
+- --ui-script PodStateMainMenu: UpdateUI returns after 581 instructions (no fault; was a
+  NullObject at +888), 78 native calls, translated 5/5, frames balanced; supplied objects 5
+  (podDemoThread, ClapperBoardIcon, _StartedVO, Puter, TweakItemSelectTexture).
+  PodStateStoriesMenu: 303 instructions, translated 1/1, supplied 4. Capture
+  d146-u12c-mainmenu.png (non-primary monitor).
+- Checks: fmt; tests lbp-ui-script, lbp-script-vm, lbp-bevy-viewer; workspace Clippy; builds.
+**+0 newly viewable / +0 newly Complete.**
