@@ -19,8 +19,14 @@
 //!   (COMMUNITY_BEHAVIOUR shape, UNKNOWN constant, D108 U2). Sides: u = perimeter length *
 //!   UV_SCALE, v = depth * UV_SCALE (preview choice, labelled).
 //!
+//! D122 adds [`extrude_bevelled`] / [`extrude_thing_bevelled`] (opt-in): rings of the
+//! outline offset per RBevel profile vertex, side strips per profile step with bevel-slot
+//! materials, caps on the first and last ring. **Bevel geometry: inferred, unverified**
+//! ([`BEVEL_LABEL`], docs/d122-shape-bevels.md); `extrude` is unchanged.
+//!
 //! All inputs are untrusted: budgets on vertices/loops/coordinates/output, checked sums,
 //! explicit [`ShapeReject`] reasons, no panics on malformed polygons.
+use crate::bevel::{Bevel, MappingMode};
 use crate::parts::{GeneratedMesh, Shape};
 use crate::serial::Descriptor;
 use crate::thing::ThingRecord;
@@ -162,10 +168,22 @@ pub struct ShapeMesh {
     pub front: Range<usize>,
     pub back: Range<usize>,
     pub sides: Range<usize>,
-    /// GENERATED_MESH.gfxMaterial: the render material for every face (D108 M1).
+    /// GENERATED_MESH.gfxMaterial: the render material of bevel slot 0 (D108 M1/M2) and of
+    /// every face of a straight extrusion.
     pub material: Option<Descriptor>,
-    /// GENERATED_MESH.bevel, recorded but not applied (no bevel in v1).
+    /// GENERATED_MESH.bevel when the bevel was not applied (straight extrusion).
     pub bevel_unused: Option<Descriptor>,
+    /// D122: index ranges with their bevel slot and render material. Straight extrusions
+    /// have three slot-0 groups (front, back, sides) with `material`. Ranges are disjoint
+    /// and cover `indices`.
+    pub groups: Vec<FaceGroup>,
+    /// D122: what happened to the bevel.
+    pub bevel: BevelOutcome,
+    /// D122: side strips or caps whose slot (1-3 null material, or out of range) fell back
+    /// to `material`.
+    pub slot_material_fallbacks: usize,
+    /// D122: side strips leaving a HIDDEN-mode profile vertex (drawn; meaning UNKNOWN).
+    pub hidden_strips: usize,
     pub uv_offset: [f32; 4],
     /// det(world 3x3) < 0: triangle order was flipped.
     pub mirrored: bool,
@@ -191,6 +209,130 @@ impl ShapeMesh {
     }
     pub fn material_guid(&self) -> Option<u32> {
         self.material.and_then(|d| d.guid)
+    }
+
+    /// Splits the mesh by render material (D122 bevel slots), in first-use order of the
+    /// face groups. A mesh whose groups share one material comes back whole and unchanged
+    /// (so straight extrusions batch exactly as in D114); otherwise each part keeps only
+    /// the vertices its triangles use.
+    pub fn material_parts(&self) -> Vec<MaterialPart> {
+        let mut order: Vec<Option<Descriptor>> = Vec::new();
+        for g in &self.groups {
+            if !order.contains(&g.material) {
+                order.push(g.material);
+            }
+        }
+        if order.len() <= 1 {
+            return vec![MaterialPart {
+                material: order.first().copied().unwrap_or(self.material),
+                positions: self.positions.clone(),
+                normals: self.normals.clone(),
+                uv0: self.uv0.clone(),
+                indices: self.indices.clone(),
+            }];
+        }
+        order
+            .into_iter()
+            .map(|material| {
+                let mut part = MaterialPart {
+                    material,
+                    positions: Vec::new(),
+                    normals: Vec::new(),
+                    uv0: Vec::new(),
+                    indices: Vec::new(),
+                };
+                let mut remap = vec![u32::MAX; self.positions.len()];
+                for g in self.groups.iter().filter(|g| g.material == material) {
+                    for &i in &self.indices[g.range.clone()] {
+                        let i = i as usize;
+                        if remap[i] == u32::MAX {
+                            remap[i] = part.positions.len() as u32;
+                            part.positions.push(self.positions[i]);
+                            part.normals.push(self.normals[i]);
+                            part.uv0.push(self.uv0[i]);
+                        }
+                        part.indices.push(remap[i]);
+                    }
+                }
+                part
+            })
+            .collect()
+    }
+}
+
+/// One render-material slice of a [`ShapeMesh`] (same space and winding).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MaterialPart {
+    pub material: Option<Descriptor>,
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub uv0: Vec<[f32; 2]>,
+    pub indices: Vec<u32>,
+}
+
+impl MaterialPart {
+    pub fn material_guid(&self) -> Option<u32> {
+        self.material.and_then(|d| d.guid)
+    }
+    pub fn triangle_count(&self) -> usize {
+        self.indices.len() / 3
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FaceKind {
+    Front,
+    Back,
+    Side,
+}
+
+/// A contiguous index range drawn with one bevel slot's material.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceGroup {
+    pub kind: FaceKind,
+    pub range: Range<usize>,
+    /// Raw BevelVertex.gmatSlot (0 for straight extrusions).
+    pub slot: i8,
+    pub material: Option<Descriptor>,
+}
+
+/// Outcome of the bevel request for one shape (D122).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum BevelOutcome {
+    /// Straight extrusion requested ([`extrude`]).
+    NotRequested,
+    /// GENERATED_MESH names no bevel: straight walls (what the game draws is UNKNOWN,
+    /// D108 B7).
+    NoBevel,
+    /// A bevel is named but no parsed bevel was supplied: straight walls.
+    Unavailable,
+    /// Bevel applied with this effective size (world units per profile unit) after
+    /// `shrink_steps` halvings of the requested size; `rings` profile rings.
+    Applied {
+        size: f32,
+        shrink_steps: u32,
+        rings: usize,
+    },
+    /// Bevel supplied but not applicable (reason key): straight walls.
+    Fallback(&'static str),
+}
+
+impl BevelOutcome {
+    /// Stable census key.
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::NotRequested => "not_requested",
+            Self::NoBevel => "no_bevel",
+            Self::Unavailable => "bevel_unavailable",
+            Self::Applied {
+                shrink_steps: 0, ..
+            } => "bevelled",
+            Self::Applied { .. } => "bevelled_shrunk",
+            Self::Fallback(_) => "bevel_fallback",
+        }
+    }
+    pub fn is_applied(&self) -> bool {
+        matches!(self, Self::Applied { .. })
     }
 }
 
@@ -345,6 +487,41 @@ fn validate(shape: &Shape) -> Result<Polygon, ShapeReject> {
         loops.push(idx);
         start = end;
     }
+    let areas = check_loops(&pts, &loops)?;
+    // Winding normalisation: outer CCW, holes CW.
+    let mut rewound = 0;
+    let mut same_winding_holes = 0;
+    let outer_sign = areas[0] > 0.0;
+    let mut area = 0.0;
+    for (lp, idx) in loops.iter_mut().enumerate() {
+        let ccw = areas[lp] > 0.0;
+        if lp > 0 && ccw == outer_sign {
+            same_winding_holes += 1;
+        }
+        let want_ccw = lp == 0;
+        if ccw != want_ccw {
+            idx.reverse();
+            rewound += 1;
+        }
+        area += if lp == 0 {
+            areas[lp].abs()
+        } else {
+            -areas[lp].abs()
+        };
+    }
+    Ok(Polygon {
+        pts,
+        loops,
+        rewound,
+        same_winding_holes,
+        removed,
+        area,
+    })
+}
+
+/// Zero-area, self-intersection, loop-intersection and containment checks of loops over
+/// `pts` (shared by the input polygon and by D122 bevel rings). Returns signed areas.
+fn check_loops(pts: &[P2], loops: &[Vec<usize>]) -> Result<Vec<f64>, ShapeReject> {
     // Zero-area loops, relative to the loop's extent.
     let mut areas = Vec::with_capacity(loops.len());
     for (lp, idx) in loops.iter().enumerate() {
@@ -356,7 +533,7 @@ fn validate(shape: &Shape) -> Result<Polygon, ShapeReject> {
             }
         }
         let extent = (hi[0] - lo[0]).max(hi[1] - lo[1]);
-        let a = signed_area(&pts, idx);
+        let a = signed_area(pts, idx);
         if extent <= 0.0 || a.abs() <= 1e-9 * extent * extent {
             return Err(ShapeReject::ZeroAreaLoop { lp });
         }
@@ -403,44 +580,16 @@ fn validate(shape: &Shape) -> Result<Polygon, ShapeReject> {
     // Containment: every hole inside the outer loop and outside every other hole.
     for lp in 1..loops.len() {
         let p = pts[loops[lp][0]];
-        if !inside(&pts, &loops[0], p) {
+        if !inside(pts, &loops[0], p) {
             return Err(ShapeReject::HoleOutsideOuter { lp });
         }
         for (other, hole) in loops.iter().enumerate().skip(1) {
-            if other != lp && inside(&pts, hole, p) {
+            if other != lp && inside(pts, hole, p) {
                 return Err(ShapeReject::NestedHoles { lp });
             }
         }
     }
-    // Winding normalisation: outer CCW, holes CW.
-    let mut rewound = 0;
-    let mut same_winding_holes = 0;
-    let outer_sign = areas[0] > 0.0;
-    let mut area = 0.0;
-    for (lp, idx) in loops.iter_mut().enumerate() {
-        let ccw = areas[lp] > 0.0;
-        if lp > 0 && ccw == outer_sign {
-            same_winding_holes += 1;
-        }
-        let want_ccw = lp == 0;
-        if ccw != want_ccw {
-            idx.reverse();
-            rewound += 1;
-        }
-        area += if lp == 0 {
-            areas[lp].abs()
-        } else {
-            -areas[lp].abs()
-        };
-    }
-    Ok(Polygon {
-        pts,
-        loops,
-        rewound,
-        same_winding_holes,
-        removed,
-        area,
-    })
+    Ok(areas)
 }
 
 /// Is `m` inside the interior cone at vertex `p` (neighbours `a` before, `b` after) of a
@@ -824,6 +973,19 @@ pub fn extrude(
         zmin = zmin.min(p[2]);
         zmax = zmax.max(p[2]);
     }
+    let groups = [
+        (FaceKind::Front, front.clone()),
+        (FaceKind::Back, back.clone()),
+        (FaceKind::Side, sides.clone()),
+    ]
+    .into_iter()
+    .map(|(kind, range)| FaceGroup {
+        kind,
+        range,
+        slot: 0,
+        material: generated.gfx_material,
+    })
+    .collect();
     Ok(ShapeMesh {
         positions,
         normals,
@@ -834,6 +996,10 @@ pub fn extrude(
         sides,
         material: generated.gfx_material,
         bevel_unused: generated.bevel,
+        groups,
+        bevel: BevelOutcome::NotRequested,
+        slot_material_fallbacks: 0,
+        hidden_strips: 0,
         uv_offset: off,
         mirrored,
         loops: poly.loops.len(),
@@ -845,4 +1011,512 @@ pub fn extrude(
         world_z: (zmin, zmax),
         label: PREVIEW_LABEL,
     })
+}
+
+// ---------------------------------------------------------------------------------------
+// D122 (plan item Ly): bevelled extrusion. Rules, evidence and what is inferred:
+// docs/d122-shape-bevels.md. Every bevelled mesh carries [`BEVEL_LABEL`].
+// ---------------------------------------------------------------------------------------
+
+/// Shown with every bevelled shape mesh (D122).
+pub const BEVEL_LABEL: &str = "preview approximation: bevel geometry: inferred, unverified; bevel UVs approximate, UV scale uncalibrated";
+/// Longest miter offset per unit offset distance at sharp outline corners (preview choice).
+pub const MITER_LIMIT: f64 = 4.0;
+/// Profile coordinates beyond this (in bevel-size units) are refused.
+pub const MAX_PROFILE_COORDINATE: f64 = 100.0;
+
+/// Which size scales the bevel profile (D108 B5: the combination is UNKNOWN).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum BevelSizeRule {
+    /// PShape.bevelSize (varies per shape for one bevel in the data); fixedBevelSize when
+    /// the shape value is not positive. Default.
+    #[default]
+    ShapeBevelSize,
+    /// RBevel.fixedBevelSize; PShape.bevelSize when it is not positive (-1 occurs).
+    FixedBevelSize,
+    /// Sum of the positive values.
+    Sum,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BevelOptions {
+    pub size_rule: BevelSizeRule,
+    /// Halvings of the bevel size tried when a ring self-intersects or a cap fails.
+    pub max_shrink_steps: u32,
+}
+
+impl Default for BevelOptions {
+    fn default() -> Self {
+        Self {
+            size_rule: BevelSizeRule::ShapeBevelSize,
+            max_shrink_steps: 4,
+        }
+    }
+}
+
+/// Selection plus bevelled extrusion for one parsed Thing. `bevel_of` resolves the
+/// GENERATED_MESH bevel descriptor to a parsed bevel (None = not available).
+pub fn extrude_thing_bevelled<'a>(
+    thing: &ThingRecord,
+    bevel_of: impl FnOnce(&Descriptor) -> Option<&'a Bevel>,
+    options: &BevelOptions,
+) -> Result<ShapeMesh, ShapeReject> {
+    let shape = thing.data.shape.as_ref().ok_or(ShapeReject::NoShape)?;
+    let gm = thing
+        .data
+        .generated_mesh
+        .as_ref()
+        .ok_or(ShapeReject::NoGeneratedMesh)?;
+    let pos = thing.data.pos.as_ref().ok_or(ShapeReject::NoPos)?;
+    if !gm.play_mode_visible {
+        return Err(ShapeReject::EditOnly);
+    }
+    let bevel = gm.bevel.as_ref().and_then(bevel_of);
+    extrude_bevelled(shape, gm, &pos.world, bevel, options)
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Step {
+    y: f64,
+    z: f64,
+    slot: i8,
+    hidden: bool,
+}
+
+fn profile(bevel: &Bevel) -> Result<Vec<Step>, &'static str> {
+    let mut steps: Vec<Step> = Vec::with_capacity(bevel.vertices.len());
+    for v in &bevel.vertices {
+        let (y, z) = (f64::from(v.y), f64::from(v.z));
+        if !y.is_finite() || !z.is_finite() {
+            return Err("profile_non_finite");
+        }
+        if y.abs() > MAX_PROFILE_COORDINATE || z.abs() > MAX_PROFILE_COORDINATE {
+            return Err("profile_oversized");
+        }
+        if steps.last().is_some_and(|l| l.y == y && l.z == z) {
+            continue;
+        }
+        steps.push(Step {
+            y,
+            z,
+            slot: v.gmat_slot,
+            hidden: v.mapping_mode() == Some(MappingMode::Hidden),
+        });
+    }
+    if steps.len() < 2 {
+        return Err("profile_too_short");
+    }
+    Ok(steps)
+}
+
+fn bevel_size(shape: &Shape, bevel: &Bevel, rule: BevelSizeRule) -> Option<f64> {
+    let pos = |v: f32| {
+        let v = f64::from(v);
+        (v.is_finite() && v > 0.0).then_some(v)
+    };
+    let (s, f) = (pos(shape.bevel_size), pos(bevel.fixed_bevel_size));
+    let b = match rule {
+        BevelSizeRule::ShapeBevelSize => s.or(f),
+        BevelSizeRule::FixedBevelSize => f.or(s),
+        BevelSizeRule::Sum => match (s, f) {
+            (None, None) => None,
+            (a, b) => Some(a.unwrap_or(0.0) + b.unwrap_or(0.0)),
+        },
+    }?;
+    (b <= MAX_COORDINATE).then_some(b)
+}
+
+/// Profile z (about -1 back .. +1 front) to local depth. The outer bands |z| in [0.5, 1]
+/// use the same world scale `s` as the radial offset y (isotropic profile), anchored so
+/// z = +-1 lies on the slab faces +-t; the middle band |z| < 0.5 stretches linearly to
+/// fill the rest. `s` is capped at 2t so the middle band never inverts. Inferred,
+/// unverified (docs/d122-shape-bevels.md R3).
+pub fn profile_depth(z: f64, t: f64, b: f64) -> f64 {
+    let s = b.min(2.0 * t);
+    let a = z.abs();
+    if a >= 0.5 {
+        z.signum() * (t - (1.0 - a) * s)
+    } else {
+        z * 2.0 * (t - 0.5 * s)
+    }
+}
+
+/// Unit offset direction per point id: the miter of the two adjacent outward edge normals
+/// (outward = right of the edge for the normalised outer CCW / holes CW), scaled so each
+/// offset edge stays parallel at distance 1, capped at MITER_LIMIT.
+fn miters(poly: &Polygon) -> Vec<P2> {
+    let mut out = vec![[0.0; 2]; poly.pts.len()];
+    let unit = |a: P2, b: P2| {
+        let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
+        let l = (dx * dx + dy * dy).sqrt();
+        [dy / l, -dx / l]
+    };
+    for lp in &poly.loops {
+        let m = lp.len();
+        for k in 0..m {
+            let prev = poly.pts[lp[(k + m - 1) % m]];
+            let cur = poly.pts[lp[k]];
+            let next = poly.pts[lp[(k + 1) % m]];
+            let (na, nb) = (unit(prev, cur), unit(cur, next));
+            let d = 1.0 + na[0] * nb[0] + na[1] * nb[1];
+            let mut v = if d > 1e-9 {
+                [(na[0] + nb[0]) / d, (na[1] + nb[1]) / d]
+            } else {
+                nb
+            };
+            let l = (v[0] * v[0] + v[1] * v[1]).sqrt();
+            if l > MITER_LIMIT {
+                v = [v[0] * MITER_LIMIT / l, v[1] * MITER_LIMIT / l];
+            }
+            out[lp[k]] = v;
+        }
+    }
+    out
+}
+
+enum BuildFail {
+    Ring(&'static str),
+    Budget,
+}
+
+type Tris = Vec<[usize; 3]>;
+
+/// Rings for every profile step at size `b`, each checked to be a valid polygon with the
+/// input's loop orientation; caps triangulated on the first and last ring.
+fn rings(
+    poly: &Polygon,
+    dirs: &[P2],
+    steps: &[Step],
+    b: f64,
+) -> Result<(Vec<Vec<P2>>, Tris, Tris), BuildFail> {
+    let mut out: Vec<Vec<P2>> = Vec::with_capacity(steps.len());
+    let mut checked: Vec<(u64, usize)> = Vec::new();
+    for st in steps {
+        let d = st.y * b;
+        if let Some(&(_, k)) = checked.iter().find(|(bits, _)| *bits == d.to_bits()) {
+            out.push(out[k].clone());
+            continue;
+        }
+        let mut ring = poly.pts.clone();
+        for lp in &poly.loops {
+            for &i in lp {
+                ring[i] = [
+                    poly.pts[i][0] + d * dirs[i][0],
+                    poly.pts[i][1] + d * dirs[i][1],
+                ];
+            }
+        }
+        if ring
+            .iter()
+            .flatten()
+            .any(|v| !v.is_finite() || v.abs() > MAX_COORDINATE)
+        {
+            return Err(BuildFail::Ring("ring_oversized"));
+        }
+        let areas = check_loops(&ring, &poly.loops).map_err(|e| BuildFail::Ring(e.reason()))?;
+        if areas
+            .iter()
+            .enumerate()
+            .any(|(lp, &a)| (lp == 0) != (a > 0.0))
+        {
+            return Err(BuildFail::Ring("ring_flipped"));
+        }
+        checked.push((d.to_bits(), out.len()));
+        out.push(ring);
+    }
+    let cap = |ring: &Vec<P2>| {
+        let area: f64 = poly.loops.iter().map(|l| signed_area(ring, l)).sum();
+        let p = Polygon {
+            pts: ring.clone(),
+            loops: poly.loops.clone(),
+            rewound: 0,
+            same_winding_holes: 0,
+            removed: 0,
+            area,
+        };
+        triangulate(&p).map_err(|_| BuildFail::Ring("cap_triangulation"))
+    };
+    let back = cap(&out[0])?;
+    let front = cap(&out[out.len() - 1])?;
+    Ok((out, front, back))
+}
+
+/// Bevelled extrusion (D122). With `bevel = None` this is [`extrude`] with the outcome
+/// `NoBevel` / `Unavailable`; a bevel whose profile or rings cannot be built falls back to
+/// the straight extrusion with `BevelOutcome::Fallback(reason)`. Geometry rules are
+/// inferred and unverified (label [`BEVEL_LABEL`]); the straight extrusion stays available
+/// through [`extrude`].
+pub fn extrude_bevelled(
+    shape: &Shape,
+    generated: &GeneratedMesh,
+    world: &[f32; 16],
+    bevel: Option<&Bevel>,
+    options: &BevelOptions,
+) -> Result<ShapeMesh, ShapeReject> {
+    let straight = |outcome: BevelOutcome| {
+        extrude(shape, generated, world).map(|mut m| {
+            m.bevel = outcome;
+            m
+        })
+    };
+    let Some(bevel) = bevel else {
+        return straight(if generated.bevel.is_none() {
+            BevelOutcome::NoBevel
+        } else {
+            BevelOutcome::Unavailable
+        });
+    };
+    let t = f64::from(shape.thickness);
+    if !t.is_finite() || t <= 0.0 || t > MAX_THICKNESS {
+        return Err(ShapeReject::BadThickness);
+    }
+    let xf = Xform::new(world)?;
+    let poly = validate(shape)?;
+    let steps = match profile(bevel) {
+        Ok(s) => s,
+        Err(r) => return straight(BevelOutcome::Fallback(r)),
+    };
+    let Some(size) = bevel_size(shape, bevel, options.size_rule) else {
+        return straight(BevelOutcome::Fallback("bevel_size"));
+    };
+    let dirs = miters(&poly);
+    let mut last = "ring";
+    for step in 0..=options.max_shrink_steps.min(16) {
+        let b = size / f64::from(1u32 << step);
+        let ctx = Build {
+            poly: &poly,
+            dirs: &dirs,
+            steps: &steps,
+            t,
+            b,
+            xf: &xf,
+            generated,
+            bevel,
+        };
+        match ctx.mesh() {
+            Ok(mut m) => {
+                m.bevel = BevelOutcome::Applied {
+                    size: b as f32,
+                    shrink_steps: step,
+                    rings: steps.len(),
+                };
+                m.thickness = shape.thickness;
+                return Ok(m);
+            }
+            Err(BuildFail::Ring(r)) => last = r,
+            Err(BuildFail::Budget) => return straight(BevelOutcome::Fallback("output_budget")),
+        }
+    }
+    straight(BevelOutcome::Fallback(last))
+}
+
+struct Build<'a> {
+    poly: &'a Polygon,
+    dirs: &'a [P2],
+    steps: &'a [Step],
+    t: f64,
+    b: f64,
+    xf: &'a Xform,
+    generated: &'a GeneratedMesh,
+    bevel: &'a Bevel,
+}
+
+impl Build<'_> {
+    fn mesh(&self) -> Result<ShapeMesh, BuildFail> {
+        let (poly, steps, xf, b) = (self.poly, self.steps, self.xf, self.b);
+        let (rings, front_tris, back_tris) = rings(poly, self.dirs, steps, b)?;
+        let n = steps.len();
+        let ring_ids: Vec<usize> = poly.loops.iter().flatten().copied().collect();
+        let edges = ring_ids.len();
+        let out_vertices = edges
+            .checked_mul(4)
+            .and_then(|v| v.checked_mul(n - 1))
+            .and_then(|v| v.checked_add(edges.checked_mul(2)?))
+            .ok_or(BuildFail::Budget)?;
+        if out_vertices > MAX_OUTPUT_VERTICES {
+            return Err(BuildFail::Budget);
+        }
+        let depth: Vec<f64> = steps
+            .iter()
+            .map(|s| profile_depth(s.z, self.t, b))
+            .collect();
+        let off = self.generated.uv_offset;
+        let planar = |x: f64, y: f64| {
+            let w = xf.linear([x, y, 0.0]);
+            [
+                (w[0] * UV_SCALE + f64::from(off[0])) as f32,
+                (f64::from(off[1]) - w[1] * UV_SCALE) as f32,
+            ]
+        };
+        let gfx = self.generated.gfx_material;
+        let mut fallbacks = 0usize;
+        let mut material_of = |slot: i8| match slot {
+            0 => gfx,
+            1..=3 => match self.bevel.materials[slot as usize] {
+                Some(d) => Some(d),
+                None => {
+                    fallbacks += 1;
+                    gfx
+                }
+            },
+            _ => {
+                fallbacks += 1;
+                gfx
+            }
+        };
+        let mut positions = Vec::with_capacity(out_vertices);
+        let mut normals = Vec::with_capacity(out_vertices);
+        let mut uv0 = Vec::with_capacity(out_vertices);
+        let mut indices: Vec<u32> = Vec::new();
+        let mut groups = Vec::new();
+        let mut slot_of = vec![u32::MAX; poly.pts.len()];
+        for (k, &i) in ring_ids.iter().enumerate() {
+            slot_of[i] = k as u32;
+        }
+        // Caps: front on the last ring (+z normal), back reversed on the first ring.
+        let caps = [
+            (n - 1, 1.0, &front_tris, FaceKind::Front, steps[n - 1].slot),
+            (0, -1.0, &back_tris, FaceKind::Back, steps[0].slot),
+        ];
+        for (r, nz, tris, kind, slot) in caps {
+            let base = positions.len() as u32;
+            let nrm = f3(xf.normal([0.0, 0.0, nz]));
+            for &i in &ring_ids {
+                let [x, y] = rings[r][i];
+                positions.push(f3(xf.point([x, y, depth[r]])));
+                normals.push(nrm);
+                uv0.push(planar(x, y));
+            }
+            let start = indices.len();
+            for tri in tris {
+                let [a, b2, c] = tri.map(|i| slot_of[i] + base);
+                if nz > 0.0 {
+                    indices.extend_from_slice(&[a, b2, c]);
+                } else {
+                    indices.extend_from_slice(&[a, c, b2]);
+                }
+            }
+            groups.push(FaceGroup {
+                kind,
+                range: start..indices.len(),
+                slot,
+                material: material_of(slot),
+            });
+        }
+        let front = groups[0].range.clone();
+        let back = groups[1].range.clone();
+        // Profile arc length (local units scaled by the world z-axis length), v = 0 at the
+        // last ring like the D114 top edge. Preview approximation.
+        let zscale = len3(xf.linear([0.0, 0.0, 1.0]));
+        let mut arc = vec![0.0f64; n];
+        for k in 1..n {
+            let dy = (steps[k].y - steps[k - 1].y) * b;
+            let dz = depth[k] - depth[k - 1];
+            arc[k] = arc[k - 1] + (dy * dy + dz * dz).sqrt() * zscale;
+        }
+        let total = arc[n - 1];
+        let mut hidden = 0usize;
+        for k in 0..n - 1 {
+            let st = steps[k];
+            hidden += usize::from(st.hidden);
+            let start = indices.len();
+            let (v0, v1) = ((total - arc[k]) * UV_SCALE, (total - arc[k + 1]) * UV_SCALE);
+            for lp in &poly.loops {
+                let m = lp.len();
+                let mut u = 0.0f64;
+                for e in 0..m {
+                    let (ia, ib) = (lp[e], lp[(e + 1) % m]);
+                    let [ox, oy] = poly.pts[ia];
+                    let [px, py] = poly.pts[ib];
+                    let u1 = u + len3(xf.linear([px - ox, py - oy, 0.0])) * UV_SCALE;
+                    let q = [
+                        [rings[k][ia][0], rings[k][ia][1], depth[k]],
+                        [rings[k][ib][0], rings[k][ib][1], depth[k]],
+                        [rings[k + 1][ib][0], rings[k + 1][ib][1], depth[k + 1]],
+                        [rings[k + 1][ia][0], rings[k + 1][ia][1], depth[k + 1]],
+                    ];
+                    let d1 = [q[2][0] - q[0][0], q[2][1] - q[0][1], q[2][2] - q[0][2]];
+                    let d2 = [q[3][0] - q[1][0], q[3][1] - q[1][1], q[3][2] - q[1][2]];
+                    let mut nl = [
+                        d1[1] * d2[2] - d1[2] * d2[1],
+                        d1[2] * d2[0] - d1[0] * d2[2],
+                        d1[0] * d2[1] - d1[1] * d2[0],
+                    ];
+                    if len3(nl) <= 1e-12 * (len3(d1) * len3(d2)).max(f64::MIN_POSITIVE) {
+                        nl = [py - oy, -(px - ox), 0.0];
+                    }
+                    let nrm = f3(xf.normal(nl));
+                    let base = positions.len() as u32;
+                    for (p, uv) in q.iter().zip([[u, v0], [u1, v0], [u1, v1], [u, v1]]) {
+                        positions.push(f3(xf.point(*p)));
+                        normals.push(nrm);
+                        uv0.push([uv[0] as f32, uv[1] as f32]);
+                    }
+                    indices.extend_from_slice(&[
+                        base,
+                        base + 1,
+                        base + 2,
+                        base,
+                        base + 2,
+                        base + 3,
+                    ]);
+                    u = u1;
+                }
+            }
+            let material = material_of(st.slot);
+            match groups.last_mut() {
+                Some(g)
+                    if g.kind == FaceKind::Side && g.slot == st.slot && g.range.end == start =>
+                {
+                    g.range.end = indices.len();
+                }
+                _ => groups.push(FaceGroup {
+                    kind: FaceKind::Side,
+                    range: start..indices.len(),
+                    slot: st.slot,
+                    material,
+                }),
+            }
+        }
+        let sides = back.end..indices.len();
+        let mirrored = xf.det < 0.0;
+        if mirrored {
+            for tri in indices.as_chunks_mut::<3>().0 {
+                tri.swap(1, 2);
+            }
+        }
+        if positions.iter().flatten().any(|v| !v.is_finite()) {
+            return Err(BuildFail::Ring("non_finite"));
+        }
+        let (mut zmin, mut zmax) = (f32::MAX, f32::MIN);
+        for p in &positions {
+            zmin = zmin.min(p[2]);
+            zmax = zmax.max(p[2]);
+        }
+        Ok(ShapeMesh {
+            positions,
+            normals,
+            uv0,
+            indices,
+            front,
+            back,
+            sides,
+            material: gfx,
+            bevel_unused: None,
+            groups,
+            bevel: BevelOutcome::NotRequested,
+            slot_material_fallbacks: fallbacks,
+            hidden_strips: hidden,
+            uv_offset: off,
+            mirrored,
+            loops: poly.loops.len(),
+            rewound_loops: poly.rewound,
+            same_winding_holes: poly.same_winding_holes,
+            duplicate_vertices_removed: poly.removed,
+            local_area: poly.area,
+            thickness: self.t as f32,
+            world_z: (zmin, zmax),
+            label: BEVEL_LABEL,
+        })
+    }
 }

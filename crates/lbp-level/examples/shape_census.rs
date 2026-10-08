@@ -3,13 +3,21 @@
 //! grouped by content hash), plus the same totals for `tutorial_23.bin` alone and a layer
 //! tiling check of the half-depth rule (docs/d108-shape-geometry.md D3).
 //! Output: a NEW JSON file under an ignored `local-analysis/` directory; nothing else is
-//! written. Usage: shape_census SNAPSHOT GAME-DIR[;GAME-DIR] NEW-JSON
+//! written. Usage: shape_census SNAPSHOT GAME-DIR[;GAME-DIR] NEW-JSON [--bevels]
 //! Counting unit: one Thing with SHAPE data, per containing level content hash.
+//! D122 `--bevels`: also loads every referenced RBevel (`lbp_level::bevel`) and runs the
+//! bevelled extrusion (`extrude_thing_bevelled`, default options) beside the straight one;
+//! the straight totals and the tiling check are unchanged, the bevel totals are separate.
 use lbp_catalog::{
     attachment::{AttachedSource, LocationKey},
     LoadControl,
 };
-use lbp_level::shape_mesh::{extrude_thing, ShapeMesh, PREVIEW_LABEL, UV_SCALE};
+use lbp_level::bevel::{self, Bevel};
+use lbp_level::serial::Descriptor;
+use lbp_level::shape_mesh::{
+    extrude_thing, extrude_thing_bevelled, BevelOptions, BevelOutcome, ShapeMesh, BEVEL_LABEL,
+    PREVIEW_LABEL, UV_SCALE,
+};
 use lbp_level::Limits;
 use serde_json::{json, Value};
 use std::{
@@ -134,6 +142,110 @@ impl Tally {
     }
 }
 
+/// D122 bevelled-extrusion totals (unit: Thing with SHAPE data, as `Tally`).
+#[derive(Default)]
+struct BevelTally {
+    outcomes: BTreeMap<String, usize>,
+    rejected: BTreeMap<&'static str, usize>,
+    shrink_steps: BTreeMap<u32, usize>,
+    triangles: u64,
+    vertices: u64,
+    multi_material: usize,
+    slot_material_fallbacks: usize,
+    hidden_strips: usize,
+}
+
+impl BevelTally {
+    fn add(&mut self, r: &Result<ShapeMesh, lbp_level::ShapeReject>) {
+        match r {
+            Ok(m) => {
+                let key = match m.bevel {
+                    BevelOutcome::Fallback(reason) => format!("bevel_fallback:{reason}"),
+                    o => o.key().to_string(),
+                };
+                *self.outcomes.entry(key).or_default() += 1;
+                if let BevelOutcome::Applied { shrink_steps, .. } = m.bevel {
+                    *self.shrink_steps.entry(shrink_steps).or_default() += 1;
+                }
+                self.triangles += m.triangle_count() as u64;
+                self.vertices += m.positions.len() as u64;
+                self.multi_material += usize::from(m.material_parts().len() > 1);
+                self.slot_material_fallbacks += m.slot_material_fallbacks;
+                self.hidden_strips += m.hidden_strips;
+            }
+            Err(e) if e.is_selection() => {}
+            Err(e) => *self.rejected.entry(e.reason()).or_default() += 1,
+        }
+    }
+    fn merge(&mut self, o: &BevelTally) {
+        for (k, v) in &o.outcomes {
+            *self.outcomes.entry(k.clone()).or_default() += v;
+        }
+        for (k, v) in &o.rejected {
+            *self.rejected.entry(k).or_default() += v;
+        }
+        for (k, v) in &o.shrink_steps {
+            *self.shrink_steps.entry(*k).or_default() += v;
+        }
+        self.triangles += o.triangles;
+        self.vertices += o.vertices;
+        self.multi_material += o.multi_material;
+        self.slot_material_fallbacks += o.slot_material_fallbacks;
+        self.hidden_strips += o.hidden_strips;
+    }
+    fn json(&self) -> Value {
+        let applied: usize = self
+            .outcomes
+            .iter()
+            .filter(|(k, _)| k.starts_with("bevelled"))
+            .map(|(_, v)| v)
+            .sum();
+        json!({
+            "extruded_ok": self.outcomes.values().sum::<usize>(),
+            "bevelled": applied,
+            "outcomes": self.outcomes,
+            "rejected_by_reason": self.rejected,
+            "rejected": self.rejected.values().sum::<usize>(),
+            "bevelled_by_shrink_steps": self.shrink_steps,
+            "triangles": self.triangles,
+            "vertices": self.vertices,
+            "with_more_than_one_material": self.multi_material,
+            "slot_material_fallbacks": self.slot_material_fallbacks,
+            "hidden_mode_strips_drawn": self.hidden_strips,
+        })
+    }
+}
+
+type BevelKey = (Option<u32>, Option<[u8; 20]>);
+
+/// Loads (once) the bevel a descriptor names; None when unresolved or unreadable.
+fn load_bevel<'a>(
+    cache: &'a mut BTreeMap<BevelKey, Result<Bevel, String>>,
+    d: &Descriptor,
+    catalog: &lbp_catalog::Catalog,
+    source: &AttachedSource,
+    control: &LoadControl,
+) -> Option<&'a Bevel> {
+    let key = (d.guid, d.sha1);
+    cache
+        .entry(key)
+        .or_insert_with(|| {
+            let hash = d.sha1.map(|h| lbp_level::serial::hex(&h));
+            let loc = match (d.guid, &hash) {
+                (Some(g), _) => lbp_preview::resolve(catalog, Some(g), None),
+                (None, Some(h)) => lbp_preview::resolve(catalog, None, Some(h)),
+                _ => Err("no identifier".into()),
+            }?;
+            if loc.size > bevel::MAX_INPUT as u64 {
+                return Err("bevel input budget".into());
+            }
+            let bytes = read_all(source, &loc, control)?;
+            bevel::read(&bytes, &|| control.check().is_err()).map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .ok()
+}
+
 /// Layer tiling of distinct root-shape slab z-ranges under one depth hypothesis.
 #[derive(Default)]
 struct Tiling {
@@ -196,8 +308,9 @@ fn z_aligned(w: &[f32; 16]) -> bool {
 
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().collect();
-    if args.len() != 4 {
-        return Err("usage: shape_census SNAPSHOT GAME-DIR NEW-JSON".into());
+    let bevels = args.len() == 5 && args[4] == "--bevels";
+    if args.len() != 4 && !bevels {
+        return Err("usage: shape_census SNAPSHOT GAME-DIR NEW-JSON [--bevels]".into());
     }
     let output = Path::new(&args[3]);
     let parent_ok = output
@@ -228,6 +341,9 @@ fn run() -> Result<(), String> {
     };
     let mut all = Tally::default();
     let mut focus = Tally::default();
+    let (mut bevel_all, mut bevel_focus) = (BevelTally::default(), BevelTally::default());
+    let mut bevel_cache: BTreeMap<BevelKey, Result<Bevel, String>> = BTreeMap::new();
+    let bevel_options = BevelOptions::default();
     let mut focus_rows = Vec::new();
     let mut statuses = BTreeMap::<&str, usize>::new();
     let mut examples = BTreeMap::<&str, Vec<Value>>::new();
@@ -292,12 +408,21 @@ fn run() -> Result<(), String> {
             levels: 1,
             ..Tally::default()
         };
+        let mut bt = BevelTally::default();
         let (mut half, mut full) = (BTreeSet::new(), BTreeSet::new());
         for thing in &report.things {
             if thing.data.shape.is_none() {
                 continue;
             }
             t.shapes += 1;
+            if bevels {
+                let r = extrude_thing_bevelled(
+                    thing,
+                    |d| load_bevel(&mut bevel_cache, d, &catalog, &source, &control),
+                    &bevel_options,
+                );
+                bt.add(&r);
+            }
             match extrude_thing(thing) {
                 Ok(m) => {
                     t.add_ok(&m);
@@ -356,10 +481,15 @@ fn run() -> Result<(), String> {
             }
         }
         row["shapes"] = t.json();
+        if bevels {
+            row["bevelled"] = bt.json();
+        }
         if is_focus {
             focus.merge(&t);
+            bevel_focus.merge(&bt);
         }
         all.merge(&t);
+        bevel_all.merge(&bt);
         rows.push(row);
     }
     source.check_stable()?;
@@ -382,6 +512,25 @@ fn run() -> Result<(), String> {
             "root_thickness_histogram": thickness_hist,
         },
         "reject_examples": examples,
+        "bevels": bevels.then(|| {
+            let mut status = BTreeMap::<String, usize>::new();
+            for r in bevel_cache.values() {
+                *status
+                    .entry(match r {
+                        Ok(_) => "parsed".into(),
+                        Err(e) => format!("failed: {e}"),
+                    })
+                    .or_default() += 1;
+            }
+            json!({
+                "label": BEVEL_LABEL,
+                "options": format!("{bevel_options:?}"),
+                "distinct_bevel_descriptors": bevel_cache.len(),
+                "bevel_load_status": status,
+                "all": bevel_all.json(),
+                "focus": bevel_focus.json(),
+            })
+        }),
         "archived_bytes_read": total_bytes,
         "rows": rows,
     });
@@ -395,6 +544,14 @@ fn run() -> Result<(), String> {
     println!("level hashes {}; status {:?}", by_hash.len(), statuses);
     println!("all: {}", all.json());
     println!("{FOCUS}: {}", focus.json());
+    if bevels {
+        println!(
+            "bevels: {} descriptors; all: {}",
+            bevel_cache.len(),
+            bevel_all.json()
+        );
+        println!("bevels {FOCUS}: {}", bevel_focus.json());
+    }
     println!(
         "tiling: {tiling_levels} levels; {intervals_total} intervals; half-depth tiled {tiled_levels} (overlaps {overlaps_half}, gaps {gaps_half}, touching {touch_half}); full-depth tiled {tiled_levels_full} (overlaps {overlaps_full}, gaps {gaps_full}, touching {touch_full})"
     );
