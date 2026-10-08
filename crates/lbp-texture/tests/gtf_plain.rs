@@ -162,8 +162,10 @@ fn refusals_and_bounds() {
     unsupported(gtf(0xe5, 4, 4, 0xaae4, 16, &px, false), fmt); // LN + UN
     unsupported(gtf(0xa6, 4, 4, 0xaae4, 8, &px, false), fmt); // LN BC1
     unsupported(gtf(0x83, 4, 4, 0xaae4, 0, &px, false), fmt); // A4R4G4B4
-    unsupported(gtf(0x81, 4, 4, 0x02ff, 0, &px, false), flags); // alpha-only remap
-    unsupported(gtf(0x85, 4, 4, 0xa9ff, 0, &px, false), flags); // BBBB on ARGB
+                                                              // D98: 0x02ff and 0xa9ff decode (d98_last.rs); remap mode 3 and order bits do not.
+    unsupported(gtf(0x81, 4, 4, 0xffe4, 0, &px, false), flags); // remap mode 3
+    unsupported(gtf(0x85, 4, 4, 0x1aae4, 0, &px, false), flags); // remap order bit
+    unsupported(gtf(0x86, 4, 4, 0xa9ff, 0, &px, false), flags); // non-identity on BC1
     unsupported(gtf(0x85, 4, 4, 0xaae4, 16, &px, false), flags); // swizzled + pitch
     unsupported(
         gtf(0x85, 3, 2, 0xaae4, 0, &px, false),
@@ -172,8 +174,8 @@ fn refusals_and_bounds() {
     let mut volume = gtf(0x85, 4, 4, 0xaae4, 0, &px, false);
     volume[6] = 3;
     unsupported(volume.clone(), "cube/volume/dimension");
-    volume[17] = 4; // depth 4: a real volume (D95 reason)
-    unsupported(volume, "volume texture: slice layout UNKNOWN");
+    volume[17] = 4; // depth 4: a real volume, decoded only by the layered entry points (D98)
+    unsupported(volume, "volume texture (2D decode)");
     let mut cube = gtf(0x81, 4, 4, 0xaae4, 0, &px, false);
     cube[7] = 1;
     unsupported(cube, "cube map (2D decode)");

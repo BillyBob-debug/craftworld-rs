@@ -15,6 +15,9 @@
 //! docs/d90-texture-census.md. The probe only labels; it never decides an outcome.
 //! D95: decodes with `lbp_texture::decode_layered_checked`, so BC1/BC3 cube maps count as
 //! decoded (six top-mip faces, recorded as layout "cube"); see docs/d95-texture-rest.md.
+//! D98: swizzled uncompressed volumes decode all slices (layout "volume") and the GCM
+//! remap word of uncompressed GTF is applied; decoded rows record the remap word and
+//! `decoded_remap_words_hashes` counts them; see docs/d98-last-textures.md.
 use lbp_catalog::{
     attachment::{AttachedSource, LocationKey},
     LoadControl,
@@ -430,6 +433,8 @@ fn run() -> Result<(), String> {
     let mut decoded_with_tail = 0usize;
     let mut decoded_no_srgb = 0usize;
     let mut decoded_cube = 0usize;
+    let mut decoded_volume = 0usize;
+    let mut decoded_remaps: BTreeMap<String, usize> = BTreeMap::new();
     let mut decoded_pixel_formats: BTreeMap<String, usize> = BTreeMap::new();
     for (n, (sha, guids)) in by_hash.iter().enumerate() {
         control.check()?;
@@ -440,6 +445,7 @@ fn run() -> Result<(), String> {
         let mut archived = None;
         let mut decoded = None;
         let mut layered = None;
+        let mut remap = None;
         let outcome = match lbp_preview::resolve(&catalog, None, Some(sha)) {
             Err(e) => Outcome::from_resolve(&e),
             Ok(key) => {
@@ -466,6 +472,7 @@ fn run() -> Result<(), String> {
                                 Ok(l) => {
                                     let t = &l.texture;
                                     layered = Some((l.layout, l.faces_decoded));
+                                    remap = t.header.remap;
                                     decoded = Some((
                                         t.header.pixel_format.to_string(),
                                         t.header.width,
@@ -490,8 +497,13 @@ fn run() -> Result<(), String> {
             decoded_with_tail += usize::from(*tail > 0);
             decoded_no_srgb += usize::from(*no_srgb);
         }
-        if let Some(("cube", _)) = layered {
-            decoded_cube += 1;
+        match layered {
+            Some(("cube", _)) => decoded_cube += 1,
+            Some(("volume", _)) => decoded_volume += 1,
+            _ => {}
+        }
+        if let Some(word) = remap {
+            *decoded_remaps.entry(format!("0x{word:04x}")).or_default() += 1;
         }
         let size = archived.map_or("unresolved", size_bucket);
         let dimension = dimension_bucket(probed.width, probed.height);
@@ -507,6 +519,9 @@ fn run() -> Result<(), String> {
             if let Some((layout, faces)) = layered {
                 row["decoded"]["layout"] = json!(layout);
                 row["decoded"]["faces_decoded"] = json!(faces);
+            }
+            if let Some(word) = remap {
+                row["decoded"]["remap"] = json!(format!("0x{word:04x}"));
             }
         }
         rows.push(row);
@@ -527,7 +542,7 @@ fn run() -> Result<(), String> {
         "tool": "corpus_texture_census",
         "milestone": "D90",
         "scope": "corpus_all_texture_map_rows",
-        "scope_note": "MAP rows with magic-confirmed type texture (snapshot), one resolve and top-mip decode per content hash with lbp_texture::decode_layered_checked (D95: cube maps decode six faces, not rendered); pixels discarded",
+        "scope_note": "MAP rows with magic-confirmed type texture (snapshot), one resolve and top-mip decode per content hash with lbp_texture::decode_layered_checked (D95: cube maps decode six faces, D98: volumes decode all slices, not rendered; GCM remap applied to uncompressed GTF); pixels discarded",
         "units": ["distinct_catalog_guid", "distinct_texture_hash"],
         "definitions": {
             "decoded": "decoder returned a top-mip RGBA image (decodability, not visual verification; higher mips not decoded)",
@@ -561,11 +576,13 @@ fn run() -> Result<(), String> {
             "decoded_expanded_bytes": decoded_expanded,
             "decoded_with_unparsed_tail_hashes": decoded_with_tail,
             "decoded_no_srgb_hashes": decoded_no_srgb,
-            "decoded_cube_hashes": decoded_cube
+            "decoded_cube_hashes": decoded_cube,
+            "decoded_volume_hashes": decoded_volume
         },
         "by_outcome": outcomes,
         "by_outcome_reason": reasons,
         "decoded_pixel_formats_hashes": decoded_pixel_formats,
+        "decoded_remap_words_hashes": decoded_remaps,
         "by_format": Tally::nested(&tally.by_format),
         "by_archived_size": Tally::nested(&tally.by_size),
         "by_max_dimension": Tally::nested(&tally.by_dimension),
@@ -701,8 +718,8 @@ mod tests {
             Outcome::from_resolve("Ambiguous: conflicting linked resource candidates").key(),
             "ambiguous"
         );
-        // Real end-to-end: the existing decoder refuses an authored GTF 0x85.
-        let e = lbp_texture::decode(&gtf(0x85, 2, 0, 1)).unwrap_err();
+        // Real end-to-end: the existing decoder refuses an authored GTF 0x83 (A4R4G4B4).
+        let e = lbp_texture::decode(&gtf(0x83, 2, 0, 1)).unwrap_err();
         assert_eq!(Outcome::from_decoder(&e).key(), "unsupported");
     }
 

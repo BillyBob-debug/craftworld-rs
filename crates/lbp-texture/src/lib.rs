@@ -29,8 +29,16 @@
 //! D95: B8 pixel budget 16 Mi (same byte budgets); BC1/BC3 GTF cube maps through the
 //! separate `decode_layered*` entry points only (face order: Toolkit DDS.getDDSHeader cube
 //! caps, CONFIRMED_FROM_COMMUNITY_CODE; 128-byte face stride: CONFIRMED_FROM_LOCAL_DATA,
-//! conflicts with Toolkit's unpadded pass-through). Volumes and remap 0x02ff stay refused.
-//! Rules and evidence: docs/d95-texture-rest.md.
+//! conflicts with Toolkit's unpadded pass-through). Rules and evidence: docs/d95-texture-rest.md.
+//! D98: the GCM remap word of uncompressed GTF is applied (bits 0..7 four 2-bit source
+//! selects A,R,G,B = 0..3 for outputs A,R,G,B; bits 8..15 four 2-bit output modes
+//! 0 zero, 1 one, 2 remap). CONFIRMED_FROM_COMMUNITY_CODE: PSL1GHT gcm_sys.h (MIT, shifts
+//! and mode values), Toolkit CellGcm REMAP_FROM_* (MIT), RPCS3 gcm_enums.h (GPL-2.0, read
+//! only). B8 texels read as A = one, R = G = B = byte before the remap (RPCS3 VKFormats
+//! B8 component mapping). Swizzled A8R8G8B8/B8 volume textures decode through the
+//! layered entry points: texel (x, y, z) sits at the bit interleave x, y, z (axes drop out
+//! once exhausted), CONFIRMED_FROM_COMMUNITY_CODE (RPCS3 image_utils.hpp
+//! calculate_z_index, read only, not translated). Rules: docs/d98-last-textures.md.
 use serde::Serialize;
 use std::fmt;
 pub const MAX_INPUT: usize = 16 * 1024 * 1024;
@@ -131,12 +139,14 @@ pub struct DdsHeader {
 }
 /// D95 layered result: `texture` is the 2D top mip (face 0, +X, for a cube map) and
 /// `extra_faces` holds the top mips of faces 1..6 (-X, +Y, -Y, +Z, -Z) as RGBA, same size.
-/// The preview renders only `texture`; the extra faces are decoded data, not rendered.
+/// D98: for a volume, `texture` is slice z = 0 and `extra_faces` holds slices 1..depth.
+/// The preview renders only `texture`; the extra layers are decoded data, not rendered.
 #[derive(Debug, Serialize)]
 pub struct LayeredTexture {
     pub texture: Texture,
-    /// "2d" or "cube".
+    /// "2d", "cube" or "volume".
     pub layout: &'static str,
+    /// Faces (cube) or slices (volume) decoded; 1 for 2D.
     pub faces_decoded: u32,
     /// Byte distance between consecutive faces in the expanded payload (cube only).
     pub face_stride: Option<usize>,
@@ -170,11 +180,47 @@ fn checked(cancel: &impl Fn() -> bool) -> Result<(), Error> {
 pub fn inspect(b: &[u8]) -> Result<Header, Error> {
     inspect_gtf(b, false).map(|(h, _)| h)
 }
-/// D95: like `inspect`, but also accepts BC1/BC3 cube maps; the flag reports a cube.
+/// D95: like `inspect`, but also accepts BC1/BC3 cube maps and (D98) swizzled
+/// uncompressed volumes; the flag reports a layered (cube or volume) texture.
 pub fn inspect_layered(b: &[u8]) -> Result<(Header, bool), Error> {
-    inspect_gtf(b, true)
+    inspect_gtf(b, true).map(|(h, shape)| (h, shape != Shape::Flat))
 }
-fn inspect_gtf(b: &[u8], allow_cube: bool) -> Result<(Header, bool), Error> {
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Shape {
+    Flat,
+    Cube,
+    /// Depth (slices) of the top mip, > 1.
+    Volume(usize),
+}
+/// One output channel after the GCM remap.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Remapped {
+    Zero,
+    One,
+    /// Source channel index in A, R, G, B order.
+    From(usize),
+}
+/// D98: output channels in R, G, B, A order for a GCM remap word. Bits 0..7 hold the
+/// 2-bit source select of outputs A, R, G, B (two bits each, A lowest), bits 8..15 the
+/// 2-bit mode of the same outputs (0 zero, 1 one, 2 remap). Mode 3 and bits above 15
+/// (remap order, two-channel formats only) have no documented meaning here: refused.
+fn remap_channels(remap: u32) -> Result<[Remapped; 4], Error> {
+    if remap >> 16 != 0 {
+        return Err(Error::Unsupported("remap/pitch/offset/location/flags"));
+    }
+    let slot = |output: u32| -> Result<Remapped, Error> {
+        let select = ((remap >> (2 * output)) & 3) as usize;
+        match (remap >> (8 + 2 * output)) & 3 {
+            0 => Ok(Remapped::Zero),
+            1 => Ok(Remapped::One),
+            2 => Ok(Remapped::From(select)),
+            _ => Err(Error::Unsupported("remap/pitch/offset/location/flags")),
+        }
+    };
+    // Output slots: A = 0, R = 1, G = 2, B = 3; result in R, G, B, A order.
+    Ok([slot(1)?, slot(2)?, slot(3)?, slot(0)?])
+}
+fn inspect_gtf(b: &[u8], allow_layered: bool) -> Result<(Header, Shape), Error> {
     if b.len() < 4 {
         return Err(Error::Invalid("truncated magic"));
     }
@@ -199,22 +245,40 @@ fn inspect_gtf(b: &[u8], allow_cube: bool) -> Result<(Header, bool), Error> {
     };
     // Toolkit CellGcmTexture: dimension > 2 is a volume, cubemap byte 1 is a cube map.
     let (dimension, cube_byte, depth) = (b[6], b[7], be16(b, 16));
-    if dimension == 3 && cube_byte == 0 && depth > 1 {
-        return Err(Error::Unsupported("volume texture: slice layout UNKNOWN"));
-    }
-    if dimension != 2 || cube_byte > 1 || depth != 1 {
+    let shape = if dimension == 3 && cube_byte == 0 && depth > 1 {
+        if !allow_layered {
+            return Err(Error::Unsupported("volume texture (2D decode)"));
+        }
+        // D98: only the swizzled uncompressed layout has a source (3D bit interleave).
+        if pixel_format.is_block() || linear {
+            return Err(Error::Unsupported("compressed or linear volume texture"));
+        }
+        if !depth.is_power_of_two() {
+            return Err(Error::Unsupported("non-power-of-two swizzled GTF"));
+        }
+        Shape::Volume(depth)
+    } else if dimension != 2 || cube_byte > 1 || depth != 1 {
         return Err(Error::Unsupported("cube/volume/dimension"));
-    }
-    let cube = cube_byte == 1;
-    if cube && !allow_cube {
-        return Err(Error::Unsupported("cube map (2D decode)"));
-    }
-    if cube && !pixel_format.is_block() {
-        return Err(Error::Unsupported("uncompressed cube map"));
-    }
-    // 0xa9ff (Toolkit REMAP_BBBB) is the B8 gray remap; other remaps are refused.
+    } else if cube_byte == 1 {
+        if !allow_layered {
+            return Err(Error::Unsupported("cube map (2D decode)"));
+        }
+        if !pixel_format.is_block() {
+            return Err(Error::Unsupported("uncompressed cube map"));
+        }
+        Shape::Cube
+    } else {
+        Shape::Flat
+    };
+    let cube = shape == Shape::Cube;
+    // BC keeps the identity remap 0xaae4 only; uncompressed formats apply any remap word
+    // with documented fields (D98; 0xaae4 identity, 0xa9ff B8 gray, 0x02ff B8 alpha mask).
     let remap = be32(b, 8);
-    let remap_ok = remap == 0xaae4 || (pixel_format == PixelFormat::B8 && remap == 0xa9ff);
+    let remap_ok = if pixel_format.is_block() {
+        remap == 0xaae4
+    } else {
+        remap_channels(remap).is_ok()
+    };
     if !remap_ok || be32(b, 24) != 0 || b[18] != 0 || b[19] & !1 != 0 {
         return Err(Error::Unsupported("remap/pitch/offset/location/flags"));
     }
@@ -227,9 +291,17 @@ fn inspect_gtf(b: &[u8], allow_cube: bool) -> Result<(Header, bool), Error> {
     } else {
         MAX_PIXELS
     };
+    let layers = match shape {
+        Shape::Volume(depth) => depth,
+        _ => 1,
+    };
     if width > 4096
         || height > 4096
-        || width.checked_mul(height).ok_or(Error::Budget)? > max_pixels
+        || width
+            .checked_mul(height)
+            .and_then(|n| n.checked_mul(layers))
+            .ok_or(Error::Budget)?
+            > max_pixels
         || b[5] > 13
     {
         return Err(Error::Budget);
@@ -262,7 +334,7 @@ fn inspect_gtf(b: &[u8], allow_cube: bool) -> Result<(Header, bool), Error> {
         no_srgb: b[19] & 1 != 0,
         dds: None,
     };
-    Ok((header, cube))
+    Ok((header, shape))
 }
 fn envelope(b: &[u8], allow_cube: bool) -> Result<usize, Error> {
     if b.len() < 4 {
@@ -471,6 +543,29 @@ fn swizzle_index(x: usize, y: usize, w: usize, h: usize) -> usize {
     let high = if w > h { x >> d } else { y >> d };
     m | (high << (2 * d))
 }
+/// D98: texel index of (x, y, z) in a swizzled power-of-two volume. Bits of x, y and z are
+/// taken in turn from bit 0 upwards (x first); an axis whose bits are exhausted drops out
+/// of the rotation. With depth 1 this equals `swizzle_index`. Callers guarantee x < w,
+/// y < h, z < d, all powers of two.
+fn swizzle_index_3d(x: usize, y: usize, z: usize, w: usize, h: usize, d: usize) -> usize {
+    let mut bits = [
+        (x, w.trailing_zeros()),
+        (y, h.trailing_zeros()),
+        (z, d.trailing_zeros()),
+    ];
+    let (mut m, mut shift) = (0, 0);
+    while bits.iter().any(|(_, left)| *left > 0) {
+        for (value, left) in bits.iter_mut() {
+            if *left > 0 {
+                m |= (*value & 1) << shift;
+                shift += 1;
+                *value >>= 1;
+                *left -= 1;
+            }
+        }
+    }
+    m
+}
 fn rgb565(c: u16) -> [u8; 4] {
     let (r, g, b) = ((c >> 11) as u8, ((c >> 5) & 63) as u8, (c & 31) as u8);
     // CPU oracle convention: nearest normalized 8-bit endpoints, floor interpolation.
@@ -650,11 +745,17 @@ fn decode_impl(
     }
     let start = envelope(b, allow_cube)?;
     let data = expand(b, start, cancel)?;
-    let (mut header, offset, cube): (Header, usize, bool) = if start == 4 {
-        (inspect_dds(&data)?, 128, false)
+    let (mut header, offset, shape): (Header, usize, Shape) = if start == 4 {
+        (inspect_dds(&data)?, 128, Shape::Flat)
     } else {
-        let (header, cube) = inspect_gtf(b, allow_cube)?;
-        (header, 0, cube)
+        let (header, shape) = inspect_gtf(b, allow_cube)?;
+        (header, 0, shape)
+    };
+    let cube = shape == Shape::Cube;
+    // D98: slices of a volume's top mip (1 otherwise); bounded by the pixel budget.
+    let depth = match shape {
+        Shape::Volume(depth) => depth,
+        _ => 1,
     };
     let (w, h) = (header.width as usize, header.height as usize);
     let (bx, by) = (w.div_ceil(4), h.div_ceil(4));
@@ -669,8 +770,9 @@ fn decode_impl(
     } else {
         None
     };
+    // A volume's top mip is one swizzled block of all its slices (no per-slice pitch).
     let size = if let Some(layout) = gtf_plain {
-        Some(layout.size)
+        layout.size.checked_mul(depth)
     } else if let Some(pitch) = pitch {
         pitch.checked_mul(h)
     } else {
@@ -692,7 +794,7 @@ fn decode_impl(
         .checked_mul(h)
         .and_then(|n| n.checked_mul(4))
         .ok_or(Error::Budget)?;
-    let faces = if cube { CUBE_FACES } else { 1 };
+    let faces = if cube { CUBE_FACES } else { depth };
     if rgba_size.checked_mul(faces).ok_or(Error::Budget)? > MAX_RGBA {
         return Err(Error::Budget);
     }
@@ -718,26 +820,41 @@ fn decode_impl(
         }
         decode_blocks(&data, 0, &header, cancel)?
     } else if let Some(layout) = gtf_plain {
-        let mut rgba = vec![0; rgba_size];
+        // Checked by inspect_gtf for every uncompressed GTF.
+        let channels = remap_channels(header.remap.unwrap_or(0xaae4))?;
         let bpp = header.pixel_format.bytes();
         let top = &data[offset..end];
-        for y in 0..h {
-            checked(cancel)?;
-            for x in 0..w {
-                let p = match layout.pitch {
-                    Some(pitch) => y * pitch + x * bpp,
-                    None => swizzle_index(x, y, w, h) * bpp,
-                };
-                let t = &top[p..p + bpp];
-                let color = if bpp == 1 {
-                    [t[0], t[0], t[0], 255]
-                } else {
-                    [t[1], t[2], t[3], t[0]]
-                };
-                rgba[(y * w + x) * 4..(y * w + x + 1) * 4].copy_from_slice(&color);
+        let mut slices = Vec::with_capacity(depth);
+        for z in 0..depth {
+            let mut rgba = vec![0; rgba_size];
+            for y in 0..h {
+                checked(cancel)?;
+                for x in 0..w {
+                    let p = match layout.pitch {
+                        Some(pitch) => y * pitch + x * bpp,
+                        None if depth > 1 => swizzle_index_3d(x, y, z, w, h, depth) * bpp,
+                        None => swizzle_index(x, y, w, h) * bpp,
+                    };
+                    let t = &top[p..p + bpp];
+                    // Source channels in A, R, G, B order; B8 reads as A one, RGB the byte.
+                    let source = if bpp == 1 {
+                        [255, t[0], t[0], t[0]]
+                    } else {
+                        [t[0], t[1], t[2], t[3]]
+                    };
+                    let color = channels.map(|c| match c {
+                        Remapped::Zero => 0,
+                        Remapped::One => 255,
+                        Remapped::From(i) => source[i],
+                    });
+                    rgba[(y * w + x) * 4..(y * w + x + 1) * 4].copy_from_slice(&color);
+                }
             }
+            slices.push(rgba);
         }
-        rgba
+        let first = slices.remove(0);
+        extra_faces = slices;
+        first
     } else if let Some(pitch) = pitch {
         let mut rgba = vec![0; rgba_size];
         for y in 0..h {
@@ -763,9 +880,30 @@ fn decode_impl(
     };
     Ok(LayeredTexture {
         texture,
-        layout: if cube { "cube" } else { "2d" },
+        layout: match shape {
+            Shape::Cube => "cube",
+            Shape::Volume(_) => "volume",
+            Shape::Flat => "2d",
+        },
         faces_decoded: faces as u32,
         face_stride,
         extra_faces,
     })
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn swizzle_3d_with_depth_one_is_the_2d_order() {
+        for (w, h) in [(1, 1), (8, 8), (16, 4), (2, 32)] {
+            for y in 0..h {
+                for x in 0..w {
+                    assert_eq!(
+                        swizzle_index_3d(x, y, 0, w, h, 1),
+                        swizzle_index(x, y, w, h)
+                    );
+                }
+            }
+        }
+    }
 }
