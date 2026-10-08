@@ -67,6 +67,13 @@ Cloud (Linux): `cargo fmt --all --check` ok; `cargo clippy -q -p lbp-level
 3. Any `stopped` row: record the stop label and head; do not patch around it without the
    Toolkit field that explains it.
 
+## Follow-up after D123 (2026-10-08)
+The PC census read 15 of 16 files complete. The 16th, `gamedata/scratch/testrnp.slt`
+(GUID 000056dc), is a slot list in Toolkit's text serialization (`SLT` type, marker
+not `b`): a developer scratch file. `read` now reports it as `Unsupported("text
+serialization (not binary)")` and the census counts it as `excluded_text_form`, not as a
+failure. Text-form resources stay out of scope.
+
 ## Expected effect / not tested
 - Viewable/Complete: +0 (data only, no assets). New count for the UI track: slot lists,
   pins, palettes and packs read complete, unit distinct content hash, scope 01.33 overlay.

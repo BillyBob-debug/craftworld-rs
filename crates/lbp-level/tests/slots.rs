@@ -248,3 +248,22 @@ fn u4_untrusted_input_stops_explicitly() {
     assert_eq!(r.checks.unknown_contents_types, 1);
     assert_eq!(r.checks.trailing_bytes, 1);
 }
+
+#[test]
+fn u4_text_form_is_an_explicit_exclusion() {
+    use lbp_resource::binary::Error;
+    let lim = Limits::default();
+    let text = lbp_level::slots::read(b"SLTt\0\0\0\0", lim, &none);
+    assert_eq!(
+        text.unwrap_err(),
+        Error::Unsupported(lbp_level::slots::NON_BINARY_TEXT)
+    );
+    assert!(matches!(
+        lbp_level::slots::read(b"SLTx", lim, &none),
+        Err(Error::Unsupported(_))
+    ));
+    assert!(matches!(
+        lbp_level::slots::read(b"MSHb", lim, &none),
+        Err(Error::Unsupported("not a U4 resource type"))
+    ));
+}

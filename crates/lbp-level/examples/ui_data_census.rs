@@ -3,7 +3,7 @@
 //! content hash. Output: a NEW JSON file under ignored `local-analysis/`; nothing else is
 //! written. Usage: ui_data_census SNAPSHOT GAME-DIR NEW-JSON
 //! Counting unit: distinct content hash. Statuses: complete, complete_with_trailing_bytes,
-//! stopped, wrapper_error, unresolved, read_failed (docs/u4-slot-pin-palette.md).
+//! stopped, excluded_text_form, wrapper_error, unresolved, read_failed (docs/u4-slot-pin-palette.md).
 use lbp_catalog::{
     attachment::{AttachedSource, LocationKey},
     LoadControl,
@@ -131,7 +131,17 @@ fn run() -> Result<(), String> {
         let report = match slots::read(&bytes, Limits::default(), &|| control.check().is_err()) {
             Ok(r) => r,
             Err(e) => {
-                status(&mut row, "wrapper_error");
+                // A text-serialized file (e.g. a developer scratch file) is excluded, not
+                // counted as a reader failure.
+                let text = e == lbp_resource::binary::Error::Unsupported(slots::NON_BINARY_TEXT);
+                status(
+                    &mut row,
+                    if text {
+                        "excluded_text_form"
+                    } else {
+                        "wrapper_error"
+                    },
+                );
                 row["reason"] = json!(e.to_string());
                 rows.push(row);
                 continue;
