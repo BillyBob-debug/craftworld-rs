@@ -65,9 +65,8 @@ Unit: RENDER_MESH Things (tag-table entries). Baseline D113.
 | draw entities | 39 | 948 (was 684) |
 | shear dropped | 0 | 0 |
 
-POS items: placement code path unchanged (`pos.world` copied); the synthetic test asserts
-POS items keep their exact matrices; tutorial_23 bounds unchanged by construction (no
-joints). Asset counts: +0 newly viewable, +0 newly Complete (no per-asset route changed);
+POS items under `--level-placement pos-only`: `pos.world` copied as in D113 (unit tests
+assert exact matrices). The table counts are identical in both placement modes. Asset counts: +0 newly viewable, +0 newly Complete (no per-asset route changed);
 0 levels Complete.
 
 ## Oracle comparison
@@ -81,15 +80,35 @@ coordinates up to ~3e4, f64 rounding). Toolkit computes no world matrix for JOIN
 so the D120 matrices themselves have no oracle; 126 of the 129 are placed (3 joints have
 no RENDER_MESH).
 
-## Finding for a follow-up (not changed here)
+## POS placement: POS x inverse bind of bone 0 (default since the D120 follow-up)
 
-Toolkit places a RENDER_MESH as POS x invSkinPose(bone 0); D113 uses POS alone. Bone-0
-skin poses are not identity for 243 of 333 POS-placed Things in main_01 and 14 of 14 in
-tutorial_23 (e.g. scale 5.55 with a 90-degree X rotation for the spawn point, 0.0287 for
-the pencil), so D113 POS placement probably shows those props rotated/scaled wrongly.
-D120 joint placement already uses the bone x inverse-bind convention; switching POS
-placement to it (and to `boneThings` / animHash for multi-bone Things) should be checked
-against a capture and StaticMeshBuilder as an oracle.
+Rule (CONFIRMED_FROM_COMMUNITY_CODE, Toolkit d6a2ef80
+`lib/cwlib/src/main/java/cwlib/io/imports/StaticMeshBuilder.java`: matrices[0] = POS
+world x bones[0].invSkinPoseMatrix; `lib/cwlib-gl/src/main/java/cwlib/gl/exporter/SceneExporter.java`
+registerThing: bone node = POS x invSkinPoseMatrix): a POS-placed RENDER_MESH Thing is
+drawn at POS world x the stored inverse skin pose of mesh bone 0
+(`PosPlacement::InverseBind`, `lbp_preview::level_scene::mul44`). Meshes without bones
+keep POS. Multi-bone Things still use bone 0 only (boneThings / animHash per bone not
+applied). Visual correctness UNVERIFIED (no capture).
+
+`--level-placement pos-only` (viewer) / `PosPlacement::PosOnly` (LevelScene) restores the
+D113 placement exactly (`pos.world`), for side-by-side captures; `inverse-bind` is the
+default. Panel / QA log / `--level-report` print the rule, the number of Things whose
+matrix changed versus POS only, and the five meshes that moved most (translation shift,
+scale factor, rotation).
+
+| | tutorial_23 | main_01_rookie_test |
+|---|---:|---:|
+| POS Things changed vs D113 / unchanged / no bones | 14 / 0 / 0 | 245 / 88 / 0 |
+| scene Z bounds, pos-only | -2037 .. 1103 | -1248 .. 726 |
+| scene Z bounds, inverse-bind | -527 .. -110 | -628 .. 228 |
+
+Largest changes: tutorial_tv 0001a6a1 (shift 591, scale x2.33, 180 deg), 0000441c
+(main_01, shift 672, x2.33, 180 deg), toilet roll 00014abf (shift 262-287, no rotation),
+padlock 00000eb1 (x7.0, 90 deg), pencil 00003199 (x34.9: D113 drew it 35 times too
+small), pressure switch 00005585 (90 deg). The scene depth extent shrinking to the layer
+range is consistent with props no longer being turned 90 degrees out of the layer plane;
+a plausibility signal, not a visual check.
 
 ## Commands
 
@@ -102,6 +121,7 @@ cargo build -q -p lbp-bevy-viewer -p lbp-viewer                               # 
 python -m unittest discover -s tests                                          # OK (skipped=1)
 target/debug/lbp-bevy-viewer.exe --snapshot local-analysis/d68-inventory-0133-verified.json --game-dir "game-data/a1-disc;game-data/a1-update-0133" --level-path lbp2/th_tutorials/levels/tutorial_23.bin --level-report
 target/debug/lbp-bevy-viewer.exe --snapshot local-analysis/d68-inventory-0133-verified.json --game-dir "game-data/a1-disc;game-data/a1-update-0133" --level-path main_01_rookie_test/main_01_rookie_test.bin --level-report
+# each also with --level-placement pos-only (D113 placement; JOINT counts unchanged)
 cargo build -q --release -p lbp-preview --example level_bone_probe
 target/release/examples/level_bone_probe <snapshot> <game dirs> --all                        # corpus summary above
 target/release/examples/level_bone_probe <snapshot> <game dirs> <level path> local-analysis/<new>.json   # joint rows
@@ -117,7 +137,8 @@ parsed_exact. Comparison script: scratch Python over that file and the five prob
 ## Not tested
 
 No window, capture or visual check: orientation (which side faces the camera), bolt
-size, string/piston appearance and the POS follow-up are unverified. Levels other than
+size, string/piston appearance and the inverse-bind POS placement are unverified
+(Integrator: capture with and without `--level-placement pos-only`). Levels other than
 the five scene levels were not run through `--level-report` (corpus numbers are reader
 level, not scene runs). Skin streams are not decoded, so true per-bone skinning was not
 attempted. The D107 `level_parity` and census examples were not rerun (reader byte

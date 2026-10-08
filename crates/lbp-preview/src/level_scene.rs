@@ -7,7 +7,10 @@
 //! counted by reason. Placement is the Thing's own POS world matrix (static bind pose):
 //! bones, animation, decorations, stickers and material overrides are not applied.
 //!
-//! D120: RENDER_MESH Things without POS that carry a JOINT (bolts, strings, pistons...)
+//! D120: POS Things are placed at POS world x inverse bind pose of mesh bone 0 by default
+//! (`PosPlacement::InverseBind`, Toolkit StaticMeshBuilder/SceneExporter rule);
+//! `PosPlacement::PosOnly` keeps the D113 placement (POS alone) for comparison.
+//! RENDER_MESH Things without POS that carry a JOINT (bolts, strings, pistons...)
 //! are placed from the joint's two endpoint Things (`joint_world`, preview
 //! approximation, see docs/d120-bone-props.md). Every other Thing without POS stays
 //! skipped with its reason.
@@ -118,6 +121,16 @@ pub struct SceneCounts {
     pub skipped: BTreeMap<String, usize>,
     /// Drawn Things whose POS names another Thing as bone owner (placed by own POS).
     pub drawn_bone_attached: usize,
+    /// D120: POS placement rule used for this scene.
+    pub pos_placement: PosPlacement,
+    /// D120: drawn POS Things whose matrix differs from POS alone (D113), and those
+    /// unchanged (inverse bind = identity) or kept at POS because the mesh has no bones.
+    pub pos_bind_changed: usize,
+    pub pos_bind_unchanged: usize,
+    pub pos_bind_no_bones: usize,
+    /// D120: per mesh source label: (changed Things, max translation shift in level
+    /// units, max |log2 scale ratio|, max rotation in degrees) versus POS alone.
+    pub pos_bind_by_mesh: BTreeMap<String, (usize, f64, f64, f64)>,
     /// D120: drawn JOINT Things without POS, placed at contact A (angular joint types).
     pub drawn_joint_pivot: usize,
     /// D120: drawn JOINT Things without POS, fitted between contacts A and B (linear).
@@ -170,6 +183,26 @@ impl SceneCounts {
             "Drawn bone-attached at own POS (approximation): {} Things",
             self.drawn_bone_attached
         ));
+        out.push(match self.pos_placement {
+            PosPlacement::InverseBind => {
+                "POS placement: POS x inverse bind pose of mesh bone 0 (D120 default, Toolkit StaticMeshBuilder rule)".into()
+            }
+            PosPlacement::PosOnly => "POS placement: POS only (D113, --level-placement pos-only)".into(),
+        });
+        if self.pos_placement == PosPlacement::InverseBind {
+            out.push(format!(
+                "Changed vs D113 POS-only: {} Things ({} unchanged, {} meshes without bones kept at POS)",
+                self.pos_bind_changed, self.pos_bind_unchanged, self.pos_bind_no_bones
+            ));
+            let mut most: Vec<_> = self.pos_bind_by_mesh.iter().collect();
+            most.sort_by(|a, b| b.1 .1.total_cmp(&a.1 .1).then(a.0.cmp(b.0)));
+            for (mesh, (n, shift, scale, rot)) in most.into_iter().take(5) {
+                out.push(format!(
+                    "  most moved: mesh {mesh} ({n} Things): shift {shift:.1} units, scale x{:.3}, rotation {rot:.1} deg",
+                    scale.exp2()
+                ));
+            }
+        }
         out.push(format!(
             "Placed from JOINT endpoints (D120 preview approximation): {} Things ({} pivot at contact A, {} span fitted A to B; no skinning, angle/renderScale not applied)",
             self.drawn_joint_pivot + self.drawn_joint_span,
@@ -292,6 +325,85 @@ pub fn world_matrix_check(m: &[f32; 16]) -> Result<(), String> {
         return Err("non-invertible world matrix".into());
     }
     Ok(())
+}
+
+/// D120 placement of POS Things.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum PosPlacement {
+    /// POS world x inverse bind (skin) pose of mesh bone 0 (CONFIRMED_FROM_COMMUNITY_CODE:
+    /// Toolkit d6a2ef80 `cwlib/io/imports/StaticMeshBuilder.java` matrices[0] = wpos x
+    /// bones[0].invSkinPoseMatrix; `cwlib-gl/.../SceneExporter.java` registerThing uses
+    /// POS x invSkinPoseMatrix for bone 0). Meshes without bones keep POS.
+    #[default]
+    InverseBind,
+    /// D113: POS world alone.
+    PosOnly,
+}
+
+impl PosPlacement {
+    pub fn parse(v: &str) -> Result<Self, String> {
+        match v {
+            "inverse-bind" => Ok(Self::InverseBind),
+            "pos-only" => Ok(Self::PosOnly),
+            _ => Err("--level-placement takes inverse-bind or pos-only".into()),
+        }
+    }
+}
+
+/// Bone bind pose and its stored inverse (column-major, as read by lbp-mesh).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct BindPose {
+    pub skin: [f32; 16],
+    pub inv: [f32; 16],
+}
+
+/// Column-major 4x4 product a x b, accumulated in f64.
+pub fn mul44(a: &[f32; 16], b: &[f32; 16]) -> [f32; 16] {
+    std::array::from_fn(|i| {
+        let (c, r) = (i / 4, i % 4);
+        (0..4)
+            .map(|k| f64::from(a[4 * k + r]) * f64::from(b[4 * c + k]))
+            .sum::<f64>() as f32
+    })
+}
+
+/// Change of `new` versus `old`: translation shift, |log2| of the volume scale ratio
+/// (cube root of the determinant ratio), and rotation angle between the column-normalized
+/// linear parts (degrees).
+fn placement_change(old: &[f32; 16], new: &[f32; 16]) -> (f64, f64, f64) {
+    let lin = |m: &[f32; 16]| -> M3 {
+        std::array::from_fn(|c| std::array::from_fn(|r| f64::from(m[4 * c + r])))
+    };
+    let det = |m: &M3| dot(m[0], cross(m[1], m[2]));
+    let (a, b) = (lin(old), lin(new));
+    let shift = dot(
+        sub(
+            [new[12], new[13], new[14]].map(f64::from),
+            [old[12], old[13], old[14]].map(f64::from),
+        ),
+        sub(
+            [new[12], new[13], new[14]].map(f64::from),
+            [old[12], old[13], old[14]].map(f64::from),
+        ),
+    )
+    .sqrt();
+    let ratio = (det(&b) / det(&a)).abs().cbrt();
+    let scale = if ratio.is_finite() && ratio > 0. {
+        ratio.log2()
+    } else {
+        f64::NAN
+    };
+    let norm = |m: &M3| -> Option<M3> { Some([unit(m[0])?, unit(m[1])?, unit(m[2])?]) };
+    let rot = match (norm(&a), norm(&b)) {
+        (Some(na), Some(nb)) => {
+            let rel = mul_mm(&nb, &transpose(&na));
+            (((rel[0][0] + rel[1][1] + rel[2][2] - 1.) / 2.).clamp(-1., 1.))
+                .acos()
+                .to_degrees()
+        }
+        _ => f64::NAN,
+    };
+    (shift, scale, rot)
 }
 
 /// How a drawn RENDER_MESH Thing is placed.
@@ -469,18 +581,20 @@ pub fn joint_world(
 
 /// Builds the scene from reader Things. `load` is called once per distinct mesh
 /// reference; failures are cached and count every Thing that names that mesh.
-/// `bind_poses` returns a loaded mesh's bone skin-pose matrices (D120 joint placement).
+/// `bind_poses` returns a loaded mesh's bone bind poses (D120 placement).
 pub fn build_scene<T>(
     things: &[ThingRecord],
     mut load: impl FnMut(&MeshSource) -> Result<T, String>,
     local_bounds: impl Fn(&T) -> Option<[[f32; 3]; 2]>,
     neutral_groups: impl Fn(&T) -> bool,
-    bind_poses: impl Fn(&T) -> Vec<[f32; 16]>,
+    bind_poses: impl Fn(&T) -> Vec<BindPose>,
+    placement: PosPlacement,
 ) -> LevelScene<T> {
     let mut scene = LevelScene::<T>::default();
     let mut by_source: HashMap<MeshSource, Result<usize, String>> = HashMap::new();
     let c = &mut scene.counts;
     c.things_total = things.len();
+    c.pos_placement = placement;
     let skip = |c: &mut SceneCounts, reason: String| *c.skipped.entry(reason).or_default() += 1;
     for t in things {
         let c = &mut scene.counts;
@@ -559,12 +673,47 @@ pub fn build_scene<T>(
         }
         let world = match (pos, &t.data.joint) {
             (Some(pos), _) => {
+                let world = match placement {
+                    PosPlacement::PosOnly => pos.world,
+                    PosPlacement::InverseBind => {
+                        let m = &scene.meshes[mesh];
+                        match bind_poses(&m.payload).first() {
+                            None => {
+                                c.pos_bind_no_bones += 1;
+                                pos.world
+                            }
+                            Some(b0) => {
+                                let w = mul44(&pos.world, &b0.inv);
+                                if let Err(e) = world_matrix_check(&w) {
+                                    skip(c, format!("POS x inverse bind: {e}"));
+                                    continue;
+                                }
+                                if w == pos.world {
+                                    c.pos_bind_unchanged += 1;
+                                } else {
+                                    c.pos_bind_changed += 1;
+                                    let (shift, scale, rot) = placement_change(&pos.world, &w);
+                                    let e = c
+                                        .pos_bind_by_mesh
+                                        .entry(m.source.label())
+                                        .or_insert((0, 0., 0., 0.));
+                                    e.0 += 1;
+                                    e.1 = e.1.max(shift);
+                                    e.2 = e.2.max(scale.abs());
+                                    e.3 = e.3.max(rot);
+                                }
+                                w
+                            }
+                        }
+                    }
+                };
                 c.drawn_bone_attached += usize::from(pos.bone_of.is_some_and(|b| b != t.index));
-                pos.world
+                world
             }
             (None, Some(joint)) => {
                 let m = &scene.meshes[mesh];
-                match joint_world(things, joint, &bind_poses(&m.payload), m.bounds) {
+                let skins: Vec<[f32; 16]> = bind_poses(&m.payload).iter().map(|b| b.skin).collect();
+                match joint_world(things, joint, &skins, m.bounds) {
                     Ok((world, kind)) => {
                         match kind {
                             JointPlacement::Pivot => c.drawn_joint_pivot += 1,
@@ -828,13 +977,33 @@ fn retained(g: &GroupedMesh) -> usize {
     total
 }
 
-/// Reads the level and loads every referenced mesh. Run on a `LEVEL_STACK_BYTES` stack.
+/// Reads the level and loads every referenced mesh (default D120 POS placement). Run on
+/// a `LEVEL_STACK_BYTES` stack.
 pub fn load_level_scene(
     source: &AttachedSource,
     catalog: &Catalog,
     level: &LocationKey,
     control: &LoadControl,
     options: PreviewOptions,
+) -> Result<LevelScene<ScenePayload>, String> {
+    load_level_scene_with(
+        source,
+        catalog,
+        level,
+        control,
+        options,
+        PosPlacement::default(),
+    )
+}
+
+/// `load_level_scene` with an explicit POS placement rule.
+pub fn load_level_scene_with(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    level: &LocationKey,
+    control: &LoadControl,
+    options: PreviewOptions,
+    placement: PosPlacement,
 ) -> Result<LevelScene<ScenePayload>, String> {
     let bytes = read_level_bytes(source, level, control)?;
     // Default depth bound (256) fits the 512 MiB stack; deepest local level is 162.
@@ -880,10 +1049,14 @@ pub fn load_level_scene(
                 .skeleton
                 .bones
                 .iter()
-                .map(|b| b.skin_pose)
+                .map(|b| BindPose {
+                    skin: b.skin_pose,
+                    inv: b.inv_skin_pose,
+                })
                 .collect(),
             ScenePayload::Shapes { .. } => Vec::new(),
         },
+        placement,
     );
     control.check()?;
     add_shapes(
@@ -1004,6 +1177,7 @@ mod tests {
             |_| Some([[-1., -1., -1.], [1., 1., 1.]]),
             |&g| g == 0x20,
             |_| Vec::new(),
+            PosPlacement::PosOnly,
         );
         assert_eq!(
             calls,
@@ -1071,6 +1245,92 @@ mod tests {
         (0..3).all(|i| (a[i] - b[i]).abs() < 1e-3)
     }
 
+    fn skins_only(skins: &[[f32; 16]]) -> Vec<BindPose> {
+        skins
+            .iter()
+            .map(|&skin| BindPose { skin, inv: skin })
+            .collect()
+    }
+
+    #[test]
+    fn pos_things_use_inverse_bind_of_bone_zero_by_default() {
+        // Bone 0 bind: scale 2, local Y -> model +Z, local Z -> model -Y, at (0, 0, 10).
+        let skin = joint_bone(2., [0., 0., 10.]);
+        // Stored inverse: model -> bone local.
+        let inv = [
+            0.5, 0., 0., 0., 0., 0., -0.5, 0., 0., 0.5, 0., 0., 0., -5., 0., 1.,
+        ];
+        assert_eq!(mul44(&skin, &inv), identity_at(0.));
+        let mut pos = identity_at(100.);
+        pos[0] = 2.;
+        pos[5] = 2.;
+        pos[10] = 2.;
+        let things = vec![
+            thing(0, Some(0x10), Some(pos)),             // bones: changes
+            thing(1, Some(0x20), Some(identity_at(7.))), // identity bind: unchanged
+            thing(2, Some(0x30), Some(identity_at(9.))), // no bones: keeps POS
+        ];
+        let build = |placement| {
+            build_scene(
+                &things,
+                |s| match s {
+                    MeshSource::Guid(g) => Ok(*g),
+                    _ => unreachable!(),
+                },
+                |_| Some([[-1.; 3], [1.; 3]]),
+                |_| false,
+                |&g| match g {
+                    0x10 => vec![BindPose { skin, inv }],
+                    0x20 => vec![BindPose {
+                        skin: identity_at(0.),
+                        inv: identity_at(0.),
+                    }],
+                    _ => Vec::new(),
+                },
+                placement,
+            )
+        };
+        // Old D113 path: POS alone.
+        let old = build(PosPlacement::PosOnly);
+        assert_eq!(
+            old.items.iter().map(|i| i.world).collect::<Vec<_>>(),
+            vec![pos, identity_at(7.), identity_at(9.)]
+        );
+        assert_eq!(old.counts.pos_bind_changed, 0);
+        assert!(old
+            .counts
+            .lines()
+            .iter()
+            .any(|l| l.starts_with("POS placement: POS only (D113")));
+        // New rule: POS x inverse bind of bone 0.
+        let new = build(PosPlacement::default());
+        let w = new.items[0].world;
+        assert_eq!(w, mul44(&pos, &inv));
+        // Model point at the bone's bind position lands on POS translation; model -Y
+        // (local +Z) maps to world +Z with the POS scale only.
+        assert!(close(apply(&w, [0., 0., 10.]), [100., 0., 0.]));
+        assert!(close(apply(&w, [0., -1., 10.]), [100., 0., 1.]));
+        assert!(close(apply(&w, [0., 0., 11.]), [100., 1., 0.]));
+        assert_eq!(new.items[1].world, identity_at(7.));
+        assert_eq!(new.items[2].world, identity_at(9.));
+        let c = &new.counts;
+        assert_eq!(
+            (
+                c.pos_bind_changed,
+                c.pos_bind_unchanged,
+                c.pos_bind_no_bones
+            ),
+            (1, 1, 1)
+        );
+        let (n, shift, _, rot) = c.pos_bind_by_mesh["00000010"];
+        assert_eq!(n, 1);
+        assert!((shift - 10.).abs() < 1e-4 && (rot - 90.).abs() < 1e-3);
+        assert!(c
+            .lines()
+            .iter()
+            .any(|l| l == "Changed vs D113 POS-only: 1 Things (1 unchanged, 1 meshes without bones kept at POS)"));
+    }
+
     #[test]
     fn joint_things_place_from_endpoints() {
         // Endpoints: A at (100, 0, 0), B at (100, 0, -100) for the bolt; C at (0, 50, 0)
@@ -1121,11 +1381,12 @@ mod tests {
             },
             |_| false,
             |&g| match g {
-                0x40 => bolt_bind.clone(),
-                0x50 => string_bind.clone(),
-                0x60 => vec![joint_bone(1., [0.; 3])],
+                0x40 => skins_only(&bolt_bind),
+                0x50 => skins_only(&string_bind),
+                0x60 => skins_only(&[joint_bone(1., [0.; 3])]),
                 _ => Vec::new(),
             },
+            PosPlacement::InverseBind,
         );
         let c = &scene.counts;
         assert_eq!(
