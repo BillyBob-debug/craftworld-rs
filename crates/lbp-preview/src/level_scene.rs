@@ -5,7 +5,10 @@
 //! through the same bounded single-mesh path (`load_mesh_groups_with_options`) and are
 //! reused by every item that names them. Things that cannot be drawn are skipped and
 //! counted by reason. Placement is the Thing's own POS world matrix (static bind pose):
-//! bones, animation, decorations, stickers and material overrides are not applied.
+//! bones, animation, stickers and material overrides are not applied.
+//!
+//! D152: DECORATIONS entries are drawn as extra items at owner POS x stored offset (see
+//! `add_decorations`); STICKERS decals are counted but not drawn.
 //!
 //! D120: POS Things are placed at POS world x inverse bind pose of mesh bone 0 by default
 //! (`PosPlacement::InverseBind`, Toolkit StaticMeshBuilder/SceneExporter rule);
@@ -205,8 +208,15 @@ pub struct SceneCounts {
     pub shape_bevel_outcomes: BTreeMap<String, usize>,
     pub bevels_loaded: usize,
     pub bevels_failed: usize,
-    /// DECORATIONS entries (not drawn).
-    pub decorations_not_drawn: usize,
+    /// D152: DECORATIONS entries (counting unit: entries), those drawn as scene items at
+    /// owner POS x offset (x inverse bind of the decoration mesh's bone 0 under the
+    /// inverse-bind rule), and the rest by reason. STICKERS decals are counted, not drawn.
+    pub decorations_total: usize,
+    pub decorations_drawn: usize,
+    /// Drawn decorations whose mesh has neutral (unsupported material) groups.
+    pub decorations_drawn_neutral: usize,
+    pub decorations_skipped: BTreeMap<String, usize>,
+    pub sticker_decals_not_drawn: usize,
     /// Reader stop (None = whole level read).
     pub reader_stop: Option<String>,
     /// D119 backdrop (static mesh + plan Things).
@@ -316,8 +326,15 @@ impl SceneCounts {
             }
         }
         out.push(format!(
-            "Not drawn: {} decorations (DECORATIONS entries)",
-            self.decorations_not_drawn
+            "Decorations drawn: {} / {} (DECORATIONS entries, owner POS x offset; inferred); {} with neutral material groups",
+            self.decorations_drawn, self.decorations_total, self.decorations_drawn_neutral
+        ));
+        for (reason, n) in &self.decorations_skipped {
+            out.push(format!("  decoration skipped {n}: {reason}"));
+        }
+        out.push(format!(
+            "Not drawn: {} sticker decals (STICKERS entries; decal projection unsupported)",
+            self.sticker_decals_not_drawn
         ));
         out.extend(self.backdrop.lines());
         out.push(match &self.reader_stop {
@@ -938,19 +955,25 @@ pub fn build_scene<T>(
     c.pos_placement = placement;
     let skip = |c: &mut SceneCounts, reason: String| *c.skipped.entry(reason).or_default() += 1;
     for t in things {
+        add_decorations(
+            &mut scene,
+            &mut by_source,
+            &mut load,
+            &local_bounds,
+            &neutral_groups,
+            &bind_poses,
+            placement,
+            t,
+        );
         let c = &mut scene.counts;
-        c.decorations_not_drawn += t.data.decorations.len();
         let Some(rm) = &t.data.render_mesh else {
             continue;
         };
         c.with_render_mesh += 1;
         let source = match &rm.mesh {
-            Some(d) => match (d.guid, d.sha1) {
-                (Some(g), _) if g != 0 => MeshSource::Guid(g),
-                (_, Some(h)) if h.iter().any(|&b| b != 0) => {
-                    MeshSource::Sha1(h.iter().map(|b| format!("{b:02x}")).collect())
-                }
-                _ => {
+            Some(d) => match descriptor_source(d) {
+                Some(s) => s,
+                None => {
                     skip(c, "RENDER_MESH with null mesh reference".into());
                     continue;
                 }
@@ -974,32 +997,14 @@ pub fn build_scene<T>(
                 continue;
             }
         };
-        let index = match by_source.get(&source) {
-            Some(r) => r.clone(),
-            None => {
-                let r = if scene.meshes.len() >= MAX_LEVEL_MESHES {
-                    Err("Unsupported: level distinct-mesh budget".to_string())
-                } else {
-                    load(&source).map(|payload| {
-                        scene.meshes.push(SceneMesh {
-                            source: source.clone(),
-                            bounds: local_bounds(&payload),
-                            neutral_groups: neutral_groups(&payload),
-                            payload,
-                        });
-                        scene.meshes.len() - 1
-                    })
-                };
-                let c = &mut scene.counts;
-                if r.is_ok() {
-                    c.meshes_loaded += 1;
-                } else {
-                    c.meshes_failed += 1;
-                }
-                by_source.insert(source.clone(), r.clone());
-                r
-            }
-        };
+        let index = scene_mesh_index(
+            &mut scene,
+            &mut by_source,
+            &mut load,
+            &local_bounds,
+            &neutral_groups,
+            &source,
+        );
         let c = &mut scene.counts;
         let mesh = match index {
             Ok(i) => i,
@@ -1081,6 +1086,134 @@ pub fn build_scene<T>(
         });
     }
     scene
+}
+
+/// Mesh source named by a RENDER_MESH-style descriptor (None for a null reference).
+fn descriptor_source(d: &lbp_level::serial::Descriptor) -> Option<MeshSource> {
+    match (d.guid, d.sha1) {
+        (Some(g), _) if g != 0 => Some(MeshSource::Guid(g)),
+        (_, Some(h)) if h.iter().any(|&b| b != 0) => Some(MeshSource::Sha1(
+            h.iter().map(|b| format!("{b:02x}")).collect(),
+        )),
+        _ => None,
+    }
+}
+
+/// Loads (once per source) a mesh into the scene; Err carries the unavailable reason.
+fn scene_mesh_index<T>(
+    scene: &mut LevelScene<T>,
+    by_source: &mut HashMap<MeshSource, Result<usize, String>>,
+    load: &mut impl FnMut(&MeshSource) -> Result<T, String>,
+    local_bounds: &impl Fn(&T) -> Option<[[f32; 3]; 2]>,
+    neutral_groups: &impl Fn(&T) -> bool,
+    source: &MeshSource,
+) -> Result<usize, String> {
+    if let Some(r) = by_source.get(source) {
+        return r.clone();
+    }
+    let r = if scene.meshes.len() >= MAX_LEVEL_MESHES {
+        Err("Unsupported: level distinct-mesh budget".to_string())
+    } else {
+        load(source).map(|payload| {
+            scene.meshes.push(SceneMesh {
+                source: source.clone(),
+                bounds: local_bounds(&payload),
+                neutral_groups: neutral_groups(&payload),
+                payload,
+            });
+            scene.meshes.len() - 1
+        })
+    };
+    if r.is_ok() {
+        scene.counts.meshes_loaded += 1;
+    } else {
+        scene.counts.meshes_failed += 1;
+    }
+    by_source.insert(source.clone(), r.clone());
+    r
+}
+
+/// D152: draws Thing `t`'s DECORATIONS entries. Each entry's `offset` is read as a
+/// matrix in the owner Thing's POS frame (inferred from the stored translations: tens to
+/// hundreds of units, z at the owner's front face), so world = POS x offset, then the
+/// decoration mesh's bone-0 inverse bind under the inverse-bind rule (as POS Things).
+#[allow(clippy::too_many_arguments)]
+fn add_decorations<T>(
+    scene: &mut LevelScene<T>,
+    by_source: &mut HashMap<MeshSource, Result<usize, String>>,
+    load: &mut impl FnMut(&MeshSource) -> Result<T, String>,
+    local_bounds: &impl Fn(&T) -> Option<[[f32; 3]; 2]>,
+    neutral_groups: &impl Fn(&T) -> bool,
+    bind_poses: &impl Fn(&T) -> Vec<BindPose>,
+    placement: PosPlacement,
+    t: &ThingRecord,
+) {
+    scene.counts.sticker_decals_not_drawn += t.data.sticker_decals;
+    let skip = |c: &mut SceneCounts, reason: &str| {
+        *c.decorations_skipped.entry(reason.to_string()).or_default() += 1
+    };
+    for d in &t.data.decorations {
+        scene.counts.decorations_total += 1;
+        let Some(rm) = &d.render_mesh else {
+            skip(
+                &mut scene.counts,
+                "render mesh not read (null or unresolved reference)",
+            );
+            continue;
+        };
+        let Some(source) = rm.mesh.as_ref().and_then(descriptor_source) else {
+            skip(&mut scene.counts, "null mesh reference");
+            continue;
+        };
+        let Some(pos) = &t.data.pos else {
+            skip(&mut scene.counts, "owner Thing has no POS");
+            continue;
+        };
+        if world_matrix_check(&pos.world).is_err() || world_matrix_check(&d.offset).is_err() {
+            skip(
+                &mut scene.counts,
+                "non-finite or degenerate POS/offset matrix",
+            );
+            continue;
+        }
+        let mesh = match scene_mesh_index(
+            scene,
+            by_source,
+            load,
+            local_bounds,
+            neutral_groups,
+            &source,
+        ) {
+            Ok(i) => i,
+            Err(e) => {
+                skip(&mut scene.counts, &format!("mesh unavailable: {e}"));
+                continue;
+            }
+        };
+        let mut world = mul44(&pos.world, &d.offset);
+        if placement == PosPlacement::InverseBind {
+            if let Some(b0) = bind_poses(&scene.meshes[mesh].payload).first() {
+                world = mul44(&world, &b0.inv);
+            }
+        }
+        if world_matrix_check(&world).is_err() {
+            skip(&mut scene.counts, "non-finite or degenerate placed matrix");
+            continue;
+        }
+        if scene.items.len() >= MAX_LEVEL_ITEMS {
+            skip(&mut scene.counts, "Unsupported: level item budget");
+            continue;
+        }
+        scene.counts.decorations_drawn += 1;
+        scene.counts.decorations_drawn_neutral += usize::from(scene.meshes[mesh].neutral_groups);
+        scene.items.push(SceneItem {
+            mesh,
+            world,
+            thing: t.index,
+            uid: t.uid,
+            shapes: 0,
+        });
+    }
 }
 
 /// Extrudes every SHAPE Thing (D114 selection rules) and adds the results as merged
@@ -1815,6 +1948,76 @@ mod tests {
             },
             ..Default::default()
         }
+    }
+
+    fn decoration(mesh: Option<u32>, offset: [f32; 16]) -> lbp_level::parts::Decoration {
+        let rm = thing(0, mesh, None).data.render_mesh;
+        lbp_level::parts::Decoration {
+            render_mesh: mesh.and(rm),
+            offset,
+            parent_bone: 0,
+            parent_tri_vert: -1,
+            bary_u: 0.,
+            bary_v: 0.,
+            angle: 0.,
+            on_costume_piece: -1,
+            earth_decoration: 0,
+            scale: 1.,
+            placed_by: 0,
+            reversed: false,
+            play_mode_frame: 0,
+            plan_guid: None,
+        }
+    }
+
+    #[test]
+    fn decorations_draw_at_owner_pos_times_offset() {
+        let mut offset = identity_at(5.);
+        offset[13] = 7.;
+        offset[0] = 2.;
+        let mut owner = thing(0, None, Some(identity_at(100.)));
+        owner.data.render_mesh = None;
+        owner.data.sticker_decals = 3;
+        owner.data.decorations = vec![
+            decoration(Some(0x40), offset),
+            decoration(None, offset),
+            decoration(Some(0x41), offset), // load fails
+        ];
+        let mut no_pos = thing(1, None, None);
+        no_pos.data.render_mesh = None;
+        no_pos.data.decorations = vec![decoration(Some(0x40), offset)];
+        let scene = build_scene(
+            &[owner, no_pos],
+            |s| match s {
+                MeshSource::Guid(0x41) => Err("Unresolved: GUID".into()),
+                MeshSource::Guid(g) => Ok(*g),
+                _ => unreachable!(),
+            },
+            |_| None,
+            |_| false,
+            |_| Vec::new(),
+            PosPlacement::InverseBind,
+        );
+        let c = &scene.counts;
+        assert_eq!((c.decorations_total, c.decorations_drawn), (4, 1));
+        assert_eq!(c.sticker_decals_not_drawn, 3);
+        assert_eq!(c.drawn, 0);
+        assert_eq!(
+            c.decorations_skipped["render mesh not read (null or unresolved reference)"],
+            1
+        );
+        assert_eq!(
+            c.decorations_skipped["mesh unavailable: Unresolved: GUID"],
+            1
+        );
+        assert_eq!(c.decorations_skipped["owner Thing has no POS"], 1);
+        assert_eq!(c.decorations_skipped.values().sum::<usize>(), 3);
+        assert_eq!(scene.items.len(), 1);
+        let w = scene.items[0].world;
+        assert_eq!(
+            (w[0], w[12], w[13], scene.items[0].thing),
+            (2., 105., 7., 0)
+        );
     }
 
     #[test]

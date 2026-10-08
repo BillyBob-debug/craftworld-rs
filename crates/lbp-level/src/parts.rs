@@ -271,6 +271,8 @@ pub struct PartData {
     pub plan_ref: Option<Descriptor>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub decorations: Vec<Decoration>,
+    /// D152: STICKERS decals (main array plus costume arrays), counted only.
+    pub sticker_decals: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub world: Option<World>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -458,7 +460,19 @@ pub struct Decoration {
     /// Render mesh of the decoration when its reference body was read here (None for a
     /// null or back-reference).
     pub render_mesh: Option<RenderMesh>,
+    /// Serialized element order (translation in 12..14), as POS.
     pub offset: [f32; 16],
+    pub parent_bone: i32,
+    pub parent_tri_vert: i32,
+    pub bary_u: f32,
+    pub bary_v: f32,
+    pub angle: f32,
+    pub on_costume_piece: i32,
+    pub earth_decoration: i32,
+    pub scale: f32,
+    pub placed_by: i16,
+    pub reversed: bool,
+    pub play_mode_frame: i32,
     pub plan_guid: Option<u32>,
 }
 
@@ -648,7 +662,7 @@ fn part_body(
             r.bool()?;
             r.f32()?;
         }
-        "STICKERS" => stickers(r)?,
+        "STICKERS" => things.list[me].data.sticker_decals = stickers(r)?,
         "DECORATIONS" => {
             let n = r.count(4)?;
             let mut out = Vec::with_capacity(n.min(4096));
@@ -1863,19 +1877,32 @@ fn decoration(r: &mut Reader, things: &mut Things) -> Result<Decoration> {
         _ => None,
     };
     let offset = r.m44()?;
-    r.i32()?;
-    r.i32()?;
-    r.skip_f32(3)?;
-    r.s32()?;
-    r.s32()?;
-    r.f32()?;
-    r.i16()?;
-    r.bool()?;
-    r.i32()?;
+    let parent_bone = r.i32()?;
+    let parent_tri_vert = r.i32()?;
+    let bary_u = r.f32()?;
+    let bary_v = r.f32()?;
+    let angle = r.f32()?;
+    let on_costume_piece = r.s32()?;
+    let earth_decoration = r.s32()?;
+    let scale = r.f32()?;
+    let placed_by = r.i16()?;
+    let reversed = r.bool()?;
+    let play_mode_frame = r.i32()?;
     let plan_guid = r.guid()?;
     Ok(Decoration {
         render_mesh,
         offset,
+        parent_bone,
+        parent_tri_vert,
+        bary_u,
+        bary_v,
+        angle,
+        on_costume_piece,
+        earth_decoration,
+        scale,
+        placed_by,
+        reversed,
+        play_mode_frame,
         plan_guid,
     })
 }
@@ -1901,15 +1928,17 @@ fn decal(r: &mut Reader) -> Result<()> {
     Ok(())
 }
 
-fn stickers(r: &mut Reader) -> Result<()> {
+fn stickers(r: &mut Reader) -> Result<usize> {
     let v = r.rev.version();
     let n = r.count(1)?;
+    let mut decals = n;
     for _ in 0..n {
         decal(r)?;
     }
     let costumes = r.count(1)?;
     for _ in 0..costumes {
         let n = r.count(1)?;
+        decals = decals.saturating_add(n);
         for _ in 0..n {
             decal(r)?;
         }
@@ -1928,7 +1957,7 @@ fn stickers(r: &mut Reader) -> Result<()> {
             r.resource(false)?;
         }
     }
-    Ok(())
+    Ok(decals)
 }
 
 fn level_settings(r: &mut Reader) -> Result<LevelSettings> {

@@ -1686,7 +1686,7 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
                 if v.level.lines.is_empty() {
                     ui.small("Loading or failed; see status.");
                 }
-                ui.small("Models: static bind pose at each Thing's POS matrix; bones, animation and decorations not applied.");
+                ui.small("Models: static bind pose at each Thing's POS matrix; bones and animation not applied; decorations at POS x offset (inferred), stickers not drawn.");
                 ui.small(format!("Shapes: {}.", level_scene::SHAPE_PREVIEW_LABEL));
                 if v.level.shape_bevels {
                     ui.small(format!("Shape bevels on: {}.", level_scene::SHAPE_BEVEL_LABEL));
