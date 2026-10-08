@@ -3587,3 +3587,21 @@ The two U5 checks skipped at merge, run afterwards (outputs local-analysis/d127v
   InventoryItemDetails layout) and 119 LEERDAMMER 0x4c44 plans at head 0x272 (refused by
   check_band). Toolkit reads both (InventoryItemDetails.serialize head<0x233 branch and
   LD_LAMS_KEYS middle layout), so both are reader gaps; added to the backlog.
+
+## D129, D130, RPCS3 setup (2026-10-08)
+
+- D129 (U5b, PR #29): early InventoryItemDetails layout (heads 0x197..0x232) and LEERDAMMER
+  0x4c44 middle layout. plan_details_census -> d129-plan-details-census-0133.json (unit
+  distinct content hash): 12,161/12,245 complete (was 11,936), 0 stopped (was 225), 84
+  wrapper_error (DOUBLE11 Vita branch, by design).
+- D130 (U7, PR #28): --slot-browser. --slot-browser-report on 01.33: slot lists 3/4 (testrnp
+  text form), 164 slots, names 163/164, icons 164/164, root levels 149/149, 122 locked at
+  start. Capture d130-slot-browser-0133.png (non-primary monitor) shows names/icons/locks.
+- Checks: fmt; tests lbp-level, lbp-preview, lbp-bevy-viewer; workspace Clippy -D warnings;
+  viewer build.
+- RPCS3 v0.0.43-20247: firmware 4.93 installed (--installfw, headless). 32 update pkgs
+  installed into RPCS3 dev_hdd0 (PARAM.SFO 01.33). `--decrypt` on a copy of patch.edat:
+  "Invalid klicensee" (needs the game's key, loaded only while the game runs). Boot from
+  game-data/a1-disc fails: "Failed to mount disc directory" (also with /dev_bdvd mapped
+  in vfs.yml: "Failed to use custom BDVD directory"). Blocked; see Next.
+**+0 newly viewable / +0 newly Complete.**

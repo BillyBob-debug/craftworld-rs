@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 — D129, D130, RPCS3 setup
+
+Item details: all 225 stopped plans now read (12,161/12,245; 84 Vita excluded). Story slot
+browser merged (164 slots, 164 icons). RPCS3 firmware + 01.33 update installed; game boot
+and patch.edat decryption blocked. +0 viewable / +0 Complete.
+
 ## 2026-10-08 — D127, D128
 
 Item details reader: 11,936 of 12,245 plans complete on 01.33. Script VM crate merged
