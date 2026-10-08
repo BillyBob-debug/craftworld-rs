@@ -3659,3 +3659,19 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   unnamed_type_refs 1,966; other listing checks 0; heads/layouts unchanged.
 - Checks: fmt; tests lbp-level, lbp-script-vm; workspace Clippy -D warnings.
 **+0 newly viewable / +0 newly Complete.**
+
+## D135 — Rs first native bindings, PR #33 (2026-10-08)
+
+- 40 native bindings, System.Yield coroutines, example native_coverage. On the 426
+  decrypted 01.33 scripts (d135-native-coverage-0133.json; unit call instruction): native
+  calls 17,704, bound 2,347 (34 distinct); gameplay scripts 255: native calls 2,472,
+  bound 690. Unparsed names 0. Unknown signature codes: `j` 32 (e.g. CheckEqual__jj...,
+  ShiftL__ji), `[` 2 (array params, e.g. GatherFriendData__[Q13PodFriendData).
+- Gap: System.Yield__ is handled inside the VM but native_coverage lists it as unbound
+  (66 gameplay calls). The PR's "953 of 1,356 G10 top-100 calls" uses a different
+  gameplay set; not reproduced here.
+- Checks: fmt; lbp-script-vm tests; workspace Clippy -D warnings.
+- PR #34 (U11/U12 Gooey trace) not merged: PodStateMainMenu UpdateUI stops after 48 of
+  1,201 instructions, translated 0/0, outline 2 lines (no English labels); 7/15 functions
+  fault (Type on member ops). Gooey 9/45 faulted, PodStateStoriesMenu 5/13.
+**+0 newly viewable / +0 newly Complete.**

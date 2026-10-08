@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D135 native bindings
+
+40 VM native bindings merged: 2,347 of 17,704 native calls bound (690/2,472 in gameplay
+scripts). PR #34 Gooey trace held back (no labels yet). +0 / +0.
+
 ## 2026-10-08 — D134 U10 name sentinel
 
 Unnamed type rows (0xFFFFFFFF) accepted: all script listing checks now 0. +0 / +0.
