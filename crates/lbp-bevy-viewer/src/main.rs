@@ -30,6 +30,14 @@ struct Completed {
     preview: Result<Option<lbp_preview::GroupedMesh>, String>,
     identity: String,
     guid: String,
+    clip: Option<Result<lbp_preview::skinned::SkinnedClip, String>>,
+}
+/// Rd: CPU-skinned playback of one animation on the displayed mesh.
+struct Playing {
+    clip: lbp_preview::skinned::SkinnedClip,
+    frame: adapter::DisplayFrame,
+    started: f32,
+    shown: Option<i64>,
 }
 struct Job {
     control: LoadControl,
@@ -45,6 +53,9 @@ struct Viewer {
     instance_input_enabled: bool,
     instance_rgba: [f32; 4],
     animation_base: bool,
+    animation_guid: String,
+    animation_frame: Option<i64>,
+    playing: Option<Playing>,
     snapshot: String,
     game: String,
     guid: String,
@@ -76,6 +87,8 @@ impl Viewer {
             .then(|| self.context.clone())
             .flatten();
         let guid = self.guid.clone();
+        let animation_guid = self.animation_guid.trim().to_ascii_lowercase();
+        self.playing = None;
         let options = lbp_preview::PreviewOptions {
             animation_base: self.animation_base,
             instance_color: self
@@ -105,6 +118,7 @@ impl Viewer {
                 // Attachment succeeds independently of a particular preview failure.
                 // The catalog remains browsable even when the initial GUID is unsupported.
                 let mut identity = String::new();
+                let mut mesh_key = None;
                 let preview = (|| {
                     if guid.trim().is_empty() {
                         return Ok(None);
@@ -115,6 +129,7 @@ impl Viewer {
                         return Err("GUID must be eight hexadecimal digits".into());
                     }
                     let key = lbp_preview::resolve(&catalog, Some(number), None)?;
+                    mesh_key = Some(key.clone());
                     identity = catalog.by_guid[&format!("{number:08x}")]
                         .iter()
                         .map(|&i| catalog.snapshot.resources[i].map_row.path.as_str())
@@ -125,12 +140,24 @@ impl Viewer {
                     )
                     .map(Some)
                 })();
+                let clip = (preview.as_ref().is_ok_and(Option::is_some)
+                    && !animation_guid.is_empty())
+                .then(|| {
+                    let number = u32::from_str_radix(&animation_guid, 16)
+                        .ok()
+                        .filter(|_| animation_guid.len() == 8)
+                        .ok_or("Animation GUID must be eight hexadecimal digits")?;
+                    let key = lbp_preview::skinned::resolve_animation(&catalog, number)?;
+                    let mesh_key = mesh_key.as_ref().ok_or("No mesh key")?;
+                    lbp_preview::skinned::load_clip(&source, mesh_key, &key, &worker)
+                });
                 worker.check()?;
                 Ok(Completed {
                     context: (catalog, source),
                     preview,
                     identity,
                     guid,
+                    clip,
                 })
             };
             let _ = tx.send(run());
@@ -164,6 +191,9 @@ fn options() -> Result<Viewer, String> {
         instance_input_enabled: false,
         instance_rgba: [1.; 4],
         animation_base: false,
+        animation_guid: String::new(),
+        animation_frame: None,
+        playing: None,
         snapshot: String::new(),
         game: String::new(),
         guid: String::new(),
@@ -236,7 +266,7 @@ fn options() -> Result<Viewer, String> {
             continue;
         }
         if flag == "--help" {
-            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: CPU-skinned playback of an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -244,6 +274,10 @@ fn options() -> Result<Viewer, String> {
             "--snapshot" => v.snapshot = value,
             "--game-dir" => v.game = value,
             "--select-guid" => v.guid = value,
+            "--play-animation" => v.animation_guid = value,
+            "--animation-frame" => {
+                v.animation_frame = Some(value.parse().map_err(|_| "invalid animation frame")?)
+            }
             "--browse-query" => v.browser.query = value,
             "--qa-capture" => {
                 let base = std::fs::canonicalize("local-analysis").map_err(|e| e.to_string())?;
@@ -309,7 +343,7 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (place_on_second_monitor, load, camera, capture).chain(),
+            (place_on_second_monitor, load, animate, camera, capture).chain(),
         )
         .add_systems(EguiPrimaryContextPass, panel)
         .run();
@@ -627,6 +661,33 @@ fn load(
             v.scene.push((entity, mesh, material, image));
         }
         *orbit = Orbit::default();
+        let clip_status = match done.clip {
+            None => String::new(),
+            Some(Err(e)) => format!("\nAnimation not played: {e}"),
+            Some(Ok(clip)) => {
+                let r = &clip.report;
+                let text = format!(
+                    "\nAnimation: {} frames at {} fps{} • {}/{} mesh bones driven ({} animation bones unmatched) • morphs {} mesh / {} animation",
+                    r.frames,
+                    r.fps,
+                    if r.looped { ", looped" } else { "" },
+                    r.matched_bones,
+                    r.mesh_bones,
+                    r.unmatched_animation_bones,
+                    r.mesh_morphs,
+                    r.animation_morphs
+                );
+                let frame = adapter::display_frame(&g.positions)
+                    .ok_or("Unsupported: zero-size geometry")?;
+                v.playing = Some(Playing {
+                    clip,
+                    frame,
+                    started: -1.,
+                    shown: None,
+                });
+                text
+            }
+        };
         v.status = format!(
             "Loaded {}\n{}\n{} vertices • {} triangles • {} primitives{}{}",
             done.guid,
@@ -634,7 +695,7 @@ fn load(
             g.positions.len(),
             g.triangles.len(),
             g.metadata.primitives.len(),
-            "\n",
+            clip_status + "\n",
             details.join("\n")
         );
         println!("{}", v.status);
@@ -648,6 +709,34 @@ fn load(
     if let Err(e) = rendered {
         v.status = format!("Load failed: {e}");
         eprintln!("{}", v.status);
+    }
+}
+/// Advances the playing clip one integer frame at a time (no interpolation) and
+/// rewrites every scene mesh's positions in the bind-pose display frame.
+fn animate(time: Res<Time>, mut v: ResMut<Viewer>, mut meshes: ResMut<Assets<Mesh>>) {
+    let held = v.animation_frame;
+    let handles: Vec<Handle<Mesh>> = v.scene.iter().map(|s| s.1.clone()).collect();
+    let Some(playing) = v.playing.as_mut() else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    if playing.started < 0. {
+        playing.started = now;
+    }
+    let fps = f32::from(playing.clip.report.fps.max(1));
+    let frame = held.unwrap_or(((now - playing.started) * fps) as i64);
+    if playing.shown == Some(frame) {
+        return;
+    }
+    playing.shown = Some(frame);
+    let Some(posed) = playing.clip.frame_positions(frame) else {
+        return;
+    };
+    let display = adapter::to_display(&posed, playing.frame);
+    for handle in handles {
+        if let Some(mut mesh) = meshes.get_mut(&handle) {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, display.clone());
+        }
     }
 }
 fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Orbit>) -> Result {
@@ -685,6 +774,8 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
             ui.text_edit_singleline(&mut v.game);
             ui.label("Mesh GUID (blank: attach and browse)");
             ui.text_edit_singleline(&mut v.guid);
+            ui.label("Play animation GUID (blank: bind pose)");
+            ui.text_edit_singleline(&mut v.animation_guid);
             if ui.button("Load / reload").clicked() { v.requested = true; }
             if v.job.is_some() && ui.button("Cancel").clicked() {
                 v.job = None;
@@ -720,7 +811,7 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
         egui::ScrollArea::vertical().max_height(260.).show(ui, |ui| { ui.label(&v.status); });
         ui.separator();
         ui.label("Left drag: orbit\nRight / middle drag: pan\nWheel: zoom • R: reset • F: frame");
-        ui.small("Unlit • opaque • sRGB • double-sided\nGenerated diagnostic normals; no bone/morph pose.\nTop mip only. Original game lighting, alpha and axis conventions unverified.");
+        ui.small("Unlit • opaque • sRGB • double-sided\nGenerated diagnostic normals. Animation: CPU skinning, positions only.\nTop mip only. Original game lighting, alpha and axis conventions unverified.");
     });
     if !v.synthetic || !v.census.is_empty() {
         census_window(ctx, &v.census);
@@ -1083,6 +1174,9 @@ mod tests {
             instance_input_enabled: false,
             instance_rgba: [1.; 4],
             animation_base: false,
+            animation_guid: String::new(),
+            animation_frame: None,
+            playing: None,
             snapshot: String::new(),
             game: String::new(),
             guid: String::new(),
