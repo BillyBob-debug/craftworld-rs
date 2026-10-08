@@ -32,6 +32,21 @@ How close can the viewer get with what we have now?
 - Globe, moon, Polaroid and background are PLACEHOLDERS until the Pod level/meshes are
   found (PC level search). The window says so unless `--qa-hide-ui`.
 
+## How the game places them (PC listing, 2026-10-08)
+`PodStateMainMenu.UpdateUI` (581 instructions, 78 native calls, 32 distinct) makes no
+projection or world-to-screen call. Its only planet links are `Planets.GetCrafteroid`
+and `Planet.GetThing`. So the pills are most likely placed by the engine, from the
+planet Things and the Pod camera (STRONG_INFERENCE).
+
+The camera and views are script-driven. The script functions involved are:
+- `PlanetsWorld.UpdatePodCamera(PlanetThing, bool, bool)` and `UpdatePlanetsView`;
+- `PlanetsView` transitions (`CopyFromTransition`, `Between`, `GetTransitionSpeed`),
+  likely the open-Puter dolly;
+- `PodComputer.SetPlanetsView`, `GetPlanetThing(EPlanetType)` and `IsMoonSelected`.
+
+Next step: once the Pod level gives the globe and moon Things, project their positions
+through the Pod camera instead of using the measured fractions.
+
 ## Tests
 - `p1b_buttons_go_down_the_globe_and_the_last_onto_the_moon`
 - `p1b_one_button_stays_on_the_globe`
