@@ -3,8 +3,8 @@
 //!
 //! What the frame properties mean is UNKNOWN (only their names and argument values are
 //! recorded), so this mapping is a placeholder layout, not the game's:
-//! - `Sizing` (two numbers, script units) becomes a size relative to the first frame with a
-//!   positive `Sizing`, which is taken as the full screen (D146: the Pod menus' outer
+//! - `Sizing` (two numbers, script units) becomes a minimum size relative to the first frame
+//!   with a positive `Sizing`, which is taken as the full screen (D146: the Pod menus' outer
 //!   frame is 2400 x 1250, `GetPuterWidth(2400)`); zero or negative values fit the content
 //!   (their meaning is UNKNOWN);
 //! - every frame is a column; `DefaultChildSpacing` (first number) is the gap and
@@ -101,13 +101,25 @@ fn frame(b: &mut Builder, f: &Frame, uid: Uid, reference: Option<[f32; 2]>) {
 }
 
 /// The script's root frame as a [`UiTree`] under `root`, with `header` lines (counts,
-/// faults) drawn above it as small text.
+/// faults) drawn above it as small text. Everything sits in one column frame so the header
+/// stacks above the script's frames instead of beside them (PC check of #46).
 pub fn ui_tree(script_root: &Frame, root: Uid, header: &[String], input: FrameInput) -> UiTree {
     let mut b = Builder::new(root, input);
-    for line in header {
-        b.text(line.clone(), TextStyle::Small);
-    }
-    let id = b.auto_id();
-    frame(&mut b, script_root, id, reference_size(script_root));
+    let column = b.auto_id();
+    b.frame(
+        column,
+        Layout::Column,
+        Align::Start,
+        PanelStyle::Plain,
+        0.,
+        4.,
+        |b| {
+            for line in header {
+                b.text(line.clone(), TextStyle::Small);
+            }
+            let id = b.auto_id();
+            frame(b, script_root, id, reference_size(script_root));
+        },
+    );
     b.finish()
 }

@@ -74,3 +74,16 @@ outer 2400 x 1250, then -1 x 500, 0 x 0 (three), 1000 x 300 (main menu).
 - PC check: `--ui-script PodStateMainMenu` capture on the second monitor; the outer frame
   should fill the window and the 1000 x 300 frame should be about 42% x 24% of it. The count
   header sits above the tree, so the outer frame overflows by the header height (known).
+
+PC check of d2fc401 (1280 x 800 capture): the script panel started about 55% across, beside
+the count lines, and the five menu buttons were blank full-width bars. Causes and changes:
+- the viewer's root node is a row, and `ui_tree` put the count lines and the script frame
+  directly under it; both now sit in one column frame;
+- `--qa-hide-ui` with `--ui-script` prints the count lines but does not draw them, so the
+  tree gets the whole window;
+- fixed heights could squeeze frames below their labels (likely cause of the blank bars,
+  INFERRED, not reproduced here); sizes are now minimums (`min_width`/`min_height` in
+  `Vw`/`Vh`) and sized frames do not shrink.
+- PC check: `--ui-script PodStateMainMenu --qa-hide-ui --qa-capture local-analysis/NEW.png`;
+  the outer frame should fill the window (plus the viewer's 24-pixel root padding), the
+  five labels should be readable, and the 1000 x 300 frame at least 42% x 24%.

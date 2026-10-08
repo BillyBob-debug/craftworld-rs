@@ -462,8 +462,14 @@ fn spawn_node(
                             FlexWrap::NoWrap
                         },
                         justify_content: justify,
-                        width: size[0].map_or(Val::Auto, |f| Val::Vw(f * 100.)),
-                        height: size[1].map_or(Val::Auto, |f| Val::Vh(f * 100.)),
+                        // Sizes are minimums (PC check of #46: fixed heights hid labels).
+                        min_width: size[0].map_or(Val::Auto, |f| Val::Vw(f * 100.)),
+                        min_height: size[1].map_or(Val::Auto, |f| Val::Vh(f * 100.)),
+                        flex_shrink: if size.iter().any(Option::is_some) {
+                            0.
+                        } else {
+                            1.
+                        },
                         padding: UiRect::all(Val::Px(*padding)),
                         row_gap: Val::Px(*gap),
                         column_gap: Val::Px(*gap),

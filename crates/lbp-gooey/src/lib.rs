@@ -74,7 +74,8 @@ pub enum Widget {
         style: PanelStyle,
         padding: f32,
         gap: f32,
-        /// Width and height as fractions of the screen; `None` fits the content.
+        /// Minimum width and height as fractions of the screen (the content can make the
+        /// frame larger, so labels are never clipped); `None` fits the content.
         size: [Option<f32>; 2],
     },
     Text {

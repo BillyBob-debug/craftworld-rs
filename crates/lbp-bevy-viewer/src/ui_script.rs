@@ -4,7 +4,7 @@
 //! it built, with the run's counts on top. The layout is a placeholder (frame property
 //! meanings are unknown); labels and structure come from the script.
 //! Usage: `--ui-script CLASS --snapshot SNAPSHOT --game-dir DIR [--ui-script-function NAME]
-//! [--ui-script-report] [--qa-capture local-analysis/NEW.png]`. The default function is
+//! [--ui-script-report] [--qa-hide-ui] [--qa-capture local-analysis/NEW.png]`. The default function is
 //! `UpdateUI__Q5Gooey` (the Pod menus' draw entry, PC run D136).
 use crate::gooey_ui::run_gooey;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
@@ -24,6 +24,7 @@ struct Args {
     class: String,
     function: String,
     report: bool,
+    hide_header: bool,
 }
 
 fn args() -> Result<Args, String> {
@@ -44,6 +45,7 @@ fn args() -> Result<Args, String> {
         class: value("--ui-script").ok_or("--ui-script requires a CLASS")?,
         function: value("--ui-script-function").unwrap_or_else(|| DEFAULT_FUNCTION.to_owned()),
         report: all.iter().any(|a| a == "--ui-script-report"),
+        hide_header: all.iter().any(|a| a == "--qa-hide-ui"),
     })
 }
 
@@ -121,6 +123,8 @@ pub fn run_ui_script() -> Result<(), String> {
         return Ok(());
     }
     let root = report.tree;
+    // `--qa-hide-ui`: the count lines are printed only, so the tree gets the whole window.
+    let header = if a.hide_header { Vec::new() } else { header };
     run_gooey(
         "UI script",
         Box::new(move |input| ui_tree(&root, ROOT, &header, input)),

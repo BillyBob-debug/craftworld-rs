@@ -281,6 +281,7 @@ fn u12d_sizing_is_relative_to_the_first_sized_frame() {
         [
             [None, None],
             [None, None],
+            [None, None],
             [Some(1.), Some(1.)],
             [Some(0.5), Some(0.24)],
             [None, Some(0.4)],
