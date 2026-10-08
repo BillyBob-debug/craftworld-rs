@@ -169,12 +169,12 @@ pub fn run_ui_demo() {
 pub fn run_gooey(
     title: &str,
     screen: ScreenFn,
-    mut images: Vec<GooeyImage>,
+    images: Vec<GooeyImage>,
     loader: Option<ImageLoader>,
     text: Option<SharedText>,
 ) {
-    App::new()
-        .insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.045)))
+    let mut app = App::new();
+    app.insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.045)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: format!("LBP2 Asset Explorer - {title}"),
@@ -184,18 +184,42 @@ pub fn run_gooey(
             }),
             ..default()
         }))
-        .init_resource::<GooeyHost>()
+        .insert_resource(DemoCapture(demo_capture_path()))
+        .add_systems(Startup, |mut commands: Commands| {
+            commands.spawn(Camera2d);
+        });
+    add_gooey(&mut app, screen, images, loader, text);
+    app.add_systems(Update, crate::place_on_second_monitor.before(gooey_input))
+        .add_systems(Update, demo_capture.after(gooey_paint_focus))
+        .run();
+}
+
+/// Where the screen's UI is drawn: the window's camera (`None`) or a camera that renders
+/// to a texture (the Puter screen, `puter.rs`).
+#[derive(Resource, Default)]
+pub struct GooeyTarget(pub Option<Entity>);
+
+/// Adds a gooey screen to an app that already has its plugins and a camera: input, rebuild
+/// and focus painting each frame. `images` are uploaded at start; `loader` (optional)
+/// supplies images the tree shows later.
+pub fn add_gooey(
+    app: &mut App,
+    screen: ScreenFn,
+    mut images: Vec<GooeyImage>,
+    loader: Option<ImageLoader>,
+    text: Option<SharedText>,
+) {
+    app.init_resource::<GooeyHost>()
+        .init_resource::<GooeyTarget>()
         .insert_resource(GooeyScreen(screen))
         .insert_resource(GooeyText(text))
         .insert_resource(GooeyLoader {
             load: loader,
             failed: Default::default(),
         })
-        .insert_resource(DemoCapture(demo_capture_path()))
         .add_systems(
             Startup,
             move |mut commands: Commands, mut assets: ResMut<Assets<Image>>| {
-                commands.spawn(Camera2d);
                 let mut handles = HashMap::new();
                 for i in images.drain(..) {
                     if let Some(image) = gpu_image(i.width, i.height, i.rgba) {
@@ -207,16 +231,8 @@ pub fn run_gooey(
         )
         .add_systems(
             Update,
-            (
-                crate::place_on_second_monitor,
-                gooey_input,
-                gooey_rebuild,
-                gooey_paint_focus,
-                demo_capture,
-            )
-                .chain(),
-        )
-        .run();
+            (gooey_input, gooey_rebuild, gooey_paint_focus).chain(),
+        );
 }
 
 fn gooey_input(
@@ -355,6 +371,7 @@ fn gooey_rebuild(
     images: Option<ResMut<GooeyImages>>,
     mut loader: ResMut<GooeyLoader>,
     mut assets: ResMut<Assets<Image>>,
+    target: Res<GooeyTarget>,
 ) {
     let Some(mut images) = images else {
         return;
@@ -384,6 +401,9 @@ fn gooey_rebuild(
         padding: UiRect::all(Val::Px(24.)),
         ..default()
     });
+    if let Some(camera) = target.0 {
+        commands.entity(root).insert(UiTargetCamera(camera));
+    }
     host.root = Some(root);
     host.buttons = buttons;
     host.tree = tree;

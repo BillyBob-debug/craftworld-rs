@@ -14,7 +14,7 @@ use lbp_script_vm::Vm;
 use lbp_ui_script::{load, outline, run, tree::ui_tree, GooeyHost, RunReport};
 use std::path::PathBuf;
 
-const ROOT: Uid = Uid(0x5553_0000);
+pub const ROOT: Uid = Uid(0x5553_0000);
 const BUDGET: u64 = 5_000_000;
 pub const DEFAULT_FUNCTION: &str = "UpdateUI__Q5Gooey";
 
@@ -88,27 +88,33 @@ pub fn summary(r: &RunReport, scripts: usize, not_read: usize) -> Vec<String> {
     ]
 }
 
-pub fn run_ui_script() -> Result<(), String> {
-    let a = args()?;
+/// Loads every script, runs `class.function` headlessly and returns the report with its
+/// count lines (also printed, with the string-table states).
+pub fn run_script(
+    snapshot: &std::path::Path,
+    game: &std::path::Path,
+    class_name: &str,
+    function: &str,
+) -> Result<(RunReport, Vec<String>), String> {
     let control = LoadControl::default();
-    let catalog = lbp_catalog::load(&a.snapshot, &control)?;
-    let source = AttachedSource::attach(&a.game, &catalog, &control)?;
+    let catalog = lbp_catalog::load(snapshot, &control)?;
+    let source = AttachedSource::attach(game, &catalog, &control)?;
     let (strings, tables) = load_strings(&source, &catalog, &control);
     let (scripts, not_read) = load::load(&source, &catalog, &control)?;
     let count = scripts.len();
     let mut vm = Vm::default();
     let mut target = None;
     for (guid, s) in scripts {
-        if s.class_name == a.class && target.is_none() {
+        if s.class_name == class_name && target.is_none() {
             target = Some((vm.load(s.clone(), guid), s));
         } else {
             vm.load(s, guid);
         }
     }
-    let (class, script) = target.ok_or_else(|| format!("class {} not found", a.class))?;
+    let (class, script) = target.ok_or_else(|| format!("class {class_name} not found"))?;
     let translate = |k: u32| strings.get(k).map(str::to_owned);
     let mut host = GooeyHost::new(&translate);
-    let report = run(&mut vm, &mut host, class, &script, &a.function, BUDGET);
+    let report = run(&mut vm, &mut host, class, &script, function, BUDGET);
     let header = summary(&report, count, not_read);
     for line in &header {
         println!("{line}");
@@ -116,6 +122,12 @@ pub fn run_ui_script() -> Result<(), String> {
     for t in &tables {
         println!("table g{}: {:?} {}", t.guid, t.state, t.detail);
     }
+    Ok((report, header))
+}
+
+pub fn run_ui_script() -> Result<(), String> {
+    let a = args()?;
+    let (report, header) = run_script(&a.snapshot, &a.game, &a.class, &a.function)?;
     if a.report {
         for line in outline(&report.tree, 60) {
             println!("  {line}");
