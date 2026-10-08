@@ -11,7 +11,7 @@
 //! Which functions the game calls on create and on each tick is not known yet: the
 //! `level_scripts` example reports the function names of the classes a level uses, and the
 //! entry names are passed in until that is settled.
-use lbp_level::parts::{ScriptPart, ScriptValue};
+use lbp_level::parts::{ScriptPart, ScriptValue, ShapeColor};
 use lbp_level::thing::ThingRecord;
 use lbp_script_vm::natives::World;
 use lbp_script_vm::{ClassId, Host, MemberKind, Step, Task, Value, Vm};
@@ -31,6 +31,25 @@ pub struct ThingState {
     pub script_guid: Option<u32>,
     /// Script members by field name; `None` when the Thing has no PScript layout.
     pub members: Option<BTreeMap<String, Value>>,
+    /// PShape colour as a colour vector (`GetShapeEditorColour`).
+    pub shape_colour: Option<[f32; 4]>,
+}
+
+/// An engine part a script reached through a native member (`thing.SpriteLight`), with
+/// the `ref_ptr` members scripts wrote to it.
+#[derive(Debug, Clone, Default)]
+pub struct PartState {
+    pub thing: u32,
+    /// The reader's part name (`SPRITE_LIGHT`).
+    pub part: &'static str,
+    pub members: BTreeMap<String, Value>,
+}
+
+/// Packed PShape colour (head > 0x389) as a colour vector. INFERRED byte order
+/// 0xAARRGGBB (white 0xffffffff is the common value; nothing yet tells R from B).
+pub fn unpack_colour(c: u32) -> [f32; 4] {
+    let ch = |shift: u32| ((c >> shift) & 0xff) as f32 / 255.;
+    [ch(16), ch(8), ch(0), ch(24)]
 }
 
 /// A read level as the VM's world.
@@ -42,6 +61,8 @@ pub struct LevelWorld {
     pub written: Vec<String>,
     /// Stored script values with no VM value yet (object references other than strings).
     pub unconverted: usize,
+    /// Parts handed to scripts; a part handle is its index + 1 (`Raw(0)` is null).
+    pub part_handles: Vec<PartState>,
 }
 
 /// VM value for a stored script field; `None` for a field the instance does not store.
@@ -86,6 +107,10 @@ impl LevelWorld {
                     parent: t.parent.and_then(handle),
                     world_matrix: t.data.pos.as_ref().map(|p| p.world),
                     parts: t.parts.clone(),
+                    shape_colour: t.data.shape.as_ref().map(|s| match s.color {
+                        ShapeColor::Packed(c) => unpack_colour(c),
+                        ShapeColor::Vector(v) => v,
+                    }),
                     ..Default::default()
                 })
                 .collect(),
@@ -132,6 +157,71 @@ impl LevelWorld {
             }
         }
         state.members = Some(members);
+    }
+
+    /// Gives every scripted Thing whose class is loaded the fields of its class and
+    /// superclasses that the instance does not store, at their type defaults. The stored
+    /// layout only carries serialized fields: a superclass field such as
+    /// `Tweakable.IsTweaking` (read by `Trigger_Speech_Bubble.Update`) is never stored but
+    /// still exists on the instance (INFERRED, the way `instantiate` builds script objects).
+    pub fn add_class_defaults(&mut self, vm: &Vm) {
+        for t in &mut self.things {
+            let Some(class) = t.script_guid.and_then(|g| vm.class_by_guid(g)) else {
+                continue;
+            };
+            let Ok(defaults) = vm.field_defaults(class) else {
+                continue;
+            };
+            let members = t.members.get_or_insert_with(BTreeMap::new);
+            for (name, v) in defaults {
+                members.entry(name).or_insert(v);
+            }
+        }
+    }
+
+    /// Handle for a part a Thing carries (index + 1), created on first use.
+    fn part_handle(&mut self, thing: u32, part: &'static str) -> u32 {
+        if let Some(i) = self
+            .part_handles
+            .iter()
+            .position(|p| p.thing == thing && p.part == part)
+        {
+            return i as u32 + 1;
+        }
+        self.part_handles.push(PartState {
+            thing,
+            part,
+            members: BTreeMap::new(),
+        });
+        self.part_handles.len() as u32
+    }
+
+    fn part_of(&mut self, base: &Value) -> Result<&mut PartState, String> {
+        match base {
+            Value::Raw(0) => Err("null part".into()),
+            Value::Raw(h) => self
+                .part_handles
+                .get_mut(*h as usize - 1)
+                .ok_or_else(|| format!("no part handle {h}")),
+            other => Err(format!("member base is not a part: {other:?}")),
+        }
+    }
+
+    /// `thing.SpriteLight` and the like: the part as a raw pointer, null when the Thing
+    /// lacks it. Only names of the reader's part list are parts.
+    fn native_member(&mut self, base: &Value, class: &str, field: &str) -> Result<Value, String> {
+        let want = part_name(field);
+        let Some(&(part, ..)) = lbp_level::thing::PARTS.iter().find(|p| p.0 == want) else {
+            return Err(format!(
+                "world does not provide native member {class}.{field}"
+            ));
+        };
+        let t = Self::thing_of(base)?;
+        Ok(if self.state(t)?.parts.contains(&part) {
+            Value::Raw(self.part_handle(t, part))
+        } else {
+            Value::Raw(0)
+        })
     }
 
     fn state(&self, thing: u32) -> Result<&ThingState, String> {
@@ -186,10 +276,18 @@ impl World for LevelWorld {
         class: &str,
         field: &str,
     ) -> Result<Value, String> {
-        if kind != MemberKind::Thing {
-            return Err(format!(
-                "world does not provide {kind:?} member {class}.{field}"
-            ));
+        match kind {
+            // Through `Thing` or a script class of a Thing (`World.World`).
+            MemberKind::Native => return self.native_member(base, class, field),
+            MemberKind::RefPtr => {
+                let p = self.part_of(base)?;
+                return p
+                    .members
+                    .get(field)
+                    .cloned()
+                    .ok_or_else(|| format!("{} member {class}.{field} not read yet", p.part));
+            }
+            MemberKind::Thing => {}
         }
         let t = Self::thing_of(base)?;
         self.state(t)?
@@ -207,6 +305,10 @@ impl World for LevelWorld {
         field: &str,
         value: Value,
     ) -> Result<(), String> {
+        if kind == MemberKind::RefPtr {
+            self.part_of(base)?.members.insert(field.to_owned(), value);
+            return Ok(());
+        }
         if kind != MemberKind::Thing {
             return Err(format!(
                 "world does not provide {kind:?} member {class}.{field}"
@@ -221,6 +323,34 @@ impl World for LevelWorld {
             .members
             .get_or_insert_with(BTreeMap::new)
             .insert(field.to_owned(), value);
+        Ok(())
+    }
+    /// One local player (the PC run has no controllers yet).
+    fn num_players(&mut self) -> Result<i32, String> {
+        Ok(1)
+    }
+    /// Play mode (0); levels run as played, not edited.
+    fn play_or_edit_mode(&mut self) -> Result<i32, String> {
+        Ok(0)
+    }
+    /// No dialogue list is loaded (0).
+    fn dialogue_list(&mut self) -> Result<i32, String> {
+        Ok(0)
+    }
+    fn shape_editor_colour(&mut self, thing: u32) -> Result<[f32; 4], String> {
+        self.state(thing)?
+            .shape_colour
+            .ok_or_else(|| format!("thing {thing} has no shape"))
+    }
+    fn set_shape_editor_colour(&mut self, thing: u32, colour: [f32; 4]) -> Result<(), String> {
+        let t = self
+            .things
+            .get_mut(thing as usize)
+            .ok_or_else(|| format!("no thing {thing}"))?;
+        if t.shape_colour.is_none() {
+            return Err(format!("thing {thing} has no shape"));
+        }
+        t.shape_colour = Some(colour);
         Ok(())
     }
     fn write(&mut self, text: &str) {

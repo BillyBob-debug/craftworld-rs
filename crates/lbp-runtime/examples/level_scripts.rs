@@ -187,13 +187,16 @@ fn run() -> Result<(), String> {
 
     // Optional run on the single level.
     let mut runs = serde_json::Map::new();
-    if let (false, Some(world)) = (entries.is_empty(), last_world) {
+    if let (false, Some(mut world)) = (entries.is_empty(), last_world) {
+        world.add_class_defaults(&vm);
         let mut host = Bindings::new(world);
         let found = instances(&vm, &host.world);
         let mut runner = Runner::default();
         for entry in &entries {
             let mut outcomes = BTreeMap::<String, usize>::new();
             let mut faults = Vec::new();
+            // Faults by site and message, Thing numbers removed.
+            let mut fault_kinds = BTreeMap::<String, usize>::new();
             let mut note = |o: &Outcome, thing: u32, outcomes: &mut BTreeMap<String, usize>| {
                 let key = match o {
                     Outcome::Fault(_) => "fault",
@@ -204,6 +207,8 @@ fn run() -> Result<(), String> {
                 };
                 *outcomes.entry(key.into()).or_default() += 1;
                 if let Outcome::Fault(f) = o {
+                    let kind = f.replace(&format!("thing {thing} "), "thing # ");
+                    *fault_kinds.entry(kind).or_default() += 1;
                     if faults.len() < MAX_FAULTS {
                         faults.push(format!("thing {thing}: {f}"));
                     }
@@ -231,6 +236,7 @@ fn run() -> Result<(), String> {
                     "resumed": resumed,
                     "still_pending": runner.pending(),
                     "first_faults": faults,
+                    "faults_by_kind": fault_kinds,
                 }),
             );
         }
