@@ -113,6 +113,8 @@ fn run() -> Result<(), String> {
     let mut layout = BTreeMap::<&str, usize>::new();
     let mut opcodes = BTreeMap::<String, usize>::new();
     let mut checks_total = BTreeMap::<&str, usize>::new();
+    let mut name_miss_kinds = BTreeMap::<&str, usize>::new();
+    let mut name_miss_values = BTreeMap::<u32, usize>::new();
     let mut natives = BTreeMap::<String, BTreeSet<String>>::new();
     let mut ui_classes = BTreeSet::<String>::new();
     let (mut functions, mut native_functions, mut instructions) = (0usize, 0usize, 0usize);
@@ -186,6 +188,7 @@ fn run() -> Result<(), String> {
         for (k, v) in [
             ("unknown_opcodes", checks.unknown_opcodes),
             ("name_index_out_of_range", checks.name_index_out_of_range),
+            ("unnamed_type_refs", checks.unnamed_type_refs),
             (
                 "function_range_out_of_range",
                 checks.function_range_out_of_range,
@@ -200,6 +203,12 @@ fn run() -> Result<(), String> {
             ),
         ] {
             *checks_total.entry(k).or_default() += v;
+        }
+        for (k, v) in &checks.name_out_of_range_by_kind {
+            *name_miss_kinds.entry(k).or_default() += v;
+        }
+        for v in &checks.name_out_of_range_values {
+            *name_miss_values.entry(*v).or_default() += 1;
         }
         for &bits in &s.bytecode {
             let name = MNEMONICS
@@ -263,6 +272,8 @@ fn run() -> Result<(), String> {
         "layout_counts": layout,
         "functions": functions, "native_functions": native_functions, "instructions": instructions,
         "listing_check_totals": checks_total,
+        "name_out_of_range_by_kind": name_miss_kinds,
+        "name_out_of_range_values_by_script_count": name_miss_values,
         "opcode_counts": opcodes,
         "native_functions_by_class": natives,
         "ui_named_classes": ui_classes,
@@ -281,6 +292,12 @@ fn run() -> Result<(), String> {
     println!(
         "heads {heads:?}; layouts {layout:?}; UI-named classes {}",
         ui_classes.len()
+    );
+    let mut values: Vec<_> = name_miss_values.iter().collect();
+    values.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    println!(
+        "name misses by kind {name_miss_kinds:?}; top values (index: scripts) {:?}",
+        &values[..values.len().min(12)]
     );
     for (k, n) in stops.iter().take(12) {
         println!("  stop {n:>4}  {k}");
