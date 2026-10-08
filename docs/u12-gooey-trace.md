@@ -69,6 +69,17 @@ Two causes, both fixed here (rules INFERRED, the trace reports them):
 - New VM entry `Vm::start_registers` stages registers directly; a run that yields is
   reported as `<yielded>`.
 
+## Second PC run (86684dd) and fix
+Faults dropped to 3 of 15 (receiver `ImplicitRegister0` everywhere): `OnActivateImpl` and
+`OnDeactivateImpl` stop on a missing object field, `PerFrameUpdate` on register 65535, and
+`UpdateUI` still returns after 48 instructions. Cause of the first two (and likely of the
+early return): directory mode loads scripts without GUIDs, and the VM finds superclasses
+by GUID, so a subclass's inherited fields and functions were missing; calls to missing
+script functions fell through to the host as natives and returned defaults. `ui_trace` now
+also takes the catalog input `script_census` uses (SNAPSHOT GAME-DIR), loading each script
+under its MAP GUIDs, and prints how many superclasses are still not loaded. Register 65535
+is unexplained (needs the listing lines at that pc).
+
 ## Tests (synthetic only)
 `crates/lbp-ui-script/tests/gooey_host.rs` `u12_gooey_calls_build_a_frame_tree_and_trace`:
 frame open/close, frame property, translated text, button label, stub bool return,
@@ -79,7 +90,8 @@ script-class argument instance, `SET_V4_X` on a fresh register. Cloud (Linux, Ru
 clean.
 
 ## PC verification (Integrator)
-Use the same extracted `.ff` directory as the D133 `script_check` run (DIR below), and the
+Use the D133 `script_census` inputs (SNAPSHOT and GAME-DIR; written `SNAPSHOT GAME-DIR` where
+DIR appears below), and the
 English `.trans` tables g54800 and g69910 extracted to local-analysis (base first).
 1. `cargo run -q -p lbp-ui-script --example ui_trace -- DIR PodStateMainMenu` and report the
    function list.
