@@ -4,8 +4,10 @@
 //! and writes the totals to a NEW JSON file under ignored `local-analysis/`.
 //! Usage: native_coverage SCRIPT-DIR NEW-JSON
 //! Counting unit: call instruction (CALL, CALLVo, CALLVsp) in a distinct script file.
-//! "Gameplay" = class name without UI words and no call to a Gooey or HUD native,
-//! the same split as the G10 export.
+//! "Test" = a script that calls a `Test.*` native (the game's own test scripts).
+//! "Gameplay" = not a test script, class name without UI words and no call to a Gooey or
+//! HUD native (the G10 export's split, minus test scripts).
+//! Natives the VM handles itself (`System.Yield__`) count as bound.
 use lbp_level::script::{self, class, Class, Script};
 use lbp_level::Limits;
 use lbp_script_vm::{natives, signature, Vm};
@@ -129,9 +131,13 @@ fn run() -> Result<(), String> {
             None => not_read += 1,
         }
     }
-    let bound_keys: Vec<String> = natives::bound().map(|(c, m)| format!("{c}.{m}")).collect();
-    let (mut all, mut gameplay) = (Tally::default(), Tally::default());
+    let bound_keys: Vec<String> = natives::bound()
+        .chain(natives::VM_HANDLED)
+        .map(|(c, m)| format!("{c}.{m}"))
+        .collect();
+    let (mut all, mut gameplay, mut tests) = (Tally::default(), Tally::default(), Tally::default());
     let (mut calls, mut script_calls, mut gameplay_scripts) = (0usize, 0usize, 0usize);
+    let mut test_scripts = 0usize;
     let mut unparsed = 0usize;
     let mut unknown_codes = BTreeMap::<String, usize>::new();
     for (class_name, sites) in &scripts {
@@ -155,14 +161,15 @@ fn run() -> Result<(), String> {
                     }
                 }
             }
-            native_sites.push((
-                format!("{owner}.{name}"),
-                natives::lookup(owner, name).is_some(),
-                owner,
-            ));
+            let key = format!("{owner}.{name}");
+            let bound = bound_keys.contains(&key);
+            native_sites.push((key, bound, owner));
         }
         let lower = class_name.to_lowercase();
-        let is_gameplay = !UI_WORDS.iter().any(|w| lower.contains(w))
+        let is_test = native_sites.iter().any(|(_, _, o)| o.as_str() == "Test");
+        test_scripts += usize::from(is_test);
+        let is_gameplay = !is_test
+            && !UI_WORDS.iter().any(|w| lower.contains(w))
             && !native_sites
                 .iter()
                 .any(|(_, _, o)| o.starts_with("Gooey") || o.to_uppercase().contains("HUD"));
@@ -171,6 +178,9 @@ fn run() -> Result<(), String> {
             all.add(key, *bound);
             if is_gameplay {
                 gameplay.add(key, *bound);
+            }
+            if is_test {
+                tests.add(key, *bound);
             }
         }
     }
@@ -189,6 +199,8 @@ fn run() -> Result<(), String> {
         "all": all.json(&bound_keys),
         "gameplay_scripts": gameplay_scripts,
         "gameplay": gameplay.json(&bound_keys),
+        "test_scripts": test_scripts,
+        "test": tests.json(&bound_keys),
     });
     let text = serde_json::to_string_pretty(&doc).map_err(|e| e.to_string())?;
     std::fs::OpenOptions::new()
@@ -199,7 +211,8 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     println!(
         "files {} read {}; calls {} (script {}); native calls {} bound {}; \
-         gameplay scripts {} native calls {} bound {}; unparsed names {}; unknown codes {:?}",
+         gameplay scripts {} native calls {} bound {}; test scripts {} native calls {} bound {}; \
+         unparsed names {}; unknown codes {:?}",
         paths.len(),
         scripts.len(),
         calls,
@@ -209,6 +222,9 @@ fn run() -> Result<(), String> {
         gameplay_scripts,
         gameplay.native_calls,
         gameplay.bound_calls,
+        test_scripts,
+        tests.native_calls,
+        tests.bound_calls,
         unparsed,
         unknown_codes
     );

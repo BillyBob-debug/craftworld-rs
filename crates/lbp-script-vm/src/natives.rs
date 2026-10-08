@@ -82,6 +82,8 @@ pub trait World {
     fn num_players(&mut self) -> Result<i32, String> {
         Err(not_available("players"))
     }
+    /// Outcome of a `Test.Check*` / `Test.Fail` native in the game's own test scripts.
+    fn test_check(&mut self, _passed: bool, _message: &str, _line: i32) {}
     /// Uniform in [0, 1); only `NonDeterministic*` natives use it.
     fn random_unit(&mut self) -> f32 {
         0.
@@ -318,6 +320,37 @@ fn len3(v: [f32; 4]) -> f32 {
     (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt()
 }
 
+/// `Test.*(..., message, line)`: reports one check; the message and line are the last two
+/// parameters (INFERRED from the `Q7StringAi` suffix every Test native shares).
+fn report(w: &mut dyn World, c: &Call<'_>, passed: bool) -> Result<Value, String> {
+    let n = c.params.len();
+    let message = text(param(c, n.wrapping_sub(2))?)?;
+    let line = int(param(c, n.wrapping_sub(1))?)?;
+    w.test_check(passed, message, line);
+    Ok(Value::Void)
+}
+
+/// `CheckEqual` on vectors compares the components the type has (V2: 2, V3: 3, V4: 4).
+fn equal_components(w: &mut dyn World, c: &Call<'_>, k: usize) -> Result<Value, String> {
+    let (a, b) = (vec4(param(c, 0)?)?, vec4(param(c, 1)?)?);
+    report(w, c, a[..k] == b[..k])
+}
+
+fn equal_values(w: &mut dyn World, c: &Call<'_>) -> Result<Value, String> {
+    let (a, b) = (param(c, 0)?, param(c, 1)?);
+    if std::mem::discriminant(a) != std::mem::discriminant(b) {
+        return Err(format!("CheckEqual on {a:?} and {b:?}"));
+    }
+    report(w, c, a == b)
+}
+
+fn boolean(v: &Value) -> Result<bool, String> {
+    match v {
+        Value::Bool(b) => Ok(*b),
+        other => Err(format!("expected bool, got {other:?}")),
+    }
+}
+
 const TABLE: &[(&str, &str, NativeFn)] = &[
     // System.Yield__ is handled inside the VM (it suspends the call).
     ("Math", "floor__f", |_, c| {
@@ -493,7 +526,41 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     ("Game", "GetNumPlayers__", |w, _| {
         Ok(Value::Int(w.num_players()?))
     }),
+    // ---- the game's own test scripts ----
+    ("Test", "Check__bQ7StringAi", |w, c| {
+        let ok = boolean(param(c, 0)?)?;
+        report(w, c, ok)
+    }),
+    ("Test", "CheckFalse__bQ7StringAi", |w, c| {
+        let ok = !boolean(param(c, 0)?)?;
+        report(w, c, ok)
+    }),
+    ("Test", "Fail__Q7StringAi", |w, c| report(w, c, false)),
+    ("Test", "CheckEqual__iiQ7StringAi", equal_values),
+    ("Test", "CheckEqual__bbQ7StringAi", equal_values),
+    ("Test", "CheckEqual__jjQ7StringAi", equal_values),
+    ("Test", "CheckEqual__ffQ7StringAi", equal_values),
+    ("Test", "CheckEqual__ppQ7StringAi", |w, c| {
+        equal_components(w, c, 2)
+    }),
+    ("Test", "CheckEqual__qqQ7StringAi", |w, c| {
+        equal_components(w, c, 3)
+    }),
+    ("Test", "CheckEqual__rrQ7StringAi", |w, c| {
+        equal_components(w, c, 4)
+    }),
+    ("Test", "CheckSimilar__fffQ7StringAi", |w, c| {
+        let (a, b, eps) = (
+            float(param(c, 0)?)?,
+            float(param(c, 1)?)?,
+            float(param(c, 2)?)?,
+        );
+        report(w, c, (a - b).abs() <= eps)
+    }),
 ];
+
+/// Natives the VM itself handles; they never reach a host.
+pub const VM_HANDLED: [(&str, &str); 1] = [("System", "Yield__")];
 
 #[cfg(test)]
 mod tests {
@@ -603,5 +670,65 @@ mod tests {
             .unwrap_err()
             .contains("translated text"));
         assert!(dispatch(&mut Tree, "Gooey", "EndFrame__", &[]).is_none());
+    }
+
+    #[test]
+    fn test_natives_report_checks() {
+        #[derive(Default)]
+        struct Log(Vec<(bool, String, i32)>);
+        impl World for Log {
+            fn test_check(&mut self, passed: bool, message: &str, line: i32) {
+                self.0.push((passed, message.into(), line));
+            }
+        }
+        let mut log = Log::default();
+        let msg = || Value::Str("m".into());
+        let mut run =
+            |m: &str, args: Vec<Value>| dispatch(&mut log, "Test", m, &args).expect("bound");
+        let v = |a: [f32; 4]| Value::Vec4(a);
+        run(
+            "CheckEqual__iiQ7StringAi",
+            vec![Value::Int(2), Value::Int(2), msg(), Value::Int(9)],
+        )
+        .unwrap();
+        run(
+            "CheckEqual__ppQ7StringAi",
+            vec![
+                v([1., 2., 3., 4.]),
+                v([1., 2., 0., 0.]),
+                msg(),
+                Value::Int(9),
+            ],
+        )
+        .unwrap();
+        run(
+            "CheckEqual__rrQ7StringAi",
+            vec![
+                v([1., 2., 3., 4.]),
+                v([1., 2., 0., 0.]),
+                msg(),
+                Value::Int(9),
+            ],
+        )
+        .unwrap();
+        run(
+            "CheckSimilar__fffQ7StringAi",
+            vec![
+                Value::Float(1.),
+                Value::Float(1.05),
+                Value::Float(0.1),
+                msg(),
+                Value::Int(3),
+            ],
+        )
+        .unwrap();
+        // Mixed types are a fault, not a failed check.
+        assert!(run(
+            "CheckEqual__iiQ7StringAi",
+            vec![Value::Int(1), Value::Float(1.), msg(), Value::Int(1)]
+        )
+        .is_err());
+        let passed: Vec<_> = log.0.iter().map(|(p, _, l)| (*p, *l)).collect();
+        assert_eq!(passed, [(true, 9), (true, 9), (false, 9), (true, 3)]);
     }
 }
