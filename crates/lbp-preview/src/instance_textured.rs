@@ -33,6 +33,16 @@ pub fn select_instance_diffuse(
         Ok(selection) if selection.product_tree.is_some() => {
             return Err("Unsupported: product tree under a supplied instance color".into());
         }
+        // D100 (docs/d100-grid-graph-bake.md): evaluated graphs only with the plain
+        // ThingColor-to-COLOR substitution (no folds, nested tint or UV subtraction).
+        Ok(selection)
+            if selection.grid_graph.is_some()
+                && !crate::grid_graph::instance_supported(projection) =>
+        {
+            return Err(
+                "Unsupported: graph evaluator under a folded or rewritten instance input".into(),
+            );
+        }
         Ok(selection) => selection,
         Err(error) => return Err(error),
     };

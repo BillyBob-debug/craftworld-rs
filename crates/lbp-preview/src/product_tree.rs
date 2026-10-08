@@ -519,10 +519,17 @@ mod tests {
             .contains("COLOR-only"));
         let mut add = g.clone();
         add.boxes[3].type_raw = 11;
-        let fixed = crate::select_diffuse(&add).unwrap_err();
-        assert!(!fixed.contains("product tree"), "{fixed}");
+        // D100: an ADD inside the tree is no product tree; the graph evaluator bakes it.
+        let evaluated = crate::select_diffuse(&add).unwrap();
+        assert!(evaluated.product_tree.is_none() && evaluated.grid_graph.is_some());
         let mut swizzled = g.clone();
         swizzled.wires[0].swizzle_raw[0] = b'r';
+        // D100: a one-component swizzle broadcasts in the graph evaluator.
+        assert!(crate::select_diffuse(&swizzled)
+            .unwrap()
+            .grid_graph
+            .is_some());
+        swizzled.wires[0].swizzle_raw[1] = b'g';
         assert!(!crate::select_diffuse(&swizzled)
             .unwrap_err()
             .contains("product tree"));
@@ -575,9 +582,9 @@ mod tests {
         g.boxes[4] = sample(2., 2, 0);
         assert!(crate::select_diffuse(&g).unwrap().third_sample.is_some());
         g.boxes[4].parameters_raw[0] = 0;
-        assert!(crate::select_diffuse(&g)
-            .unwrap_err()
-            .contains("nonzero scale/offset"));
+        // D100: off the integer grid the evaluator adds its reason after D65's.
+        let reason = crate::select_diffuse(&g).unwrap_err();
+        assert!(reason.contains("nonzero scale/offset") && reason.contains("graph evaluator"));
     }
     #[test]
     fn d99_four_texture_trees_need_two_sharing_pairs() {
@@ -703,11 +710,11 @@ mod tests {
         let s = crate::select_diffuse(&g).unwrap();
         assert_eq!(s.tint.values(), [0.25, 0.25, 0.5, 0.25]);
         assert_eq!(s.product_tree.unwrap().color_leaves, 2);
-        // Overbright CONST: refused with the tint bound reason.
+        // Overbright CONST: the D99 tree refuses its tint, then the D100 graph
+        // evaluator takes the graph (constants within -16..16, baked and clamped).
         g.boxes[4].parameters_raw[0] = 4.888889f32.to_bits();
-        assert!(crate::select_diffuse(&g)
-            .unwrap_err()
-            .contains("tint outside finite 0..1"));
+        let over = crate::select_diffuse(&g).unwrap();
+        assert!(over.product_tree.is_none() && over.grid_graph.is_some());
         // CONST2/CONST3 leaves: vector width not established.
         g.boxes[4].type_raw = 5;
         assert!(crate::select_diffuse(&g)
