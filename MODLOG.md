@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 — First level on screen (D113, D114)
+
+tutorial_23 renders in the Bevy viewer from 01.33 data: 14/14 meshes at POS and 9/9
+visible shapes (straight extrusion, labelled approximate). Level mode flags and
+--qa-hide-ui. +0 viewable / +0 Complete.
+
 ## 2026-10-08 — Batch: first levels (D106-D108) + D109-D112
 
 Level oracle (385/398 parse; first target tutorial_23) and new lbp-level crate (236/236

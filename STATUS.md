@@ -3471,3 +3471,33 @@ Not tested: level rendering (no viewer change yet), Vita/LEERDAMMER levels, plan
 lbp-level, 15 missing fonts, .ff scripts.
 Next: L2/L5 level scene in Bevy for tutorial_23 (RENDER_MESH things at POS first), then
 Lx straight shape extrusion.
+
+## Batch 2026-10-08f — first level on screen: D113, D114 (2026-10-08)
+
+Detail: [d113-level-scene.md](docs/d113-level-scene.md), [d114-shape-extrude.md](docs/d114-shape-extrude.md).
+
+- D114 (Lx): `lbp_level::shape_mesh` straight extrusion (own hole-bridging triangulation,
+  mirrored transforms, half-depth slabs, planar UV 1/500), labelled preview approximation.
+  01.33 in-band levels: 121,167 of 121,286 drawable shapes extrude; 119 rejected (bad
+  outlines); half-depth layer tiling 2,367 adjacent pairs vs 0 at full depth.
+- D113 (L2/L5): Bevy level mode `--level-guid` / `--level-path` / `--level-report`; scene
+  built in `lbp_preview::level_scene` (no Bevy). RENDER_MESH Things at POS (static bind
+  pose), shapes batched per gfx material through the existing material route.
+- Integrator: `--qa-hide-ui` capture flag (panels off) added to lbp-bevy-viewer.
+- tutorial_23 (GUID 0001db4f): 91 Things; 14/14 RENDER_MESH drawn (8 meshes, 2 with neutral
+  groups); 36 SHAPE, 9 extruded and drawn (27 have no GENERATED_MESH: collision only),
+  1 flat fallback colour; 3 decorations not drawn. Rookie Test (headless): 333 of 455
+  meshes drawn (122 need bone placement), 599 of 857 shapes.
+- Visual check: native capture on non-primary monitor 165v0
+  (local-analysis/d113-tutorial23-clean.png): recognisable, upright, sensibly placed level
+  pieces; no backdrop, no bevels, unlit. Sent privately to the owner; not committed.
+**+0 newly viewable / +0 newly Complete** (assets unchanged).
+
+Commands (after `. ./scripts/use-local-rust.ps1`):
+- fmt check, workspace Clippy -D warnings, tests (lbp-preview, -bevy-viewer, -mesh, -level, -viewer, -resource, -catalog), both viewer builds.
+- lbp-bevy-viewer --snapshot ... --level-path lbp2/th_tutorials/levels/tutorial_23.bin [--qa-hide-ui] --qa-capture local-analysis/d113-tutorial23[-clean].png: exit 0.
+
+Not tested: backdrop/REF plans, bevels, lighting, bone-attached props, other levels in
+the window, legacy viewer level mode (none).
+Next: queued PRs #18 (skin weights/morphs), #19 (animation keyframes), #20 (UI layer);
+level: backdrop plan, bevels, bone-attached props.
