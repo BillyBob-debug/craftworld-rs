@@ -6,6 +6,7 @@
 //! Applicability, conflicts and synthetic/local oracle evidence: docs/mesh-prefix.md.
 //! inspect returns prefix metadata; geometry and UV arrays require separate bounded APIs.
 pub use lbp_resource::binary::Error;
+pub mod static_mesh;
 mod uv;
 use serde::Serialize;
 use sha2::{Digest, Sha256};

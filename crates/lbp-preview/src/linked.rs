@@ -1321,6 +1321,11 @@ pub(crate) enum UvInput<'a> {
     Mesh(&'a [u8]),
     /// D113 level shapes: generated UV0 only (UV1 requests are refused as absent).
     Generated(&'a [[f32; 2]]),
+    /// D119 static backdrop meshes: stored UV0 and UV1 (f16 pairs, decoded).
+    Static {
+        uv0: &'a [[f32; 2]],
+        uv1: &'a [[f32; 2]],
+    },
 }
 impl UvInput<'_> {
     pub(crate) fn decode(self, control: &LoadControl) -> Result<lbp_mesh::UvCoordinates, String> {
@@ -1339,6 +1344,24 @@ impl UvInput<'_> {
                 },
                 channels: vec![uv.to_vec()],
             }),
+            Self::Static { uv0, uv1 } => {
+                if uv0.len() != uv1.len() {
+                    return Err("Invalid: static mesh UV channel lengths differ".into());
+                }
+                Ok(lbp_mesh::UvCoordinates {
+                    metadata: UvMetadata {
+                        vertex_count: u32::try_from(uv0.len()).map_err(|_| "UV count overflow")?,
+                        channel_count: 2,
+                        channels: (0..2)
+                            .map(|channel| lbp_mesh::UvChannelMetadata {
+                                channel,
+                                uv_bits_sha256: "static mesh f16 (level backdrop)".into(),
+                            })
+                            .collect(),
+                    },
+                    channels: vec![uv0.to_vec(), uv1.to_vec()],
+                })
+            }
         }
     }
 }

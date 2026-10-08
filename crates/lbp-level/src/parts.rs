@@ -195,6 +195,7 @@ const SUPPORTED: &[&str] = &[
     "SHAPE",
     "EFFECTOR",
     "REF",
+    "METADATA",
     "CAMERA_TWEAK",
     "SWITCH_KEY",
     "GAMEPLAY_DATA",
@@ -223,6 +224,31 @@ pub fn supported(name: &str) -> bool {
     SUPPORTED.contains(&name)
 }
 
+/// D119: parts audited for plan Things at heads 0x335..0x340 (Toolkit serialize gates
+/// in that range: PPos localPosition m44 below 0x341; PGroup pre-0x341 bool fields;
+/// PSpriteLight two fog bools below 0x337 (already in its reader); PBody, PRenderMesh,
+/// LevelSettings/PLevelSettings, PMetadata and PScriptName have no gate between 0x335
+/// and 0x341). Every other part stops below 0x341.
+const PRE_BAND_SUPPORTED: &[&str] = &[
+    "BODY",
+    "POS",
+    "RENDER_MESH",
+    "GROUP",
+    "LEVEL_SETTINGS",
+    "METADATA",
+    "SCRIPT_NAME",
+    "SPRITE_LIGHT",
+];
+
+/// `supported` for the band, the audited short list below 0x341.
+pub fn supported_at(name: &str, version: u32) -> bool {
+    if version < 0x341 {
+        PRE_BAND_SUPPORTED.contains(&name)
+    } else {
+        supported(name)
+    }
+}
+
 pub fn supported_parts() -> &'static [&'static str] {
     SUPPORTED
 }
@@ -245,6 +271,9 @@ pub struct PartData {
     pub decorations: Vec<Decoration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub world: Option<World>,
+    /// PLevelSettings tail (backdrop mesh, D119).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level_settings: Option<LevelSettings>,
     /// PScriptName (raw byte count, name length up to the first NUL).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_name: Option<(usize, usize)>,
@@ -324,10 +353,23 @@ pub struct Decoration {
     pub plan_guid: Option<u32>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Default, Serialize)]
 pub struct World {
     pub things: Vec<Option<usize>>,
     pub thing_uid_counter: Option<i32>,
+    /// D119: PWorld `backdrop` / `backdropNew` Thing references (Thing indices) and the
+    /// `backdropPlan` / `backdropNewPlan` plan descriptors (head >= 0x321).
+    pub backdrop: Option<usize>,
+    pub backdrop_new: Option<usize>,
+    pub backdrop_plan: Option<Descriptor>,
+    pub backdrop_new_plan: Option<Descriptor>,
+}
+
+/// D119: the PLevelSettings field after the LevelSettings presets and ambience name.
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct LevelSettings {
+    /// `backdropMesh` resource (STATIC_MESH, head >= 0x2f3).
+    pub backdrop_mesh: Option<Descriptor>,
 }
 
 /// `reference(P*)` for a present part of Thing `me`.
@@ -379,6 +421,9 @@ fn part_body(
         "POS" => {
             let bone_of = thing_ref(r, things)?;
             let anim_hash = r.i32()?;
+            if v < 0x341 {
+                r.m44()?; // localPosition (removed at THING_FLAGS 0x341)
+            }
             let world = r.m44()?;
             things.list[me].data.pos = Some(Pos {
                 bone_of,
@@ -408,17 +453,54 @@ fn part_body(
             things.list[me].data.generated_mesh = Some(g);
         }
         "GROUP" => {
+            // Below 0x341 (plans only): copyright bool before the creator, editable bool
+            // after the plan, then pickupAllMembers and mainSelectableObject bools
+            // (>= 0x30f) instead of the u8 flags. Pre-band flags are reported as 0.
+            let pre = v < 0x341;
+            if pre {
+                r.bool()?;
+            }
             r.bytes(36)?;
             let plan = r.resource(true)?;
+            if pre {
+                r.bool()?;
+            }
             let emitter = thing_ref(r, things)?;
             r.i32()?;
             r.i32()?;
-            let flags = r.u8()?;
+            let flags = if pre {
+                r.bool()?;
+                r.bool()?;
+                0
+            } else {
+                r.u8()?
+            };
             things.list[me].data.group = Some(Group {
                 plan,
                 emitter,
                 flags,
             });
+        }
+        "METADATA" => {
+            // D119 (plans): PMetadata at head > 0x2ba: titleKey, descriptionKey, location,
+            // category u32, primaryIndex i32 (>= 0x195), fluffCost i32, type flags i32,
+            // subType i32, creationDate u32, icon res, reference(PhotoMetadata),
+            // referencable bool (>= 0x15f), allowEmit bool (>= 0x205).
+            for _ in 0..4 {
+                r.u32()?;
+            }
+            for _ in 0..4 {
+                r.i32()?;
+            }
+            r.u32()?;
+            r.resource(false)?;
+            if let Tag::New(_) = r.tag("PhotoMetadata", |r| Ok(r.next_other("PhotoMetadata")))? {
+                r.enter()?;
+                photo_metadata(r)?;
+                r.leave();
+            }
+            r.bool()?;
+            r.bool()?;
         }
         "REF" => {
             let plan = r.resource(true)?;
@@ -480,7 +562,8 @@ fn part_body(
                 level_settings(r)?;
             }
             r.str8()?;
-            r.resource(false)?;
+            let backdrop_mesh = r.resource(false)?;
+            things.list[me].data.level_settings = Some(LevelSettings { backdrop_mesh });
         }
         "CAMERA_TWEAK" => camera_tweak(r)?,
         "JOINT" => {
@@ -800,8 +883,15 @@ fn part_body(
             things.list[me].data.world = Some(World {
                 things: list,
                 thing_uid_counter: Some(uid),
+                ..Default::default()
             });
-            world_tail(r, things)?;
+            let tail = world_tail(r, things)?;
+            if let Some(w) = things.list[me].data.world.as_mut() {
+                w.backdrop = tail.backdrop;
+                w.backdrop_new = tail.backdrop_new;
+                w.backdrop_plan = tail.backdrop_plan;
+                w.backdrop_new_plan = tail.backdrop_new_plan;
+            }
         }
         _ => return r.unsupported(format!("part reader {name}")),
     }
@@ -897,21 +987,28 @@ fn photo_data_ref(r: &mut Reader) -> Result<()> {
     })? {
         r.resource(true)?;
         r.resource(true)?;
-        r.resource(true)?;
-        r.u32()?;
-        r.u32()?;
-        r.wstr()?;
-        r.sha1()?;
-        r.u64()?;
-        let n = r.count(1)?;
-        for _ in 0..n {
-            r.bytes(20)?;
-            r.wstr()?;
-            r.v4()?;
-        }
+        photo_metadata(r)?;
         if r.rev.version() > 0x3c7 {
             r.resource(true)?;
         }
+    }
+    Ok(())
+}
+
+/// PhotoMetadata struct: photo desc, SlotID (2 x u32), levelName wstr, levelHash sha1,
+/// timestamp s64 (same bytes as u64), users array(PhotoUser: 20-byte PSID, wstr, v4).
+fn photo_metadata(r: &mut Reader) -> Result<()> {
+    r.resource(true)?;
+    r.u32()?;
+    r.u32()?;
+    r.wstr()?;
+    r.sha1()?;
+    r.u64()?;
+    let n = r.count(1)?;
+    for _ in 0..n {
+        r.bytes(20)?;
+        r.wstr()?;
+        r.v4()?;
     }
     Ok(())
 }
@@ -940,7 +1037,8 @@ fn egg_link(r: &mut Reader) -> Result<()> {
 }
 
 /// PWorld fields after thingUIDCounter (see module notes, WORLD tail).
-fn world_tail(r: &mut Reader, things: &mut Things) -> Result<()> {
+fn world_tail(r: &mut Reader, things: &mut Things) -> Result<World> {
+    let mut out = World::default();
     let v = r.rev.version();
     let n = r.count(1)?;
     for _ in 0..n {
@@ -952,8 +1050,8 @@ fn world_tail(r: &mut Reader, things: &mut Things) -> Result<()> {
             r.leave();
         }
     }
-    thing_ref(r, things)?;
-    thing_ref(r, things)?;
+    out.backdrop = thing_ref(r, things)?;
+    out.backdrop_new = thing_ref(r, things)?;
     r.f32()?;
     if v >= 0x3a3 {
         r.s32()?;
@@ -1043,8 +1141,8 @@ fn world_tail(r: &mut Reader, things: &mut Things) -> Result<()> {
     if v >= 0x347 {
         r.skip_f32(4)?;
     }
-    r.resource(true)?;
-    r.resource(true)?;
+    out.backdrop_plan = r.resource(true)?;
+    out.backdrop_new_plan = r.resource(true)?;
     if v >= 0x352 {
         r.bool()?;
     }
@@ -1098,7 +1196,7 @@ fn world_tail(r: &mut Reader, things: &mut Things) -> Result<()> {
     if v >= 0x3f1 {
         r.bool()?;
     }
-    Ok(())
+    Ok(out)
 }
 
 /// reference(NpcBehavior) with its inline body (and the ActingData/InputRecording it

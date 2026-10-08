@@ -53,7 +53,8 @@ home view.
   neutral grey and is counted with its reason. Label shown in panel and log:
   "preview approximation: straight extrusion, no bevel, UV scale uncalibrated".
 - Not drawn: DECORATIONS (counted), STICKERS, bones/JOINT placement, animation,
-  MATERIAL_OVERRIDE/TWEAK, editor colour, PShape colour, lighting, backdrop plans.
+  MATERIAL_OVERRIDE/TWEAK, editor colour, PShape colour, lighting. Backdrops: D119
+  ([d119-level-backdrop.md](d119-level-backdrop.md)).
 
 Framing: the whole displayed scene is centred and scaled to unit size (largest axis = 1),
 so the existing orbit camera, clip planes and pan limits apply. Home view yaw 0 / pitch 0

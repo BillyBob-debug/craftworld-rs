@@ -30,6 +30,7 @@
 !/scripts/PlanOracle.java
 !/scripts/PlanInventoryOracle.java
 !/scripts/LevelOracle.java
+!/scripts/PlanThingOracle.java
 !/scripts/TranslationOracle.java
 !/crates/
 !/crates/**/

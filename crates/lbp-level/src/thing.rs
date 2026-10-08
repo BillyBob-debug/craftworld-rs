@@ -90,6 +90,8 @@ pub const PARTS: &[(&str, u32, i32, bool)] = &[
 ];
 
 const CREATOR_ANIM_HISTORY: i32 = 0x32;
+/// Lowest head whose Things this reader accepts (plans only; D119).
+pub const PRE_BAND_MIN: u32 = 0x335;
 
 /// Flag bit tested for a part, or None when the part can never appear at this head
 /// (LBP2 heads only: subVersion is always 0 here).
@@ -227,7 +229,10 @@ pub fn thing_array(r: &mut Reader, things: &mut Things) -> Result<Vec<Option<usi
 fn thing_body(r: &mut Reader, things: &mut Things, me: usize) -> Result<()> {
     r.check_cancel()?;
     let v = r.rev.version();
-    if !(0x341..=crate::LBP2_MAX).contains(&v) || r.rev.head > 0xffff {
+    // D119: plans at 0x335..0x340 (four local backdrop plans) use the pre-0x341 header
+    // and a short audited part list (`parts::supported_at`). RLevel refuses heads below
+    // 0x341 before any Thing is read, so levels keep the D107 band.
+    if !(PRE_BAND_MIN..=crate::LBP2_MAX).contains(&v) || r.rev.head > 0xffff {
         return r.unsupported(format!("Thing layout at head 0x{:x}", r.rev.head));
     }
     if r.u8()? != 0xaa {
@@ -242,8 +247,16 @@ fn thing_body(r: &mut Reader, things: &mut Things, me: usize) -> Result<()> {
     things.list[me].old_emitter = emitter;
     let created_by = r.i16()?;
     let changed_by = r.i16()?;
-    let plan_guid = r.guid()?;
-    let flags = r.i8()?;
+    let (plan_guid, flags) = if v < 0x341 {
+        // Toolkit Thing.serialize below THING_FLAGS (0x341): isStamping bool (> 0x21a),
+        // planGUID (>= 0x254), hidden bool (>= 0x2f2); no flags byte.
+        r.bool()?;
+        let plan = r.guid()?;
+        r.bool()?;
+        (plan, 0)
+    } else {
+        (r.guid()?, r.i8()?)
+    };
     let parts_revision = r.s32()?;
     let part_flags = r.u64()?;
     let (present, unmapped) = present_parts(r.rev.head, part_flags, parts_revision);
@@ -270,7 +283,7 @@ fn thing_body(r: &mut Reader, things: &mut Things, me: usize) -> Result<()> {
             });
             continue;
         }
-        if !parts::supported(name) {
+        if !parts::supported_at(name, v) {
             return Err(Stop::UnsupportedPart {
                 part: name,
                 head: r.rev.head,

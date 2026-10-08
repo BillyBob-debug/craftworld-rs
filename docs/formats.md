@@ -653,3 +653,17 @@ own compiled fragment programs fetch all 54 UV-addressed word-2 samples (6 mater
 attribute (decal UV) is not used. Agrees with Toolkit `GfxAssembler`; conflicts with
 Toolkit's glTF export (`texCoord` = raw word). Pins, decode method and counts:
 [d104-uv-channel-2.md](d104-uv-channel-2.md).
+
+## D119 level backdrops, static meshes and plan Things
+
+PWorld `backdrop` (Thing reference) and `backdropPlan` (plan descriptor, head >= 0x321);
+the backdrop Thing's PLevelSettings `backdropMesh` names a STATIC_MESH (`SMHb`). SMH
+header: no branch/flags/compressed fields; a StaticMeshInfo struct (fixed BE, three
+lightmap descriptors, counts, primitives, tree nodes, "HELP" marker) precedes the
+chunk-compressed vertex (stride 0x20, f16 UVs) and u16 index streams; primitive indices
+are relative to vertexStart; type 5 lists, 6 strips with 0xFFFF restart. RPlan thingData
+reads with the shared Thing reader; plans at 0x335..0x340 use the pre-0x341 Thing header
+(isStamping, planGUID, hidden) and PPos localPosition / old PGroup fields.
+`CONFIRMED_FROM_COMMUNITY_CODE` + `CONFIRMED_FROM_LOCAL_DATA` (27/27 SMH consistent,
+42/42 backdrop plans equal to a Toolkit oracle). Details:
+[d119-level-backdrop.md](d119-level-backdrop.md).
