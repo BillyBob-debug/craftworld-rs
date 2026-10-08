@@ -18,6 +18,7 @@ env:
   CRATES: >-
     -p lbp-core -p lbp-io -p lbp-archive -p lbp-resource -p lbp-texture
     -p lbp-mesh -p lbp-catalog -p lbp-preview -p lbp-cli -p lbp-gooey
+    -p lbp-level -p lbp-script-vm
 
 jobs:
   rust:
