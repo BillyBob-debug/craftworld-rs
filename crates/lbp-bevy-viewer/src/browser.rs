@@ -188,7 +188,7 @@ impl Browser {
         ui.small(format!(
             "{ready} ready for completeness review: all diffuse groups supported"
         ));
-        ui.small("Counts are distinct attempted GUIDs, include complete in viewable, and ignore search filters. Corpus totals remain unknown.");
+        ui.small("Counts are distinct attempted GUIDs, include complete in viewable, and ignore search filters. Corpus totals: see the Corpus counts window (census files).");
         self.refresh(catalog);
         ui.label(format!(
             "{} shown / {} catalog rows",

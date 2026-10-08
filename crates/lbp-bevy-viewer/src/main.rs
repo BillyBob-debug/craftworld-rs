@@ -8,7 +8,11 @@ use bevy::{
     render::view::screenshot::{save_to_disk, Screenshot, ScreenshotCaptured},
 };
 use bevy_egui::{egui, EguiContexts, EguiPlugin, EguiPrimaryContextPass};
-use lbp_catalog::{attachment::AttachedSource, Catalog, LoadControl};
+use lbp_catalog::{
+    attachment::AttachedSource,
+    census_summary::{census_flag, CorpusCounts, LineKind, CENSUS_FLAGS_HELP},
+    Catalog, LoadControl,
+};
 use std::{
     path::PathBuf,
     sync::{mpsc, Arc, Mutex},
@@ -55,6 +59,7 @@ struct Viewer {
     ready_frames: u32,
     synthetic: bool,
     browser: browser::Browser,
+    census: CorpusCounts,
 }
 impl Viewer {
     fn start(&mut self) {
@@ -173,7 +178,9 @@ fn options() -> Result<Viewer, String> {
         ready_frames: 0,
         synthetic: false,
         browser: browser::Browser::default(),
+        census: CorpusCounts::default(),
     };
+    let mut print_census = false;
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
         if flag == "--instance-rgba" {
@@ -217,8 +224,19 @@ fn options() -> Result<Viewer, String> {
             v.synthetic = true;
             continue;
         }
+        if flag == "--print-census" {
+            print_census = true;
+            continue;
+        }
+        if let Some(role) = census_flag(&flag) {
+            let path = args
+                .next()
+                .ok_or_else(|| format!("{flag} requires a FILE"))?;
+            v.census.load(role, std::path::Path::new(&path))?;
+            continue;
+        }
         if flag == "--help" {
-            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -243,6 +261,23 @@ fn options() -> Result<Viewer, String> {
             }
             _ => return Err(format!("Unknown option {flag}")),
         }
+    }
+    if print_census {
+        for (_, line) in v.census.lines() {
+            println!("{line}");
+        }
+        std::process::exit(0);
+    }
+    if !v.census.is_empty() {
+        println!(
+            "Corpus counts: {} mesh census file(s), texture census {}",
+            v.census.mesh.len(),
+            if v.census.texture.is_some() {
+                "given"
+            } else {
+                "not given"
+            }
+        );
     }
     if !v.synthetic && (v.snapshot.is_empty() || v.game.is_empty()) {
         return Err(
@@ -670,7 +705,37 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
         ui.label("Left drag: orbit\nRight / middle drag: pan\nWheel: zoom • R: reset • F: frame");
         ui.small("Unlit • opaque • sRGB • double-sided\nGenerated diagnostic normals; no bone/morph pose.\nTop mip only. Original game lighting, alpha and axis conventions unverified.");
     });
+    if !v.synthetic || !v.census.is_empty() {
+        census_window(ctx, &v.census);
+    }
     Ok(())
+}
+/// Corpus-count window; text and validation come from `lbp_catalog::census_summary`.
+fn census_window(ctx: &egui::Context, census: &CorpusCounts) {
+    egui::Window::new("Corpus counts (census files)")
+        .default_pos([420., 10.])
+        .default_width(380.)
+        .default_open(true)
+        .show(ctx, |ui| {
+            egui::ScrollArea::vertical()
+                .max_height(420.)
+                .show(ui, |ui| {
+                    for (kind, text) in census.lines() {
+                        match kind {
+                            LineKind::Heading => {
+                                ui.separator();
+                                ui.strong(text);
+                            }
+                            LineKind::Value => {
+                                ui.label(text);
+                            }
+                            LineKind::Note => {
+                                ui.small(text);
+                            }
+                        }
+                    }
+                });
+        });
 }
 // Bevy injects independent input resources and the camera query into this system.
 #[allow(clippy::too_many_arguments)]
@@ -1015,6 +1080,7 @@ mod tests {
             ready_frames: 0,
             synthetic: false,
             browser: browser::Browser::default(),
+            census: CorpusCounts::default(),
         };
         let mut entities = vec![entity];
         for _ in 0..3 {
