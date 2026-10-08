@@ -27,8 +27,11 @@
 //!   number), copyright bool + NetworkPlayerID struct, UserCreatedDetails above 0x1aa,
 //!   CreationHistory (wide names) above 0x1b0, allowEmit above 0x204, fixed s64
 //!   dateAdded above 0x221, shareable above 0x222.
+//! - Leerdammer branch (0x4c44, Toolkit `Branch.LEERDAMMER`) at its head 0x272 reads the
+//!   middle layout; from branch revision 0x8 (`LD_LAMS_KEYS`) it has title/description
+//!   keys instead of a tag, and the RPlan placement uses keys too (`RPlan.serialize`).
 //! - head < 0x197 (no plan details; the branches Toolkit keeps for older heads are not
-//!   implemented), branches other than 0 and LBP3 are Unsupported.
+//!   implemented), other branches and LBP3 are Unsupported.
 //!
 //! RPlan tail: i32 plan revision (ignored), bytearray thingData (skipped here, D119 reads
 //! it), then from head 0x197 the details, then location and category as u32 keys from
@@ -45,6 +48,16 @@ use serde::Serialize;
 const PLAN_DETAILS: u32 = 0x197;
 /// Toolkit `Revisions.LAMS_KEYS`.
 const LAMS_KEYS: u32 = 0x2bb;
+/// Toolkit `Branch.LEERDAMMER` id, `Revisions.LD_HEAD`, `Revisions.LD_LAMS_KEYS`.
+const LEERDAMMER: u16 = 0x4c44;
+const LD_HEAD: u32 = 0x272;
+const LD_LAMS_KEYS: u16 = 0x8;
+
+/// LAMS keys replace translation tags: head 0x2bb, or Leerdammer branch revision 0x8.
+fn lams_keys(rev: Revision) -> bool {
+    rev.version() >= LAMS_KEYS
+        || (rev.branch_id == LEERDAMMER && rev.branch_revision >= LD_LAMS_KEYS)
+}
 pub const MAX_INPUT: usize = 16 * 1024 * 1024;
 const MAX_EXPANDED: usize = 64 * 1024 * 1024;
 
@@ -188,7 +201,7 @@ pub fn read_plan_details_payload(
             });
         }
         let details = item_details(&mut r)?;
-        let placement = if v >= LAMS_KEYS {
+        let placement = if lams_keys(rev) {
             Placement::Keys {
                 location: r.u32()?,
                 category: r.u32()?,
@@ -216,7 +229,10 @@ pub fn read_plan_details_payload(
 
 fn check_band(r: &Reader) -> Result<()> {
     let rev = r.rev;
-    if rev.branch_id != 0 || rev.head >> 16 != 0 || rev.head > crate::LBP2_MAX {
+    // Leerdammer (0x4c44) is read only at its own head; its branch revisions change CThing
+    // and profile data, which this reader skips, and the LAMS key switch (`lams_keys`).
+    let branch_ok = rev.branch_id == 0 || (rev.branch_id == LEERDAMMER && rev.head == LD_HEAD);
+    if !branch_ok || rev.head >> 16 != 0 || rev.head > crate::LBP2_MAX {
         return r.unsupported(format!(
             "details branch 0x{:x} / head 0x{:x}",
             rev.branch_id, rev.head
@@ -326,7 +342,7 @@ fn middle(r: &mut Reader) -> Result<ItemDetails> {
     let shareable = Some(r.bool()?);
     let copyright = Some(r.bool()?);
     let flags = if v > 0x334 { r.u8()? } else { 0 };
-    let (title_key, description_key, translation_tag) = if v > 0x2ba {
+    let (title_key, description_key, translation_tag) = if lams_keys(r.rev) {
         (Some(r.u32()?), Some(r.u32()?), None)
     } else {
         (None, None, Some(str8(r)?))

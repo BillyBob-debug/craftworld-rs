@@ -278,6 +278,82 @@ fn u5b_early_layout_fixed_fields_and_tags() {
     }
 }
 
+/// Leerdammer branch plan at its head 0x272 (middle layout).
+fn leerdammer_plan(keys: bool, flags: u8) -> Vec<u8> {
+    let mut w = W::new(flags);
+    prefix(&mut w);
+    for v in [0x55u32, 0, 9, 1, 2, 3, 10, 11, 0] {
+        w.raw(&v.to_be_bytes()); // sound, slot, indices, lastUsed, numUses, pad (> 0x234)
+    }
+    w.raw(&5i64.to_be_bytes());
+    for v in [100u32, 0xff, 1 << 3, 2, 5] {
+        w.raw(&v.to_be_bytes());
+    }
+    player(&mut w, "mm"); // no length prefixes from 0x234
+    w.u8(1).u8(0).u8(1); // allowEmit, shareable, copyright (no flags byte below 0x335)
+    if keys {
+        w.u32(0x77).u32(0x88);
+    } else {
+        str8(&mut w, "BOX");
+    }
+    wstr(&mut w, "");
+    wstr(&mut w, "");
+    w.u32(0); // creation history
+    desc_guid(&mut w, 0x99);
+    w.u32(0).u32(0); // photo, eyetoy
+    if keys {
+        w.u32(0x12).u32(0x34);
+    } else {
+        str8(&mut w, "LOC");
+        str8(&mut w, "CAT");
+    }
+    w.b
+}
+
+#[test]
+fn u5b_leerdammer_branch_keys_follow_its_revision() {
+    for (branch_revision, keys) in [(0x8u16, true), (0x17, true), (0x7, false)] {
+        for flags in [0u8, 7] {
+            let mut rv = rev(0x272, flags);
+            rv.branch_id = 0x4c44;
+            rv.branch_revision = branch_revision;
+            let report = read_plan_details_payload(
+                &leerdammer_plan(keys, flags),
+                rv,
+                Limits::default(),
+                &none,
+            );
+            let p = report
+                .result
+                .unwrap_or_else(|e| panic!("branch rev {branch_revision}: {e:?}"));
+            assert_eq!(report.trailing_bytes, 0);
+            let d = p.details.unwrap();
+            assert_eq!(d.date_added, 5);
+            assert_eq!(d.creator, Ref::Value("mm".to_owned()));
+            assert_eq!(d.icon.unwrap().guid, Some(0x99));
+            if keys {
+                assert_eq!((d.title_key, d.description_key), (Some(0x77), Some(0x88)));
+                assert_eq!(
+                    p.placement,
+                    Some(Placement::Keys {
+                        location: 0x12,
+                        category: 0x34
+                    })
+                );
+            } else {
+                assert_eq!(d.translation_tag.as_deref(), Some("BOX"));
+                assert!(matches!(p.placement, Some(Placement::Tags { .. })));
+            }
+        }
+    }
+    // The branch is read only at its own head.
+    let mut rv = rev(0x273, 0);
+    rv.branch_id = 0x4c44;
+    rv.branch_revision = 8;
+    let r = read_plan_details_payload(&leerdammer_plan(true, 0), rv, Limits::default(), &none);
+    assert!(matches!(r.result, Err(Stop::Unsupported { .. })));
+}
+
 #[test]
 fn u5_type_bits_follow_the_game_version() {
     // Bit 17 is FLOOD_FILL in LBP1 and EDIT_MODE_TOOL in LBP2; bit 12 PAINT vs SEQUENCER.
