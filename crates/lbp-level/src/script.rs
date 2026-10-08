@@ -33,7 +33,10 @@
 //!   units, i32 unit count + UTF-16BE units, same rule.
 //! - head >= 0x30c: s64 constants as a `longvector` (flag 2: i32 count, u8 byte width,
 //!   then width planes of count bytes, little-endian per element; else i32 count + u64
-//!   each). Toolkit `Revisions` names 0x30b; code gate used (PC check).
+//!   each). Toolkit `Revisions` names 0x30b; code gate used (PC check). The planes hold
+//!   zigzag values, `(n >> 1) ^ -(n & 1)` (INFERRED: Toolkit keeps the raw value; with
+//!   zigzag the game's TestS64 checks at test.cod 1551 and 1562 pass, PC D143). The
+//!   uncompressed u64 is read as two's complement (INFERRED, untested on game data).
 //! - f32 constants: i32 count + fixed f32 each. head >= 0x1ec: depending GUIDs, i32 count +
 //!   u32 each (compressed per flag 1).
 //!
@@ -138,7 +141,7 @@ pub struct Script {
     pub locals: Vec<LocalVariable>,
     pub strings_a: Vec<String>,
     pub strings_w: Vec<String>,
-    pub constants_s64: Option<Vec<u64>>,
+    pub constants_s64: Option<Vec<i64>>,
     pub constants_f32: Vec<f32>,
     pub depending_guids: Option<Vec<u32>>,
 }
@@ -324,7 +327,13 @@ fn script(r: &mut Reader) -> Result<Script> {
         String::from_utf16_lossy(&wide[a..b]).replace('\0', "")
     })?;
     let constants_s64 = if r.rev.version() >= 0x30c {
-        Some(long_vector(r)?)
+        let zigzag = r.rev.compression & FLAG_VECTORS != 0;
+        let raw = long_vector(r)?;
+        Some(
+            raw.into_iter()
+                .map(|n| if zigzag { unzigzag(n) } else { n as i64 })
+                .collect(),
+        )
     } else {
         None
     };
@@ -421,6 +430,11 @@ fn split(
 }
 
 /// Toolkit `longvector`.
+/// Zigzag decoding, `(n >> 1) ^ -(n & 1)`.
+fn unzigzag(n: u64) -> i64 {
+    ((n >> 1) as i64) ^ -((n & 1) as i64)
+}
+
 fn long_vector(r: &mut Reader) -> Result<Vec<u64>> {
     if r.rev.compression & FLAG_VECTORS == 0 {
         let n = r.count(1)?;
@@ -968,7 +982,7 @@ impl Script {
                 .constants_s64
                 .as_ref()
                 .and_then(|t| t.get(index))
-                .map(|v| format!("{}", *v as i64)),
+                .map(|v| format!("{v}")),
             _ => None,
         };
         if matches!(op, 0x05 | 0xbc | 0xc3) && extra.is_none() {

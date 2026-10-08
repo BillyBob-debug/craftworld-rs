@@ -99,11 +99,11 @@ fn lamp(head: u32, flags: u8) -> Vec<u8> {
     w.int_vector(&[0]);
     w.u32(3).raw(&[0, b'H', 0, b'i', 0, 0]);
     if head >= 0x30c {
-        // longvector: one value 0x0102
+        // longvector: one value -130 (zigzag 0x0103 in planes)
         if flags & 2 != 0 {
-            w.u32(1).u8(2).u8(0x02).u8(0x01);
+            w.u32(1).u8(2).u8(0x03).u8(0x01);
         } else {
-            w.u32(1).u64(0x0102);
+            w.u32(1).u64(-130i64 as u64);
         }
     }
     w.u32(1).f32(0.5); // f32 constants
@@ -133,7 +133,7 @@ fn u10_reads_both_function_layouts() {
         assert_eq!(s.function_defs[1].bytecode.end, 4);
         assert_eq!(s.bytecode.len(), 4);
         assert_eq!(s.line_numbers, [10, 11]);
-        assert_eq!(s.constants_s64.as_deref(), Some(&[0x0102u64][..]));
+        assert_eq!(s.constants_s64.as_deref(), Some(&[-130i64][..]));
         assert_eq!(s.constants_f32, [0.5]);
         assert_eq!(s.depending_guids.as_deref(), Some(&[0xabcd][..]));
         let (text, checks) = s.listing();

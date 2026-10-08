@@ -616,6 +616,43 @@ fn locals_start_at_defaults_and_no_register_operands_are_ignored() {
 }
 
 #[test]
+fn m44_locals_default_to_zero() {
+    // Product of two never-written m44 locals: W.w is 0 with zeroed storage (1 with identity).
+    let mut b = Builder::new();
+    let m44 = b.ty(6, "m44", None, 0);
+    let mut s = b.build(
+        "Mats",
+        None,
+        vec![func(
+            "Run",
+            &[],
+            vec![
+                i(0x51, 6, 12, 4, 8),      // MULm44 r12 = r4 * r8
+                i(0x70, FLOAT, 16, 12, 0), // GET_M44_WW r16 = r12.ww
+                i(0xa5, FLOAT, 0, 16, 0),  // RETURN r16
+            ],
+        )],
+    );
+    let name = s.function_defs[0].name;
+    for offset in [4, 8] {
+        s.locals.push(lbp_level::script::LocalVariable {
+            modifiers: 0,
+            type_ref: u32::from(m44),
+            name,
+            offset,
+        });
+    }
+    s.function_defs[0].locals = Span { begin: 0, end: 2 };
+    let mut vm = Vm::default();
+    let c = vm.load(s, None);
+    let mut budget = 100;
+    assert_eq!(
+        vm.call(&mut TestHost::default(), c, "Run", &[], &mut budget),
+        Ok(Value::Float(0.))
+    );
+}
+
+#[test]
 fn new_object_runs_inherited_init_and_finds_superclass_by_learned_guid() {
     // Base (loaded without a GUID) initialises x = 7 in .init__.
     let mut b = Builder::new();

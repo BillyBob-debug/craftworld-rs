@@ -69,7 +69,10 @@ impl Value {
             _ => return None,
         })
     }
-    /// Default for a Toolkit MachineType byte (fields, new arrays).
+    /// Default for a Toolkit MachineType byte (fields, locals, new arrays). Every type
+    /// defaults to zeroed storage, m44 included (INFERRED from the test script, D144:
+    /// TestMatrix44 expects a zero W row from the product of two never-written m44 locals;
+    /// an identity default gives W.w = 1).
     pub fn default_for(machine_type: u8) -> Value {
         match machine_type {
             1 => Value::Bool(false),
@@ -77,7 +80,7 @@ impl Value {
             3 => Value::Int(0),
             4 => Value::Float(0.),
             5 => Value::Vec4([0.; 4]),
-            6 => Value::Mat44(IDENTITY),
+            6 => Value::Mat44([0.; 16]),
             8 => Value::Raw(0),
             9 => Value::Ref(0),
             10 => Value::Thing(None),
@@ -88,10 +91,6 @@ impl Value {
         }
     }
 }
-
-const IDENTITY: [f32; 16] = [
-    1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
-];
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Fault {
@@ -718,7 +717,7 @@ impl Vm {
                                 .ok_or(Fault::Index {
                                     pc,
                                     what: "s64 constant",
-                                })? as i64,
+                                })?,
                         ),
                         // LCv4: four consecutive f32 constants (INFERRED).
                         0xb8 => {
@@ -867,7 +866,8 @@ impl Vm {
                         0x9a => *a.get_mut(idx(&index).ok_or(bad.clone())?).ok_or(bad)? = src,
                         0x9d => {
                             // Index -1 inserts at the end (INFERRED from the D140 test
-                            // script's ARRAY_INSERT with -1).
+                            // script's ARRAY_INSERT with -1). Other out-of-range indices
+                            // fault: appending them broke 20 TestArray checks (D144).
                             let i = match index {
                                 Value::Int(-1) => Some(a.len()),
                                 _ => idx(&index),
@@ -1195,7 +1195,7 @@ fn zero_like(v: &Value) -> Value {
         Value::Int(_) => Value::Int(0),
         Value::Float(_) => Value::Float(0.),
         Value::Vec4(_) => Value::Vec4([0.; 4]),
-        Value::Mat44(_) => Value::Mat44(IDENTITY),
+        Value::Mat44(_) => Value::Mat44([0.; 16]),
         Value::Long(_) => Value::Long(0),
         Value::Double(_) => Value::Double(0.),
         Value::Object(_) => Value::Object(None),
