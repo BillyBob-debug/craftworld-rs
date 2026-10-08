@@ -9,7 +9,10 @@ mod animation_base;
 pub use animation_base::AnimationBaseSnapshot;
 mod blend;
 mod blend_mask;
-pub use blend_mask::{blend_factor, blend_thresholds, BlendDiffuseMask, BLEND_THRESHOLD_BITS};
+pub use blend_mask::{
+    blend_factor, blend_mask_value, blend_thresholds, BlendDiffuseMask, BlendPort,
+    TextureBlendMask, BLEND_THRESHOLD_BITS,
+};
 mod border_domain;
 pub mod census;
 pub use blend::DiffuseBlend;

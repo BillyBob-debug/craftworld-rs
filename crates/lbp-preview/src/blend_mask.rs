@@ -2,6 +2,8 @@
 //! sample's alpha. D94 generalises the thresholds: factor = clamp((m − p0)/(p1 − p0), 0, 1)
 //! for parameter words p0 < p1 (the community literals 100/15 are p0/p1 = 0.15/0.16).
 //! Rule, evidence labels, pin and limits: docs/d94-blend.md, docs/d84-blend-route.md.
+//! D97 (docs/d97-blend-mask.md): an unswizzled/red mask is read sRGB-decoded (the
+//! texture's own sampling space), an alpha mask linearly; two-texture BLEND on the grid.
 /// The threshold pair observed in community code (0.15 / 0.16 as f32 bits).
 pub const BLEND_THRESHOLD_BITS: [u32; 2] = [0x3e19_999a, 0x3e23_d70a];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -12,6 +14,32 @@ pub struct BlendDiffuseMask {
     pub color_first: bool,
     /// Raw parameter words 0 and 1 (lower/upper threshold); see `blend_thresholds`.
     pub threshold_bits: [u32; 2],
+    /// D97: true = red channel (sRGB-decoded), false = alpha (linear).
+    pub mask_red: bool,
+}
+/// D97: sRGB-decoded value of an 8-bit encoded colour channel (IEC 61966-2-1).
+pub(crate) fn srgb_decode(byte: u8) -> f64 {
+    let x = f64::from(byte) / 255.;
+    if x <= 0.04045 {
+        x / 12.92
+    } else {
+        ((x + 0.055) / 1.055).powf(2.4)
+    }
+}
+/// D97: mask value m from a texel byte: red is sampled sRGB-decoded, alpha linearly.
+pub fn blend_mask_value(byte: u8, mask_red: bool) -> f64 {
+    if mask_red {
+        srgb_decode(byte)
+    } else {
+        f64::from(byte) / 255.
+    }
+}
+fn mask_channel_label(mask_red: bool) -> &'static str {
+    if mask_red {
+        "red (sRGB-decoded)"
+    } else {
+        "alpha"
+    }
 }
 /// Parameter words 0/1 as thresholds: both finite, p0 < p1, finite scale 1/(p1 − p0).
 pub fn blend_thresholds(bits: [u32; 2]) -> Result<[f64; 2], String> {
@@ -35,12 +63,13 @@ impl BlendDiffuseMask {
     pub fn label(self) -> String {
         let [p0, p1] = self.threshold_bits.map(f32::from_bits);
         format!(
-            "BLEND mask alpha of sample, thresholds {p0}/{p1}, color {:?} on port {} • nearest filtering",
+            "BLEND mask {} of sample, thresholds {p0}/{p1}, color {:?} on port {} • nearest filtering",
+            mask_channel_label(self.mask_red),
             self.color.values(),
             if self.color_first { 0 } else { 1 }
         )
     }
-    /// Per-texel bake: the factor is a steep step of the sample's own alpha and does
+    /// Per-texel bake: the factor is a steep step of the sample's own red/alpha and does
     /// not commute with filtering, so the result is displayed with nearest sampling.
     /// RGB lerp in linear space (sRGB-decoded sample), alpha linear. Source untouched.
     pub fn pixels(self, rgba: &[u8], cancelled: impl Fn() -> bool) -> Result<Vec<u8>, String> {
@@ -77,14 +106,14 @@ impl BlendDiffuseMask {
                 ((x + 0.055) / 1.055).powf(2.4)
             }
         });
-        // One factor per alpha byte; the table is per alpha byte
+        // One factor per mask byte; the table is per mask byte
         // (256 x 256 x 3 bytes on the heap), like the alpha MIX bake.
         let mut table = Vec::<[u8; 3]>::with_capacity(65536);
-        for alpha in 0..256 {
-            if alpha % 16 == 0 && cancelled() {
+        for byte in 0..=255u8 {
+            if byte % 16 == 0 && cancelled() {
                 return Err("Cancelled".into());
             }
-            let f = blend_factor(alpha as f64 / 255., thresholds);
+            let f = blend_factor(blend_mask_value(byte, self.mask_red), thresholds);
             for value in decoded {
                 table.push(std::array::from_fn(|c| encode(lerp(value, c, f))));
             }
@@ -94,13 +123,14 @@ impl BlendDiffuseMask {
             if i % 4096 == 0 && cancelled() {
                 return Err("Cancelled".into());
             }
-            let a = usize::from(p[3]);
-            let m = f64::from(p[3]) / 255.;
+            let byte = if self.mask_red { p[0] } else { p[3] };
+            let k = usize::from(byte);
+            let f = blend_factor(blend_mask_value(byte, self.mask_red), thresholds);
             result.extend_from_slice(&[
-                table[a * 256 + p[0] as usize][0],
-                table[a * 256 + p[1] as usize][1],
-                table[a * 256 + p[2] as usize][2],
-                (lerp(m, 3, blend_factor(m, thresholds)) * 255.)
+                table[k * 256 + p[0] as usize][0],
+                table[k * 256 + p[1] as usize][1],
+                table[k * 256 + p[2] as usize][2],
+                (lerp(f64::from(p[3]) / 255., 3, f) * 255.)
                     .round()
                     .clamp(0., 255.) as u8,
             ]);
@@ -109,6 +139,97 @@ impl BlendDiffuseMask {
             return Err("Cancelled".into());
         }
         Ok(result)
+    }
+}
+/// D97: one BLEND port input of the two-texture grid bake.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BlendPort {
+    /// 0 = primary texture (`sample_index`), 1 = `second_sample`.
+    Texture(u8),
+    Color(crate::DiffuseTint),
+}
+/// D97: BLEND whose ports/mask use two distinct texture samples on the nearest grid
+/// (two samples with the mask reusing one, or COLOR + sample with a separate mask).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TextureBlendMask {
+    pub blend_index: usize,
+    pub ports: [BlendPort; 2],
+    /// 0 = primary texture, 1 = `second_sample`.
+    pub mask_texture: u8,
+    pub mask_red: bool,
+    pub threshold_bits: [u32; 2],
+}
+impl TextureBlendMask {
+    pub fn validate(self) -> Result<(), String> {
+        blend_thresholds(self.threshold_bits)?;
+        if self.mask_texture > 1 {
+            return Err("Unsupported: BLEND mask texture index".into());
+        }
+        for port in self.ports {
+            match port {
+                BlendPort::Texture(t) if t > 1 => {
+                    return Err("Unsupported: BLEND port texture index".into())
+                }
+                BlendPort::Color(c) => c.validate()?,
+                BlendPort::Texture(_) => {}
+            }
+        }
+        Ok(())
+    }
+    pub fn label(self) -> String {
+        let [p0, p1] = self.threshold_bits.map(f32::from_bits);
+        let port = |p: BlendPort| match p {
+            BlendPort::Texture(t) => format!("texture {}", t + 1),
+            BlendPort::Color(c) => format!("color {:?}", c.values()),
+        };
+        format!(
+            "BLEND {} to {} by mask {} of texture {}, thresholds {p0}/{p1}",
+            port(self.ports[0]),
+            port(self.ports[1]),
+            mask_channel_label(self.mask_red),
+            self.mask_texture + 1
+        )
+    }
+    /// One output texel from the primary (`a`) and second (`b`) texels: RGB lerp in
+    /// linear space (sRGB-decoded samples, COLOR as linear values), alpha linear.
+    /// `thresholds` comes from `blend_thresholds`; `linear` is the sRGB decode table.
+    pub(crate) fn texel(
+        self,
+        [a, b]: [&[u8]; 2],
+        thresholds: [f64; 2],
+        linear: &[f64; 256],
+        out: &mut Vec<u8>,
+    ) {
+        let mask = if self.mask_texture == 0 { a } else { b };
+        let m = if self.mask_red {
+            linear[usize::from(mask[0])]
+        } else {
+            f64::from(mask[3]) / 255.
+        };
+        let f = blend_factor(m, thresholds);
+        let value = |port: BlendPort, c: usize| match port {
+            BlendPort::Texture(t) => {
+                let v = if t == 0 { a[c] } else { b[c] };
+                if c == 3 {
+                    f64::from(v) / 255.
+                } else {
+                    linear[usize::from(v)]
+                }
+            }
+            BlendPort::Color(color) => f64::from(color.values()[c]),
+        };
+        for c in 0..4 {
+            let (l, r) = (value(self.ports[0], c), value(self.ports[1], c));
+            let v = (r - l) * f + l;
+            let v = if c == 3 {
+                v
+            } else if v <= 0.0031308 {
+                12.92 * v
+            } else {
+                1.055 * v.powf(1. / 2.4) - 0.055
+            };
+            out.push((v * 255.).round().clamp(0., 255.) as u8);
+        }
     }
 }
 #[cfg(test)]
@@ -122,6 +243,7 @@ mod tests {
             },
             color_first,
             threshold_bits: BLEND_THRESHOLD_BITS,
+            mask_red: false,
         }
     }
     const COMMUNITY: [f64; 2] = [0.15000000596046448, 0.1599999964237213];
@@ -253,6 +375,93 @@ mod tests {
                 .unwrap_err(),
             "Cancelled"
         );
+    }
+    #[test]
+    fn red_mask_is_srgb_decoded_and_alpha_passes_through() {
+        // D97: thresholds 0/1, COLOR black (alpha 1) on port 0, sample on port 1.
+        let mut red = mask([0., 0., 0., 1.], true);
+        red.threshold_bits = [0, 1f32.to_bits()];
+        red.mask_red = true;
+        assert!(red.label().contains("mask red (sRGB-decoded)"));
+        assert!(mask([0.; 4], true).label().contains("mask alpha of sample"));
+        let out = red
+            .pixels(&[0, 9, 9, 0, 255, 255, 255, 0, 128, 128, 128, 100], || {
+                false
+            })
+            .unwrap();
+        // Red 0 -> port 0 (black, alpha 1); red 255 -> port 1 (the texel itself).
+        assert_eq!(&out[..8], &[0, 0, 0, 255, 255, 255, 255, 0]);
+        // Red 128: m = decode(128) = 0.2158 (not 128/255 = 0.502): the RGB lerp of black
+        // and decode(128) by m re-encodes to 61; alpha lerps 1 -> 100/255 by m.
+        let m = srgb_decode(128);
+        assert!((m - 0.21586).abs() < 1e-4);
+        assert_eq!(blend_mask_value(128, true), m);
+        assert_eq!(blend_mask_value(128, false), 128. / 255.);
+        let encoded = |v: f64| ((1.055 * v.powf(1. / 2.4) - 0.055) * 255.).round() as u8;
+        assert_eq!(out[8], encoded(m * m));
+        assert_eq!(out[8], 61);
+        assert_eq!(&out[9..11], &[61, 61]);
+        assert_eq!(
+            out[11],
+            ((1. + (100. / 255. - 1.) * m) * 255.).round() as u8
+        );
+        // The alpha byte does not affect a red mask; the red byte does not affect alpha.
+        let alpha = mask([0., 0., 0., 1.], true);
+        assert_eq!(
+            alpha.pixels(&[255, 0, 0, 0], || false).unwrap(),
+            [0, 0, 0, 255]
+        );
+        assert_eq!(
+            red.pixels(&[255, 0, 0, 0], || false).unwrap(),
+            [255, 0, 0, 0]
+        );
+    }
+    #[test]
+    fn texture_blend_texel_ports_mask_and_validation() {
+        let linear: [f64; 256] = std::array::from_fn(|v| srgb_decode(v as u8));
+        let unit = [0., 1.];
+        let mut b = TextureBlendMask {
+            blend_index: 1,
+            ports: [BlendPort::Texture(0), BlendPort::Texture(1)],
+            mask_texture: 1,
+            mask_red: true,
+            threshold_bits: [0, 1f32.to_bits()],
+        };
+        assert!(b.validate().is_ok());
+        assert!(b
+            .label()
+            .contains("texture 1 to texture 2 by mask red (sRGB-decoded) of texture 2"));
+        let run = |b: TextureBlendMask, a: [u8; 4], c: [u8; 4]| {
+            let mut out = vec![];
+            b.texel([&a, &c], unit, &linear, &mut out);
+            out
+        };
+        // Mask red 0 -> port 0 texel; red 255 -> port 1 texel.
+        assert_eq!(run(b, [10, 20, 30, 40], [0, 5, 6, 7]), [10, 20, 30, 40]);
+        assert_eq!(run(b, [10, 20, 30, 40], [255, 5, 6, 7]), [255, 5, 6, 7]);
+        // Alpha mask from texture 1 (port 0's own alpha).
+        b.mask_red = false;
+        b.mask_texture = 0;
+        assert_eq!(run(b, [10, 20, 30, 255], [9, 5, 6, 7]), [9, 5, 6, 7]);
+        assert_eq!(run(b, [10, 20, 30, 0], [9, 5, 6, 7]), [10, 20, 30, 0]);
+        // COLOR port: linear values, alpha from the COLOR word.
+        b.ports[1] = BlendPort::Color(crate::DiffuseTint {
+            bits: [1., 0., 0.5, 0.25].map(f32::to_bits),
+        });
+        assert_eq!(run(b, [10, 20, 30, 255], [0; 4]), [255, 0, 188, 64]);
+        // Invalid: thresholds, indices, COLOR range.
+        b.threshold_bits = [1f32.to_bits(), 0];
+        assert!(b.validate().is_err());
+        b.threshold_bits = [0, 1f32.to_bits()];
+        b.mask_texture = 2;
+        assert!(b.validate().is_err());
+        b.mask_texture = 0;
+        b.ports[0] = BlendPort::Texture(2);
+        assert!(b.validate().is_err());
+        b.ports[0] = BlendPort::Color(crate::DiffuseTint {
+            bits: [f32::NAN.to_bits(); 4],
+        });
+        assert!(b.validate().is_err());
     }
     #[test]
     fn thresholds_and_color_are_validated() {

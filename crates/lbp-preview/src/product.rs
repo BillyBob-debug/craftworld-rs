@@ -189,6 +189,72 @@ fn bake_alpha_mix(
     }
     Ok((width, height, output))
 }
+/// D97: two-texture BLEND on the nearest grid; `a` is the primary sample, `b` the
+/// second. Per texel: factor from the mask texel (red sRGB-decoded or alpha linear),
+/// then `TextureBlendMask::texel` (docs/d97-blend-mask.md).
+pub(crate) fn pixels_blend_masked(
+    a: &lbp_texture::Texture,
+    b: &lbp_texture::Texture,
+    ta: SamplingTransform,
+    tb: SamplingTransform,
+    blend: crate::TextureBlendMask,
+    cancelled: impl Fn() -> bool,
+) -> Result<(u32, u32, Vec<u8>), String> {
+    bake_blend_mask(
+        [
+            [a.header.width, a.header.height],
+            [b.header.width, b.header.height],
+        ],
+        [&a.rgba, &b.rgba],
+        [scales(ta)?, scales(tb)?],
+        blend,
+        cancelled,
+    )
+}
+fn bake_blend_mask(
+    dimensions: [[u32; 2]; 2],
+    sources: [&[u8]; 2],
+    scales: [[u32; 2]; 2],
+    blend: crate::TextureBlendMask,
+    cancelled: impl Fn() -> bool,
+) -> Result<(u32, u32, Vec<u8>), String> {
+    blend.validate()?;
+    let thresholds = crate::blend_thresholds(blend.threshold_bits)?;
+    let (width, height, count) = extent(dimensions, sources, scales)?;
+    if cancelled() {
+        return Err("Cancelled".into());
+    }
+    let [da, db] = dimensions;
+    let [a, b] = sources;
+    let [sa, sb] = scales;
+    let linear: [f64; 256] = std::array::from_fn(|v| crate::blend_mask::srgb_decode(v as u8));
+    let mut output = Vec::with_capacity(count as usize * 4);
+    for y in 0..height {
+        for x in 0..width {
+            if output.len().is_multiple_of(16384) && cancelled() {
+                return Err("Cancelled".into());
+            }
+            let index = |d: [u32; 2], s: [u32; 2]| {
+                let px = ((u64::from(x) * u64::from(d[0]) * u64::from(s[0]) / u64::from(width))
+                    % u64::from(d[0])) as usize;
+                let py = ((u64::from(y) * u64::from(d[1]) * u64::from(s[1]) / u64::from(height))
+                    % u64::from(d[1])) as usize;
+                (py * d[0] as usize + px) * 4
+            };
+            let (i, j) = (index(da, sa), index(db, sb));
+            blend.texel(
+                [&a[i..i + 4], &b[j..j + 4]],
+                thresholds,
+                &linear,
+                &mut output,
+            );
+        }
+    }
+    if cancelled() {
+        return Err("Cancelled".into());
+    }
+    Ok((width, height, output))
+}
 fn bake_policy(
     dimensions: [[u32; 2]; 2],
     sources: [&[u8]; 2],
@@ -378,6 +444,47 @@ mod tests {
             )
             .is_err());
         }
+    }
+    #[test]
+    fn two_texture_blend_grid_mask_and_cancel() {
+        // Port 0 COLOR green, port 1 texture 1 (1x1 red at scale 2), mask = red of
+        // texture 2 (2x1: red 0, red 255), thresholds 0/1.
+        let red = [255, 0, 0, 255];
+        let mask = [0, 7, 7, 7, 255, 7, 7, 7];
+        let blend = crate::TextureBlendMask {
+            blend_index: 1,
+            ports: [
+                crate::BlendPort::Color(crate::DiffuseTint {
+                    bits: [0., 1., 0., 1.].map(f32::to_bits),
+                }),
+                crate::BlendPort::Texture(0),
+            ],
+            mask_texture: 1,
+            mask_red: true,
+            threshold_bits: [0, 1f32.to_bits()],
+        };
+        let run = |blend, cancel: &dyn Fn() -> bool| {
+            bake_blend_mask(
+                [[1, 1], [2, 1]],
+                [&red, &mask],
+                [[2, 1], [1, 1]],
+                blend,
+                cancel,
+            )
+        };
+        let (width, height, pixels) = run(blend, &|| false).unwrap();
+        assert_eq!((width, height), (2, 1));
+        assert_eq!(pixels, [0, 255, 0, 255, 255, 0, 0, 255]);
+        assert_eq!(run(blend, &|| true).unwrap_err(), "Cancelled");
+        let mut bad = blend;
+        bad.threshold_bits = [0, 0];
+        assert!(run(bad, &|| false).is_err());
+        assert!(
+            bake_blend_mask([[1, 1]; 2], [&red, &red], [[17, 1], [1, 1]], blend, || {
+                false
+            })
+            .is_err()
+        );
     }
     #[test]
     fn two_texture_alpha_mix_grid_endpoints_factor_port_and_cancel() {
