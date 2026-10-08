@@ -205,4 +205,6 @@ fn u10_untrusted_input_stops_explicitly() {
     assert_eq!(c.member_index_out_of_range, 1);
     assert_eq!(c.function_range_out_of_range, 1);
     assert_eq!(c.name_index_out_of_range, 1);
+    assert_eq!(c.name_out_of_range_by_kind.get("function"), Some(&1));
+    assert!(c.name_out_of_range_values.contains(&77));
 }

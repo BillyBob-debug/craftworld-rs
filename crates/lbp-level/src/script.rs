@@ -44,6 +44,7 @@
 //! test this.
 use crate::serial::{Descriptor, Limits, Reader, Result, Revision, Stop, FLAG_VECTORS};
 use serde::Serialize;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 pub const MAX_INPUT: usize = 64 << 20;
@@ -817,9 +818,23 @@ pub fn operands(bits: u64) -> Vec<(&'static str, i64)> {
 pub struct ListingChecks {
     pub unknown_opcodes: usize,
     pub name_index_out_of_range: usize,
+    /// Out-of-range name indices by row kind (type, fieldref, funcref, field, property,
+    /// function, member) and the first distinct values seen (at most 16).
+    pub name_out_of_range_by_kind: BTreeMap<&'static str, usize>,
+    pub name_out_of_range_values: BTreeSet<u32>,
     pub function_range_out_of_range: usize,
     pub constant_index_out_of_range: usize,
     pub member_index_out_of_range: usize,
+}
+
+impl ListingChecks {
+    fn name_miss(&mut self, kind: &'static str, index: u32) {
+        self.name_index_out_of_range += 1;
+        *self.name_out_of_range_by_kind.entry(kind).or_default() += 1;
+        if self.name_out_of_range_values.len() < 16 {
+            self.name_out_of_range_values.insert(index);
+        }
+    }
 }
 
 impl Script {
@@ -832,10 +847,10 @@ impl Script {
     pub fn listing(&self) -> (String, ListingChecks) {
         let mut c = ListingChecks::default();
         let mut o = String::new();
-        let name = |i: u32, c: &mut ListingChecks| match self.name(i) {
+        let name = |kind: &'static str, i: u32, c: &mut ListingChecks| match self.name(i) {
             Some(s) => s.to_owned(),
             None => {
-                c.name_index_out_of_range += 1;
+                c.name_miss(kind, i);
                 format!("<name #{i}>")
             }
         };
@@ -855,7 +870,7 @@ impl Script {
             modifier_names(self.modifiers).join(" ")
         );
         for (i, t) in self.type_refs.iter().enumerate() {
-            let n = name(t.type_name, &mut c);
+            let n = name("type", t.type_name, &mut c);
             let _ = writeln!(
                 o,
                 "type #{i}: {n} machine={} builtin={} dims={} base={} script={}",
@@ -867,15 +882,15 @@ impl Script {
             );
         }
         for (i, f) in self.field_refs.iter().enumerate() {
-            let n = name(f.name, &mut c);
+            let n = name("fieldref", f.name, &mut c);
             let _ = writeln!(o, "fieldref #{i}: type#{} {n}", f.type_ref);
         }
         for (i, f) in self.function_refs.iter().enumerate() {
-            let n = name(f.name, &mut c);
+            let n = name("funcref", f.name, &mut c);
             let _ = writeln!(o, "funcref #{i}: type#{} {n}", f.type_ref);
         }
         for f in &self.field_defs {
-            let n = name(f.name, &mut c);
+            let n = name("field", f.name, &mut c);
             let _ = writeln!(
                 o,
                 "field {n}: type#{} [{}]",
@@ -884,7 +899,7 @@ impl Script {
             );
         }
         for p in &self.property_defs {
-            let n = name(p.name, &mut c);
+            let n = name("property", p.name, &mut c);
             let _ = writeln!(
                 o,
                 "property {n}: type#{} get={} set={} [{}]",
@@ -895,7 +910,7 @@ impl Script {
             );
         }
         for f in &self.function_defs {
-            let n = name(f.name, &mut c);
+            let n = name("function", f.name, &mut c);
             let _ = writeln!(
                 o,
                 "\nfunction {n}: returns type#{} [{}] stack={} args={}..{} code={}..{}",
@@ -958,7 +973,13 @@ impl Script {
             _ => None,
         };
         let extra = match member {
-            Some(Some(n)) => Some(self.name(n).unwrap_or("<name?>").to_owned()),
+            Some(Some(n)) => Some(match self.name(n) {
+                Some(t) => t.to_owned(),
+                None => {
+                    c.name_miss("member", n);
+                    "<name?>".to_owned()
+                }
+            }),
             Some(None) => {
                 c.member_index_out_of_range += 1;
                 Some("<ref out of range>".to_owned())
