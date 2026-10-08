@@ -53,7 +53,7 @@ story levels add cameras, triggers and logic that can move or hold Sackboy.
 
 | Check | What to record |
 |---|---|
-| X1 tick rate | Game update rate: frames per in-game second. Video a timer or piston with a known stored duration and compare. Inferred 30 Hz is unverified. |
+| X1 tick rate | Done 2026-10-08 (local observation, RPCS3 at full speed): 30 game ticks per second, one tick every 2 display refreshes, within 0.1%. The runtime uses 30 Hz for its fixed update. |
 | S9 walk / run | Ground speed in level units per second: find Sackboy's x in memory, walk for 3+ s, sample x per frame. |
 | S9 jump | Jump height and air time from a standing jump on flat ground (y per frame); fit a parabola for gravity. |
 | S9 fall | Terminal fall speed, if any, from a long drop. |
