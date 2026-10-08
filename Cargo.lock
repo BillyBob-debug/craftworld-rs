@@ -2820,6 +2820,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "lbp-level"
+version = "0.1.0"
+dependencies = [
+ "lbp-catalog",
+ "lbp-preview",
+ "lbp-resource",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lbp-mesh"
 version = "0.1.0"
 dependencies = [
