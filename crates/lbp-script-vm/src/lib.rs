@@ -836,14 +836,15 @@ impl Vm {
                         .ok_or(Fault::Index {
                             pc,
                             what: "element",
-                        })?
+                        })
+                        .map(|v| typed(v, ty))?
                     };
                     set!(r16(16), v);
                 }
                 Class::SetElement => {
                     let o = get!(r16(32));
                     let index = get!(r16(48));
-                    let src = get!(r16(16));
+                    let src = typed(get!(r16(16)), ty);
                     let Value::Object(Some(id)) = o else {
                         return Err(if o == Value::Object(None) {
                             Fault::NullObject { pc }
@@ -865,15 +866,14 @@ impl Vm {
                     match op {
                         0x9a => *a.get_mut(idx(&index).ok_or(bad.clone())?).ok_or(bad)? = src,
                         0x9d => {
-                            // Index -1 inserts at the end (INFERRED from the D140 test
-                            // script's ARRAY_INSERT with -1). Other out-of-range indices
-                            // fault: appending them broke 20 TestArray checks (D144).
+                            // The index is clamped to [0, len]: -1 inserts at the front and
+                            // an index past the end appends (INFERRED from the test script's
+                            // TestArray, D145: inserts at 1, -1 and 100 then length and
+                            // element checks).
                             let i = match index {
-                                Value::Int(-1) => Some(a.len()),
-                                _ => idx(&index),
-                            }
-                            .filter(|&i| i <= a.len())
-                            .ok_or(bad)?;
+                                Value::Int(i) => usize::try_from(i).map_or(0, |i| i.min(a.len())),
+                                _ => return Err(bad),
+                            };
                             if a.len() >= MAX_ARRAY_LEN {
                                 return Err(Fault::Heap);
                             }
@@ -894,7 +894,7 @@ impl Vm {
                             let n = idx(&index)
                                 .filter(|&n| n <= MAX_ARRAY_LEN)
                                 .ok_or(Fault::Heap)?;
-                            let fill = a.first().map_or(Value::Void, zero_like);
+                            let fill = typed(a.first().map_or(Value::Void, zero_like), ty);
                             a.resize(n, fill);
                         }
                         0xb7 => {} // ARRAY_RESERVE: capacity hint only
@@ -1185,6 +1185,17 @@ fn array_ref<'a>(
         },
         Value::Object(None) => Err(Some(Fault::NullObject { pc })),
         _ => Err(None),
+    }
+}
+
+/// Array elements are zeroed storage of the instruction's machine type (INFERRED: the
+/// array instructions carry the element type, e.g. `GET_ELEMENT t=3` on an int array; the
+/// D146 TestArray run read a Void element back after an `EQi`). A Void element, value
+/// written or resize fill becomes that type's default.
+fn typed(v: Value, ty: u8) -> Value {
+    match v {
+        Value::Void => Value::default_for(ty),
+        v => v,
     }
 }
 
