@@ -631,3 +631,11 @@ subtype-0 curve. Instance values in the game remain unknown. Details:
 thresholds; compiled constants in two 01.33 materials equal 1/(p1 − p0) and
 −p0/(p1 − p0), matching Toolkit's 100/15 literals for 0.15/0.16. RGB mask space stays
 `UNKNOWN`. Details: [d94-blend.md](d94-blend.md).
+
+## D97 BLEND mask colour space
+
+`STRONG_INFERENCE`: an unswizzled/red BLEND mask is sampled sRGB-decoded (alpha masks
+linear). Toolkit's GL baker samples every non-noSRGB texture as `GL_SRGB_ALPHA`
+(`CONFIRMED_FROM_COMMUNITY_CODE`); in 01.33 the noSRGB marker tracks bump-only samplers
+(99.4%) and is absent on all 63 mask textures (`CONFIRMED_FROM_LOCAL_DATA`). Not observed
+in the executable or on hardware. Details: [d97-blend-mask.md](d97-blend-mask.md).

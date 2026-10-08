@@ -238,7 +238,7 @@ impl MaterialAsset {
             Self::Texture(a) if a.fourth.is_some() => format!("Diffuse only • four-texture nested product • UV{} {} × UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.fourth_sample.unwrap().uv_channel,a.selection.fourth_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.third.is_some() => format!("Diffuse only • three-texture nested product{} • UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.third.as_ref().and_then(|t| t.relative).filter(|r| !r.is_identity() || r.from_primary).map_or(String::new(), |r| format!(" (third from {} coordinates × {:?} + {:?})", if r.from_primary {"primary"} else {"second"}, r.scale, r.offset)),a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture sampling • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.texture_alpha_mix.map(|m|m.label()).or(a.selection.texture_add.map(|m|format!("{} after {}",m.label(),a.selection.tint.label()))).or(a.selection.blend.map(|blend|blend.label())).unwrap_or_else(||a.selection.tint.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture {}, second {}, nearest grid {:?}",if a.selection.texture_alpha_mix.is_some(){"alpha MIX"}else if a.selection.texture_add.is_some(){"ADD"}else{"product"},second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.texture_blend.map(|m|m.label()).or(a.selection.texture_alpha_mix.map(|m|m.label())).or(a.selection.texture_add.map(|m|format!("{} after {}",m.label(),a.selection.tint.label()))).or(a.selection.blend.map(|blend|blend.label())).unwrap_or_else(||a.selection.tint.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture {}, second {}, nearest grid {:?}",if a.selection.texture_blend.is_some(){"BLEND"}else if a.selection.texture_alpha_mix.is_some(){"alpha MIX"}else if a.selection.texture_add.is_some(){"ADD"}else{"product"},second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire • black (0,0,0,0) per Toolkit shader generator; game default unverified • other channels not rendered • ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) => format!("Solid diffuse color {:?}{} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),if a.selection.product_of.is_some() {" (COLOR × COLOR product)"} else {""},a.selection.ignored_nodes,a.selection.ignored_wires),
         }
@@ -253,8 +253,11 @@ pub struct DiffuseSelection {
     /// D92: further distinct animated product leaves, each with its own base rows.
     pub animation_base_more: [Option<crate::AnimationBaseSnapshot>; 3],
     pub blend: Option<crate::DiffuseBlend>,
-    /// D84 BLEND (box 16) phase 1: COLOR and one sample stepped by its alpha.
+    /// D84 BLEND (box 16) phase 1: COLOR and one sample stepped by its alpha (D97: or red).
     pub blend_mask: Option<crate::BlendDiffuseMask>,
+    /// D97 two-texture BLEND on the nearest grid: primary = `sample_index`, second =
+    /// `second_sample`; ports and mask refer to them by index.
+    pub texture_blend: Option<crate::TextureBlendMask>,
     pub fourth_sample: Option<SamplerSelection>,
     /// D87: CONST/CONST2 UV scale on sampler port 1, folded into `uv_transform`.
     pub sampler_scale: Option<crate::SamplerScale>,
@@ -732,13 +735,14 @@ fn select_blend(
         );
     }
     let [left, right, mask] = [0, 1, 2].map(|i| edges[i].box_from as usize);
-    // Only the first mask component is used (E3). RGB channel space is unknown (D76
-    // E10, D94): checked before the input kinds since it blocks every corpus BLEND.
-    if !matches!(edges[2].swizzle_raw, [b'a' | b'w', 0, 0, 0, 0]) {
-        return Err(
-            "Unsupported: BLEND mask must be a sample alpha (RGB mask space unknown)".into(),
-        );
-    }
+    // Only the first mask component is used (E3). D97 (docs/d97-blend-mask.md): an
+    // unswizzled or r/x mask is the red channel, read sRGB-decoded like the texture's
+    // colour (no corpus mask carries the noSRGB marker); alpha stays linear.
+    let mask_red = match edges[2].swizzle_raw {
+        [0, 0, 0, 0, 0] | [b'r' | b'x', 0, 0, 0, 0] => true,
+        [b'a' | b'w', 0, 0, 0, 0] => false,
+        _ => return Err("Unsupported: BLEND mask must be the red or alpha channel".into()),
+    };
     // D94: any finite p0 < p1 (factor clamp((m − p0)/(p1 − p0), 0, 1)).
     let p = &graph.boxes[root].parameters_raw;
     let threshold_bits = [p[0], p[1]];
@@ -747,41 +751,108 @@ fn select_blend(
         .iter()
         .any(|&i| !matches!(graph.boxes[i].type_raw, 1 | 3))
     {
-        return Err("Unsupported: BLEND phase 1 inputs must be COLOR or texture samples".into());
+        return Err("Unsupported: BLEND inputs must be COLOR or texture samples".into());
     }
-    if mask != left && mask != right || graph.boxes[mask].type_raw != 1 {
-        return Err("Unsupported: BLEND mask must reuse the port 0/1 texture sample".into());
+    if graph.boxes[mask].type_raw != 1 {
+        return Err("Unsupported: BLEND mask must be a texture sample".into());
     }
-    let (color, color_first) = match (graph.boxes[left].type_raw, graph.boxes[right].type_raw) {
-        (3, 1) => (left, true),
-        (1, 3) => (right, false),
-        _ => return Err("Unsupported: BLEND phase 1 needs COLOR and one texture sample".into()),
+    if left == right {
+        return Err("Unsupported: BLEND ports 0/1 must be distinct inputs".into());
+    }
+    for &c in [left, right]
+        .iter()
+        .filter(|&&i| graph.boxes[i].type_raw == 3)
+    {
+        if !static_node(&graph.boxes[c]) || graph.wires.iter().any(|w| w.box_to as usize == c) {
+            return Err("Unsupported: BLEND COLOR must be static and unwired".into());
+        }
+    }
+    let tint = |i: usize| crate::DiffuseTint {
+        bits: graph.boxes[i].parameters_raw[..4].try_into().unwrap(),
     };
-    if !static_node(&graph.boxes[color]) || graph.wires.iter().any(|w| w.box_to as usize == color) {
-        return Err("Unsupported: BLEND COLOR must be static and unwired".into());
+    let color_index = [left, right]
+        .into_iter()
+        .find(|&i| graph.boxes[i].type_raw == 3);
+    // Distinct texture samples in port order, then the mask.
+    let mut samples: Vec<usize> = vec![];
+    for i in [left, right, mask] {
+        if graph.boxes[i].type_raw == 1 && !samples.contains(&i) {
+            samples.push(i);
+        }
     }
-    let selected = sampler(graph, mask)?;
-    let blend = crate::BlendDiffuseMask {
-        blend_index: root,
-        color: crate::DiffuseTint {
-            bits: graph.boxes[color].parameters_raw[..4].try_into().unwrap(),
-        },
-        color_first,
-        threshold_bits,
-    };
-    blend.validate()?;
-    Ok(DiffuseSelection {
-        blend_mask: Some(blend),
-        output_index: output,
-        sample_index: mask,
-        slot: selected.slot,
-        uv_channel: selected.uv_channel,
-        uv_transform: selected.uv_transform,
-        color_index: Some(color),
-        ignored_nodes: graph.boxes.len() - 4,
-        ignored_wires: graph.wires.len() - 4,
-        ..Default::default()
-    })
+    match samples.len() {
+        1 if mask == left || mask == right => {
+            let (color, color_first) = if color_index == Some(left) {
+                (left, true)
+            } else {
+                (right, false)
+            };
+            let selected = sampler(graph, mask)?;
+            let blend = crate::BlendDiffuseMask {
+                blend_index: root,
+                color: tint(color),
+                color_first,
+                threshold_bits,
+                mask_red,
+            };
+            blend.validate()?;
+            Ok(DiffuseSelection {
+                blend_mask: Some(blend),
+                output_index: output,
+                sample_index: mask,
+                slot: selected.slot,
+                uv_channel: selected.uv_channel,
+                uv_transform: selected.uv_transform,
+                color_index: Some(color),
+                ignored_nodes: graph.boxes.len() - 4,
+                ignored_wires: graph.wires.len() - 4,
+                ..Default::default()
+            })
+        }
+        1 => Err("Unsupported: BLEND of two COLORs by a mask sample has no bake".into()),
+        2 => {
+            // D97: two distinct samples on the nearest Repeat grid (as D83 alpha MIX).
+            let first = sampler(graph, samples[0])?;
+            let second = sampler(graph, samples[1])?;
+            let index = |i: usize| u8::from(i != samples[0]);
+            let port = |i: usize| {
+                if graph.boxes[i].type_raw == 3 {
+                    crate::BlendPort::Color(tint(i))
+                } else {
+                    crate::BlendPort::Texture(index(i))
+                }
+            };
+            let blend = crate::TextureBlendMask {
+                blend_index: root,
+                ports: [port(left), port(right)],
+                mask_texture: index(mask),
+                mask_red,
+                threshold_bits,
+            };
+            blend.validate()?;
+            let selection = DiffuseSelection {
+                texture_blend: Some(blend),
+                output_index: output,
+                sample_index: first.sample_index,
+                slot: first.slot,
+                uv_channel: first.uv_channel,
+                uv_transform: first.uv_transform,
+                second_sample: Some(second),
+                color_index,
+                ignored_nodes: graph.boxes.len() - 4 - usize::from(color_index.is_some()),
+                ignored_wires: graph.wires.len() - 4,
+                ..Default::default()
+            };
+            if !uses_grid(selection) {
+                return Err(
+                    "Unsupported: two-texture BLEND requires same-channel integer Repeat grid samplers"
+                        .into(),
+                );
+            }
+            Ok(selection)
+        }
+        _ => Err("Unsupported: BLEND with three distinct texture samples has no bake".into()),
+    }
 }
 pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String> {
     select_products(
@@ -1019,6 +1090,7 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
         animation_base_more: leaves.base.more(),
         blend: None,
         blend_mask: None,
+        texture_blend: None,
         fourth_sample: None,
         sampler_scale: None,
         deep_multiply_index: None,
@@ -1340,6 +1412,7 @@ pub(crate) fn load_primitive(
             .is_none_or(|p| p.alpha_subtract_samplers.is_empty() && p.nested_tint.is_none());
     if (selection.blend.is_some()
         || selection.texture_alpha_mix.is_some()
+        || selection.texture_blend.is_some()
         || selection.texture_add.is_some())
         && selection.second_sample.is_some()
         && !use_grid
@@ -1443,6 +1516,15 @@ pub(crate) fn load_primitive(
                     selection.uv_transform,
                     second.uv_transform,
                     mix,
+                    || control.check().is_err(),
+                )?
+            } else if let Some(blend) = selection.texture_blend {
+                crate::product::pixels_blend_masked(
+                    &texture,
+                    &second_texture,
+                    selection.uv_transform,
+                    second.uv_transform,
+                    blend,
                     || control.check().is_err(),
                 )?
             } else if selection.texture_add.is_some() {
@@ -2912,29 +2994,97 @@ mod tests {
                 "Unsupported: BLEND thresholds must be finite with param0 < param1"
             );
         }
-        // D94 order: an RGB mask is reported before product inputs (all 14 corpus
-        // BLEND-without-THING_COLOR materials have unswizzled masks).
-        let mut g = base.clone();
-        g.boxes[2] = node(10, 0);
-        g.wires[3].swizzle_raw = [0; 5];
-        assert!(reason(&g).contains("RGB mask space unknown"));
-        // T6: RGB, multi-component and unknown mask swizzles; mask from another sample.
-        for swizzle in [&b""[..], b"r", b"x", b"xy", b"aa", b"q"] {
+        // D97: unswizzled, `r` and `x` masks are the red channel (sRGB-decoded);
+        // multi-component, green/blue and unknown swizzles are refused.
+        for swizzle in [&b""[..], b"r", b"x"] {
             let mut g = base.clone();
             g.wires[3].swizzle_raw = [0; 5];
             g.wires[3].swizzle_raw[..swizzle.len()].copy_from_slice(swizzle);
-            assert!(reason(&g).contains("RGB mask space unknown"), "{swizzle:?}");
+            let red = select_diffuse(&g).unwrap().blend_mask.unwrap();
+            assert!(red.mask_red, "{swizzle:?}");
+            assert_eq!(
+                red,
+                crate::BlendDiffuseMask {
+                    mask_red: true,
+                    ..mask
+                }
+            );
         }
+        assert!(!mask.mask_red);
+        for swizzle in [&b"xy"[..], b"aa", b"g", b"b", b"q"] {
+            let mut g = base.clone();
+            g.wires[3].swizzle_raw = [0; 5];
+            g.wires[3].swizzle_raw[..swizzle.len()].copy_from_slice(swizzle);
+            assert_eq!(
+                reason(&g),
+                "Unsupported: BLEND mask must be the red or alpha channel",
+                "{swizzle:?}"
+            );
+        }
+        // Products under an input are still refused (the mask check runs first).
         let mut g = base.clone();
-        g.wires[3].box_from = 4;
-        assert!(reason(&g).contains("mask must reuse"));
-        // T2/T3 (phase 1): two texture samples are not implemented yet.
-        let mut g = base.clone();
-        g.wires[1].box_from = 4;
+        g.boxes[2] = node(10, 0);
+        g.wires[3].swizzle_raw = [0; 5];
         assert_eq!(
             reason(&g),
-            "Unsupported: BLEND phase 1 needs COLOR and one texture sample"
+            "Unsupported: BLEND inputs must be COLOR or texture samples"
         );
+        // D97 T2: COLOR + sample with the mask from a second sample -> two-texture grid.
+        let mut g = base.clone();
+        g.wires[3].box_from = 4;
+        g.wires[3].swizzle_raw = [0; 5];
+        let s = select_diffuse(&g).unwrap();
+        let b = s.texture_blend.unwrap();
+        assert_eq!(
+            b.ports,
+            [
+                crate::BlendPort::Color(mask.color),
+                crate::BlendPort::Texture(0)
+            ]
+        );
+        assert_eq!((b.mask_texture, b.mask_red, b.blend_index), (1, true, 1));
+        assert_eq!(
+            (s.sample_index, s.second_sample.unwrap().sample_index),
+            (3, 4)
+        );
+        assert_eq!(
+            (s.color_index, s.ignored_nodes, s.ignored_wires),
+            (Some(2), 0, 0)
+        );
+        assert!(s.blend_mask.is_none() && s.texture_alpha_mix.is_none());
+        // T3: two samples on ports 0/1, mask reusing the port-0 sample's alpha.
+        let mut g = base.clone();
+        g.wires[1].box_from = 4;
+        let s = select_diffuse(&g).unwrap();
+        let b = s.texture_blend.unwrap();
+        assert_eq!(
+            b.ports,
+            [crate::BlendPort::Texture(0), crate::BlendPort::Texture(1)]
+        );
+        assert_eq!((b.mask_texture, b.mask_red), (1, false));
+        assert_eq!((s.sample_index, s.color_index), (4, None));
+        assert_eq!((s.ignored_nodes, s.ignored_wires), (1, 0));
+        // Non-grid second sampler (other UV channel, fractional scale) is refused.
+        for (i, v) in [(4, 1), (0, 0.5f32.to_bits())] {
+            let mut h = g.clone();
+            h.boxes[4].parameters_raw[i] = v;
+            assert!(reason(&h).contains("two-texture BLEND requires"), "{i}");
+        }
+        // Three distinct samples, two COLORs, the same input on both ports.
+        let mut h = g.clone();
+        h.boxes.push(node(1, 6));
+        h.wires[3].box_from = 5;
+        assert!(reason(&h).contains("three distinct texture samples"));
+        let mut h = base.clone();
+        h.boxes[3] = node(3, 0);
+        h.wires[3].box_from = 4;
+        assert!(reason(&h).contains("two COLORs"));
+        let mut h = base.clone();
+        h.wires[1].box_from = 3;
+        assert!(reason(&h).contains("must be distinct inputs"));
+        let mut h = base.clone();
+        h.wires[3].box_from = 2;
+        assert!(reason(&h).contains("mask must be a texture sample"));
         // T7: animated/subtype-1 root, wired COLOR, invalid COLOR, animated sampler.
         let mut g = base.clone();
         g.boxes[1].subtype_raw = 1;
@@ -2959,7 +3109,7 @@ mod tests {
             g.boxes[2] = node(kind, 0);
             assert_eq!(
                 reason(&g),
-                "Unsupported: BLEND phase 1 inputs must be COLOR or texture samples"
+                "Unsupported: BLEND inputs must be COLOR or texture samples"
             );
         }
         // Animation-base opt-in does not widen BLEND.
