@@ -20,7 +20,15 @@
 //!   subType, toolType), NetworkPlayerID struct, three bools, i8 flags above 0x334, keys
 //!   above 0x2ba else a translation tag, UserCreatedDetails and CreationHistory structs
 //!   (wide names), icon descriptor, photo and EyeToy references, a pad byte above 0x358.
-//! - head < 0x233 (early LBP1), branches other than 0 and LBP3 are Unsupported.
+//! - 0x197 <= head < 0x233 (early LBP1, U5b): `str` translation tag, fixed i32 location,
+//!   category, primary indices and a pad word, fixed type bits, subType and toolType,
+//!   icon descriptor, fixed numUses + lastUsed above 0x1c0, fixed highlight sound GUID,
+//!   fixed colour, EyeToy reference, photo reference, SlotID (compressed type, fixed
+//!   number), copyright bool + NetworkPlayerID struct, UserCreatedDetails above 0x1aa,
+//!   CreationHistory (wide names) above 0x1b0, allowEmit above 0x204, fixed s64
+//!   dateAdded above 0x221, shareable above 0x222.
+//! - head < 0x197 (no plan details; the branches Toolkit keeps for older heads are not
+//!   implemented), branches other than 0 and LBP3 are Unsupported.
 //!
 //! RPlan tail: i32 plan revision (ignored), bytearray thingData (skipped here, D119 reads
 //! it), then from head 0x197 the details, then location and category as u32 keys from
@@ -225,6 +233,8 @@ pub fn item_details(r: &mut Reader) -> Result<ItemDetails> {
         modern(r)
     } else if v >= 0x233 {
         middle(r)
+    } else if v >= PLAN_DETAILS {
+        early(r)
     } else {
         r.unsupported(format!("InventoryItemDetails layout at head 0x{v:x}"))
     }
@@ -357,6 +367,80 @@ fn middle(r: &mut Reader) -> Result<ItemDetails> {
         last_used,
         num_uses,
         fluff_cost,
+        allow_emit,
+        shareable,
+        copyright,
+    })
+}
+
+fn early(r: &mut Reader) -> Result<ItemDetails> {
+    let v = r.rev.version();
+    let translation_tag = Some(str8(r)?);
+    let location_index = r.fixed_u32()? as i32;
+    let category_index = r.fixed_u32()? as i32;
+    let primary_index = r.fixed_u32()? as i32;
+    r.fixed_u32()?; // pad
+    let type_bits = r.fixed_u32()?;
+    let sub_type = r.fixed_u32()?;
+    let tool_type = r.fixed_u32()? as u8;
+    let icon = r.resource(true)?;
+    let (num_uses, last_used) = if v > 0x1c0 {
+        (Some(r.fixed_u32()?), Some(r.fixed_u32()?))
+    } else {
+        (None, None)
+    };
+    let highlight_sound = Some(r.fixed_u32()?).filter(|g| *g != 0);
+    let colour = r.fixed_u32()?;
+    let eyetoy = reference(r, "EyetoyData", eyetoy)?;
+    let photo = reference(r, "InventoryItemPhotoData", photo)?;
+    let level_unlock = SlotId {
+        slot_type: r.u32()?,
+        number: r.fixed_u32()?,
+    };
+    let copyright = Some(r.bool()?);
+    let creator = Ref::Value(network_player_id(r)?);
+    let user_created = if v > 0x1aa {
+        Ref::Value(self::user_created(r)?)
+    } else {
+        Ref::Null
+    };
+    let creation_history = if v > 0x1b0 {
+        let n = r.count(1)?;
+        let mut history = Vec::with_capacity(n);
+        for _ in 0..n {
+            history.push(wstr(r)?);
+        }
+        Ref::Value(history)
+    } else {
+        Ref::Null
+    };
+    let allow_emit = if v > 0x204 { Some(r.bool()?) } else { None };
+    let date_added = if v > 0x221 { r.fixed_u64()? as i64 } else { 0 };
+    let shareable = if v > 0x222 { Some(r.bool()?) } else { None };
+    Ok(ItemDetails {
+        date_added,
+        level_unlock,
+        highlight_sound,
+        colour,
+        type_bits,
+        sub_type,
+        title_key: None,
+        description_key: None,
+        translation_tag,
+        creation_history,
+        icon,
+        user_created,
+        photo,
+        eyetoy,
+        location_index,
+        category_index,
+        primary_index,
+        creator,
+        tool_type,
+        flags: 0,
+        last_used,
+        num_uses,
+        fluff_cost: None,
         allow_emit,
         shareable,
         copyright,
