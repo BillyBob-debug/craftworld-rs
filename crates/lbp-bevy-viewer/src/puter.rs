@@ -3,6 +3,7 @@
 //! screen in the 3D view instead of a flat window: the gooey UI renders through a second
 //! camera into a 1280 x 720 texture, shown unlit on a quad. It works in any 3D mode (single
 //! mesh, level), so the screen can be placed in the pod room once that is found.
+//! The texture camera is spawned after bevy_egui has put its panel on the 3D camera.
 //! Keyboard: arrows move focus, Enter activates (the tree is the script's one run, so
 //! activation changes only the focus outline). Mouse picking on the quad is not wired.
 //! Placement is a viewer choice, not the game's (UNKNOWN until the PC reference captures):
@@ -88,10 +89,16 @@ pub fn install(app: &mut App) -> Result<(), String> {
         None,
         None,
     );
-    // PostStartup: the viewer's own 3D camera (Startup) exists first, so the egui panel
-    // keeps attaching to it rather than to the texture camera.
+    // bevy_egui gives its panel to the first new camera it sees in PreUpdate; with two
+    // cameras new in the same frame it could pick the texture camera (PC check of 35e07ad:
+    // egui's Rgba8 pipeline in the Bgra8 texture pass). So the texture camera spawns only
+    // once the egui context sits on the 3D camera, and the UI waits for it.
     app.insert_resource(placement)
-        .add_systems(PostStartup, spawn_screen);
+        .insert_resource(GooeyTarget {
+            camera: None,
+            pending: true,
+        })
+        .add_systems(Update, spawn_screen);
     Ok(())
 }
 
@@ -102,7 +109,11 @@ fn spawn_screen(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
     mut target: ResMut<GooeyTarget>,
+    egui: Query<(), With<bevy_egui::PrimaryEguiContext>>,
 ) {
+    if !target.pending || egui.is_empty() {
+        return;
+    }
     let mut image = Image::new_fill(
         Extent3d {
             width: SCREEN[0],
@@ -128,7 +139,10 @@ fn spawn_screen(
             RenderTarget::Image(handle.clone().into()),
         ))
         .id();
-    target.0 = Some(camera);
+    *target = GooeyTarget {
+        camera: Some(camera),
+        pending: false,
+    };
     let height = placement.width * SCREEN[1] as f32 / SCREEN[0] as f32;
     commands.spawn((
         Mesh3d(meshes.add(Rectangle::new(placement.width, height))),
