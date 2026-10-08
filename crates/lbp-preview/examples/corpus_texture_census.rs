@@ -13,6 +13,8 @@
 //! SerializedResource::process, CellGcmTexture constructor, Compressor::decompressData;
 //! DDS_HEADER: CONFIRMED_FROM_DOCUMENTATION (Microsoft). See docs/textures.md and
 //! docs/d90-texture-census.md. The probe only labels; it never decides an outcome.
+//! D95: decodes with `lbp_texture::decode_layered_checked`, so BC1/BC3 cube maps count as
+//! decoded (six top-mip faces, recorded as layout "cube"); see docs/d95-texture-rest.md.
 use lbp_catalog::{
     attachment::{AttachedSource, LocationKey},
     LoadControl,
@@ -427,6 +429,7 @@ fn run() -> Result<(), String> {
     let mut decoded_expanded = 0u64;
     let mut decoded_with_tail = 0usize;
     let mut decoded_no_srgb = 0usize;
+    let mut decoded_cube = 0usize;
     let mut decoded_pixel_formats: BTreeMap<String, usize> = BTreeMap::new();
     for (n, (sha, guids)) in by_hash.iter().enumerate() {
         control.check()?;
@@ -436,6 +439,7 @@ fn run() -> Result<(), String> {
         let mut probed = unknown("not read".into());
         let mut archived = None;
         let mut decoded = None;
+        let mut layered = None;
         let outcome = match lbp_preview::resolve(&catalog, None, Some(sha)) {
             Err(e) => Outcome::from_resolve(&e),
             Ok(key) => {
@@ -455,9 +459,13 @@ fn run() -> Result<(), String> {
                         Err(e) => Outcome::ReadFailed(e),
                         Ok(bytes) => {
                             probed = probe(&bytes);
-                            match lbp_texture::decode_checked(&bytes, || control.check().is_err()) {
+                            match lbp_texture::decode_layered_checked(&bytes, || {
+                                control.check().is_err()
+                            }) {
                                 Err(e) => Outcome::from_decoder(&e),
-                                Ok(t) => {
+                                Ok(l) => {
+                                    let t = &l.texture;
+                                    layered = Some((l.layout, l.faces_decoded));
                                     decoded = Some((
                                         t.header.pixel_format.to_string(),
                                         t.header.width,
@@ -482,6 +490,9 @@ fn run() -> Result<(), String> {
             decoded_with_tail += usize::from(*tail > 0);
             decoded_no_srgb += usize::from(*no_srgb);
         }
+        if let Some(("cube", _)) = layered {
+            decoded_cube += 1;
+        }
         let size = archived.map_or("unresolved", size_bucket);
         let dimension = dimension_bucket(probed.width, probed.height);
         tally.record(guids, &outcome, &probed.format, size, dimension);
@@ -493,6 +504,10 @@ fn run() -> Result<(), String> {
         if let Some((pf, w, h, expanded, tail, no_srgb)) = decoded {
             row["decoded"] = json!({"pixel_format": pf, "width": w, "height": h,
                 "expanded_bytes": expanded, "unparsed_after_top_mip": tail, "no_srgb": no_srgb});
+            if let Some((layout, faces)) = layered {
+                row["decoded"]["layout"] = json!(layout);
+                row["decoded"]["faces_decoded"] = json!(faces);
+            }
         }
         rows.push(row);
     }
@@ -512,7 +527,7 @@ fn run() -> Result<(), String> {
         "tool": "corpus_texture_census",
         "milestone": "D90",
         "scope": "corpus_all_texture_map_rows",
-        "scope_note": "MAP rows with magic-confirmed type texture (snapshot), one resolve and top-mip decode per content hash with lbp_texture::decode_checked; pixels discarded",
+        "scope_note": "MAP rows with magic-confirmed type texture (snapshot), one resolve and top-mip decode per content hash with lbp_texture::decode_layered_checked (D95: cube maps decode six faces, not rendered); pixels discarded",
         "units": ["distinct_catalog_guid", "distinct_texture_hash"],
         "definitions": {
             "decoded": "decoder returned a top-mip RGBA image (decodability, not visual verification; higher mips not decoded)",
@@ -531,6 +546,8 @@ fn run() -> Result<(), String> {
             "per_texture_input_bytes": lbp_texture::MAX_INPUT,
             "per_texture_expanded_bytes": lbp_texture::MAX_EXPANDED,
             "per_texture_pixels": lbp_texture::MAX_PIXELS,
+            "per_texture_pixels_b8": lbp_texture::MAX_PIXELS_ONE_BYTE,
+            "per_texture_rgba_bytes": lbp_texture::MAX_RGBA,
             "max_seconds": max_seconds
         },
         "snapshot_texture_map_rows": map_rows,
@@ -543,7 +560,8 @@ fn run() -> Result<(), String> {
             "archived_bytes_read": bytes_read,
             "decoded_expanded_bytes": decoded_expanded,
             "decoded_with_unparsed_tail_hashes": decoded_with_tail,
-            "decoded_no_srgb_hashes": decoded_no_srgb
+            "decoded_no_srgb_hashes": decoded_no_srgb,
+            "decoded_cube_hashes": decoded_cube
         },
         "by_outcome": outcomes,
         "by_outcome_reason": reasons,

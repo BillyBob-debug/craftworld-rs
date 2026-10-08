@@ -55,8 +55,10 @@ public class TextureOracle {
         }
         return out.toByteArray();
     }
-    static void pixelBudget(long w,long h) throws IOException {
-        if(w<1||h<1||w>4096||h>4096||w*h>4*1024*1024)throw new IOException("pixel/dimension budget");
+    static void pixelBudget(long w,long h) throws IOException {pixelBudget(w,h,4L*1024*1024);}
+    // D95: GTF B8 (one byte per texel) mirrors the Rust 16 Mi pixel budget.
+    static void pixelBudget(long w,long h,long max) throws IOException {
+        if(w<1||h<1||w>4096||h>4096||w*h>max)throw new IOException("pixel/dimension budget");
     }
     static void rejected(byte[] b) throws Exception {
         try {clearPayload(b);}catch(IOException e){return;}
@@ -136,8 +138,10 @@ public class TextureOracle {
                     if(!actual.equals(id))throw new IOException("FARC payload SHA-1 mismatch");
                     byte[] strict=clearPayload(raw);
                     if(raw[0]=='G'){
-                        pixelBudget(be16(raw,12),be16(raw,14));
-                        if(raw[6]!=2||raw[7]!=0||be16(raw,16)!=1)throw new IOException("non-simple 2D GTF excluded");
+                        pixelBudget(be16(raw,12),be16(raw,14),(raw[4]&0x9f)==0x81?16L*1024*1024:4L*1024*1024);
+                        // D95: BC1/BC3 cube maps admitted; Toolkit's image is face 0's top mip.
+                        boolean bcCube=raw[7]==1&&((raw[4]&0xff)==0x86||(raw[4]&0xff)==0x88);
+                        if(raw[6]!=2||(raw[7]!=0&&!bcCube)||be16(raw,16)!=1)throw new IOException("non-simple 2D GTF excluded");
                     } else {
                         if(strict.length<128||!Arrays.equals(Arrays.copyOf(strict,4),new byte[]{'D','D','S',' '}))throw new IOException("missing DDS header");
                         pixelBudget(le32(strict,16),le32(strict,12));

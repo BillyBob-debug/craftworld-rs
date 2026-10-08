@@ -26,11 +26,27 @@
 //! bytes per texel), DDS.convertSwizzleGtf (swizzle order, big-endian texels),
 //! DDS.getDDSHeader/DDSReader.readL8 (B8 as opaque gray). Independent implementation of
 //! written findings; rules, conflicts and oracle coverage: docs/d91-gtf-uncompressed.md.
+//! D95: B8 pixel budget 16 Mi (same byte budgets); BC1/BC3 GTF cube maps through the
+//! separate `decode_layered*` entry points only (face order: Toolkit DDS.getDDSHeader cube
+//! caps, CONFIRMED_FROM_COMMUNITY_CODE; 128-byte face stride: CONFIRMED_FROM_LOCAL_DATA,
+//! conflicts with Toolkit's unpadded pass-through). Volumes and remap 0x02ff stay refused.
+//! Rules and evidence: docs/d95-texture-rest.md.
 use serde::Serialize;
 use std::fmt;
 pub const MAX_INPUT: usize = 16 * 1024 * 1024;
 pub const MAX_EXPANDED: usize = 32 * 1024 * 1024;
+/// Pixel budget for every format except B8, and the cap the preview composition and GPU
+/// upload paths keep using.
 pub const MAX_PIXELS: usize = 4 * 1024 * 1024;
+/// D95: pixel budget for one-byte-per-texel B8 (4096 x 4096). Its top mip is 16 MiB, under
+/// `MAX_EXPANDED`; the decoded RGBA stays under `MAX_RGBA`.
+pub const MAX_PIXELS_ONE_BYTE: usize = 16 * 1024 * 1024;
+/// D95: decoded RGBA output budget per texture, all cube faces together.
+pub const MAX_RGBA: usize = 64 * 1024 * 1024;
+/// Faces of a GTF cube map; order +X, -X, +Y, -Y, +Z, -Z (DDS cube caps order).
+pub const CUBE_FACES: usize = 6;
+/// D95: locally measured alignment of each cube face's mip chain.
+const CUBE_FACE_ALIGN: usize = 128;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Error {
     Blocked,
@@ -113,6 +129,20 @@ pub struct DdsHeader {
     pub masks: [u32; 4],
     pub caps: [u32; 4],
 }
+/// D95 layered result: `texture` is the 2D top mip (face 0, +X, for a cube map) and
+/// `extra_faces` holds the top mips of faces 1..6 (-X, +Y, -Y, +Z, -Z) as RGBA, same size.
+/// The preview renders only `texture`; the extra faces are decoded data, not rendered.
+#[derive(Debug, Serialize)]
+pub struct LayeredTexture {
+    pub texture: Texture,
+    /// "2d" or "cube".
+    pub layout: &'static str,
+    pub faces_decoded: u32,
+    /// Byte distance between consecutive faces in the expanded payload (cube only).
+    pub face_stride: Option<usize>,
+    #[serde(skip)]
+    pub extra_faces: Vec<Vec<u8>>,
+}
 #[derive(Debug, Serialize)]
 pub struct Texture {
     pub header: Header,
@@ -136,7 +166,15 @@ fn checked(cancel: &impl Fn() -> bool) -> Result<(), Error> {
     }
 }
 /// Header preflight permits rejection before callers read a full resource.
+/// 2D only: cube maps are refused here and accepted by `inspect_layered`.
 pub fn inspect(b: &[u8]) -> Result<Header, Error> {
+    inspect_gtf(b, false).map(|(h, _)| h)
+}
+/// D95: like `inspect`, but also accepts BC1/BC3 cube maps; the flag reports a cube.
+pub fn inspect_layered(b: &[u8]) -> Result<(Header, bool), Error> {
+    inspect_gtf(b, true)
+}
+fn inspect_gtf(b: &[u8], allow_cube: bool) -> Result<(Header, bool), Error> {
     if b.len() < 4 {
         return Err(Error::Invalid("truncated magic"));
     }
@@ -159,8 +197,20 @@ pub fn inspect(b: &[u8]) -> Result<Header, Error> {
         0x81 | 0xa1 => PixelFormat::B8,
         _ => return Err(Error::Unsupported("pixel format or layout flags")),
     };
-    if b[6] != 2 || b[7] != 0 || be16(b, 16) != 1 {
+    // Toolkit CellGcmTexture: dimension > 2 is a volume, cubemap byte 1 is a cube map.
+    let (dimension, cube_byte, depth) = (b[6], b[7], be16(b, 16));
+    if dimension == 3 && cube_byte == 0 && depth > 1 {
+        return Err(Error::Unsupported("volume texture: slice layout UNKNOWN"));
+    }
+    if dimension != 2 || cube_byte > 1 || depth != 1 {
         return Err(Error::Unsupported("cube/volume/dimension"));
+    }
+    let cube = cube_byte == 1;
+    if cube && !allow_cube {
+        return Err(Error::Unsupported("cube map (2D decode)"));
+    }
+    if cube && !pixel_format.is_block() {
+        return Err(Error::Unsupported("uncompressed cube map"));
     }
     // 0xa9ff (Toolkit REMAP_BBBB) is the B8 gray remap; other remaps are refused.
     let remap = be32(b, 8);
@@ -172,12 +222,20 @@ pub fn inspect(b: &[u8]) -> Result<Header, Error> {
     if width == 0 || height == 0 || b[5] == 0 {
         return Err(Error::Invalid("zero dimensions or mip count"));
     }
+    let max_pixels = if pixel_format == PixelFormat::B8 {
+        MAX_PIXELS_ONE_BYTE
+    } else {
+        MAX_PIXELS
+    };
     if width > 4096
         || height > 4096
-        || width.checked_mul(height).ok_or(Error::Budget)? > MAX_PIXELS
+        || width.checked_mul(height).ok_or(Error::Budget)? > max_pixels
         || b[5] > 13
     {
         return Err(Error::Budget);
+    }
+    if cube && width != height {
+        return Err(Error::Unsupported("non-square cube map"));
     }
     let pitch = be32(b, 20) as usize;
     if linear {
@@ -192,7 +250,7 @@ pub fn inspect(b: &[u8]) -> Result<Header, Error> {
     } else if !pixel_format.is_block() && !(width.is_power_of_two() && height.is_power_of_two()) {
         return Err(Error::Unsupported("non-power-of-two swizzled GTF"));
     }
-    Ok(Header {
+    let header = Header {
         pixel_format,
         width: width as u32,
         height: height as u32,
@@ -203,14 +261,15 @@ pub fn inspect(b: &[u8]) -> Result<Header, Error> {
         format_raw: Some(b[4]),
         no_srgb: b[19] & 1 != 0,
         dds: None,
-    })
+    };
+    Ok((header, cube))
 }
-fn envelope(b: &[u8]) -> Result<usize, Error> {
+fn envelope(b: &[u8], allow_cube: bool) -> Result<usize, Error> {
     if b.len() < 4 {
         return Err(Error::Invalid("truncated magic"));
     }
     if &b[..4] != b"TEX " {
-        inspect(b)?;
+        inspect_gtf(b, allow_cube)?;
         return Ok(28);
     }
     if b.len() < 8 {
@@ -478,12 +537,29 @@ pub fn decode(b: &[u8]) -> Result<Texture, Error> {
 }
 /// The owner provides approved read-only range access; this crate owns no paths.
 /// Reject unsupported headers before full reads; each callback is at most 4096 bytes.
+/// 2D only; cube maps are refused (see `decode_reader_layered`).
 pub fn decode_reader(
     size: u64,
-    mut read: impl FnMut(u64, usize) -> Result<Vec<u8>, Error>,
+    read: impl FnMut(u64, usize) -> Result<Vec<u8>, Error>,
     cancel: impl Fn() -> bool,
 ) -> Result<Texture, Error> {
-    checked(&cancel)?;
+    reader(size, read, &cancel, false).map(|l| l.texture)
+}
+/// D95: `decode_reader` that also decodes the six top-mip faces of a BC1/BC3 cube map.
+pub fn decode_reader_layered(
+    size: u64,
+    read: impl FnMut(u64, usize) -> Result<Vec<u8>, Error>,
+    cancel: impl Fn() -> bool,
+) -> Result<LayeredTexture, Error> {
+    reader(size, read, &cancel, true)
+}
+fn reader(
+    size: u64,
+    mut read: impl FnMut(u64, usize) -> Result<Vec<u8>, Error>,
+    cancel: &impl Fn() -> bool,
+    allow_cube: bool,
+) -> Result<LayeredTexture, Error> {
+    checked(cancel)?;
     let size = usize::try_from(size).map_err(|_| Error::Budget)?;
     if size > MAX_INPUT {
         return Err(Error::Budget);
@@ -492,10 +568,10 @@ pub fn decode_reader(
     if bytes.len() != size.min(32) {
         return Err(Error::Invalid("short source header read"));
     }
-    envelope(&bytes)?;
+    envelope(&bytes, allow_cube)?;
     bytes.reserve(size - bytes.len());
     while bytes.len() < size {
-        checked(&cancel)?;
+        checked(cancel)?;
         let count = (size - bytes.len()).min(4096);
         let part = read(bytes.len() as u64, count)?;
         if part.len() != count {
@@ -503,19 +579,82 @@ pub fn decode_reader(
         }
         bytes.extend(part);
     }
-    decode_checked(&bytes, cancel)
+    decode_impl(&bytes, cancel, allow_cube)
 }
+/// 2D top mip; cube maps are refused (see `decode_layered_checked`).
 pub fn decode_checked(b: &[u8], cancel: impl Fn() -> bool) -> Result<Texture, Error> {
-    checked(&cancel)?;
+    decode_impl(b, &cancel, false).map(|l| l.texture)
+}
+/// D95: also decodes the six top-mip faces of a BC1/BC3 GTF cube map. Face 0 (+X) is
+/// `texture`; a 2D texture returns the same image as `decode_checked`.
+pub fn decode_layered_checked(
+    b: &[u8],
+    cancel: impl Fn() -> bool,
+) -> Result<LayeredTexture, Error> {
+    decode_impl(b, &cancel, true)
+}
+/// Byte size of a full BC mip chain; mips <= 13 and sides <= 4096 were checked by `inspect`.
+fn block_chain_bytes(header: &Header) -> Result<usize, Error> {
+    let (mut w, mut h) = (header.width as usize, header.height as usize);
+    let mut total = 0usize;
+    for _ in 0..header.mips {
+        let blocks = w
+            .div_ceil(4)
+            .checked_mul(h.div_ceil(4))
+            .and_then(|n| n.checked_mul(header.pixel_format.bytes()))
+            .ok_or(Error::Budget)?;
+        total = total.checked_add(blocks).ok_or(Error::Budget)?;
+        w = (w / 2).max(1);
+        h = (h / 2).max(1);
+    }
+    Ok(total)
+}
+/// Top-mip BC blocks at `offset`; callers checked `offset + top-mip size <= data.len()`.
+fn decode_blocks(
+    data: &[u8],
+    offset: usize,
+    header: &Header,
+    cancel: &impl Fn() -> bool,
+) -> Result<Vec<u8>, Error> {
+    let (w, h) = (header.width as usize, header.height as usize);
+    let (bx, by) = (w.div_ceil(4), h.div_ceil(4));
+    let mut rgba = vec![0; w * h * 4];
+    for yb in 0..by {
+        checked(cancel)?;
+        for xb in 0..bx {
+            let p = offset + (yb * bx + xb) * header.pixel_format.bytes();
+            let block = &data[p..p + header.pixel_format.bytes()];
+            let pixels = block_pixels(block, header.pixel_format);
+            for y in 0..4 {
+                for x in 0..4 {
+                    let (px, py) = (xb * 4 + x, yb * 4 + y);
+                    if px >= w || py >= h {
+                        continue;
+                    }
+                    let color = pixels[y * 4 + x];
+                    rgba[(py * w + px) * 4..(py * w + px + 1) * 4].copy_from_slice(&color);
+                }
+            }
+        }
+    }
+    Ok(rgba)
+}
+fn decode_impl(
+    b: &[u8],
+    cancel: &impl Fn() -> bool,
+    allow_cube: bool,
+) -> Result<LayeredTexture, Error> {
+    checked(cancel)?;
     if b.len() > MAX_INPUT {
         return Err(Error::Budget);
     }
-    let start = envelope(b)?;
-    let data = expand(b, start, &cancel)?;
-    let (mut header, offset): (Header, usize) = if start == 4 {
-        (inspect_dds(&data)?, 128)
+    let start = envelope(b, allow_cube)?;
+    let data = expand(b, start, cancel)?;
+    let (mut header, offset, cube): (Header, usize, bool) = if start == 4 {
+        (inspect_dds(&data)?, 128, false)
     } else {
-        (inspect(b)?, 0)
+        let (header, cube) = inspect_gtf(b, allow_cube)?;
+        (header, 0, cube)
     };
     let (w, h) = (header.width as usize, header.height as usize);
     let (bx, by) = (w.div_ceil(4), h.div_ceil(4));
@@ -553,12 +692,37 @@ pub fn decode_checked(b: &[u8], cancel: impl Fn() -> bool) -> Result<Texture, Er
         .checked_mul(h)
         .and_then(|n| n.checked_mul(4))
         .ok_or(Error::Budget)?;
-    let mut rgba = vec![0; rgba_size];
-    if let Some(layout) = gtf_plain {
+    let faces = if cube { CUBE_FACES } else { 1 };
+    if rgba_size.checked_mul(faces).ok_or(Error::Budget)? > MAX_RGBA {
+        return Err(Error::Budget);
+    }
+    // Cube: each face holds a full mip chain padded to 128 bytes. The payload must be
+    // exactly six such faces, otherwise the layout does not hold for this file.
+    let (face_stride, end) = if cube {
+        let stride = block_chain_bytes(&header)?
+            .checked_next_multiple_of(CUBE_FACE_ALIGN)
+            .ok_or(Error::Budget)?;
+        if stride.checked_mul(CUBE_FACES) != Some(data.len()) {
+            return Err(Error::Unsupported(
+                "cube payload is not six 128-byte-aligned mip chains",
+            ));
+        }
+        (Some(stride), stride * (CUBE_FACES - 1) + end)
+    } else {
+        (None, end)
+    };
+    let mut extra_faces = Vec::new();
+    let rgba = if let Some(stride) = face_stride {
+        for face in 1..CUBE_FACES {
+            extra_faces.push(decode_blocks(&data, face * stride, &header, cancel)?);
+        }
+        decode_blocks(&data, 0, &header, cancel)?
+    } else if let Some(layout) = gtf_plain {
+        let mut rgba = vec![0; rgba_size];
         let bpp = header.pixel_format.bytes();
         let top = &data[offset..end];
         for y in 0..h {
-            checked(&cancel)?;
+            checked(cancel)?;
             for x in 0..w {
                 let p = match layout.pitch {
                     Some(pitch) => y * pitch + x * bpp,
@@ -573,41 +737,35 @@ pub fn decode_checked(b: &[u8], cancel: impl Fn() -> bool) -> Result<Texture, Er
                 rgba[(y * w + x) * 4..(y * w + x + 1) * 4].copy_from_slice(&color);
             }
         }
+        rgba
     } else if let Some(pitch) = pitch {
+        let mut rgba = vec![0; rgba_size];
         for y in 0..h {
-            checked(&cancel)?;
+            checked(cancel)?;
             let row = &data[offset + y * pitch..offset + y * pitch + w * 4];
             for (x, pixel) in row.as_chunks::<4>().0.iter().enumerate() {
                 rgba[(y * w + x) * 4..(y * w + x + 1) * 4]
                     .copy_from_slice(&[pixel[2], pixel[1], pixel[0], pixel[3]]);
             }
         }
+        rgba
     } else {
-        for yb in 0..by {
-            checked(&cancel)?;
-            for xb in 0..bx {
-                let p = offset + (yb * bx + xb) * header.pixel_format.bytes();
-                let block = &data[p..p + header.pixel_format.bytes()];
-                let pixels = block_pixels(block, header.pixel_format);
-                for y in 0..4 {
-                    for x in 0..4 {
-                        let (px, py) = (xb * 4 + x, yb * 4 + y);
-                        if px >= w || py >= h {
-                            continue;
-                        }
-                        let color = pixels[y * 4 + x];
-                        rgba[(py * w + px) * 4..(py * w + px + 1) * 4].copy_from_slice(&color);
-                    }
-                }
-            }
-        }
-    }
-    checked(&cancel)?;
-    Ok(Texture {
+        decode_blocks(&data, offset, &header, cancel)?
+    };
+    checked(cancel)?;
+    let texture = Texture {
         header,
         expanded_bytes: data.len(),
         top_mip_block_bytes: size,
+        // Cube: measured after the last face's top mip.
         unparsed_after_top_mip: data.len() - end,
         rgba,
+    };
+    Ok(LayeredTexture {
+        texture,
+        layout: if cube { "cube" } else { "2d" },
+        faces_decoded: faces as u32,
+        face_stride,
+        extra_faces,
     })
 }

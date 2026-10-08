@@ -54,7 +54,8 @@ fn run() -> Result<(), String> {
             offset: l.offset,
             size: l.size,
         };
-        let texture = lbp_texture::decode_reader(
+        // D95: layered decode; a cube map compares face 0 (+X), the image Toolkit returns.
+        let texture = lbp_texture::decode_reader_layered(
             key.size,
             |offset, count| {
                 source
@@ -65,7 +66,9 @@ fn run() -> Result<(), String> {
             || false,
         );
         match texture {
-            Ok(t) => {
+            Ok(l) => {
+                let (layout, faces_decoded) = (l.layout, l.faces_decoded);
+                let t = l.texture;
                 let digest = format!("{:x}", Sha256::digest(&t.rgba));
                 let dds_equal = if let Some(header) = &t.header.dds {
                     let raw = serde_json::to_value(header).map_err(|e| e.to_string())?;
@@ -97,7 +100,7 @@ fn run() -> Result<(), String> {
                     .count();
                 compared += 1;
                 mismatches += usize::from(!equal);
-                rows.push(json!({"sha1":sha,"status":"decoded","texture":t,"rgba_sha256":digest,"oracle_equal":equal,"dds_fields_equal":dds_equal,"transparent_pixels":transparent_pixels}));
+                rows.push(json!({"sha1":sha,"status":"decoded","texture":t,"rgba_sha256":digest,"oracle_equal":equal,"dds_fields_equal":dds_equal,"transparent_pixels":transparent_pixels,"layout":layout,"faces_decoded":faces_decoded}));
             }
             Err(e) => {
                 let skipped = matches!(

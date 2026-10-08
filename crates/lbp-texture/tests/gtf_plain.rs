@@ -171,10 +171,12 @@ fn refusals_and_bounds() {
     );
     let mut volume = gtf(0x85, 4, 4, 0xaae4, 0, &px, false);
     volume[6] = 3;
-    unsupported(volume, "cube/volume/dimension");
+    unsupported(volume.clone(), "cube/volume/dimension");
+    volume[17] = 4; // depth 4: a real volume (D95 reason)
+    unsupported(volume, "volume texture: slice layout UNKNOWN");
     let mut cube = gtf(0x81, 4, 4, 0xaae4, 0, &px, false);
     cube[7] = 1;
-    unsupported(cube, "cube/volume/dimension");
+    unsupported(cube, "cube map (2D decode)");
     // LN non-power-of-two is fine (linear rows), short pitch is malformed.
     assert!(decode(&gtf(0xa5, 3, 1, 0xaae4, 12, &px[..12], false)).is_ok());
     assert_eq!(
@@ -191,9 +193,10 @@ fn refusals_and_bounds() {
         decode(&gtf(0x85, 4, 4, 0xaae4, 0, &px[..63], false)).unwrap_err(),
         Error::Invalid("truncated top mip data")
     );
-    // Pixel budget: 4096x2048 B8 exceeds MAX_PIXELS.
+    // Pixel budget: 4096x2048 A8R8G8B8 exceeds MAX_PIXELS; B8 has its own D95 budget.
     assert_eq!(
-        inspect(&gtf(0x81, 4096, 2048, 0xaae4, 0, &px, false)).unwrap_err(),
+        inspect(&gtf(0x85, 4096, 2048, 0xaae4, 0, &px, false)).unwrap_err(),
         Error::Budget
     );
+    assert!(inspect(&gtf(0x81, 4096, 2048, 0xaae4, 0, &px, false)).is_ok());
 }
