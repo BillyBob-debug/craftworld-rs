@@ -857,7 +857,14 @@ impl Vm {
                     match op {
                         0x9a => *a.get_mut(idx(&index).ok_or(bad.clone())?).ok_or(bad)? = src,
                         0x9d => {
-                            let i = idx(&index).filter(|&i| i <= a.len()).ok_or(bad)?;
+                            // Index -1 inserts at the end (INFERRED from the D140 test
+                            // script's ARRAY_INSERT with -1).
+                            let i = match index {
+                                Value::Int(-1) => Some(a.len()),
+                                _ => idx(&index),
+                            }
+                            .filter(|&i| i <= a.len())
+                            .ok_or(bad)?;
                             if a.len() >= MAX_ARRAY_LEN {
                                 return Err(Fault::Heap);
                             }

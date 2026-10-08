@@ -753,3 +753,36 @@ fn test_script_checks_reach_the_world_through_construct() {
         assert_eq!(host.calls.get("Test.Check__bQ7StringAi"), Some(&1));
     }
 }
+
+#[test]
+fn array_insert_at_minus_one_appends() {
+    let mut b = Builder::new();
+    let ints = b.ty(OBJ, "int[]", None, INT);
+    let s = b.build(
+        "Arrays",
+        None,
+        vec![func(
+            "Run",
+            &[],
+            vec![
+                hi(0x03, 4, 0),              // r4 = 0 (size)
+                i(0x9c, 0, 8, 4, ints),      // r8 = new int[0]
+                hi(0x03, 12, 5),             // r12 = 5
+                i(0x9e, INT, 12, 8, 0xffff), // append r12 (no index operand)
+                hi(0x03, 16, -1i32 as u32),  // r16 = -1
+                hi(0x03, 20, 8),             // r20 = 8
+                i(0x9d, INT, 20, 8, 16),     // insert r20 at r16 = -1
+                hi(0x03, 24, 1),             // r24 = 1
+                i(0x99, INT, 28, 8, 24),     // r28 = r8[1]
+                i(0xa5, INT, 0, 28, 0),      // RETURN r28
+            ],
+        )],
+    );
+    let mut vm = Vm::default();
+    let c = vm.load(s, None);
+    let mut budget = 100;
+    assert_eq!(
+        vm.call(&mut TestHost::default(), c, "Run", &[], &mut budget),
+        Ok(Value::Int(8))
+    );
+}
