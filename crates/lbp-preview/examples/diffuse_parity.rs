@@ -903,7 +903,7 @@ fn run() -> Result<(), String> {
                     }
                     projected += 1;
                     // Versioned diagnostics retain all three original selectors/root indices.
-                    json!({"status":"projected","grid_graph":s.grid_graph.map(|g|json!({"root":g.root,"nodes":g.nodes,"samples":g.samples,"sources":g.sources,"policy":"evaluated_static_graph_nearest","bake":if g.sources==1 {"per_texel"} else {"repeat_grid"}})),"product_tree":s.product_tree.map(|t|json!({"root":t.root,"multiply_nodes":t.multiply_nodes,"texture_leaves":t.texture_leaves,"color_leaves":t.color_leaves,"policy":"folded_color_product"})),"texture_add":s.texture_add.map(|a|json!({"add_index":a.add_index,"addend_index":a.addend_index,"addend_bits":a.addend.map(|c|c.bits),"policy":"linear_sum_clamped"})),"sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"texture_blend":s.texture_blend.map(|b|json!({"blend_index":b.blend_index,"ports":format!("{:?}",b.ports),"mask_texture":b.mask_texture,"mask_red_srgb_decoded":b.mask_red,"threshold_bits":b.threshold_bits,"filter":"nearest_grid"})),"blend_mask":s.blend_mask.map(|b|json!({"blend_index":b.blend_index,"color_bits":b.color.bits,"color_first":b.color_first,"mask_red_srgb_decoded":b.mask_red,"threshold_bits":b.threshold_bits,"filter":"nearest"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"animation_base_more":s.animation_base_more.iter().flatten().map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})).collect::<Vec<_>>(),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+                    json!({"status":"projected","grid_graph":s.grid_graph.map(|g|json!({"root":g.root,"nodes":g.nodes,"samples":g.samples,"sources":g.sources,"policy":if g.off_grid.is_some() {"evaluated_static_graph_offgrid_preview_approximation"} else {"evaluated_static_graph_nearest"},"bake":match g.off_grid {Some(lbp_preview::OffGrid::Resampled{..}) => "offgrid_resampled_bilinear_tile",Some(lbp_preview::OffGrid::Split{..}) => "offgrid_split_dual_multiply",None if g.sources==1 => "per_texel",None => "repeat_grid"},"approximation":g.off_grid.map(|o|o.label())})),"product_tree":s.product_tree.map(|t|json!({"root":t.root,"multiply_nodes":t.multiply_nodes,"texture_leaves":t.texture_leaves,"color_leaves":t.color_leaves,"policy":"folded_color_product"})),"texture_add":s.texture_add.map(|a|json!({"add_index":a.add_index,"addend_index":a.addend_index,"addend_bits":a.addend.map(|c|c.bits),"policy":"linear_sum_clamped"})),"sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"texture_blend":s.texture_blend.map(|b|json!({"blend_index":b.blend_index,"ports":format!("{:?}",b.ports),"mask_texture":b.mask_texture,"mask_red_srgb_decoded":b.mask_red,"threshold_bits":b.threshold_bits,"filter":"nearest_grid"})),"blend_mask":s.blend_mask.map(|b|json!({"blend_index":b.blend_index,"color_bits":b.color.bits,"color_first":b.color_first,"mask_red_srgb_decoded":b.mask_red,"threshold_bits":b.threshold_bits,"filter":"nearest"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"animation_base_more":s.animation_base_more.iter().flatten().map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})).collect::<Vec<_>>(),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
                 }
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
@@ -1209,9 +1209,121 @@ fn graph_equal(
         && s.alpha_mix.is_none()
         && s.texture_alpha_mix.is_none()
         && s.blend.is_none()
-        && s.second_sample.is_none()
+        && off_grid_equal(&expected, nodes, root, s, g)
         && s.multiply_index.is_none()
         && s.tint == lbp_preview::DiffuseTint::default())
+}
+/// D103 (docs/d103-offgrid-bake.md): re-derive the off-grid plan from the oracle rows
+/// alone: the sample channels, the separable root product (oracle MULTIPLY rows from
+/// the diffuse root; every factor on one channel or none) and the smallest common tile
+/// period per channel group from the oracle scale words (Repeat assumed, as at selection).
+fn off_grid_equal(
+    expected: &std::collections::BTreeMap<usize, Value>,
+    nodes: &Value,
+    root: usize,
+    s: &lbp_preview::DiffuseSelection,
+    g: lbp_preview::GridGraph,
+) -> bool {
+    let samples: Vec<usize> = expected
+        .iter()
+        .filter(|(_, r)| r["op"] == "sample")
+        .map(|(i, _)| *i)
+        .collect();
+    let channel = |i: usize| expected.get(&i).and_then(|r| r["channel"].as_u64());
+    let period = |set: &[usize]| -> Option<[u8; 2]> {
+        let axis = |a: usize| {
+            (1u8..=16).find(|&p| {
+                set.iter().all(|&i| {
+                    nodes[i]["parameters_raw"][a].as_u64().is_some_and(|bits| {
+                        let c = f64::from(p) * f64::from(f32::from_bits(bits as u32)).abs();
+                        (c - c.round()).abs() <= 1e-4
+                    })
+                })
+            })
+        };
+        Some([axis(0)?, axis(1)?])
+    };
+    let inputs = |i: usize| -> Vec<usize> {
+        expected.get(&i).map_or(vec![], |r| {
+            r["inputs"].as_array().map_or(vec![], |v| {
+                v.iter()
+                    .filter_map(|x| x[1].as_u64().map(|n| n as usize))
+                    .collect()
+            })
+        })
+    };
+    // Channel bit mask of everything below `i` (bounded walk).
+    let mask = |i: usize| -> Option<u8> {
+        let mut m = 0u8;
+        let mut pending = vec![i];
+        let mut visits = 0;
+        while let Some(k) = pending.pop() {
+            visits += 1;
+            if visits > 256 {
+                return None;
+            }
+            if let Some(c) = channel(k) {
+                m |= 1u8.checked_shl(c as u32)?;
+            }
+            pending.extend(inputs(k));
+        }
+        Some(m)
+    };
+    match g.off_grid {
+        None => s.second_sample.is_none(),
+        Some(lbp_preview::OffGrid::Resampled {
+            channel: c,
+            period: p,
+        }) => {
+            s.second_sample.is_none()
+                && s.uv_channel == usize::from(c)
+                && samples.iter().all(|&i| channel(i) == Some(u64::from(c)))
+                && period(&samples) == Some(p)
+        }
+        Some(lbp_preview::OffGrid::Split {
+            channel: c,
+            period: p,
+            second_channel: c2,
+            second_period: p2,
+        }) => {
+            let mut factors = vec![];
+            let mut pending = vec![root];
+            while let Some(k) = pending.pop() {
+                if factors.len() + pending.len() > 64 {
+                    return false;
+                }
+                if expected.get(&k).is_some_and(|r| r["op"] == "multiply") {
+                    pending.extend(inputs(k));
+                } else {
+                    factors.push(k);
+                }
+            }
+            let masks: Option<Vec<u8>> = factors.iter().map(|&k| mask(k)).collect();
+            let Some(masks) = masks else {
+                return false;
+            };
+            let (b1, b2) = (1u8 << c, 1u8 << c2);
+            let group = |ch: u8| -> Vec<usize> {
+                samples
+                    .iter()
+                    .copied()
+                    .filter(|&i| channel(i) == Some(u64::from(ch)))
+                    .collect()
+            };
+            c != c2
+                && masks.iter().all(|&m| m == 0 || m == b1 || m == b2)
+                && masks.contains(&b1)
+                && masks.contains(&b2)
+                && s.uv_channel == usize::from(c)
+                && group(c).len() + group(c2).len() == samples.len()
+                && period(&group(c)) == Some(p)
+                && period(&group(c2)) == Some(p2)
+                && s.second_sample.is_some_and(|x| {
+                    x.uv_channel == usize::from(c2)
+                        && channel(x.sample_index) == Some(u64::from(c2))
+                })
+        }
+    }
 }
 fn add_equal(
     sample: &Value,

@@ -137,6 +137,14 @@ impl Asset {
             .map_or_else(|| self.wrap.raw(), |b| b.source_wrap_raw)
     }
     pub fn nearest_sampling(&self) -> bool {
+        // D103: off-grid evaluator bakes are resampled; shown with linear filtering.
+        if self
+            .selection
+            .grid_graph
+            .is_some_and(|g| g.off_grid.is_some())
+        {
+            return false;
+        }
         self.product.is_some()
             || self.selection.alpha_mix.is_some()
             || self.selection.blend_mask.is_some()
@@ -2046,7 +2054,13 @@ mod tests {
         );
         graph.boxes[4].parameters_raw[4] = 0;
         graph.boxes[2].parameters_raw[0] = 0; // zero base scale is not invertible
-        assert!(select_diffuse(&graph).is_err());
+                                              // D103: the evaluator takes it off the grid as a labelled resampled bake.
+        assert!(select_diffuse(&graph)
+            .unwrap()
+            .grid_graph
+            .unwrap()
+            .off_grid
+            .is_some());
         graph.boxes[2].parameters_raw[..4].copy_from_slice(&[1f32, 1., 0., 0.].map(f32::to_bits));
         // D67: both inner leaves on UV0 and the outer leaf on UV1: the second and
         // third roles swap so displayed coordinates cover both channels.
@@ -3167,12 +3181,19 @@ mod tests {
         assert_eq!((b.mask_texture, b.mask_red), (1, false));
         assert_eq!((s.sample_index, s.color_index), (4, None));
         assert_eq!((s.ignored_nodes, s.ignored_wires), (1, 0));
-        // Non-grid second sampler (other UV channel, fractional scale) is refused.
-        for (i, v) in [(4, 1), (0, 0.5f32.to_bits())] {
-            let mut h = g.clone();
-            h.boxes[4].parameters_raw[i] = v;
-            assert!(reason(&h).contains("two-texture BLEND requires"), "{i}");
-        }
+        // Non-grid second sampler: another UV channel is refused; a fractional scale
+        // is a D103 resampled approximation (docs/d103-offgrid-bake.md).
+        let mut h = g.clone();
+        h.boxes[4].parameters_raw[4] = 1;
+        assert!(reason(&h).contains("two-texture BLEND requires"));
+        let mut h = g.clone();
+        h.boxes[4].parameters_raw[0] = 0.5f32.to_bits();
+        assert!(select_diffuse(&h)
+            .unwrap()
+            .grid_graph
+            .unwrap()
+            .off_grid
+            .is_some());
         // Three distinct samples, two COLORs, the same input on both ports, a COLOR
         // mask: no fixed BLEND route; D100's graph evaluator bakes each (grid or
         // per texel). Off the grid the fixed reason stays first.

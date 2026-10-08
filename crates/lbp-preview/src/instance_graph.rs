@@ -249,11 +249,12 @@ mod tests {
     /// the original projection (and its reason) is returned.
     #[test]
     fn d105_refusals_keep_the_projection_and_name_the_reason() {
+        // Off-grid scale 1.5: since D103 the evaluator resamples it (labelled preview
+        // approximation), so it is evaluated rather than refused.
         let g = nested_blend(1.5);
         let (_, p) = project_instance_graph(&g, HALF, false).unwrap();
-        assert!(!p.unwrap().evaluated);
-        let reason = instance_graph_refusal(&g, HALF).unwrap();
-        assert!(reason.contains("integer Repeat grid"), "{reason}");
+        assert!(p.unwrap().evaluated);
+        assert_eq!(instance_graph_refusal(&g, HALF), None);
         // ThingColor alpha on a sampler UV port: the plain graph keeps the wire.
         let mut port = edge(3, 6, 2);
         port.swizzle_raw = [b'a', 0, 0, 0, 0];
