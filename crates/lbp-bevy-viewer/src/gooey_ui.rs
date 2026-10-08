@@ -121,6 +121,7 @@ pub fn run_ui_demo() {
         }))
         .init_resource::<GooeyHost>()
         .init_resource::<DemoState>()
+        .insert_resource(DemoCapture(demo_capture_path()))
         .add_systems(Startup, |mut commands: Commands| {
             commands.spawn(Camera2d);
         })
@@ -131,6 +132,7 @@ pub fn run_ui_demo() {
                 gooey_input,
                 gooey_rebuild,
                 gooey_paint_focus,
+                demo_capture,
             )
                 .chain(),
         )
@@ -438,5 +440,47 @@ mod tests {
             4,
         );
         assert_eq!(state.picked.as_deref(), Some("Stickers 4"));
+    }
+}
+
+/// `--qa-capture NEW_PNG` with `--ui-demo`: screenshot the demo after it settles, then exit.
+#[derive(Resource)]
+struct DemoCapture(Option<std::path::PathBuf>);
+
+fn demo_capture_path() -> Option<std::path::PathBuf> {
+    let args: Vec<String> = std::env::args().collect();
+    let value = args
+        .iter()
+        .position(|a| a == "--qa-capture")
+        .and_then(|i| args.get(i + 1))?;
+    let base = std::fs::canonicalize("local-analysis").ok()?;
+    let path = std::path::PathBuf::from(value);
+    let parent = std::fs::canonicalize(path.parent()?).ok()?;
+    if !parent.starts_with(base) || path.exists() || path.extension().is_none_or(|e| e != "png") {
+        eprintln!("Capture must be a new PNG under local-analysis");
+        return None;
+    }
+    Some(parent.join(path.file_name()?))
+}
+
+fn demo_capture(
+    mut commands: Commands,
+    mut capture: ResMut<DemoCapture>,
+    time: Res<Time>,
+    mut frames: Local<u32>,
+) {
+    *frames += 1;
+    if *frames > 120 && time.elapsed_secs() > 3. {
+        if let Some(path) = capture.0.take() {
+            commands
+                .spawn(bevy::render::view::screenshot::Screenshot::primary_window())
+                .observe(bevy::render::view::screenshot::save_to_disk(path))
+                .observe(
+                    |_: On<bevy::render::view::screenshot::ScreenshotCaptured>,
+                     mut exit: MessageWriter<AppExit>| {
+                        exit.write(AppExit::Success);
+                    },
+                );
+        }
     }
 }
