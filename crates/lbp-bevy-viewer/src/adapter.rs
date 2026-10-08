@@ -33,6 +33,23 @@ pub fn mesh(
     triangles: &[[u32; 3]],
     uv: Option<&[[f32; 2]]>,
 ) -> Result<Mesh, String> {
+    build_mesh(positions, triangles, uv, true)
+}
+/// D113 level scenes: source model coordinates are kept (no centering/normalization) so
+/// each instance's world matrix places the mesh; the scene is framed as a whole instead.
+pub fn mesh_local(
+    positions: &[[f32; 3]],
+    triangles: &[[u32; 3]],
+    uv: Option<&[[f32; 2]]>,
+) -> Result<Mesh, String> {
+    build_mesh(positions, triangles, uv, false)
+}
+fn build_mesh(
+    positions: &[[f32; 3]],
+    triangles: &[[u32; 3]],
+    uv: Option<&[[f32; 2]]>,
+    normalize: bool,
+) -> Result<Mesh, String> {
     if positions.is_empty() || positions.len() > 100_000 || triangles.len() > 50_000 {
         return Err("Unsupported: empty or over-budget geometry".into());
     }
@@ -44,7 +61,11 @@ pub fn mesh(
         return Err("Invalid: nonfinite position/UV or UV correspondence".into());
     }
     let frame = display_frame(positions).ok_or("Unsupported: zero-size geometry")?;
-    let display = to_display(positions, frame);
+    let display: Vec<[f32; 3]> = if normalize {
+        to_display(positions, frame)
+    } else {
+        positions.to_vec()
+    };
     let mut indices = Vec::with_capacity(triangles.len() * 3);
     let mut normals = vec![Vec3::ZERO; positions.len()];
     for t in triangles {

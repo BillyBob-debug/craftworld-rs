@@ -522,9 +522,8 @@ pub(crate) fn load(
     }
     let additional_texture_slots =
         crate::instance::additional_texture_slots(cx.original_graph, &slots)?;
-    let coordinates = lbp_mesh::decode_uvs(cx.mesh_bytes, || cx.control.check().is_err())
-        .map_err(|e| e.to_string())?;
-    let vertices = cx.geometry.positions.len();
+    let coordinates = cx.uv.decode(cx.control)?;
+    let vertices = cx.vertices;
     let mut decoded = vec![];
     for &slot in &slots {
         decoded.push(Some(crate::grid_graph::decode(cx, slot, false)?));

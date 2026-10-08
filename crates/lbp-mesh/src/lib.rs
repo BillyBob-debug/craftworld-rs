@@ -9,7 +9,7 @@ pub use lbp_resource::binary::Error;
 mod uv;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
-pub use uv::{decode_uvs, UvCoordinates, UvMetadata};
+pub use uv::{decode_uvs, UvChannelMetadata, UvCoordinates, UvMetadata};
 pub const MAX_INPUT: usize = 2 * 1024 * 1024;
 pub const MAX_EXPANDED: usize = 16 * 1024 * 1024;
 #[derive(Debug, Serialize)]

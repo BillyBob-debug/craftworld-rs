@@ -1314,6 +1314,34 @@ pub fn load(
         crate::PreviewOptions::default(),
     )
 }
+/// Where a material's per-vertex coordinates come from.
+#[derive(Clone, Copy)]
+pub(crate) enum UvInput<'a> {
+    /// Stored mesh UV channels (decoded from the mesh resource bytes).
+    Mesh(&'a [u8]),
+    /// D113 level shapes: generated UV0 only (UV1 requests are refused as absent).
+    Generated(&'a [[f32; 2]]),
+}
+impl UvInput<'_> {
+    pub(crate) fn decode(self, control: &LoadControl) -> Result<lbp_mesh::UvCoordinates, String> {
+        match self {
+            Self::Mesh(bytes) => {
+                lbp_mesh::decode_uvs(bytes, || control.check().is_err()).map_err(|e| e.to_string())
+            }
+            Self::Generated(uv) => Ok(lbp_mesh::UvCoordinates {
+                metadata: UvMetadata {
+                    vertex_count: u32::try_from(uv.len()).map_err(|_| "UV count overflow")?,
+                    channel_count: 1,
+                    channels: vec![lbp_mesh::UvChannelMetadata {
+                        channel: 0,
+                        uv_bits_sha256: "generated (level shape preview)".into(),
+                    }],
+                },
+                channels: vec![uv.to_vec()],
+            }),
+        }
+    }
+}
 pub(crate) fn load_primitive(
     source: &AttachedSource,
     catalog: &Catalog,
@@ -1335,6 +1363,27 @@ pub(crate) fn load_primitive(
         primitive.material_guid,
         primitive.material_hash.as_deref(),
     )?;
+    load_material(
+        source,
+        catalog,
+        material_key,
+        geometry.positions.len(),
+        UvInput::Mesh(mesh_bytes),
+        control,
+        options,
+    )
+}
+/// Material selection and loading for `vertices` coordinates from `uv`.
+pub(crate) fn load_material(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    material_key: LocationKey,
+    vertices: usize,
+    uv_input: UvInput,
+    control: &LoadControl,
+    options: crate::PreviewOptions,
+) -> Result<MaterialAsset, String> {
+    control.check()?;
     if material_key.size > lbp_resource::material::MAX_INPUT as u64 {
         return Err("Material input budget exceeded".into());
     }
@@ -1386,8 +1435,8 @@ pub(crate) fn load_primitive(
         let cx = crate::grid_graph::LoadContext {
             source,
             catalog,
-            geometry,
-            mesh_bytes,
+            vertices,
+            uv: uv_input,
             graph: &graph,
             original_graph: &original_graph,
             control,
@@ -1428,9 +1477,8 @@ pub(crate) fn load_primitive(
         }
         selection.tint = tint;
     }
-    let coordinates =
-        lbp_mesh::decode_uvs(mesh_bytes, || control.check().is_err()).map_err(|e| e.to_string())?;
-    let uv = selected_uv(&coordinates, selection.uv_channel, geometry.positions.len())?;
+    let coordinates = uv_input.decode(control)?;
+    let uv = selected_uv(&coordinates, selection.uv_channel, vertices)?;
     let second_wrap = selection
         .second_sample
         .map(|second| {
@@ -1606,8 +1654,7 @@ pub(crate) fn load_primitive(
                 rgba,
             }))
         } else {
-            let raw_second =
-                selected_uv(&coordinates, second.uv_channel, geometry.positions.len())?;
+            let raw_second = selected_uv(&coordinates, second.uv_channel, vertices)?;
             let mut sampling_uv = second
                 .uv_transform
                 .sampling(&raw_second, || control.check().is_err())?;
