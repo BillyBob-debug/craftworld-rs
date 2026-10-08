@@ -17,7 +17,7 @@
 //! - Everything else returns nothing; the VM then substitutes the default of the call's
 //!   return type. Member reads return `Void` and writes are dropped (counted).
 use lbp_level::script::Script;
-use lbp_script_vm::{ClassId, Fault, Host, MemberKind, Value, Vm};
+use lbp_script_vm::{ClassId, Fault, Host, MemberKind, Step, Value, Vm};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -307,37 +307,98 @@ pub fn functions(script: &Script) -> Vec<FunctionInfo> {
         .collect()
 }
 
-/// Arguments for calling `function` of `script` headlessly: the receiver `this` first for
-/// a member function (VM rule, INFERRED), defaults of each argument's machine type after.
-pub fn default_args(script: &Script, function: &str, this: Option<Value>) -> Option<Vec<Value>> {
+/// Where the receiver went when a function was entered headlessly.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum Receiver {
+    /// Static function: no receiver.
+    None,
+    /// Member function with an argument row at register 0: the receiver fills that row.
+    FirstRow,
+    /// Member function whose argument rows all start above register 0: the receiver is
+    /// staged at register 0 outside the rows.
+    ImplicitRegister0,
+}
+
+/// How a function is entered headlessly.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Entry {
+    pub registers: Vec<(u16, Value)>,
+    pub receiver: Receiver,
+    /// Argument rows' register offsets.
+    pub offsets: Vec<i32>,
+}
+
+/// Registers for entering `function` of `script` headlessly, plus where the receiver went
+/// and the argument rows' register offsets (reported so the PC can check the guess).
+/// Receiver rule (INFERRED, open question): a member function takes `this` at register 0;
+/// whether its argument rows include that register is decided per function from the
+/// offsets. Other arguments get their machine type's default, except an object argument
+/// whose type names a loaded script class, which gets a fresh instance of that class (UI
+/// entry points take a `Gooey` object).
+pub fn entry_registers(
+    vm: &mut Vm,
+    script: &Script,
+    function: &str,
+    this: Value,
+) -> Result<Entry, Fault> {
+    let missing = || Fault::MissingFunction {
+        class: script.class_name.clone(),
+        function: function.to_owned(),
+    };
     let f = script
         .function_defs
         .iter()
-        .find(|f| script.name(f.name) == Some(function))?;
+        .find(|f| script.name(f.name) == Some(function))
+        .ok_or_else(missing)?;
     let rows = script
         .shared_arguments
-        .get(f.arguments.begin as usize..f.arguments.end as usize)?;
-    let member = f.modifiers & 1 == 0;
-    Some(
-        rows.iter()
-            .enumerate()
-            .map(|(i, row)| match (&this, i == 0 && member) {
-                (Some(t), true) => t.clone(),
-                _ => Value::default_for(
-                    script
-                        .type_refs
-                        .get(row.type_ref as usize)
-                        .map_or(0, |t| t.machine_type),
-                ),
-            })
-            .collect(),
-    )
+        .get(f.arguments.begin as usize..f.arguments.end as usize)
+        .ok_or_else(missing)?;
+    let offsets: Vec<i32> = rows.iter().map(|r| r.offset).collect();
+    let receiver = if f.modifiers & 1 != 0 {
+        Receiver::None
+    } else if offsets.contains(&0) {
+        Receiver::FirstRow
+    } else {
+        Receiver::ImplicitRegister0
+    };
+    let mut regs = Vec::with_capacity(rows.len() + 1);
+    if receiver == Receiver::ImplicitRegister0 {
+        regs.push((0, this.clone()));
+    }
+    for row in rows {
+        let at = u16::try_from(row.offset).map_err(|_| Fault::Index {
+            pc: 0,
+            what: "argument offset",
+        })?;
+        let t = script.type_refs.get(row.type_ref as usize);
+        let v = if receiver == Receiver::FirstRow && at == 0 {
+            this.clone()
+        } else {
+            let class = t
+                .filter(|t| t.machine_type == 11)
+                .and_then(|t| script.name(t.type_name))
+                .and_then(|n| vm.class_by_name(n));
+            match class {
+                Some(c) => Value::Object(Some(vm.instantiate(c)?)),
+                None => Value::default_for(t.map_or(0, |t| t.machine_type)),
+            }
+        };
+        regs.push((at, v));
+    }
+    Ok(Entry {
+        registers: regs,
+        receiver,
+        offsets,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct RunReport {
     pub class: String,
     pub function: String,
+    pub receiver: Option<Receiver>,
+    pub argument_offsets: Vec<i32>,
     /// Returned value, or the VM fault that stopped the run.
     pub result: Result<String, String>,
     pub instructions: u64,
@@ -347,8 +408,8 @@ pub struct RunReport {
     pub output: Vec<String>,
 }
 
-/// Instantiates `class` (for a member function), calls `function` with default
-/// arguments under `budget` instructions, and returns what the host saw.
+/// Instantiates `class`, enters `function` per [`entry_registers`] under `budget`
+/// instructions, and returns what the host saw.
 pub fn run(
     vm: &mut Vm,
     host: &mut GooeyHost,
@@ -358,19 +419,25 @@ pub fn run(
     budget: u64,
 ) -> RunReport {
     let mut left = budget;
-    let result = (|| -> Result<Value, Fault> {
+    let mut entry = (None, Vec::new());
+    let result = (|| -> Result<String, Fault> {
         let this = Value::Object(Some(vm.instantiate(class)?));
-        let args =
-            default_args(script, function, Some(this)).ok_or_else(|| Fault::MissingFunction {
-                class: vm.class_name(class).to_owned(),
-                function: function.to_owned(),
-            })?;
-        vm.call(host, class, function, &args, &mut left)
+        let e = entry_registers(vm, script, function, this)?;
+        let regs = e.registers;
+        entry = (Some(e.receiver), e.offsets);
+        Ok(
+            match vm.start_registers(host, class, function, &regs, &mut left)? {
+                Step::Done(v) => show(&v),
+                Step::Yielded(_) => "<yielded>".to_owned(),
+            },
+        )
     })();
     RunReport {
         class: vm.class_name(class).to_owned(),
         function: function.to_owned(),
-        result: result.map(|v| show(&v)).map_err(|f| format!("{f:?}")),
+        receiver: entry.0,
+        argument_offsets: entry.1,
+        result: result.map_err(|f| format!("{f:?}")),
         instructions: budget - left,
         tree: host.finish(),
         counts: host.counts.clone(),

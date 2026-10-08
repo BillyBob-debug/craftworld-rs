@@ -51,10 +51,29 @@ stubbed while showing the static screens.
   members, server data. Script GUIDs are not known in directory mode, so cross-script
   calls resolve by class name.
 
+## Fix after the first PC run (2026-10-08)
+PC result: PodStateMainMenu `all` ran 15 functions, 7 faulted with Type faults on
+`GET_OBJ_MEMBER`/`SET_OBJ_MEMBER`/`SET_V4_X` within the first 11 instructions;
+`UpdateUI__Q5Gooey` stopped after 48 of 1,201 instructions with 1 frame open and no text.
+Gooey: 45 run, 9 faulted. PodStateStoriesMenu: 13 run, 5 faulted.
+
+Two causes, both fixed here (rules INFERRED, the trace reports them):
+- Receiver placement. The first version put `this` in the first argument row, so for
+  `UpdateUI__Q5Gooey` it replaced the Gooey argument and register 0 stayed empty.
+  `entry_registers` now puts `this` at register 0, inside the rows only when a row sits
+  at register 0, and reports which (`receiver`, `argument_offsets` per run). An object
+  argument whose type names a loaded script class (e.g. `Gooey`) gets a fresh instance
+  instead of null.
+- Fresh registers. `SET_V4_*` / `SET_M44_*` on a never-written register now start from a
+  zero vector/matrix (VM change; registers behave like zeroed storage).
+- New VM entry `Vm::start_registers` stages registers directly; a run that yields is
+  reported as `<yielded>`.
+
 ## Tests (synthetic only)
 `crates/lbp-ui-script/tests/gooey_host.rs` `u12_gooey_calls_build_a_frame_tree_and_trace`:
 frame open/close, frame property, translated text, button label, stub bool return,
-unbalanced `EndFrame` counted, outline. Cloud (Linux, Rust 1.99.0): `cargo fmt --all
+unbalanced `EndFrame` counted, outline, receiver at register 0 with a member read,
+script-class argument instance, `SET_V4_X` on a fresh register. Cloud (Linux, Rust 1.99.0): `cargo fmt --all
 --check` ok; `cargo test -q -p lbp-ui-script -p lbp-script-vm` pass;
 `cargo +1.99.0 clippy -q -p lbp-ui-script -p lbp-script-vm --all-targets -- -D warnings`
 clean.

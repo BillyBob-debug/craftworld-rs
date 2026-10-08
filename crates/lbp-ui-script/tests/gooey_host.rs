@@ -1,7 +1,7 @@
 //! U12 Gooey host on an authored synthetic script (no game bytecode).
-use lbp_level::script::{FunctionDef, MemberRef, Script, Span, TypeOffset, TypeRef};
+use lbp_level::script::{FieldDef, FunctionDef, MemberRef, Script, Span, TypeOffset, TypeRef};
 use lbp_script_vm::{Value, Vm};
-use lbp_ui_script::{default_args, functions, outline, run, GooeyHost, Node};
+use lbp_ui_script::{entry_registers, functions, outline, run, GooeyHost, Node, Receiver};
 
 fn i(op: u8, ty: u8, a: u16, b: u16, c: u16) -> u64 {
     u64::from(op)
@@ -15,6 +15,7 @@ fn hi(op: u8, a: u16, value: u32) -> u64 {
 }
 
 const BOOL: u8 = 1;
+const INT: u8 = 3;
 const OBJ: u8 = 11;
 
 /// class Menu { bool Draw() } calling Gooey and LAMS natives.
@@ -31,6 +32,8 @@ fn menu() -> Script {
         "EndFrame__",
         "Play",
         "Draw",
+        "s32",
+        "count",
     ]
     .map(String::from)
     .to_vec();
@@ -45,6 +48,9 @@ fn menu() -> Script {
     let f = |type_ref, name| MemberRef { type_ref, name };
     let one = 1.0f32.to_bits();
     let bytecode = vec![
+        i(0xb3, INT, 28, 0, 0),  // r28 = this.count (this at register 0)
+        hi(0x04, 32, one),       // r32 = 1.0
+        i(0x79, 0, 32, 36, 0),   // r36.x = r32 on a fresh register
         hi(0x03, 4, 0),          // r4 = 0
         i(0xa3, 0, 4, 0, 0),     // ARG @0 = r4
         i(0xa4, 0, 0, 0, 0),     // StartFrame(0)
@@ -72,10 +78,14 @@ fn menu() -> Script {
         class_name: "Menu".into(),
         super_class: None,
         modifiers: 0,
-        type_refs: vec![ty(OBJ, 1), ty(OBJ, 2), ty(OBJ, 0)],
-        field_refs: vec![],
+        type_refs: vec![ty(OBJ, 1), ty(OBJ, 2), ty(OBJ, 0), ty(INT, 11)],
+        field_refs: vec![f(2, 12)],
         function_refs: vec![f(0, 3), f(0, 4), f(1, 5), f(0, 6), f(0, 7), f(0, 8)],
-        field_defs: vec![],
+        field_defs: vec![FieldDef {
+            modifiers: 0,
+            type_ref: 3,
+            name: 12,
+        }],
         property_defs: vec![],
         function_defs: vec![FunctionDef {
             modifiers: 0,
@@ -109,20 +119,24 @@ fn u12_gooey_calls_build_a_frame_tree_and_trace() {
     assert_eq!(list.len(), 1);
     assert_eq!((list[0].name.as_str(), list[0].is_static), ("Draw", false));
     assert_eq!(list[0].arguments, 1);
-    // A member function gets the receiver first.
-    assert_eq!(
-        default_args(&script, "Draw", Some(Value::Int(9))),
-        Some(vec![Value::Int(9)])
-    );
 
     let mut vm = Vm::default();
     let class = vm.load(script.clone(), None);
+    // The only argument row is at register 32, so the receiver goes to register 0 and the
+    // Menu-typed argument gets a fresh Menu instance.
+    let e = entry_registers(&mut vm, &script, "Draw", Value::Int(9)).unwrap();
+    let (regs, receiver, offsets) = (e.registers, e.receiver, e.offsets);
+    assert_eq!(receiver, Receiver::ImplicitRegister0);
+    assert_eq!(offsets, vec![32]);
+    assert_eq!(regs[0], (0, Value::Int(9)));
+    assert!(matches!(regs[1], (32, Value::Object(Some(_)))));
     let translate = |k: u32| (k == 0x1234).then(|| "Start".to_owned());
     let mut host = GooeyHost::new(&translate);
     let r = run(&mut vm, &mut host, class, &script, "Draw", 10_000);
 
     // The stubbed button returns the default of its bool return type.
     assert_eq!(r.result, Ok("false".into()));
+    assert_eq!(r.receiver, Some(Receiver::ImplicitRegister0));
     assert_eq!(r.counts.native_calls, 7);
     assert_eq!(r.counts.translated, 1);
     assert_eq!(r.counts.unbalanced_end, 1);

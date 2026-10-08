@@ -113,13 +113,16 @@ fn run_main() -> Result<(), String> {
         let r = run(&mut vm, &mut host, class, &s, name, BUDGET);
         let c = &r.counts;
         println!(
-            "{name}: {} after {} instructions; natives {} (distinct {}), translated {}/{}, \
-             frames unbalanced {} unclosed {}, member reads {} writes {}",
+            "{name}: {} after {} instructions; receiver {:?} arg offsets {:?}; natives {} \
+             (distinct {}), translated {}/{}, frames unbalanced {} unclosed {}, \
+             member reads {} writes {}",
             match &r.result {
                 Ok(v) => format!("returned {v}"),
                 Err(f) => format!("FAULT {f}"),
             },
             r.instructions,
+            r.receiver,
+            r.argument_offsets,
             c.native_calls,
             c.by_native.len(),
             c.translated,
