@@ -1,12 +1,14 @@
 # Project rules
 
 Build an independent LBP2 Asset Explorer that reads the user's own game data.
-The future compatible runtime is context, not the current implementation scope.
+Since 2026-10-08 the user has approved gameplay runtime work (physics, logic, scripts, a playable Sackboy) on top of the explorer. It lives in separate crates that the parsing crates never depend on; see `docs/runtime-research.md`.
 
 ## Boundaries
 
 - Original ZIP, ISO, disc images, extracted game directories, saves, and executable files are read-only. Open inputs in read mode. Never mount with write access or patch them.
 - Local decryption, protected-data inspection and targeted executable disassembly/decompilation of the user's own game copy are permitted research techniques when needed. Preserve original inputs; write derived research material only under ignored local directories. This supersedes the earlier blanket prohibition. Online service modification remains outside the asset-viewer scope.
+- Interpreting the user's own compiled game scripts (RScript) at runtime is approved (2026-10-08). Scripts are loaded from the user's game data like any other asset. The interpreter and its native-function API are written independently from recorded findings; no script bytecode, disassembly or decompiled engine code ships or is committed.
+- Running the user's own game copy in the RPCS3 emulator (frame-stepping, memory observation) is an approved research method for gameplay constants (2026-10-08). Results are recorded as local observations; no game code is copied. RPCS3 and PS3 firmware are user-installed tools, not product dependencies; their files stay outside the repository.
 - Never publish or commit proprietary game files, assets, decompiler output, reference-repository binaries, or unknown-provenance fixtures. Local diagnostic JSON and byte samples belong only under ignored `local-analysis/`; game trees under ignored `game-data/`.
 - Keep the default-deny `.gitignore`. Check prospective tracked files before publication; extensions alone do not prove provenance. Never force-add game data.
 - Reference repositories remain ignored under `references/`. Do not blindly copy their bundled assets or templates.
@@ -21,7 +23,7 @@ The future compatible runtime is context, not the current implementation scope.
 3. For each format rule, record source URL, pinned commit, class/method or section, evidence category, build/revision applicability, conflicts, and test coverage near the implementation. Use the five labels in `docs/formats.md`.
 4. Do not copy/adapt/translate unlicensed source. MIT-derived source retains notices; GPL/AGPL source requires its obligations and a deliberate licensing decision. Independent specification-based implementation and an external oracle are the default. Public visibility is not reuse permission.
 5. Parsing libraries must not depend on UI/rendering. Keep disk layouts, intermediate representations, and GPU/UI representations separate.
-6. Implement small, reviewable milestones. No GUI, physics, gameplay, multiplayer, or speculative format parser during scanner work.
+6. Implement small, reviewable milestones. Scanner and parsing crates stay free of GUI, physics and gameplay; runtime work goes in its own crates. No multiplayer or speculative format parser. The physics dependency is avian2d (MIT OR Apache-2.0), approved 2026-10-08.
 7. All lengths/counts/offsets/revisions are untrusted. Use checked arithmetic, strict bounds, decompression budgets, cycle limits, and explicit unsupported/encrypted outcomes. Preserve duplicate MAP aliases and conflicting candidates rather than silently choosing one.
 8. Resource type inferred from extension must remain distinct from type confirmed by magic. Unresolved is not corrupt; not parsed is not empty.
 9. Use deterministic ordering and versioned JSON. Keep timing, absolute paths, and generation timestamps outside the deterministic inventory body.
