@@ -8,14 +8,17 @@
 //!   `this` in register 0 (the convention the test-script and Gooey hosts use, INFERRED for
 //!   Thing scripts) and resumes yielded scripts once per tick.
 //!
-//! Which functions the game calls on create and on each tick is not known yet: the
-//! `level_scripts` example reports the function names of the classes a level uses, and the
-//! entry names are passed in until that is settled.
+//! - [`LevelScripts`] is the per-tick schedule: [`CREATE`] once on every scripted Thing,
+//!   then each tick resume suspended scripts and run [`UPDATE`] on the others.
+//!
+//! Entry names: `OnCreate__` and `Update__` are the create/update functions (PC D152:
+//! across the 49 classes Rookie Test and the other levels use, `OnCreate__` is defined by
+//! 24 and `Update__` by 11; the remaining names are UI, switch and enter/leave handlers).
 use lbp_level::parts::{ScriptPart, ScriptValue, ShapeColor};
 use lbp_level::thing::ThingRecord;
 use lbp_script_vm::natives::World;
 use lbp_script_vm::{ClassId, Host, MemberKind, Step, Task, Value, Vm};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// One Thing as the runtime sees it.
 #[derive(Debug, Clone, Default)]
@@ -409,6 +412,11 @@ impl Runner {
         self.tasks.len()
     }
 
+    /// Things with a suspended script.
+    pub fn pending_things(&self) -> BTreeSet<u32> {
+        self.tasks.iter().map(|(t, _)| *t).collect()
+    }
+
     /// Runs `function` on one instance with the Thing as `this` in register 0.
     pub fn start(
         &mut self,
@@ -462,6 +470,120 @@ impl Runner {
                 Outcome::Fault(format!("{f:?} at {site}"))
             }
         }
+    }
+}
+
+/// Function the game runs once when a scripted Thing is created.
+pub const CREATE: &str = "OnCreate__";
+/// Function the game runs on every scripted Thing each tick.
+pub const UPDATE: &str = "Update__";
+/// Game logic rate (X1, CONFIRMED_FROM_LOCAL_DATA in RPCS3: 30 ticks per second).
+pub const TICK_HZ: u32 = 30;
+
+/// Outcomes of one schedule step, by kind, with the faults.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StepReport {
+    pub done: usize,
+    pub yielded: usize,
+    pub resumed: usize,
+    pub no_function: usize,
+    pub no_class: usize,
+    pub faults: Vec<(u32, String)>,
+}
+
+impl StepReport {
+    fn add(&mut self, thing: u32, o: Outcome) {
+        match o {
+            Outcome::Done => self.done += 1,
+            Outcome::Yielded => self.yielded += 1,
+            Outcome::NoFunction => self.no_function += 1,
+            Outcome::NoClass => self.no_class += 1,
+            Outcome::Fault(f) => self.faults.push((thing, f)),
+        }
+    }
+}
+
+/// Per-tick script schedule for one level.
+///
+/// INFERRED (docs/level-scripts.md): `create` runs [`CREATE`] on every instance in Thing
+/// order; each `tick` first resumes scripts suspended by `System.Yield` (in the order
+/// they yielded), then runs [`UPDATE`] on every instance that was not suspended at the
+/// start of the tick, in Thing order. A Thing whose script faults is not run again.
+pub struct LevelScripts {
+    pub instances: Vec<Instance>,
+    runner: Runner,
+    /// Things stopped by a fault.
+    pub stopped: BTreeSet<u32>,
+    /// Ticks run so far.
+    pub ticks: u64,
+}
+
+impl LevelScripts {
+    pub fn new(vm: &Vm, world: &LevelWorld) -> Self {
+        Self {
+            instances: instances(vm, world),
+            runner: Runner::default(),
+            stopped: BTreeSet::new(),
+            ticks: 0,
+        }
+    }
+
+    /// Scripts suspended by `System.Yield`.
+    pub fn pending(&self) -> usize {
+        self.runner.pending()
+    }
+
+    /// Runs [`CREATE`] on every instance; `budget` is per call.
+    pub fn create(&mut self, vm: &mut Vm, host: &mut dyn Host, budget: u64) -> StepReport {
+        self.run_all(vm, host, CREATE, budget, &BTreeSet::new())
+    }
+
+    /// One game tick; `budget` is per call or resume.
+    pub fn tick(&mut self, vm: &mut Vm, host: &mut dyn Host, budget: u64) -> StepReport {
+        // A Thing suspended at the start of the tick is resumed, not updated again.
+        let busy = self.runner.pending_things();
+        let mut resume_budget = budget.saturating_mul(self.runner.pending() as u64);
+        let mut report = StepReport::default();
+        for (thing, o) in self.runner.tick(vm, host, &mut resume_budget) {
+            if matches!(o, Outcome::Done | Outcome::Yielded) {
+                report.resumed += 1;
+            }
+            if matches!(o, Outcome::Fault(_)) {
+                self.stopped.insert(thing);
+                report.add(thing, o);
+            }
+        }
+        let update = self.run_all(vm, host, UPDATE, budget, &busy);
+        report.done += update.done;
+        report.yielded += update.yielded;
+        report.no_function += update.no_function;
+        report.no_class += update.no_class;
+        report.faults.extend(update.faults);
+        self.ticks += 1;
+        report
+    }
+
+    fn run_all(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut dyn Host,
+        function: &str,
+        budget: u64,
+        skip: &BTreeSet<u32>,
+    ) -> StepReport {
+        let mut report = StepReport::default();
+        for inst in self.instances.clone() {
+            if skip.contains(&inst.thing) || self.stopped.contains(&inst.thing) {
+                continue;
+            }
+            let mut b = budget;
+            let o = self.runner.start(vm, host, inst, function, &mut b);
+            if matches!(o, Outcome::Fault(_)) {
+                self.stopped.insert(inst.thing);
+            }
+            report.add(inst.thing, o);
+        }
+        report
     }
 }
 

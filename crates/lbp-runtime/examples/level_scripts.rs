@@ -1,6 +1,7 @@
 //! Rt PC check (docs/level-scripts.md): which scripts levels use and how they run.
 //!
 //! level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH NEW-JSON [--entry=NAME]... [--ticks=N]
+//! level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH NEW-JSON --play=TICKS
 //! level_scripts SNAPSHOT GAME-DIRS --all NEW-JSON
 //!
 //! Loads every magic-confirmed script with its MAP GUID (the U12 loader), reads the level(s)
@@ -10,11 +11,12 @@
 //! names that have code, which is how the create/update entry names get settled. With
 //! `--entry`, one level runs that function on every scripted Thing and resumes yielded
 //! scripts for `--ticks` ticks (default 30), reporting outcomes, faults, unbound natives
-//! and `WRITE` lines. Names and counts only; no bytecode. Output: a NEW JSON file under
+//! and `WRITE` lines. `--play` runs the `LevelScripts` schedule instead: `OnCreate__`, then
+//! TICKS ticks of resume + `Update__`. Names and counts only; no bytecode. Output: a NEW JSON file under
 //! ignored `local-analysis/`. Counting unit: Thing with a PScript part (instances) or
 //! distinct script class (function names).
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
-use lbp_runtime::{instances, LevelWorld, Outcome, Runner};
+use lbp_runtime::{instances, LevelScripts, LevelWorld, Outcome, Runner, StepReport};
 use lbp_script_vm::natives::Bindings;
 use lbp_script_vm::Vm;
 use std::collections::{BTreeMap, BTreeSet};
@@ -100,14 +102,22 @@ fn run() -> Result<(), String> {
         .find_map(|a| a.strip_prefix("--ticks="))
         .map_or(Ok(30), str::parse)
         .map_err(|e| format!("--ticks: {e}"))?;
+    let play: Option<u64> = all
+        .iter()
+        .find_map(|a| a.strip_prefix("--play="))
+        .map(str::parse)
+        .transpose()
+        .map_err(|e| format!("--play: {e}"))?;
     let args: Vec<&String> = all
         .iter()
-        .filter(|a| !a.starts_with("--entry=") && !a.starts_with("--ticks="))
+        .filter(|a| {
+            !a.starts_with("--entry=") && !a.starts_with("--ticks=") && !a.starts_with("--play=")
+        })
         .collect();
     if args.len() != 5 {
         return Err(
             "usage: level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH|--all NEW-JSON \
-                    [--entry=NAME]... [--ticks=N]"
+                    [--entry=NAME]... [--ticks=N] [--play=TICKS]"
                 .into(),
         );
     }
@@ -116,8 +126,11 @@ fn run() -> Result<(), String> {
         return Err("output must be a new file under local-analysis/".into());
     }
     let every = args[3] == "--all";
-    if every && !entries.is_empty() {
-        return Err("--entry runs one level, not --all".into());
+    if every && (!entries.is_empty() || play.is_some()) {
+        return Err("--entry and --play run one level, not --all".into());
+    }
+    if play.is_some() && !entries.is_empty() {
+        return Err("use --play or --entry, not both".into());
     }
     let control = LoadControl::default();
     let catalog = lbp_catalog::load(Path::new(args[1]), &control)?;
@@ -187,6 +200,66 @@ fn run() -> Result<(), String> {
 
     // Optional run on the single level.
     let mut runs = serde_json::Map::new();
+    if let (Some(n), Some(mut world)) = (play, last_world.take()) {
+        world.add_class_defaults(&vm);
+        let mut host = Bindings::new(world);
+        let mut level = LevelScripts::new(&vm, &host.world);
+        let created = level.create(&mut vm, &mut host, BUDGET_PER_CALL);
+        let mut sum = StepReport::default();
+        let mut fault_kinds = BTreeMap::<String, usize>::new();
+        let mut first_faults = Vec::new();
+        let mut ticks_with_faults = 0usize;
+        let mut note_faults = |r: &StepReport| {
+            for (thing, f) in &r.faults {
+                let kind = f.replace(&format!("thing {thing} "), "thing # ");
+                *fault_kinds.entry(kind).or_default() += 1;
+                if first_faults.len() < MAX_FAULTS {
+                    first_faults.push(format!("thing {thing}: {f}"));
+                }
+            }
+        };
+        note_faults(&created);
+        for _ in 0..n {
+            let t = level.tick(&mut vm, &mut host, BUDGET_PER_CALL);
+            ticks_with_faults += usize::from(!t.faults.is_empty());
+            note_faults(&t);
+            sum.done += t.done;
+            sum.yielded += t.yielded;
+            sum.resumed += t.resumed;
+            sum.no_function += t.no_function;
+            sum.no_class += t.no_class;
+            sum.faults.extend(t.faults);
+        }
+        let report = |r: &StepReport| {
+            serde_json::json!({
+                "done": r.done, "yielded": r.yielded, "resumed": r.resumed,
+                "no_function": r.no_function, "no_class": r.no_class, "faults": r.faults.len(),
+            })
+        };
+        let mut unbound: Vec<_> = host.unbound.iter().collect();
+        unbound.sort_by(|a, b| b.1.cmp(a.1));
+        unbound.truncate(40);
+        runs.insert(
+            "play".into(),
+            serde_json::json!({
+                "instances": level.instances.len(),
+                "ticks": level.ticks,
+                "tick_hz": lbp_runtime::TICK_HZ,
+                "create": report(&created),
+                "ticks_total": report(&sum),
+                "ticks_with_faults": ticks_with_faults,
+                "stopped_by_fault": level.stopped.len(),
+                "pending_at_end": level.pending(),
+                "faults_by_kind": fault_kinds,
+                "first_faults": first_faults,
+                "unbound_natives": unbound
+                    .iter()
+                    .map(|(k, n)| serde_json::json!({"native": k, "calls": n}))
+                    .collect::<Vec<_>>(),
+                "written": host.world.written.iter().take(40).collect::<Vec<_>>(),
+            }),
+        );
+    }
     if let (false, Some(mut world)) = (entries.is_empty(), last_world) {
         world.add_class_defaults(&vm);
         let mut host = Bindings::new(world);
@@ -308,7 +381,8 @@ fn run() -> Result<(), String> {
     );
     for (entry, r) in &runs {
         if entry != "unbound_natives" && entry != "written" {
-            println!("--entry={entry}: {r}");
+            let flag = if entry == "play" { "--play" } else { "--entry" };
+            println!("{flag}={entry}: {r}");
         }
     }
     Ok(())
