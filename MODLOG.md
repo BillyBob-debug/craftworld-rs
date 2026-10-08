@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-07 — Batch: local D91, D92, D93 merged
+
+D91 GTF A8R8G8B8/B8 decode: textures 23,215 of 23,247 decode (+242). D92 2+ animated
+leaves under animation base: unsupported 162 -> 144. D93 census counts shown in both
+viewers. Corpus all-diffuse unchanged by default. +0 viewable / +0 Complete.
+
 ## 2026-10-07 — Batch: local D88, D89, D90 merged
 
 D88 textured THING_COLOR under the instance color (8). D89 ADD shapes (4). D90 texture

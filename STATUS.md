@@ -3240,3 +3240,38 @@ diffuse_route_census (instance-only check); kept both. diffuse_parity schema 18.
 Not tested: viewer captures, real instance colors, ADD sum vs game (linear clamp is policy).
 Next: GTF 0x85/0x81 texture decode (267 hashes, Toolkit-confirmed); THING_COLOR in
 sampler ports (14) and 2+ animated samplers (12); BLEND thresholds (38 with THING).
+
+## Batch 2026-10-07h — local D91, D92, D93 merged (2026-10-07)
+
+Local subagents on plan usage. Detail: [d91-gtf-uncompressed.md](docs/d91-gtf-uncompressed.md),
+[d92-multi-animated.md](docs/d92-multi-animated.md), [d93-counts-in-app.md](docs/d93-counts-in-app.md).
+
+- D91: GTF 0x85 A8R8G8B8 and 0x81 B8 decode (swizzled, and 0x20 linear rows 0xa5/0xa1).
+  Texture census on 01.33: decoded 22,973 -> 23,215 of 23,247 hashes (23,195 -> 23,445
+  of 23,477 GUIDs). Left: 7 unsupported (cubes 4, volume 1, B8 remap 0x02ff 2) and 25 B8
+  over the 4 Mi pixel budget. Toolkit pixel parity on 20 new samples: 0 mismatches.
+- D92: animation-base opt-in accepts 2+ distinct animated leaves, each with its own base
+  rows; nested-tint ThingColor forms refused. Default unchanged.
+- D93: both viewers show the corpus mesh/texture census counts (unit, scope, baseline;
+  "not measured" without files). Flags --mesh-census, --texture-census, --census-baseline;
+  Bevy --print-census prints headlessly.
+- Route census on 01.33 (material locations, 8,094): animation-base-only 106 -> 121,
+  instance-only 244 -> 247, unsupported 162 -> 144; texture 6,953, solid 619 unchanged.
+- Corpus mesh census (distinct catalog GUID, 4,261; viewable 4,257 in every mode):
+  all-diffuse default 3,669 (unchanged), --animation-base 3,721 -> 3,733, --instance-rgba
+  3,899 (unchanged), both 3,967 -> 3,980. Complete 0.
+**+0 newly viewable / +0 newly Complete** (texture decode +242 hashes).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests lbp-preview/-texture/-catalog/-resource/-viewer/-bevy-viewer/-cli, both viewer builds, python OK.
+- diffuse_route_census -> b93-diffuse-route-shapes-0133.json: counts above.
+- diffuse_parity: d92 oracles (--animation-base --instance-white) 17/0/14, 1/0/1, 1/0/1, 3/0/2, 2/0/0; d88 4/0/4, 1/0/1, 2/0/2, 1/0/1; regressions d78 38/0/36, d75 48/0/41, d83 8/0/2, d68 26/0/20, d86 5/0/5, d87 18/0/18, d89 5/0/2, d64 17/0/17, d65 48/0/48, d67 18/0/18, d46 32/0/29 and 48/0/46.
+- compatibility_census: d68-new 48/45/0, D61 48/43/0, D75 48/44/0 (unchanged).
+- corpus_mesh_census -> b93-corpus-{default,anim,inst,both}.json; corpus_texture_census (D91 agent) -> d91-texture-census-0133.json.
+- lbp-bevy-viewer --print-census with those files: counts above, baseline deltas correct, exit 0.
+
+Failed: none. Schema bumps: diffuse_parity 19, compatibility_census 12 (D92).
+Not tested: viewer window layout of the census panel; B8 identity-remap colour on
+hardware; patch-archive textures vs oracle; animated playback.
+Next: BLEND (thresholds, 38 with THING); ThingColor wired into sampler ports (14);
+25 B8 textures over the pixel budget; cubes/volumes.

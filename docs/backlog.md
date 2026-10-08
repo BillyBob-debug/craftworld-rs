@@ -1,12 +1,12 @@
-# Backlog (Integrator-owned; refreshed 2026-10-07 after D89 from the 01.33 census)
+# Backlog (Integrator-owned; refreshed 2026-10-07 after D92 from the 01.33 census)
 
-Source: `local-analysis/b90-diffuse-route-shapes-0133.json` (schema 2, local only),
+Source: `local-analysis/b93-diffuse-route-shapes-0133.json` (schema 2, local only),
 the D64 `diffuse_route_census` tool run on 01.33 (disc + update layers). Scope is
 diffuse route selection only: these are material locations with MAP rows, not asset
 counts and not payload compatibility. Counts only; no asset bytes or GUIDs here.
 
 Totals (8,094 materials): texture 6,953; solid 619; unwired black 10; animation-base
-only 106; instance-color only 244; unsupported 162; no MAP row 65.
+only 121; instance-color only 247; unsupported 144; no MAP row 65.
 (After D75: animation-base 60, instance 225, unsupported 258. Before D75: texture 6,828,
 instance 207, unsupported 386.)
 
@@ -16,7 +16,7 @@ animation. Families are exclusive, assigned in this order: any THING_COLOR, any
 BLEND, 2+ textures with an animated sampler, exactly 2 TEX + COLOR under MUL only,
 any MIX, other.
 
-## Ranked unsupported families (162 materials after D89)
+## Ranked unsupported families (144 materials after D92)
 
 Ranked by count and tractability (THING_COLOR is larger but blocked on real
 instance values).
@@ -24,14 +24,14 @@ instance values).
 | Rank | Family | Materials | Notes |
 |---|---|---|---|
 | done | <a id="two-tex-color"></a>Two textures × static COLOR (MUL only, any nesting) | 0–3 (was 113) | D75 merged: 110 now texture route, Toolkit parity 128/0 mismatches. Any leftovers are edge shapes now counted under Other. |
-| 2 | <a id="animated-sampler-product"></a>2+ texture product with an animated sampler | about 16 (was 65) | D78: 49 moved to opt-in classes; two or more animated leaves still unsupported. Signatures 18 / 15 / 13 / 12. Single-sampler animation base opt-in exists already. |
+| 2 | <a id="animated-sampler-product"></a>2+ texture product with an animated sampler | few (was 65) | D78 one animated leaf, D92 2+ animated leaves, both under the animation-base opt-in. Nested-tint ThingColor forms still refused. |
 | 3 | <a id="thing-color"></a>Any THING_COLOR in the diffuse chain | about 80 (D86 and D88 moved 16 to instance-only; left: BLEND 38, ThingColor in sampler ports 14, 2+ animated samplers 12, ADD 13) | Includes the BLEND+THING shapes (7 / 7 / 6 / 5). Needs supplied-color opt-in; real values unknown. |
 | 4 | <a id="mix"></a>MIX shapes | 12 (was 14) | D83: 2 two-texture alpha MIX on the Repeat grid now select; 6 need per-sample UVs. Two-texture alpha MIX 8. |
 | 5 | <a id="blend"></a>BLEND without THING_COLOR | 14 | D84 implemented the D76 0.15/0.16 rule; 0 materials use it (13 use 0/1, 1 uses 0.67/0.8; 10 have products under an input). |
 | 6 | <a id="small"></a>Other | about 37 (D89 took 4 ADD shapes; UV channel raw 2 (4) stays unsupported) | D87 took CONST4 alone, COLOR x COLOR, TEX with CONST/CONST2 UV scale (25). Left: ADD-containing 8, UV channel raw 2 (4), COLOR outside 0..1 (3), animated samplers, deeper products. |
 
 ## Opt-in classes (not unsupported)
-- Instance-color only 244 (+8 D86 constant folds, +8 D88 textured shapes).
+- Instance-color only 247 (+8 D86, +8 D88, +3 D92).
 - Animation-base only 106 (60 single-sampler + 46 from D78 multi-texture products).
 
 ## Other open items (no census count)
@@ -41,5 +41,5 @@ instance values).
 - BORDER color, CLAMP5, mirror-once 6–8, filtering fidelity unknown.
 
 ## Texture decode (D90)
-- 274 of 23,247 texture hashes on 01.33 do not decode: GTF 0x85 A8R8G8B8 187, GTF 0x81 B8 80,
-  GTF 0xa5 3, cube/volume 4. Toolkit decodes 0x85/0x81/0xa5 (oracle), so these are decoder gaps.
+- After D91, 32 of 23,247 texture hashes on 01.33 do not decode: 25 B8 over the 4 Mi pixel
+  budget, 4 BC1 cubes, 1 A8R8G8B8 volume, 2 B8 with remap 0x02ff.
