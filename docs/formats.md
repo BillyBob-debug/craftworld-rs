@@ -280,8 +280,12 @@ D91 (`CONFIRMED_FROM_COMMUNITY_CODE`, oracle parity on 20 local samples): uncomp
 0xaae4/0xa9ff as opaque gray. Rules and conflicts: [d91-gtf-uncompressed.md](d91-gtf-uncompressed.md).
 D95: B8 pixel budget 16 Mi; BC1/BC3 cube maps decode six top-mip faces via the layered
 API only (face order COMMUNITY_CODE, 128-byte face stride LOCAL, conflicts with Toolkit's
-unpadded pass-through); volume slices and remap 0x02ff UNKNOWN, refused.
-[d95-texture-rest.md](d95-texture-rest.md).
+unpadded pass-through). [d95-texture-rest.md](d95-texture-rest.md).
+D98 (`CONFIRMED_FROM_COMMUNITY_CODE`, no oracle: Toolkit ignores remap and has no volume
+layout): uncompressed GTF applies the GCM remap word (bits 0..7 source selects A,R,G,B =
+0..3 for outputs A,R,G,B; bits 8..15 modes 0 zero, 1 one, 2 remap), so B8 0x02ff is an
+alpha mask (RGB 0); swizzled volumes interleave x, y, z bits (x lowest, exhausted axes
+drop out), slice 0 as 2D. [d98-last-textures.md](d98-last-textures.md).
 
 Best texture oracle: Toolkit RTexture + DDS helpers. External cross-checks:
 [Refresh TexStream](https://github.com/LittleBigRefresh/Refresh/blob/25f03e40416ebe73016b9e9972e0fa7b11a7f0b0/Refresh.Core/Importing/TexStream.cs)

@@ -1,5 +1,5 @@
 //! D95 synthetic fixtures (hand-built headers and texels only): B8 pixel budget, BC1 cube
-//! maps through the layered entry points, volume and remap refusals.
+//! maps through the layered entry points, volume refusal by the 2D entry points.
 use lbp_texture::{
     decode, decode_checked, decode_layered_checked, decode_reader, decode_reader_layered, inspect,
     inspect_layered, Error, MAX_INPUT, MAX_RGBA,
@@ -196,21 +196,14 @@ fn cube_layout_and_budget_refusals() {
 }
 
 #[test]
-fn volume_and_alpha_only_remap_stay_refused() {
+fn volume_refused_by_2d_entry_points() {
+    // D98 decodes volumes and remap 0x02ff through the layered path (d98_last.rs).
     let texels = vec![0u8; 16 * 16 * 16 * 4];
     let volume = gtf(0x85, 1, 3, 0, 16, 16, 16, 0xaae4, &texels, None);
-    for result in [
-        decode(&volume).map(|_| ()),
-        decode_layered_checked(&volume, || false).map(|_| ()),
-    ] {
-        assert_eq!(
-            result.unwrap_err(),
-            Error::Unsupported("volume texture: slice layout UNKNOWN")
-        );
-    }
-    let b8 = gtf(0x81, 1, 2, 0, 4, 4, 1, 0x02ff, &[0; 16], None);
     assert_eq!(
-        decode_layered_checked(&b8, || false).unwrap_err(),
-        Error::Unsupported("remap/pitch/offset/location/flags")
+        decode(&volume).unwrap_err(),
+        Error::Unsupported("volume texture (2D decode)")
     );
+    let l = decode_layered_checked(&volume, || false).unwrap();
+    assert_eq!((l.layout, l.faces_decoded), ("volume", 16));
 }
