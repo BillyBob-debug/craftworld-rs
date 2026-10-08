@@ -1,0 +1,305 @@
+//! P1b: `--pod-menu CLASS`, the Pod main menu as the game shows it with the Puter open:
+//! the script's buttons as pill labels down the right side of a globe, the last one on the
+//! moon, and the profile Polaroid between them (placement in `lbp_ui_script::pod`, from the
+//! RPCS3 reference). The scene is a level camera looking into -Z with the globe and moon
+//! placed so they project to the measured frame positions.
+//! Fidelity: the globe and moon are PLACEHOLDER spheres (flat colours) until the PC finds
+//! the pod meshes; the Polaroid is a blank card; the workshop background is a flat colour;
+//! pill style (white, cyan highlight with a pulse) follows the captures by eye. The window
+//! says so unless `--qa-hide-ui`.
+//! Keys: Up/Down move the highlight, Enter prints the chosen label (the live menu, running
+//! the script per frame, is a later slice).
+//! Usage: `--pod-menu CLASS --snapshot SNAPSHOT --game-dir DIR [--ui-script-function NAME]
+//! [--qa-hide-ui] [--qa-capture local-analysis/NEW.png]`.
+use crate::gooey_ui::{demo_capture, demo_capture_path, DemoCapture};
+use crate::ui_script::{run_script, DEFAULT_FUNCTION};
+use bevy::prelude::*;
+use lbp_ui_script::pod::{layout, PodMenu, ASPECT, GLOBE, MOON};
+
+/// Vertical field of view (UNKNOWN in the game; only the projected positions matter here).
+const FOV: f32 = std::f32::consts::FRAC_PI_4;
+/// Distance of the spheres from the camera, in display units.
+const DEPTH: f32 = 10.;
+/// Globe spin, radians per second (slow, by eye from the captures).
+const SPIN: f32 = 0.15;
+
+#[derive(Resource)]
+struct Menu {
+    menu: PodMenu,
+    focused: usize,
+}
+
+#[derive(Component)]
+struct Globe;
+
+#[derive(Component)]
+struct PillNode(usize);
+
+/// The point at frame fractions `f` on the plane `DEPTH` in front of the camera.
+pub fn frame_to_world(f: [f32; 2]) -> Vec3 {
+    let half = (FOV / 2.).tan() * DEPTH;
+    Vec3::new(
+        (f[0] - 0.5) * 2. * half * ASPECT,
+        (0.5 - f[1]) * 2. * half,
+        -DEPTH,
+    )
+}
+
+/// A radius given as a fraction of the frame height, in display units at `DEPTH`.
+pub fn height_to_world(r: f32) -> f32 {
+    r * 2. * (FOV / 2.).tan() * DEPTH
+}
+
+pub fn run_pod_menu() -> Result<(), String> {
+    let all: Vec<String> = std::env::args().collect();
+    let value = |flag: &str| {
+        all.iter()
+            .position(|a| a == flag)
+            .and_then(|i| all.get(i + 1))
+            .cloned()
+    };
+    let class = value("--pod-menu").ok_or("--pod-menu requires a CLASS")?;
+    let snapshot = value("--snapshot").ok_or("--pod-menu requires --snapshot")?;
+    let game = value("--game-dir").ok_or("--pod-menu requires --game-dir")?;
+    let function = value("--ui-script-function").unwrap_or_else(|| DEFAULT_FUNCTION.into());
+    let hide = all.iter().any(|a| a == "--qa-hide-ui");
+    let (report, _) = run_script(snapshot.as_ref(), game.as_ref(), &class, &function)?;
+    let menu = layout(&report.tree);
+    println!(
+        "Pod menu: {} pills ({}), polaroid {}",
+        menu.pills.len(),
+        menu.pills
+            .iter()
+            .map(|p| format!(
+                "{} {:?} at {:.2}/{:.2}",
+                p.label, p.on, p.centre[0], p.centre[1]
+            ))
+            .collect::<Vec<_>>()
+            .join(", "),
+        menu.polaroid.is_some()
+    );
+    App::new()
+        .insert_resource(ClearColor(Color::srgb(0.42, 0.33, 0.24)))
+        .add_plugins(DefaultPlugins.set(WindowPlugin {
+            primary_window: Some(Window {
+                title: "LBP2 Asset Explorer - Pod menu".into(),
+                resolution: (1280, 720).into(),
+                visible: false,
+                ..default()
+            }),
+            ..default()
+        }))
+        .insert_resource(Menu { menu, focused: 0 })
+        .insert_resource(DemoCapture(demo_capture_path()))
+        .add_systems(
+            Startup,
+            move |c: Commands,
+                  m: ResMut<Assets<Mesh>>,
+                  s: ResMut<Assets<StandardMaterial>>,
+                  menu: Res<Menu>| setup(c, m, s, menu, hide),
+        )
+        .add_systems(
+            Update,
+            (
+                crate::place_on_second_monitor,
+                spin,
+                keys,
+                paint,
+                demo_capture,
+            )
+                .chain(),
+        )
+        .run();
+    Ok(())
+}
+
+fn sphere(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    materials: &mut Assets<StandardMaterial>,
+    (centre, radius): ([f32; 2], f32),
+    colour: Color,
+) -> Entity {
+    commands
+        .spawn((
+            Mesh3d(meshes.add(Sphere::new(height_to_world(radius)).mesh().uv(48, 24))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: colour,
+                perceptual_roughness: 0.95,
+                ..default()
+            })),
+            Transform::from_translation(frame_to_world(centre)),
+        ))
+        .id()
+}
+
+fn setup(
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    menu: Res<Menu>,
+    hide: bool,
+) {
+    commands.spawn((
+        Camera3d::default(),
+        Projection::Perspective(PerspectiveProjection {
+            fov: FOV,
+            ..default()
+        }),
+        Transform::IDENTITY,
+    ));
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 6000.,
+            ..default()
+        },
+        Transform::from_xyz(-4., 6., 4.).looking_at(Vec3::new(0., 0., -DEPTH), Vec3::Y),
+    ));
+    let globe = sphere(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        GLOBE,
+        Color::srgb(0.20, 0.42, 0.62),
+    );
+    commands.entity(globe).insert(Globe);
+    sphere(
+        &mut commands,
+        &mut meshes,
+        &mut materials,
+        MOON,
+        Color::srgb(0.62, 0.62, 0.60),
+    );
+    let root = commands
+        .spawn(Node {
+            width: Val::Percent(100.),
+            height: Val::Percent(100.),
+            ..default()
+        })
+        .id();
+    let centred = |f: [f32; 2]| Node {
+        position_type: PositionType::Absolute,
+        left: Val::Percent(f[0] * 100.),
+        top: Val::Percent(f[1] * 100.),
+        ..default()
+    };
+    for (i, pill) in menu.menu.pills.iter().enumerate() {
+        let node = commands
+            .spawn((
+                Node {
+                    padding: UiRect::axes(Val::Px(18.), Val::Px(6.)),
+                    border_radius: BorderRadius::all(Val::Px(999.)),
+                    ..centred(pill.centre)
+                },
+                UiTransform::from_translation(Val2::percent(-50., -50.)),
+                BackgroundColor(Color::WHITE),
+                PillNode(i),
+                children![(
+                    Text::new(pill.label.clone()),
+                    TextFont::from_font_size(22.),
+                    TextColor(Color::srgb(0.12, 0.12, 0.14)),
+                )],
+            ))
+            .id();
+        commands.entity(root).add_child(node);
+    }
+    if let Some(f) = menu.menu.polaroid {
+        let card = commands
+            .spawn((
+                Node {
+                    width: Val::Vh(10.),
+                    height: Val::Vh(12.),
+                    padding: UiRect::new(Val::Vh(0.8), Val::Vh(0.8), Val::Vh(0.8), Val::Vh(2.5)),
+                    ..centred(f)
+                },
+                UiTransform::from_translation(Val2::percent(-50., -50.)),
+                BackgroundColor(Color::srgb(0.96, 0.95, 0.90)),
+                children![(
+                    Node {
+                        width: Val::Percent(100.),
+                        height: Val::Percent(100.),
+                        ..default()
+                    },
+                    BackgroundColor(Color::srgb(0.35, 0.35, 0.38)),
+                )],
+            ))
+            .id();
+        commands.entity(root).add_child(card);
+    }
+    if !hide {
+        let note = commands
+            .spawn((
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(12.),
+                    bottom: Val::Px(10.),
+                    ..default()
+                },
+                Text::new(
+                    "Placeholder globe, moon, Polaroid and background; pill positions from the \
+                     RPCS3 reference. Up/Down move, Enter prints the choice.",
+                ),
+                TextFont::from_font_size(14.),
+                TextColor(Color::srgba(1., 1., 1., 0.8)),
+            ))
+            .id();
+        commands.entity(root).add_child(note);
+    }
+}
+
+fn spin(time: Res<Time>, mut globes: Query<&mut Transform, With<Globe>>) {
+    for mut t in &mut globes {
+        t.rotate_y(SPIN * time.delta_secs());
+    }
+}
+
+fn keys(input: Res<ButtonInput<KeyCode>>, mut menu: ResMut<Menu>) {
+    let n = menu.menu.pills.len();
+    if n == 0 {
+        return;
+    }
+    if input.just_pressed(KeyCode::ArrowDown) {
+        menu.focused = (menu.focused + 1) % n;
+    }
+    if input.just_pressed(KeyCode::ArrowUp) {
+        menu.focused = (menu.focused + n - 1) % n;
+    }
+    if input.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
+        println!("Pod menu: chose {}", menu.menu.pills[menu.focused].label);
+    }
+}
+
+fn paint(
+    time: Res<Time>,
+    menu: Res<Menu>,
+    mut pills: Query<(&PillNode, &mut BackgroundColor, &mut UiTransform)>,
+) {
+    let pulse = (time.elapsed_secs() * 4.).sin() * 0.5 + 0.5;
+    for (pill, mut background, mut transform) in &mut pills {
+        let focused = pill.0 == menu.focused;
+        *background = BackgroundColor(if focused {
+            Color::srgb(0.30 + 0.10 * pulse, 0.85, 0.95)
+        } else {
+            Color::WHITE
+        });
+        transform.scale = Vec2::splat(if focused { 1.08 + 0.03 * pulse } else { 1. });
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn p1b_frame_points_project_back_to_their_fractions() {
+        let projection = Mat4::perspective_rh(FOV, ASPECT, 0.1, 100.);
+        for f in [GLOBE.0, MOON.0, [0.5, 0.5], [0.1, 0.9]] {
+            let clip = projection.project_point3(frame_to_world(f));
+            let back = [(clip.x + 1.) / 2., (1. - clip.y) / 2.];
+            assert!((back[0] - f[0]).abs() < 1e-4 && (back[1] - f[1]).abs() < 1e-4);
+        }
+        // A radius of the full height spans the visible height at DEPTH.
+        let top = projection.project_point3(Vec3::new(0., height_to_world(0.5), -DEPTH));
+        assert!((top.y - 1.).abs() < 1e-4);
+    }
+}

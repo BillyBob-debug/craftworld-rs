@@ -23,6 +23,7 @@
 //! - Everything else returns nothing; the VM then substitutes the default of the call's
 //!   return type. Member reads return `Void` and writes are dropped (counted).
 pub mod load;
+pub mod pod;
 pub mod tree;
 
 use lbp_level::script::Script;
