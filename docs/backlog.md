@@ -50,3 +50,9 @@ reasons: BLEND/MIX roots mixing UV0 and UV1 outside a separable product (D103), 
 (view-dependent, no bake), animated or wired samplers inside ThingColor graphs, graphs
 without texture samples. UV channel word 2 is solved (D104). Regroup from
 b105-diffuse-route-shapes-0133.json before the next batch.
+
+## Item details (U5) gaps
+- 106 plans at heads 0x19f..0x232 use the early InventoryItemDetails layout (translation
+  tag, i32 location/category, numUses/lastUsed, creator struct, ...); Toolkit reads them.
+- 119 LEERDAMMER (0x4c44) plans at head 0x272 use the middle layout with u32 keys; the
+  reader refuses the branch. Both found by the D127 verification (2026-10-08).

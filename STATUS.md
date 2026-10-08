@@ -3573,3 +3573,17 @@ Next: level visual QA vs game; joint skinning; bevel/UV calibration; more levels
   to CI. Real-script semantics check waits for script bytes (patch.edat).
 - Checks: fmt, tests (lbp-level, lbp-script-vm), workspace Clippy -D warnings.
 **+0 newly viewable / +0 newly Complete.**
+
+## D127 verification (2026-10-08)
+
+The two U5 checks skipped at merge, run afterwards (outputs local-analysis/d127v-*):
+- D33 cross-check: 11,313 plans read by both readers, 9 prefix fields (date bits, slot
+  type/number, highlight sound, colour, type bits, subType, title/description keys): 0
+  mismatches. 932 not read by D33 (848 below its 893 floor, 84 DOUBLE11).
+- Toolkit spot check (full RPlan load @ d6a2ef80): 4 plans (material, sticker, readymade,
+  head 0x26e) equal on icon, title key, type, location, category, creator.
+- 84 wrapper_error rows: all `Unsupported("DOUBLE11 branch payload")` (Vita; by design).
+- Correction: the 225 stopped rows are 106 branch-0 plans at heads 0x19f..0x232 (early
+  InventoryItemDetails layout) and 119 LEERDAMMER 0x4c44 plans at head 0x272 (refused by
+  check_band). Toolkit reads both (InventoryItemDetails.serialize head<0x233 branch and
+  LD_LAMS_KEYS middle layout), so both are reader gaps; added to the backlog.
