@@ -124,7 +124,19 @@ fn u12_gooey_calls_build_a_frame_tree_and_trace() {
     let class = vm.load(script.clone(), None);
     // The only argument row is at register 32, so the receiver goes to register 0 and the
     // Menu-typed argument gets a fresh Menu instance.
-    let e = entry_registers(&mut vm, &script, "Draw", Value::Int(9)).unwrap();
+    let none = |_: u32| None;
+    let mut h = GooeyHost::new(&none);
+    let (mut budget, mut supplied) = (1_000u64, Vec::new());
+    let e = entry_registers(
+        &mut vm,
+        &mut h,
+        &script,
+        "Draw",
+        Value::Int(9),
+        &mut budget,
+        &mut supplied,
+    )
+    .unwrap();
     let (regs, receiver, offsets) = (e.registers, e.receiver, e.offsets);
     assert_eq!(receiver, Receiver::ImplicitRegister0);
     assert_eq!(offsets, vec![32]);
@@ -192,4 +204,42 @@ fn u12b_frame_tree_maps_to_a_gooey_tree_and_screen_size_answers() {
     assert_eq!(labels, ["header", "#00001234", "Play"]);
     assert_eq!(tree.focusable().len(), 1);
     assert!(tree.duplicate_ids.is_empty());
+}
+
+#[test]
+fn u12c_null_script_class_fields_are_supplied() {
+    use lbp_ui_script::make_object;
+    let holder = Script {
+        class_name: "Holder".into(),
+        type_refs: vec![TypeRef {
+            machine_type: OBJ,
+            builtin_type: 0,
+            dimension_count: 0,
+            array_base_machine_type: 0,
+            script: None,
+            type_name: 2,
+        }],
+        field_defs: vec![FieldDef {
+            modifiers: 0,
+            type_ref: 0,
+            name: 1,
+        }],
+        function_defs: vec![],
+        shared_arguments: vec![],
+        bytecode: vec![],
+        strings_a: ["Holder", "Puter", "Menu"].map(String::from).to_vec(),
+        ..menu()
+    };
+    let mut vm = Vm::default();
+    vm.load(menu(), None);
+    let class = vm.load(holder, None);
+    let none = |_: u32| None;
+    let mut host = GooeyHost::new(&none);
+    let (mut budget, mut supplied) = (1_000u64, Vec::new());
+    let id = make_object(&mut vm, &mut host, class, &mut budget, &mut supplied).unwrap();
+    assert_eq!(supplied, ["Holder.Puter: Menu"]);
+    assert!(matches!(
+        vm.field(id, "Puter"),
+        Some(Value::Object(Some(_)))
+    ));
 }
