@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after batch D103-D105, 2026-10-08
+# Current state (overwrite each milestone) — after batch D106-D112, 2026-10-08
 
 ## Product
 Independent LBP2 Asset Explorer (Rust). Bevy viewer (main) and legacy viewer read
@@ -37,7 +37,9 @@ off-grid alpha MIX via Bevy dual path (D99). All texture formats on 01.33 decode
 General static graph evaluator on the Repeat grid as fallback (D100). Four-leaf trees
 without shared pairs, COLOR-only trees (D101). Matrix masks, animated x COLOR (D102).
 Off-grid graphs resampled (labelled preview approximation, D103). UV word 2 = UV0 (D104).
-Evaluator on instance-color graphs (D105).
+Evaluator on instance-color graphs (D105). Asset work paused 2026-10-08.
+Levels: lbp-level crate reads 236 in-band 01.33 levels (D107); Toolkit LevelOracle (D106).
+Also: .trans string tables (D109), mesh bones (D110), font glyphs (D112).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).
@@ -62,6 +64,8 @@ Evaluator on instance-color graphs (D105).
 - Batch D97-D99: +0 viewable / +0 Complete; all-diffuse +14 default; textures +3 (all decode).
 - Batch D100-D102: +0 viewable / +0 Complete; all-diffuse +12 default.
 - Batch D103-D105: +0 viewable / +0 Complete; all-diffuse +5 default.
+- Levels on 01.33: 398 resources; Toolkit parses 385; lbp-level walks 236 (all in-band),
+  parity 236/236. 76 LBP2 story levels (inferred). Batch D106-D112: +0 / +0.
 
 ## Open blockers
 - Glow, reflection and other non-diffuse channels are not rendered.
@@ -71,8 +75,8 @@ Evaluator on instance-color graphs (D105).
   FNTb +8 word meaning unknown; patch.edat not decrypted.
 
 ## Next
-34 unsupported materials left (BLEND/MIX mixing UV0 and UV1 outside a product, FRESNEL,
-animated/wired ThingColor graphs; docs/backlog.md); viewer QA toward Complete (0 so far).
+First level: lbp2/th_tutorials/levels/tutorial_23.bin. L2/L5: Bevy level scene with
+RENDER_MESH things at POS; then Lx straight SHAPE extrusion (docs/d108-shape-geometry.md).
 
 ## Environment
 - Toolchain: `. ./scripts/use-local-rust.ps1` (project-local, windows-gnu).

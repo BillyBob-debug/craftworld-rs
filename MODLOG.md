@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 — Batch: first levels (D106-D108) + D109-D112
+
+Level oracle (385/398 parse; first target tutorial_23) and new lbp-level crate (236/236
+in-band levels parity, 4,180 Things bit-exact). Shape research. Merged .trans reader,
+bone parsing, runtime research, font glyphs. +0 viewable / +0 Complete.
+
 ## 2026-10-08 — Batch: local D103, D104, D105 merged
 
 D103 off-grid bakes (labelled preview approximation). D104 UV word 2 = UV0 (from the

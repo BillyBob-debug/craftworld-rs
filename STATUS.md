@@ -3424,3 +3424,50 @@ Not tested: viewer rendering of resampled bakes, dual multiply, and the 4 UV-wor
 materials; game pixels.
 Next: 34 unsupported (mostly BLEND/MIX mixing UV0 and UV1 outside a product, FRESNEL,
 animated/wired ThingColor graphs); viewer QA toward Complete.
+
+## Batch 2026-10-08e — first level batch D106-D108 + queued D109-D112 (2026-10-08)
+
+Asset work paused at the owner's request; level work started from
+[level-research.md](docs/level-research.md). Detail: [d106-level-oracle.md](docs/d106-level-oracle.md),
+[d107-level-reader.md](docs/d107-level-reader.md), [d108-shape-geometry.md](docs/d108-shape-geometry.md),
+[u1-translation.md](docs/u1-translation.md), [mesh-bones.md](docs/mesh-bones.md),
+[runtime-research.md](docs/runtime-research.md), [u2-font-glyphs.md](docs/u2-font-glyphs.md).
+
+- D106 (L0/L1): Toolkit LevelOracle. 01.33: 398 level resources, 385 parse to the last
+  byte (13 failures: Vita .cpv, branch 0x4431); 680,391 Things, 40 part types. 76 LBP2
+  story levels (th_* dirs, inferred): 29,068 RENDER_MESH vs 68,519 SHAPE; their 240
+  mesh GUIDs all viewable. Recommended first level: lbp2/th_tutorials/levels/tutorial_23.bin
+  (91 Things, 14 meshes, 36 shapes). Scene dumps byte-identical on repeat.
+- D107 (L3/L4/L5/L6/Lw): new crate lbp-level (no UI deps): serializer core, Thing headers,
+  POS/RENDER_MESH/SHAPE/GENERATED_MESH/GROUP/REF/BODY parsed, other parts read through.
+  236 of 398 levels walk to the last byte; the other 162 are out of band (122 heads
+  < 0x341, 20 LEERDAMMER, 20 DOUBLE11). Parity vs D106: 236/236 levels, 4,180/4,180
+  scene Things bit-exact. Reader recurses natively (examples use a 512 MiB stack).
+- D108: shape geometry research (doc only). Shapes store parameters only; first
+  implementation = straight extrusion, no bevel, labelled approximation. Read LBP Asset
+  Studio (unlicensed, ported from the PS3 binary) for behaviour hypotheses only, labelled.
+- D109 (U1, PR #14): .trans reader. All 40 tables: 20 real (28,144-29,540 keys) match
+  Toolkit on every key (0 differ, 0 tag hash differences); 20 empty 4-byte placeholders.
+  U0 UI census (d110-ui-census-0133.json): .ff scripts 427 rows, 0 bytes present (likely
+  in encrypted patch.edat); fonts 16 rows, 1 present; UI textures 1,935.
+- D110 (R1, PR #15): mesh bones/mirror tables. Skeleton census: 4,243 of 4,245 mesh hashes
+  decode (same 2 failures), 91,018 bones, 0 bad links/cycles, 60 name-hash mismatches,
+  14 inverse outliers; Sackboy 43-bone skeleton shared by 2,047 meshes.
+- D111 (PR #16): Sackboy/physics/logic research plan (docs only).
+- D112 (U2, PR #17): FNTb glyph decode. icon_patch_font.fnt: 4/4 glyphs, 0 malformed;
+  glyph sheet checked visually (clean icon shapes).
+**+0 newly viewable / +0 newly Complete** (corpus 4,257 / 3,700 / 0 rechecked after D110).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests for 12 crates, both viewer builds, python 36 OK.
+- level_census -> b108-level-census-0133.json (byte-identical to d107); level_parity -> b108-level-parity-0133.json: 236/236, 4,180/4,180.
+- run-translation-oracle.ps1 on all 40 extracted .trans (d109-trans/): 40/40 pass.
+- corpus_skeleton_census -> d110-skeleton-census-0133.json; corpus_mesh_census -> b110-corpus-default.json (4,257/3,700/0).
+- font_glyphs on icon_patch_font.fnt -> d112-icon-patch-font.*.
+
+Failed: none. Integrator fixes: .gitignore conflict (LevelOracle + TranslationOracle
+lines), lbp-viewer mesh.rs kept CRLF (D110 branch had converted it).
+Not tested: level rendering (no viewer change yet), Vita/LEERDAMMER levels, plans in
+lbp-level, 15 missing fonts, .ff scripts.
+Next: L2/L5 level scene in Bevy for tutorial_23 (RENDER_MESH things at POS first), then
+Lx straight shape extrusion.
