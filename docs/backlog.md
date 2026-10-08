@@ -1,12 +1,12 @@
-# Backlog (Integrator-owned; refreshed 2026-10-08 after D102 from the 01.33 census)
+# Backlog (Integrator-owned; refreshed 2026-10-08 after D105 from the 01.33 census)
 
-Source: `local-analysis/b102-diffuse-route-shapes-0133.json` (schema 2, local only),
+Source: `local-analysis/b105-diffuse-route-shapes-0133.json` (schema 2, local only),
 the D64 `diffuse_route_census` tool run on 01.33 (disc + update layers). Scope is
 diffuse route selection only: these are material locations with MAP rows, not asset
 counts and not payload compatibility. Counts only; no asset bytes or GUIDs here.
 
 Totals (8,094 materials): texture 6,953; solid 619; unwired black 10; animation-base
-only 121; instance-color only 296; unsupported 53; no MAP row 65.
+only 121; instance-color only 301; unsupported 34; no MAP row 65.
 (After D75: animation-base 60, instance 225, unsupported 258. Before D75: texture 6,828,
 instance 207, unsupported 386.)
 
@@ -16,7 +16,7 @@ animation. Families are exclusive, assigned in this order: any THING_COLOR, any
 BLEND, 2+ textures with an animated sampler, exactly 2 TEX + COLOR under MUL only,
 any MIX, other.
 
-## Ranked unsupported families (53 materials after D102)
+## Ranked unsupported families (34 materials after D105)
 
 Ranked by count and tractability (THING_COLOR is larger but blocked on real
 instance values).
@@ -44,8 +44,9 @@ instance values).
 - After D98, all 23,247 texture hashes on 01.33 decode (top mip). The volume layout
   (RPCS3 source only) and B8 remap rules are not Toolkit-oracle confirmed.
 
-## Remaining after D102
-53 unsupported material locations; the family rows above predate the D100 evaluator. Main
-reasons: graphs whose texture leaves are off the integer Repeat grid (evaluator refuses),
-UV channel raw 2, FRESNEL, five texture leaves, multi-letter swizzles. Regroup from
-b102-diffuse-route-shapes-0133.json before the next batch.
+## Remaining after D105
+34 unsupported material locations; the family rows above predate the D100 evaluator. Main
+reasons: BLEND/MIX roots mixing UV0 and UV1 outside a separable product (D103), FRESNEL
+(view-dependent, no bake), animated or wired samplers inside ThingColor graphs, graphs
+without texture samples. UV channel word 2 is solved (D104). Regroup from
+b105-diffuse-route-shapes-0133.json before the next batch.

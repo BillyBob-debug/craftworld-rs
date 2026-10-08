@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 — Batch: local D103, D104, D105 merged
+
+D103 off-grid bakes (labelled preview approximation). D104 UV word 2 = UV0 (from the
+game's compiled shaders). D105 evaluator on instance-color graphs. Unsupported 53 -> 34;
+corpus all-diffuse 3,695 -> 3,700. +0 viewable / +0 Complete.
+
 ## 2026-10-08 — Batch: local D100, D101, D102 merged
 
 D100 general static graph evaluator on the Repeat grid. D101 four-leaf trees without

@@ -3387,3 +3387,40 @@ Not tested: viewer rendering of evaluated graphs and the Bevy fourth-sample path
 legacy viewer for D101; game pixels.
 Next: 53 unsupported left (mostly off-grid graphs, UV channel raw 2, FRESNEL, five
 leaves); viewer QA toward Complete.
+
+## Batch 2026-10-08d — local D103, D104, D105 merged (2026-10-08)
+
+Local subagents on plan usage. Detail: [d103-offgrid-bake.md](docs/d103-offgrid-bake.md),
+[d104-uv-channel-2.md](docs/d104-uv-channel-2.md), [d105-instance-graphs.md](docs/d105-instance-graphs.md).
+
+- D103: off-grid graph bakes. One UV channel: leaves resampled bilinearly in linear
+  light onto a shared repeating tile (<= 4096/axis, 4 Mi px). UV0 x UV1 root products:
+  per-channel bakes multiplied by the Bevy dual path. Resampling is preview policy,
+  labelled "preview approximation (not game behaviour)" in labels, census and parity.
+- D104: sampler UV channel word 2 samples UV0. Evidence CONFIRMED_FROM_LOCAL_DATA: the
+  materials' compiled fragment programs (decoded with the public NV40 encoding) fetch
+  TEXCOORD0.xy for every word-2 sampler (54 fetches); matches Toolkit's shader generator.
+  Research output in ignored local-analysis/d104-uv-channel/.
+- D105: under a supplied instance color, the graph evaluator runs on the original graph
+  with only ThingColor substituted when the rewritten projection gives nothing (2).
+- Route census on 01.33 (material locations, 8,094): texture 6,989 -> 7,003,
+  instance-only 296 -> 301, unsupported 53 -> 34.
+- Corpus mesh census (4,261 GUIDs; viewable 4,257 every mode): all-diffuse default
+  3,695 -> 3,700, --animation-base 3,762 -> 3,767, --instance-rgba 3,962 -> 3,971,
+  both 4,046 -> 4,055. Complete 0.
+**+0 newly viewable / +0 newly Complete** (all-diffuse +5 default).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests (lbp-preview 76 and 6 other crates), both viewer builds, python OK.
+- diffuse_route_census -> b105-diffuse-route-shapes-0133.json: counts above.
+- diffuse_parity: d103 15/0/7, 15/0/9 (--instance-white); d104 3/0/3, 1/0/1; d105 2/0/0, 2/0/2 (--instance-white); regressions d100, d101, d99, d78, d75, d83, d86, d87, d88, d92, d96, d64, d65, d67, d46 x2 unchanged; d89-0 5/0/5 and d97-a 31/0/23 gain projections of previously refused rows.
+- compatibility_census: d68-new 48/45/0, D61 48/43/0, D75 48/44/0 (unchanged).
+- corpus_mesh_census -> b105-corpus-{default,anim,inst,both}.json.
+
+Failed: D103 merge conflicted with D104/D105 (route-census scope line, add.rs test);
+kept both, route census schema 5. D105's off-grid refusal test now expects D103 to
+evaluate that graph (Integrator update).
+Not tested: viewer rendering of resampled bakes, dual multiply, and the 4 UV-word-2
+materials; game pixels.
+Next: 34 unsupported (mostly BLEND/MIX mixing UV0 and UV1 outside a product, FRESNEL,
+animated/wired ThingColor graphs); viewer QA toward Complete.
