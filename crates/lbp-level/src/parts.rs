@@ -245,6 +245,8 @@ pub struct PartData {
     pub decorations: Vec<Decoration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub world: Option<World>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub joint: Option<Joint>,
     /// PScriptName (raw byte count, name length up to the first NUL).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_name: Option<(usize, usize)>,
@@ -256,6 +258,24 @@ pub struct Pos {
     pub anim_hash: i32,
     /// Serialized element order (translation in 12..14, see serial.rs).
     pub world: [f32; 16],
+}
+
+/// PJoint placement summary (D120): endpoint Things, contact points in each endpoint's
+/// local frame, rest length and angle, settings, bone indices/lengths, type, render scale.
+#[derive(Debug, Clone, Serialize)]
+pub struct Joint {
+    pub a: Option<usize>,
+    pub b: Option<usize>,
+    pub a_contact: [f32; 3],
+    pub b_contact: [f32; 3],
+    pub length: f32,
+    pub angle: f32,
+    pub settings: Option<Descriptor>,
+    pub bone_idx: Vec<i32>,
+    pub bone_lengths: [f32; 4],
+    pub joint_type: i32,
+    pub render_scale: f32,
+    pub hide_in_play_mode: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -484,27 +504,43 @@ fn part_body(
         }
         "CAMERA_TWEAK" => camera_tweak(r)?,
         "JOINT" => {
-            thing_ref(r, things)?;
-            thing_ref(r, things)?;
-            r.v3()?;
-            r.v3()?;
-            r.skip_f32(3)?;
+            let a = thing_ref(r, things)?;
+            let b = thing_ref(r, things)?;
+            let a_contact = r.v3()?;
+            let b_contact = r.v3()?;
+            let length = r.f32()?;
+            let angle = r.f32()?;
+            r.f32()?;
             r.bool()?;
-            r.resource(false)?;
-            r.int_array()?;
-            r.v4()?;
-            r.i32()?;
+            let settings = r.resource(false)?;
+            let bone_idx = r.int_array()?;
+            let bone_lengths = r.v4()?;
+            let joint_type = r.i32()?;
             r.f32()?;
             r.bool()?;
             r.v3()?;
             r.i32()?;
             r.skip_f32(10)?;
-            r.f32()?;
+            let render_scale = r.f32()?;
             r.i32()?;
             r.skip_f32(2)?;
             r.bool()?;
-            r.bool()?;
+            let hide_in_play_mode = r.bool()?;
             r.i32()?;
+            things.list[me].data.joint = Some(Joint {
+                a,
+                b,
+                a_contact,
+                b_contact,
+                length,
+                angle,
+                settings,
+                bone_idx: bone_idx.into_iter().map(|v| v as i32).collect(),
+                bone_lengths,
+                joint_type,
+                render_scale,
+                hide_in_play_mode,
+            });
         }
         "CHECKPOINT" => {
             r.bool()?;
