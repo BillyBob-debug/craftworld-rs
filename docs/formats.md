@@ -278,6 +278,10 @@ Full swizzle/channel-remap/mip decode is not tested here.
 D91 (`CONFIRMED_FROM_COMMUNITY_CODE`, oracle parity on 20 local samples): uncompressed
 2D 0x85 A8R8G8B8 / 0x81 B8, swizzled or LN (0x20) linear, top mip only; B8 remap
 0xaae4/0xa9ff as opaque gray. Rules and conflicts: [d91-gtf-uncompressed.md](d91-gtf-uncompressed.md).
+D95: B8 pixel budget 16 Mi; BC1/BC3 cube maps decode six top-mip faces via the layered
+API only (face order COMMUNITY_CODE, 128-byte face stride LOCAL, conflicts with Toolkit's
+unpadded pass-through); volume slices and remap 0x02ff UNKNOWN, refused.
+[d95-texture-rest.md](d95-texture-rest.md).
 
 Best texture oracle: Toolkit RTexture + DDS helpers. External cross-checks:
 [Refresh TexStream](https://github.com/LittleBigRefresh/Refresh/blob/25f03e40416ebe73016b9e9972e0fa7b11a7f0b0/Refresh.Core/Importing/TexStream.cs)

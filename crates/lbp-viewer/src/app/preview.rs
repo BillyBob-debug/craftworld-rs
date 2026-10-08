@@ -135,7 +135,15 @@ impl Preview {
             }
         }
         if let Some(t) = &self.image {
-            if self.uploaded_channel != Some(self.channel) {
+            // D95: B8 masks up to 4096x4096 decode on the CPU; GPU upload keeps the 4 Mi
+            // pixel cap, so those report decoded metadata without an image.
+            let pixels = t.header.width as usize * t.header.height as usize;
+            if pixels > lbp_texture::MAX_PIXELS {
+                self.gpu = None;
+                self.error = "Unsupported: GPU texture budget (4 Mi pixels); decoded on CPU, \
+                    not displayed"
+                    .into();
+            } else if self.uploaded_channel != Some(self.channel) {
                 let pixels = channel_pixels(&t.rgba, self.channel);
                 let image = egui::ColorImage::from_rgba_unmultiplied(
                     [t.header.width as usize, t.header.height as usize],

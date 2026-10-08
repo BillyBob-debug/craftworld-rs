@@ -102,14 +102,13 @@ pub fn image_axes(
     let count = u64::from(width)
         .checked_mul(u64::from(height))
         .ok_or("Image size overflow")?;
-    if width == 0
-        || height == 0
-        || width > 4096
-        || height > 4096
-        || count > 4_194_304
-        || count * 4 != pixels.len() as u64
-    {
+    if width == 0 || height == 0 || count * 4 != pixels.len() as u64 {
         return Err("Invalid: texture extent/budget".into());
+    }
+    // GPU upload keeps the 4 Mi pixel cap (at most 16 MiB RGBA per image): D95's 4096x4096
+    // B8 masks decode on the CPU (64 MiB RGBA) but are refused here, explicitly.
+    if width > 4096 || height > 4096 || count > lbp_texture::MAX_PIXELS as u64 {
+        return Err("Unsupported: GPU texture budget (4 Mi pixels)".into());
     }
     let mut image = Image::new(
         Extent3d {
@@ -331,6 +330,11 @@ mod tests {
         }
         assert!(image(u32::MAX, 2, vec![], true).is_err());
         assert!(image(2, 2, vec![0; 15], true).is_err());
+        // D95: a CPU-decoded 4096x4096 B8 mask is refused at upload, not uploaded.
+        assert_eq!(
+            image(4096, 4096, vec![0; lbp_texture::MAX_RGBA], true).unwrap_err(),
+            "Unsupported: GPU texture budget (4 Mi pixels)"
+        );
         for raw in [
             [1, 3],
             [3, 1],
