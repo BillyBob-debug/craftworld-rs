@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D127, D128
+
+Item details reader: 11,936 of 12,245 plans complete on 01.33. Script VM crate merged
+(synthetic tests; real scripts wait for patch.edat). +0 viewable / +0 Complete.
+
 ## 2026-10-08 — D125, D126
 
 Runtime decisions doc merged (AGENTS scope amendment, RPCS3 plan). RScript reader merged;

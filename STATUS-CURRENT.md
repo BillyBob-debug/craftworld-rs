@@ -47,6 +47,7 @@ Runtime: skin/morphs (D115), animation keys (D116), --play-animation GPU/CPU ski
 (D118), lbp-gooey UI + --ui-demo (D117, no per-frame rebuild since D124), slot/pin/
 palette readers (D123; 15/16 complete, 1 excluded test file). RScript reader (D126; 0
 scripts readable on 01.33, likely in encrypted patch.edat). Runtime scope per AGENTS.md (D125).
+Item details (D127; 11,936/12,245 plans complete). Script VM crate lbp-script-vm (D128).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).

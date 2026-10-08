@@ -3560,3 +3560,16 @@ Next: level visual QA vs game; joint skinning; bevel/UV calibration; more levels
   G10 (native-call census) is blocked on script bytes.
 - Checks: fmt, tests and Clippy -D warnings for lbp-level.
 **+0 newly viewable / +0 newly Complete.**
+
+## D127, D128 — item details (U5), script VM (Rq) (2026-10-08)
+
+- D127 (U5, PR #26): `lbp_level::item_details` (InventoryItemDetails + RPlan details tail).
+  plan_details_census -> d127-plan-details-census-0133.json (unit distinct content hash):
+  12,245 plans: 11,936 complete, 225 stopped (heads 0x19f..0x1fe: older layouts), 84
+  wrapper_error. Icons 10,497 (10,493 resolved in catalog); title keys 9,584; creators
+  9,641. Types: readymade 2,936, costume 2,527, decoration 597, primitive_material 449,
+  costume_material 327, music 132, ... D33 prefix cross-check and Toolkit spot-check not run.
+- D128 (Rq, PR #27): new crate lbp-script-vm (register VM; synthetic bytecode only), added
+  to CI. Real-script semantics check waits for script bytes (patch.edat).
+- Checks: fmt, tests (lbp-level, lbp-script-vm), workspace Clippy -D warnings.
+**+0 newly viewable / +0 newly Complete.**
