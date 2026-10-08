@@ -48,7 +48,8 @@ Runtime: skin/morphs (D115), animation keys (D116), --play-animation GPU/CPU ski
 palette readers (D123; 15/16 complete, 1 excluded test file). RScript reader (D126; 0
 scripts readable on 01.33, likely in encrypted patch.edat). Runtime scope per AGENTS.md (D125).
 Item details (D127/D129; 12,161/12,245 plans complete, 84 Vita excluded). Story slot
-browser --slot-browser (D130). Inventory browser --popit (D131; 12,161 items). Script VM crate lbp-script-vm (D128).
+browser --slot-browser (D130). Inventory browser --popit (D131; 12,161 items).
+Strings/fonts browser --text-browser with OS font fallback (D132). Script VM crate lbp-script-vm (D128).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).

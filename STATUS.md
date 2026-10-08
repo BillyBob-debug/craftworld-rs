@@ -3617,3 +3617,18 @@ The two U5 checks skipped at merge, run afterwards (outputs local-analysis/d127v
 - Checks: fmt; tests lbp-level, lbp-preview, lbp-bevy-viewer; workspace Clippy -D
   warnings; viewer build.
 **+0 newly viewable / +0 newly Complete.**
+
+## D132 — U3 strings and fonts browser, PR #31 (2026-10-08)
+
+- `--text-browser` plus OS font fallback for UI text (bevy `system_font_discovery`). New
+  crates: objc2-core-text 0.3.2 (Zlib OR Apache-2.0 OR MIT), roxmltree 0.21.1 (MIT OR
+  Apache-2.0), yeslogic-fontconfig-sys 6.0.1 (MIT); the objc2/fontconfig ones are
+  non-Windows targets.
+- `--text-browser-report` on 01.33: tables 21/21 parsed (unit distinct .trans content hash;
+  1 empty: patch american.trans), 583,648 keys summed; fonts with a glyph sheet 1/1,
+  glyphs 4/4 decoded (icon_patch_font.fnt).
+- Captures (non-primary monitor): d132-text-browser-0133.png (tables, search, rows);
+  d132-popit-recheck-0133.png: the "DC Comics™" title now renders ™ (D131 glyph gap fixed).
+- Checks: fmt; full workspace build (windows-gnu, viewer included); tests lbp-preview,
+  lbp-bevy-viewer; workspace Clippy -D warnings.
+**+0 newly viewable / +0 newly Complete.**

@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D132 strings and fonts browser
+
+--text-browser merged (21/21 tables, 583,648 keys); OS font fallback fixes missing glyphs
+such as ™. +0 viewable / +0 Complete.
+
 ## 2026-10-08 — D131 inventory browser
 
 --popit browser merged: 12,161 items on 27 pages, 9,971/9,971 distinct icons decode.
