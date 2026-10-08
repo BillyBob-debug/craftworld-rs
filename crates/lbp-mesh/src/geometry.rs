@@ -4,7 +4,7 @@
 //! Exact sources/applicability/conflicts/coverage: docs/mesh-geometry.md.
 use super::*;
 use crate::skeleton::{read_skeleton, Skeleton};
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Primitive {
     pub material_flags: u32,
     pub material_kind: u8,
@@ -20,7 +20,7 @@ pub struct Primitive {
     pub index_count: u32,
     pub region: u32,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct GeometryMetadata {
     pub prefix: MeshPrefix,
     pub primitives: Vec<Primitive>,
@@ -32,7 +32,7 @@ pub struct GeometryMetadata {
     pub unparsed_after_geometry: usize,
 }
 /// CPU geometry only, intentionally not serializable as diagnostic asset output.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Geometry {
     pub metadata: GeometryMetadata,
     pub positions: Vec<[f32; 3]>,
