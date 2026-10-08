@@ -165,6 +165,9 @@ fn run_main() -> Result<(), String> {
             c.member_reads,
             c.member_writes
         );
+        if !r.supplied.is_empty() {
+            println!("  supplied: {}", r.supplied.join("; "));
+        }
         if names.len() == 1 {
             for line in outline(&r.tree, 40) {
                 println!("  {line}");

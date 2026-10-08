@@ -45,3 +45,17 @@ pass; `cargo test -q -p lbp-bevy-viewer` 25 pass; `cargo +1.99.0 clippy -q -p lb
 ## Expected effect / not tested
 - Viewable/Complete: +0 (UI, not mesh assets). New in-app counts as above.
 - Not tested: the window itself, real script output (cloud has no game data).
+
+## U12c: construct objects and supply null script fields (after D141)
+D140 runs stopped on NullObject in `UpdateUI+888` (the final `Puter` read),
+`PartyManagement.GatherFriendData+2` and `PodComputerState.SetupFrameMatrix+3`.
+- `run` now builds `this` and script-class arguments with `Vm::construct` (D141: inherited
+  fields plus `.init__`) and then supplies every null `object_ref` field whose declared type
+  is a loaded script class with a constructed instance of that class, one level deep
+  (`make_object`). In the game the engine sets objects like the Pod's `Puter`; this is a
+  stand-in (INFERRED), and each supplied field is listed (`Class.field: Type`) in the
+  report, the `ui_trace` output and the viewer header.
+- VM (additive): `Vm::set_field`, `Vm::null_script_fields`.
+- Test: `u12c_null_script_class_fields_are_supplied`.
+- PC check: rerun step 1 and step 3 above; report the "Supplied objects" line and any fault
+  with its site.

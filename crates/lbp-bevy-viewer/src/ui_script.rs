@@ -73,6 +73,15 @@ pub fn summary(r: &RunReport, scripts: usize, not_read: usize) -> Vec<String> {
             c.unclosed,
             c.unbalanced_end
         ),
+        format!(
+            "Supplied objects {}: {}",
+            r.supplied.len(),
+            if r.supplied.is_empty() {
+                "none".to_owned()
+            } else {
+                r.supplied.join("; ")
+            }
+        ),
         "Placeholder layout: frame property meanings are unknown; labels and nesting come from the script.".to_owned(),
     ]
 }

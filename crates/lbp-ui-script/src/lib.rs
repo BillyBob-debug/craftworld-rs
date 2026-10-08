@@ -26,7 +26,7 @@ pub mod load;
 pub mod tree;
 
 use lbp_level::script::Script;
-use lbp_script_vm::{ClassId, Fault, Host, MemberKind, Step, Value, Vm};
+use lbp_script_vm::{ClassId, Fault, Host, MemberKind, ObjectId, Step, Value, Vm};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
@@ -349,6 +349,32 @@ pub enum Receiver {
     ImplicitRegister0,
 }
 
+/// Constructs `class` (`Vm::construct`: fields of the class chain, `.init__`) and then
+/// supplies each null `object_ref` field whose type is a loaded script class with a
+/// constructed instance of that class (one level; engine-owned objects such as the Pod's
+/// `Puter` are set by the engine in the game, so this is a stand-in, INFERRED). Each
+/// supplied field is recorded as `field: Class` (or `field: Class FAULT ..`).
+pub fn make_object(
+    vm: &mut Vm,
+    host: &mut dyn Host,
+    class: ClassId,
+    budget: &mut u64,
+    supplied: &mut Vec<String>,
+) -> Result<ObjectId, Fault> {
+    let id = vm.construct(host, class, budget)?;
+    for (name, k) in vm.null_script_fields(id) {
+        let label = format!("{}.{name}: {}", vm.class_name(class), vm.class_name(k));
+        match vm.construct(host, k, budget) {
+            Ok(o) => {
+                vm.set_field(id, &name, Value::Object(Some(o)));
+                supplied.push(label);
+            }
+            Err(f) => supplied.push(format!("{label} FAULT {f:?}")),
+        }
+    }
+    Ok(id)
+}
+
 /// How a function is entered headlessly.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Entry {
@@ -367,9 +393,12 @@ pub struct Entry {
 /// entry points take a `Gooey` object).
 pub fn entry_registers(
     vm: &mut Vm,
+    host: &mut dyn Host,
     script: &Script,
     function: &str,
     this: Value,
+    budget: &mut u64,
+    supplied: &mut Vec<String>,
 ) -> Result<Entry, Fault> {
     let missing = || Fault::MissingFunction {
         class: script.class_name.clone(),
@@ -410,7 +439,7 @@ pub fn entry_registers(
                 .and_then(|t| script.name(t.type_name))
                 .and_then(|n| vm.class_by_name(n));
             match class {
-                Some(c) => Value::Object(Some(vm.instantiate(c)?)),
+                Some(c) => Value::Object(Some(make_object(vm, host, c, budget, supplied)?)),
                 None => Value::default_for(t.map_or(0, |t| t.machine_type)),
             }
         };
@@ -429,6 +458,8 @@ pub struct RunReport {
     pub function: String,
     pub receiver: Option<Receiver>,
     pub argument_offsets: Vec<i32>,
+    /// Script objects the host supplied for null fields ([`make_object`]).
+    pub supplied: Vec<String>,
     /// Returned value, or the VM fault that stopped the run.
     pub result: Result<String, String>,
     /// Where the fault happened (`Class.Function+pc`, pc relative to that function).
@@ -452,9 +483,16 @@ pub fn run(
 ) -> RunReport {
     let mut left = budget;
     let mut entry = (None, Vec::new());
+    let mut supplied = Vec::new();
     let result = (|| -> Result<String, Fault> {
-        let this = Value::Object(Some(vm.instantiate(class)?));
-        let e = entry_registers(vm, script, function, this)?;
+        let this = Value::Object(Some(make_object(
+            vm,
+            host,
+            class,
+            &mut left,
+            &mut supplied,
+        )?));
+        let e = entry_registers(vm, host, script, function, this, &mut left, &mut supplied)?;
         let regs = e.registers;
         entry = (Some(e.receiver), e.offsets);
         Ok(
@@ -469,6 +507,7 @@ pub fn run(
         function: function.to_owned(),
         receiver: entry.0,
         argument_offsets: entry.1,
+        supplied,
         fault_site: result
             .is_err()
             .then(|| vm.last_site().map(|s| s.to_string()))

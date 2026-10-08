@@ -342,6 +342,59 @@ impl Vm {
         }
     }
 
+    /// Sets an existing field of a script object (for hosts that supply engine-owned
+    /// objects). False when the object or field does not exist.
+    pub fn set_field(&mut self, object: ObjectId, name: &str, value: Value) -> bool {
+        match self.heap.get_mut(object.0 as usize) {
+            Some(HeapObject::Instance { fields, .. }) => match fields.get_mut(name) {
+                Some(v) => {
+                    *v = value;
+                    true
+                }
+                None => false,
+            },
+            _ => false,
+        }
+    }
+
+    /// Null `object_ref` fields of `object` (its class and superclasses) whose declared
+    /// type is a loaded script class, by GUID or name, in declaration order.
+    pub fn null_script_fields(&self, object: ObjectId) -> Vec<(String, ClassId)> {
+        let Some(HeapObject::Instance { class, fields }) = self.heap.get(object.0 as usize) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        let mut at = Some(*class);
+        for _ in 0..MAX_CALL_DEPTH {
+            let Some(c) = at else { break };
+            let s = &self.classes[c.0 as usize].script;
+            for f in &s.field_defs {
+                let (Some(name), Some(t)) = (s.name(f.name), s.type_refs.get(f.type_ref as usize))
+                else {
+                    continue;
+                };
+                if t.machine_type != 11 || fields.get(name) != Some(&Value::Object(None)) {
+                    continue;
+                }
+                let by_guid = t
+                    .script
+                    .and_then(|d| d.guid)
+                    .and_then(|g| self.by_guid.get(&g).copied());
+                let by_name = || {
+                    s.name(t.type_name)
+                        .and_then(|n| self.by_name.get(n).copied())
+                };
+                if let Some(k) = by_guid.or_else(by_name) {
+                    if !out.iter().any(|(n, _)| n == name) {
+                        out.push((name.to_owned(), k));
+                    }
+                }
+            }
+            at = self.super_class(c);
+        }
+        out
+    }
+
     pub fn array(&self, object: ObjectId) -> Option<&[Value]> {
         match self.heap.get(object.0 as usize)? {
             HeapObject::Array(v) => Some(v),
