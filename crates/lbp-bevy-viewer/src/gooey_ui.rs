@@ -194,10 +194,14 @@ pub fn run_gooey(
         .run();
 }
 
-/// Where the screen's UI is drawn: the window's camera (`None`) or a camera that renders
-/// to a texture (the Puter screen, `puter.rs`).
+/// Where the screen's UI is drawn: the window's camera (`camera` None) or a camera that
+/// renders to a texture (the Puter screen, `puter.rs`). While `pending`, nothing is built
+/// (the texture camera does not exist yet); a change rebuilds the tree on the new target.
 #[derive(Resource, Default)]
-pub struct GooeyTarget(pub Option<Entity>);
+pub struct GooeyTarget {
+    pub camera: Option<Entity>,
+    pub pending: bool,
+}
 
 /// Adds a gooey screen to an app that already has its plugins and a camera: input, rebuild
 /// and focus painting each frame. `images` are uploaded at start; `loader` (optional)
@@ -376,6 +380,9 @@ fn gooey_rebuild(
     let Some(mut images) = images else {
         return;
     };
+    if target.pending {
+        return;
+    }
     let input = FrameInput {
         focused: host.focused,
         activated: host.activated.take(),
@@ -383,7 +390,7 @@ fn gooey_rebuild(
     let tree = (screen.0)(input);
     host.focused = settle_focus(&tree, host.focused);
     let loaded = load_missing(&tree, &mut images, &mut loader, &mut assets);
-    if tree == host.tree && host.root.is_some() && !loaded {
+    if tree == host.tree && host.root.is_some() && !loaded && !target.is_changed() {
         return;
     }
     if !tree.duplicate_ids.is_empty() {
@@ -401,7 +408,7 @@ fn gooey_rebuild(
         padding: UiRect::all(Val::Px(24.)),
         ..default()
     });
-    if let Some(camera) = target.0 {
+    if let Some(camera) = target.camera {
         commands.entity(root).insert(UiTargetCamera(camera));
     }
     host.root = Some(root);
