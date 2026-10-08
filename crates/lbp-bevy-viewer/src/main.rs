@@ -104,6 +104,8 @@ struct Viewer {
     animation_guid: String,
     animation_frame: Option<i64>,
     cpu_skinning: bool,
+    /// D148: single-mesh model space is Z-up (default) or Y-up (`--model-up`).
+    model_z_up: bool,
     playing: Option<Playing>,
     snapshot: String,
     game: String,
@@ -270,14 +272,27 @@ struct Orbit {
     distance: f32,
     target: Vec3,
 }
+/// D148 single-mesh home view: from the front (+Z), camera height 2 x sin(0.15) = 0.3
+/// display units above the centre (about eye height of a unit-tall upright figure), so
+/// it looks slightly down at the subject instead of from steeply above or below.
 impl Default for Orbit {
     fn default() -> Self {
         Self {
-            yaw: 0.6,
-            pitch: 0.65,
+            yaw: 0.,
+            pitch: 0.15,
             distance: 2.,
             target: Vec3::ZERO,
         }
+    }
+}
+/// D148: game meshes are authored Z-up with the front toward -Y (sack_boy.mol: head bone
+/// z 108, toes z 0, eye bones y -34). Rotating -90 degrees about X maps (x, y, z) to
+/// (x, z, -y): Bevy Y-up, front toward the +Z camera. Proper rotation, winding unchanged.
+fn model_up(z_up: bool) -> Quat {
+    if z_up {
+        Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+    } else {
+        Quat::IDENTITY
     }
 }
 fn options() -> Result<Viewer, String> {
@@ -288,6 +303,7 @@ fn options() -> Result<Viewer, String> {
         animation_guid: String::new(),
         animation_frame: None,
         cpu_skinning: false,
+        model_z_up: true,
         playing: None,
         snapshot: String::new(),
         game: String::new(),
@@ -380,7 +396,7 @@ fn options() -> Result<Viewer, String> {
             continue;
         }
         if flag == "--help" {
-            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
+            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
 --qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
@@ -398,6 +414,13 @@ fn options() -> Result<Viewer, String> {
                     "cpu" => true,
                     "gpu" => false,
                     _ => return Err("--skinning takes cpu or gpu".into()),
+                }
+            }
+            "--model-up" => {
+                v.model_z_up = match value.as_str() {
+                    "z" => true,
+                    "y" => false,
+                    _ => return Err("--model-up takes z or y".into()),
                 }
             }
             "--browse-query" => v.browser.query = value,
@@ -713,10 +736,15 @@ fn load(
         let g = &preview.geometry;
         let mut details = Vec::new();
         let prepared = prepare(&preview, true, &mut evidence, &mut details)?;
+        let up = model_up(v.model_z_up);
         for p in prepared {
             let (mesh, material, image) = upload(p, &mut meshes, &mut materials, &mut images);
             let entity = commands
-                .spawn((Mesh3d(mesh.clone()), MeshMaterial3d(material.clone())))
+                .spawn((
+                    Mesh3d(mesh.clone()),
+                    MeshMaterial3d(material.clone()),
+                    Transform::from_rotation(up),
+                ))
                 .id();
             v.scene.push((entity, mesh, material, image));
         }
@@ -749,7 +777,7 @@ fn load(
                         &mut bindposes,
                         &clip.rig,
                         (&clip.skin.joints, &clip.skin.weights),
-                        frame,
+                        (frame, up),
                         &scene,
                     )?;
                     rig.morphs = !clip.skin.morphs.is_empty() && clip.report.animation_morphs > 0;
@@ -1298,7 +1326,7 @@ fn gpu_rig(
     bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
     rig: &lbp_preview::skinned::Rig,
     (skin_joints, skin_weights): (&[[u8; 4]], &[[f32; 4]]),
-    (centre, span): adapter::DisplayFrame,
+    ((centre, span), up): (adapter::DisplayFrame, Quat),
     scene: &[(Entity, Handle<Mesh>)],
 ) -> Result<GpuRig, String> {
     let bones = rig.bone_count();
@@ -1320,8 +1348,13 @@ fn gpu_rig(
         .map(|m| Mat4::from_cols_array(m) * n_inv)
         .collect();
     inverse.push(n_inv);
+    // Skinned vertices ignore the mesh entity transform, so the D148 model-up rotation
+    // goes on the root: skin = U x N x world x inverse bind x N^-1 on display vertices.
     let root = commands
-        .spawn((Transform::from_matrix(n), Visibility::default()))
+        .spawn((
+            Transform::from_matrix(Mat4::from_quat(up) * n),
+            Visibility::default(),
+        ))
         .id();
     let local = rig.local_matrices(None);
     let mut joints: Vec<Entity> = local
@@ -1898,41 +1931,62 @@ mod tests {
             morphs: vec![],
         };
         let frame = ([1., 2., 3.], 4.);
-        let mut app = App::new();
-        app.add_plugins(bevy::transform::TransformPlugin);
-        let world = app.world_mut();
-        let mut meshes = Assets::<Mesh>::default();
-        let mut bindposes = Assets::<SkinnedMeshInverseBindposes>::default();
-        let mut queue = bevy::ecs::world::CommandQueue::default();
-        let mut commands = Commands::new(&mut queue, world);
-        let gpu = gpu_rig(
-            &mut commands,
-            &mut meshes,
-            &mut bindposes,
-            &rig,
-            (&[], &[]),
-            frame,
-            &[],
-        )
-        .unwrap();
-        queue.apply(world);
-        for (joint, m) in gpu.joints.iter().zip(rig.local_matrices(Some(&pose))) {
-            *world.get_mut::<Transform>(*joint).unwrap() =
-                Transform::from_matrix(Mat4::from_cols_array(&m));
+        // Raw axes and the D148 Z-up rotation on the root.
+        for up in [model_up(false), model_up(true)] {
+            let mut app = App::new();
+            app.add_plugins(bevy::transform::TransformPlugin);
+            let world = app.world_mut();
+            let mut meshes = Assets::<Mesh>::default();
+            let mut bindposes = Assets::<SkinnedMeshInverseBindposes>::default();
+            let mut queue = bevy::ecs::world::CommandQueue::default();
+            let mut commands = Commands::new(&mut queue, world);
+            let gpu = gpu_rig(
+                &mut commands,
+                &mut meshes,
+                &mut bindposes,
+                &rig,
+                (&[], &[]),
+                (frame, up),
+                &[],
+            )
+            .unwrap();
+            queue.apply(world);
+            for (joint, m) in gpu.joints.iter().zip(rig.local_matrices(Some(&pose))) {
+                *world.get_mut::<Transform>(*joint).unwrap() =
+                    Transform::from_matrix(Mat4::from_cols_array(&m));
+            }
+            app.update();
+            let (_, inverse) = bindposes.iter().next().unwrap();
+            let n = Mat4::from_scale(Vec3::splat(0.25))
+                * Mat4::from_translation(-Vec3::new(1., 2., 3.));
+            for (i, cpu) in rig.skin_matrices(Some(&pose)).iter().enumerate() {
+                let global = app.world().get::<GlobalTransform>(gpu.joints[i]).unwrap();
+                let got = global.to_matrix() * inverse[i];
+                let want = Mat4::from_quat(up) * n * Mat4::from_cols_array(cpu) * n.inverse();
+                assert!(got.abs_diff_eq(want, 1e-4), "{i}: {got} vs {want}");
+            }
+            // The static joint only applies the model-up rotation to display vertices.
+            let fixed = app.world().get::<GlobalTransform>(gpu.joints[2]).unwrap();
+            let u = Mat4::from_quat(up);
+            assert!((fixed.to_matrix() * inverse[2]).abs_diff_eq(u, 1e-5));
         }
-        app.update();
-        let (_, inverse) = bindposes.iter().next().unwrap();
-        let n =
-            Mat4::from_scale(Vec3::splat(0.25)) * Mat4::from_translation(-Vec3::new(1., 2., 3.));
-        for (i, cpu) in rig.skin_matrices(Some(&pose)).iter().enumerate() {
-            let global = app.world().get::<GlobalTransform>(gpu.joints[i]).unwrap();
-            let got = global.to_matrix() * inverse[i];
-            let want = n * Mat4::from_cols_array(cpu) * n.inverse();
-            assert!(got.abs_diff_eq(want, 1e-4), "{i}: {got} vs {want}");
-        }
-        // The static joint leaves display-space vertices where they are.
-        let fixed = app.world().get::<GlobalTransform>(gpu.joints[2]).unwrap();
-        assert!((fixed.to_matrix() * inverse[2]).abs_diff_eq(Mat4::IDENTITY, 1e-5));
+    }
+    #[test]
+    fn z_up_models_stand_upright_facing_the_default_camera() {
+        // sack_boy.mol bind bones (model units): head top above toes, eyes toward -Y.
+        let up = model_up(true);
+        let (toe, head, eye) = (
+            Vec3::new(29.9, -13., 0.3),
+            Vec3::new(-0.1, 0.3, 108.1),
+            Vec3::new(24., -34.2, 166.4),
+        );
+        assert!((up * head).y > (up * toe).y);
+        assert!((up * eye).z > 0. && (up * eye).x > 0.);
+        assert_eq!(model_up(false), Quat::IDENTITY);
+        // Default camera: in front (+Z), a little above the centre, never below it.
+        let o = Orbit::default();
+        let eye_pos = Quat::from_rotation_y(o.yaw) * Quat::from_rotation_x(-o.pitch) * Vec3::Z;
+        assert!(eye_pos.z > 0.9 && eye_pos.y > 0. && eye_pos.y * o.distance < 0.5);
     }
     #[test]
     fn hidden_window_only_becomes_visible_on_non_primary_monitor() {
@@ -2054,6 +2108,7 @@ mod tests {
             animation_guid: String::new(),
             animation_frame: None,
             cpu_skinning: false,
+            model_z_up: true,
             playing: None,
             snapshot: String::new(),
             game: String::new(),

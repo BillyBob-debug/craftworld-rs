@@ -101,6 +101,9 @@ guided independent implementation; no example asset or implementation was copied
 Limits remain 100,000 vertices, 50,000 triangles, 4096 per texture dimension and
 4,194,304 pixels, plus the existing loader/parser budgets. Camera distance is bounded
 0.15..30, pitch ±1.5, pan target ±10. Display normalization does not prove game scale.
+Since D148 single meshes are shown Z-up model space rotated to Y-up (front toward the
++Z camera; `--model-up y` keeps raw axes) and the home view is yaw 0 / pitch 0.15
+(docs/d148-camera-sackboy.md).
 No skinning, morphs, animations, multiple-material binding, general shader graphs,
 levels, physics, gameplay, multiplayer or direct ISO loading.
 
