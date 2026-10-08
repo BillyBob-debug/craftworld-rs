@@ -1,15 +1,17 @@
 //! Runs the game's own test scripts in the VM (docs/script-natives.md, "PC checks").
-//! A test script is one that calls a `Test.*` native. Every function of it that takes no
-//! arguments and has code is run once with the bindings over a world that only records
-//! `Test.*` checks and `WRITE` output; after each test the script framework's own
-//! counters (`.get.NumSucceeded__` / `.get.NumFailed__`, when the class chain has them)
-//! are added to the totals. A non-static function runs on a fresh instance of its class
-//! (fields of the class and its superclasses, then `.init__`), placed in
-//! register 0 as `this` (as the U12 Gooey host does, INFERRED from the D134 trace). A yield resumes on the next "tick", up to a tick limit. Writes the
-//! totals and one row per function (class and function names, outcome, checks) to a NEW
-//! JSON file under ignored `local-analysis/`.
-//! Usage: script_tests SCRIPT-DIR NEW-JSON
-//! Counting unit: function run; checks are counted per `Test.*` call executed.
+//! A test script is one that calls a `Test.*` method. Every function of it that takes no
+//! arguments and has code runs once with the bindings over a world that records `Test.*`
+//! native checks and `WRITE` output. After each test, the script framework's own counters
+//! (`.get.NumSucceeded__` / `.get.NumFailed__`, when the class chain has them) are added.
+//! Only `Test*` functions count in the totals: `main__` repeats them, and helpers such as
+//! NeverEvaluated fail by design when run alone.
+//! A non-static function runs on a fresh instance of its class (fields of the class and
+//! its superclasses, then `.init__`) with `this` in register 0, as the U12 Gooey host does
+//! (INFERRED from the D134 trace). A yield resumes on the next "tick", up to a tick limit.
+//! Writes the totals and one row per function to a NEW JSON file under ignored
+//! `local-analysis/`.
+//! Usage: script_tests [--no-init] [--lcb=bit63|any|bit32] SCRIPT-DIR NEW-JSON
+//! Counting unit: function run; checks are counted by the framework counters.
 use lbp_level::script::{self, class, Class, Script};
 use lbp_level::Limits;
 use lbp_script_vm::natives::{Bindings, World};
@@ -224,9 +226,15 @@ fn run() -> Result<(), String> {
                 host.world.passed += usize::try_from(ok).unwrap_or(0);
                 host.world.failed += usize::try_from(bad).unwrap_or(0);
             }
-            passed += host.world.passed;
-            failed += host.world.failed;
+            // Only `Test*` functions count: `main__` repeats them, and helpers such as
+            // NeverEvaluated fail by design when called directly.
+            let in_totals = name.starts_with("Test");
+            if in_totals {
+                passed += host.world.passed;
+                failed += host.world.failed;
+            }
             rows.push(serde_json::json!({
+                "in_totals": in_totals,
                 "class": vm.class_name(*id),
                 "function": name,
                 "static": is_static,
