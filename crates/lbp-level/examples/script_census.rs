@@ -188,6 +188,7 @@ fn run() -> Result<(), String> {
         for (k, v) in [
             ("unknown_opcodes", checks.unknown_opcodes),
             ("name_index_out_of_range", checks.name_index_out_of_range),
+            ("unnamed_type_refs", checks.unnamed_type_refs),
             (
                 "function_range_out_of_range",
                 checks.function_range_out_of_range,

@@ -28,6 +28,7 @@ native-function bindings built on `lbp_level::script::Script`.
 | `longvector` byte-plane layout under flag 2 | `io/serializer/Serializer.java` | CONFIRMED_FROM_COMMUNITY_CODE |
 | `upToDateScript` gate: code 0x360 vs `Revisions` 0x33a; s64 gate: code 0x30c vs `Revisions` 0x30b | `RScript` vs `enums/Revisions.java` | CONFLICT; code gates used, PC check 2 |
 | Name and type-name indices point into the ASCII table; `LCsa`/`LCsw`/`LCs64` index the ASCII, wide and s64 tables; member `field` and `CALL` `call` index field/function references | not stated by Toolkit (it keeps raw indices) | STRONG_INFERENCE; the census counts out-of-range indices |
+| A type-reference name index of 0xffffffff means unnamed, not out of range (2026-10-08 fix) | PC census d133: all 1,966 name misses were type rows with 0xffffffff, all builtin or array types (void, bool, s32, f32, v4, m44, s64, object_ref/safe_ptr arrays); named class types never had it; 0 misses in other rows | STRONG_INFERENCE (measured); counted as `unnamed_type_refs`, other misses broken down by row kind in the census |
 | Native semantics | executable only | UNKNOWN |
 
 ## Implementation (`crates/lbp-level/src/script.rs`)

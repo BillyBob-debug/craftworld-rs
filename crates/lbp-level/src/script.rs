@@ -38,7 +38,9 @@
 //!   u32 each (compressed per flag 1).
 //!
 //! STRONG_INFERENCE (not in Toolkit, which keeps raw indices): name and type-name
-//! indices point into the ASCII string table; `LCsa`/`LCsw` index the ASCII/wide tables;
+//! indices point into the ASCII string table, except a type-reference name of 0xffffffff,
+//! which means unnamed (PC census d133: all 1,966 such rows are builtin or array types,
+//! no named class type has it; counted as `unnamed_type_refs`); `LCsa`/`LCsw` index the ASCII/wide tables;
 //! `LCs64` indexes the s64 constants; GET/SET member `field` indexes field references and
 //! CALL `call` indexes function references. The census counts indices out of range to
 //! test this.
@@ -48,6 +50,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 pub const MAX_INPUT: usize = 64 << 20;
+/// Type-reference name index meaning "no name" (builtin and array types).
+pub const UNNAMED: u32 = u32::MAX;
 const MAX_EXPANDED: usize = 256 << 20;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -818,6 +822,8 @@ pub fn operands(bits: u64) -> Vec<(&'static str, i64)> {
 pub struct ListingChecks {
     pub unknown_opcodes: usize,
     pub name_index_out_of_range: usize,
+    /// Type references whose name index is the 0xffffffff "unnamed" sentinel.
+    pub unnamed_type_refs: usize,
     /// Out-of-range name indices by row kind (type, fieldref, funcref, field, property,
     /// function, member) and the first distinct values seen (at most 16).
     pub name_out_of_range_by_kind: BTreeMap<&'static str, usize>,
@@ -870,7 +876,12 @@ impl Script {
             modifier_names(self.modifiers).join(" ")
         );
         for (i, t) in self.type_refs.iter().enumerate() {
-            let n = name("type", t.type_name, &mut c);
+            let n = if t.type_name == UNNAMED {
+                c.unnamed_type_refs += 1;
+                "<unnamed>".to_owned()
+            } else {
+                name("type", t.type_name, &mut c)
+            };
             let _ = writeln!(
                 o,
                 "type #{i}: {n} machine={} builtin={} dims={} base={} script={}",

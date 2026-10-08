@@ -207,4 +207,18 @@ fn u10_untrusted_input_stops_explicitly() {
     assert_eq!(c.name_index_out_of_range, 1);
     assert_eq!(c.name_out_of_range_by_kind.get("function"), Some(&1));
     assert!(c.name_out_of_range_values.contains(&77));
+
+    // A type-reference name of 0xffffffff is the unnamed sentinel (builtin types), not a miss.
+    s.type_refs.push(lbp_level::script::TypeRef {
+        machine_type: 3,
+        builtin_type: 0,
+        dimension_count: 0,
+        array_base_machine_type: 0,
+        script: None,
+        type_name: lbp_level::script::UNNAMED,
+    });
+    let (text, c) = s.listing();
+    assert_eq!(c.unnamed_type_refs, 1);
+    assert_eq!(c.name_out_of_range_by_kind.get("type"), None);
+    assert!(text.contains("<unnamed> machine="));
 }
