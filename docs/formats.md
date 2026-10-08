@@ -620,3 +620,10 @@ subtract (2) after static scale/offset; with one named animation the sampled UV 
 `(uv - t.zw) * t.xy`. Local data confirms ThingColor variant 8 and a W-only
 subtype-0 curve. Instance values in the game remain unknown. Details:
 [instance-preview.md](instance-preview.md), [animation-base-preview.md](animation-base-preview.md).
+
+## D94 BLEND thresholds
+
+`CONFIRMED_FROM_LOCAL_DATA`: BLEND (box 16) parameter words 0/1 are lower/upper
+thresholds; compiled constants in two 01.33 materials equal 1/(p1 − p0) and
+−p0/(p1 − p0), matching Toolkit's 100/15 literals for 0.15/0.16. RGB mask space stays
+`UNKNOWN`. Details: [d94-blend.md](d94-blend.md).

@@ -696,6 +696,7 @@ fn select_static_mix(
     Ok(selection)
 }
 // D84 BLEND (box 16) phase 1, rule from docs/d76-blend.md; scope: docs/d84-blend-route.md.
+// D94 thresholds generalised from the materials' compiled constants: docs/d94-blend.md.
 // Fixed depth: three direct inputs, no recursion. Checks run in a fixed order so the
 // census reason names the first unmet condition.
 fn select_blend(
@@ -731,25 +732,25 @@ fn select_blend(
         );
     }
     let [left, right, mask] = [0, 1, 2].map(|i| edges[i].box_from as usize);
+    // Only the first mask component is used (E3). RGB channel space is unknown (D76
+    // E10, D94): checked before the input kinds since it blocks every corpus BLEND.
+    if !matches!(edges[2].swizzle_raw, [b'a' | b'w', 0, 0, 0, 0]) {
+        return Err(
+            "Unsupported: BLEND mask must be a sample alpha (RGB mask space unknown)".into(),
+        );
+    }
+    // D94: any finite p0 < p1 (factor clamp((m − p0)/(p1 − p0), 0, 1)).
+    let p = &graph.boxes[root].parameters_raw;
+    let threshold_bits = [p[0], p[1]];
+    crate::blend_thresholds(threshold_bits)?;
     if [left, right]
         .iter()
         .any(|&i| !matches!(graph.boxes[i].type_raw, 1 | 3))
     {
         return Err("Unsupported: BLEND phase 1 inputs must be COLOR or texture samples".into());
     }
-    // Only the first mask component is used (E3). RGB channel space is unknown (E10).
-    if !matches!(edges[2].swizzle_raw, [b'a' | b'w', 0, 0, 0, 0]) {
-        return Err(
-            "Unsupported: BLEND mask must be a sample alpha (RGB mask space unknown)".into(),
-        );
-    }
     if mask != left && mask != right || graph.boxes[mask].type_raw != 1 {
         return Err("Unsupported: BLEND mask must reuse the port 0/1 texture sample".into());
-    }
-    let p = &graph.boxes[root].parameters_raw;
-    let threshold_bits = [p[0], p[1]];
-    if threshold_bits != crate::BLEND_THRESHOLD_BITS {
-        return Err("Unsupported: BLEND thresholds other than 0.15/0.16".into());
     }
     let (color, color_first) = match (graph.boxes[left].type_raw, graph.boxes[right].type_raw) {
         (3, 1) => (left, true),
@@ -2887,19 +2888,36 @@ mod tests {
         let mut g = base.clone();
         g.wires[2].swizzle_raw[0] = b'x';
         assert!(reason(&g).contains("exactly unswizzled ports 0/1"));
-        // T5: thresholds must be the exact 0.15/0.16 bits.
+        // T5 (D94): any finite p0 < p1 selects (0/1 and 0.67/0.8 are the corpus pairs);
+        // equal, reversed or non-finite pairs are rejected.
         for bits in [
             [0, 1f32.to_bits()],
+            [0x3f2b_851e, 0x3f4c_cccc],
             [0x3e19_999a, 0x3e2e_147b],
-            [0x3e19_999b, 0x3e23_d70a],
+        ] {
+            let mut g = base.clone();
+            g.boxes[1].parameters_raw[..2].copy_from_slice(&bits);
+            let selected = select_diffuse(&g).unwrap().blend_mask.unwrap();
+            assert_eq!(selected.threshold_bits, bits);
+        }
+        for bits in [
+            [1f32.to_bits(), 0],
+            [0x3e19_999a, 0x3e19_999a],
+            [f32::NAN.to_bits(), 1f32.to_bits()],
         ] {
             let mut g = base.clone();
             g.boxes[1].parameters_raw[..2].copy_from_slice(&bits);
             assert_eq!(
                 reason(&g),
-                "Unsupported: BLEND thresholds other than 0.15/0.16"
+                "Unsupported: BLEND thresholds must be finite with param0 < param1"
             );
         }
+        // D94 order: an RGB mask is reported before product inputs (all 14 corpus
+        // BLEND-without-THING_COLOR materials have unswizzled masks).
+        let mut g = base.clone();
+        g.boxes[2] = node(10, 0);
+        g.wires[3].swizzle_raw = [0; 5];
+        assert!(reason(&g).contains("RGB mask space unknown"));
         // T6: RGB, multi-component and unknown mask swizzles; mask from another sample.
         for swizzle in [&b""[..], b"r", b"x", b"xy", b"aa", b"q"] {
             let mut g = base.clone();
