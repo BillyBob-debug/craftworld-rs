@@ -47,15 +47,21 @@ code is copied into the product.
 
 ## 3. First measurements (runtime checks X1 and S9)
 
-Use one story level with flat ground, for example the first tutorial level.
+Use an empty test level: a new level in Create mode (My Moon) with only flat ground,
+Sackboy and nothing else. Not the first story level: it opens with a custom camera, and
+story levels add cameras, triggers and logic that can move or hold Sackboy.
 
 | Check | What to record |
 |---|---|
-| X1 tick rate | Game update rate: frames per in-game second. Video a timer or piston with a known stored duration and compare. Inferred 30 Hz is unverified. |
+| X1 tick rate | Done 2026-10-08, CONFIRMED_FROM_LOCAL_DATA (emulated): 30 game ticks per second, one tick every 2 vblanks, within 0.1%. The runtime uses 30 Hz for its fixed update. Details below. |
 | S9 walk / run | Ground speed in level units per second: find Sackboy's x in memory, walk for 3+ s, sample x per frame. |
 | S9 jump | Jump height and air time from a standing jump on flat ground (y per frame); fit a parabola for gravity. |
 | S9 fall | Terminal fall speed, if any, from a long drop. |
 | S9 layer shift | Frames from input to arrival on the next layer; z values of the three layers. |
+
+X1 run (game 01.33): RPCS3 0.0.43-20247, Vulkan, offline, full speed (29.98 FPS). Over
+20 s, three game tick counters advanced 599, 598 and 599 while the vblank counter (guest
+0xdb8244) advanced 1,197. Samples: PC `local-analysis/x1-tick-counters-0133-run1.csv`.
 
 Record the method, level, RPCS3 build, and the raw per-frame samples (CSV under
 `local-analysis/`). The milestone doc gets the fitted numbers with the evidence label for
@@ -88,7 +94,7 @@ Proposed route (no human needed if it works):
    local script reads guest memory over it each frame (big-endian floats).
 2. Send keyboard input to the game window. Set up a keyboard pad profile in RPCS3 and
    record its key map in the milestone doc.
-3. Get to a flat story level. Find Sackboy's x/y/z by scanning while walking and
+3. Open the empty test level from section 3. Find Sackboy's x/y/z by scanning while walking and
    standing still (values that change only while moving). Record the guest addresses.
 4. Run the section 3 table: walk 3+ s, standing jump, long drop, layer shift. One CSV
    per run in `local-analysis/` (new names): tick, x, y, z, input state.
