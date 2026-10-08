@@ -5,6 +5,16 @@ The user wants the Pod itself, not a flat menu window: the menu is what the Pod 
 (the "Puter") shows. First slice: draw the script menu (U12b-U12d) onto a screen inside
 the 3D viewer, so it can be placed in the pod room once the room is found (PC task A).
 
+## Status after the RPCS3 reference (PC, 2026-10-08)
+The real Puter has no flat screen. The main menu is the 3D cloth Earth globe in the
+workshop, with pill labels curving down its right side (Story, Community, Recent Activity,
+Store); the moon is "Me", and a profile Polaroid sits between them
+(/mnt/project-files/lbp2/research/pod-reference-rpcs3.md, CONFIRMED_FROM_LOCAL_DATA).
+So the quad below is a debug view, not the game's look. What carries forward is the
+plumbing: `add_gooey`, `GooeyTarget` and `run_script` let the 3D viewer host the script's
+tree. The globe menu (pills placed on the globe, driven by the same tree) is the next
+slice.
+
 ## Change (crates/lbp-bevy-viewer)
 - `gooey_ui::add_gooey` adds a gooey screen (input, rebuild, focus) to any app;
   `run_gooey` keeps its own window and uses it. `GooeyTarget` names a camera that renders
