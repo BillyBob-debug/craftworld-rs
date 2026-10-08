@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/lbp-core", "crates/lbp-archive", "crates/lbp-resource", "crates/lbp-io", "crates/lbp-cli", "crates/lbp-catalog", "crates/lbp-viewer", "crates/lbp-texture", "crates/lbp-mesh", "crates/lbp-bevy-viewer", "crates/lbp-preview"]
+members = ["crates/lbp-core", "crates/lbp-archive", "crates/lbp-resource", "crates/lbp-io", "crates/lbp-cli", "crates/lbp-catalog", "crates/lbp-viewer", "crates/lbp-texture", "crates/lbp-mesh", "crates/lbp-bevy-viewer", "crates/lbp-preview", "crates/lbp-level"]
 resolver = "2"
 
 [workspace.package]
@@ -25,3 +25,4 @@ lbp-mesh = { path = "crates/lbp-mesh" }
 
 
 lbp-preview = { path = "crates/lbp-preview" }
+lbp-level = { path = "crates/lbp-level" }
