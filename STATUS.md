@@ -3816,3 +3816,21 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
 - Level census d150 byte-identical to b108. Integrator fix: clippy as_chunks in serial.rs.
 - Checks: fmt; tests lbp-level, lbp-runtime, lbp-script-vm; workspace Clippy -D warnings.
 **+0 newly viewable / +0 newly Complete.**
+
+## D147-D149 — level polish batch (local subagents) (2026-10-08)
+
+- D147 (docs/d147-joint-skinning.md): Rookie Test span joints (piston 33, string 25,
+  chain 4) skinned with rigid end groups and a stretched bridge (INFERRED from mesh
+  weights; no oracle): 62/62, 0 kept stretched; pivots 60 unchanged; 455/455 placed.
+  New --level-focus-thing N. Capture d147-rookie-joints.png.
+- D148 (docs/d148-camera-sackboy.md): game meshes are Z-up, front -Y; single meshes now
+  shown upright (--model-up z default, y = raw); eye-level default camera. Sackboy
+  0000043f + walk 0001a697 f8 faces the camera; GPU/CPU skinning match. Captures
+  d148-sackboy-front(.png, -cpu.png), d148-tutorial23-camera.png.
+- D149 (docs/d149-davinci-levels.md): --slot-browser-slots lists slots. Da Vinci's Hideout
+  (group 22) levels: Rookie Test 0001e786 3,247 Things, 455/455 meshes, 599/857 shapes;
+  Grab and Swing 0001e793 2,163, 439/440, 589/1,061; Hedge Hopping 0001e7f4 875, 163/163,
+  171/318. Capture d149-davinci-rookie-test-unlit.png (lit view fogged out: stored fog
+  range vs overview camera).
+- Checks: fmt; tests lbp-mesh, lbp-preview, lbp-bevy-viewer (26); workspace Clippy; builds.
+**+0 newly viewable / +0 newly Complete.**

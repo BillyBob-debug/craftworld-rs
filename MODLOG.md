@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 — D146-D150 level polish, UI objects, runtime
+
+Sackboy shown upright facing the camera; Rookie Test joints skinned; three Da Vinci
+levels render; main-menu script runs cleanly; level-script runtime resolves all 13,547
+scripted things. +0 / +0.
+
 ## 2026-10-08 — D145 script VM arrays
 
 All 47 of the game's test functions run; 512/513 checks pass. S9 waits for My Moon to

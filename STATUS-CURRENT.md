@@ -109,3 +109,6 @@ more story levels on screen; Toolkit spot-check for U4 slot lists (not done).
   `docs/third-sample-preview.md` (D65, D67), `docs/material-budget-preview.md` (D66),
   `docs/route-census.md` (D64), `docs/unwired-diffuse-preview.md` (D63).
 - Format evidence: `docs/formats.md` (grep headings). Rules: `AGENTS.md`.
+
+Latest (2026-10-08): X1 = 30 Hz (D143). Script VM 512/513 game test checks (D145).
+Level polish D147-D149; runtime D150. S9 waits for My Moon on the RPCS3 profile.
