@@ -143,7 +143,7 @@ pub(crate) fn sampler(
     let sample = &graph.boxes[sample_index];
     if sample.type_raw != 1
         || sample.subtype_raw > 1
-        || sample.parameters_raw[4] > 1
+        || crate::sampler_uv_channel(sample.parameters_raw[4]).is_none()
         || graph
             .wires
             .iter()
@@ -218,7 +218,7 @@ pub(crate) fn sampler(
         crate::linked::SamplerSelection {
             sample_index,
             slot: sample.parameters_raw[5] as usize,
-            uv_channel: sample.parameters_raw[4] as usize,
+            uv_channel: crate::sampler_uv_channel(sample.parameters_raw[4]).unwrap_or_default(),
             uv_transform,
         },
         AnimationBaseSnapshot {
@@ -463,7 +463,7 @@ mod tests {
         uneven.boxes[2].animations[1].name_hex = "000000".into();
         assert!(select(&uneven, true).is_err());
         let mut uv2 = g.clone();
-        uv2.boxes[2].parameters_raw[4] = 2;
+        uv2.boxes[2].parameters_raw[4] = 3;
         assert!(select(&uv2, true).is_err());
         let mut wired = g.clone();
         wired.wires.push(wire(1, 2, 0));
@@ -518,7 +518,7 @@ mod tests {
             wired.wires.push(wire(2, 1, 1));
             assert!(select(&wired, true).is_err());
             let mut uv2 = tinted.clone();
-            uv2.boxes[1].parameters_raw[4] = 2;
+            uv2.boxes[1].parameters_raw[4] = 3;
             assert!(select(&uv2, true).is_err());
             let mut moving_root = tinted.clone();
             scale_offset(&mut moving_root, 3, "643100", [1., 1., 0., 0.]);

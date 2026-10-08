@@ -643,3 +643,13 @@ linear). Toolkit's GL baker samples every non-noSRGB texture as `GL_SRGB_ALPHA`
 (`CONFIRMED_FROM_COMMUNITY_CODE`); in 01.33 the noSRGB marker tracks bump-only samplers
 (99.4%) and is absent on all 63 mask textures (`CONFIRMED_FROM_LOCAL_DATA`). Not observed
 in the executable or on hardware. Details: [d97-blend-mask.md](d97-blend-mask.md).
+
+## D104 sampler UV channel word 2
+
+No new disk layout. TEXTURE_SAMPLE parameter 4 = 2 samples UV0 (same as 0; 1 is UV1;
+higher words unobserved and unsupported). `CONFIRMED_FROM_LOCAL_DATA`: the materials'
+own compiled fragment programs fetch all 54 UV-addressed word-2 samples (6 materials,
+01.33) from TEXCOORD0.xy like word 0 (word 1: TEXCOORD0.zw); the third mesh UV
+attribute (decal UV) is not used. Agrees with Toolkit `GfxAssembler`; conflicts with
+Toolkit's glTF export (`texCoord` = raw word). Pins, decode method and counts:
+[d104-uv-channel-2.md](d104-uv-channel-2.md).

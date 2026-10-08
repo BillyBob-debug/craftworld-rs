@@ -316,8 +316,9 @@ fn grid_with_wrapping(
 pub(crate) fn sampler(graph: &GraphMetadata, index: usize) -> Result<SamplerSelection, String> {
     let sample = &graph.boxes[index];
     let p = &sample.parameters_raw;
+    let uv_channel = crate::sampler_uv_channel(p[4]);
     if sample.type_raw != 1
-        || p[4] > 1
+        || uv_channel.is_none()
         || sample
             .animations
             .iter()
@@ -339,7 +340,7 @@ pub(crate) fn sampler(graph: &GraphMetadata, index: usize) -> Result<SamplerSele
     Ok(SamplerSelection {
         sample_index: index,
         slot: p[5] as usize,
-        uv_channel: p[4] as usize,
+        uv_channel: uv_channel.unwrap_or_default(),
         uv_transform,
     })
 }
@@ -1766,6 +1767,8 @@ mod tests {
         graph.boxes[1].parameters_raw[4] = 1;
         assert_eq!(select_diffuse(&graph).unwrap().uv_channel, 1);
         graph.boxes[1].parameters_raw[4] = 2;
+        assert_eq!(select_diffuse(&graph).unwrap().uv_channel, 0);
+        graph.boxes[1].parameters_raw[4] = 3;
         assert!(sample_slot(&graph).is_err());
         graph.boxes[1].parameters_raw[4] = 0;
         graph.wires[0].swizzle_raw[0] = b'x';
@@ -2508,14 +2511,14 @@ mod tests {
         assert_eq!(squared.second_sample.unwrap().sample_index, 2);
         assert_eq!(squared.animation_base.unwrap().sample_index, 2);
         graph.wires[0].box_from = 1;
-        // Rejections: animated multiply, wired or UV2 animated sampler, bad curve.
+        // Rejections: animated multiply, wired or unobserved-UV-word animated sampler, bad curve.
         graph.boxes[3].animations[0].name_hex = "643100".into();
         assert!(select_diffuse_with_animation_base(&graph, true).is_err());
         graph.boxes[3].animations[0].name_hex = "000000".into();
         graph.wires.push(wire(1, 2, 0));
         assert!(select_diffuse_with_animation_base(&graph, true).is_err());
         graph.wires.pop();
-        graph.boxes[2].parameters_raw[4] = 2;
+        graph.boxes[2].parameters_raw[4] = 3;
         assert!(select_diffuse_with_animation_base(&graph, true).is_err());
         graph.boxes[2].parameters_raw[4] = 0;
         graph.boxes[2].animations[0].component_value_count = 7;
@@ -2682,7 +2685,7 @@ mod tests {
             .unwrap_err()
             .contains("sampler must be static"));
         graph.boxes[2].animations[0].component_value_count = 0;
-        graph.boxes[2].parameters_raw[4] = 2;
+        graph.boxes[2].parameters_raw[4] = 3;
         assert!(select_diffuse(&graph).is_err());
         graph.boxes[2].parameters_raw[4] = 0;
         graph.boxes[2] = node(3, 0);
@@ -2746,8 +2749,8 @@ mod tests {
         assert_eq!(squared.second_sample.unwrap().sample_index, 1);
         assert_eq!((squared.ignored_nodes, squared.ignored_wires), (1, 0));
         graph.wires[3].box_from = 4;
-        // Genuine sampler-rule failures stay unsupported.
-        for (index, raw) in [(1, 2u32), (4, 2)] {
+        // Genuine sampler-rule failures stay unsupported (word 2 is UV0 since D104).
+        for (index, raw) in [(1, 3u32), (4, 3)] {
             graph.boxes[index].parameters_raw[4] = raw;
             assert!(select_diffuse(&graph)
                 .unwrap_err()

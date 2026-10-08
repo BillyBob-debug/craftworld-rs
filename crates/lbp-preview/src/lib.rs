@@ -40,6 +40,8 @@ mod small_family;
 pub use small_family::{select_small_solid, SamplerScale};
 mod solid;
 mod tint;
+mod uv_channel;
+pub use uv_channel::sampler_uv_channel;
 mod wrapping;
 pub use affine::UvTransform;
 use lbp_catalog::{
