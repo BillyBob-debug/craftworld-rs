@@ -3,6 +3,10 @@
 //!
 //! What the frame properties mean is UNKNOWN (only their names and argument values are
 //! recorded), so this mapping is a placeholder layout, not the game's:
+//! - `Sizing` (two numbers, script units) becomes a minimum size relative to the first frame
+//!   with a positive `Sizing`, which is taken as the full screen (D146: the Pod menus' outer
+//!   frame is 2400 x 1250, `GetPuterWidth(2400)`); zero or negative values fit the content
+//!   (their meaning is UNKNOWN);
 //! - every frame is a column; `DefaultChildSpacing` (first number) is the gap and
 //!   `Borders` (first number) the padding, both clamped to 0..=64 (NaN/absent = 0/4);
 //!   a frame with properties is drawn filled, the implicit root plain;
@@ -11,6 +15,30 @@
 //!   naming the native (for example `[DoPlayerBigIcon]`).
 use crate::{base_name, Frame, Node};
 use lbp_gooey::{Align, Builder, FrameInput, Layout, PanelStyle, TextStyle, UiTree, Uid};
+
+fn numbers(f: &Frame, key: &str) -> Vec<f32> {
+    f.props
+        .get(key)
+        .map(|v| {
+            v.split(',')
+                .filter_map(|x| x.trim().parse::<f32>().ok())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The first positive `Sizing` in pre-order: the screen size in script units.
+pub fn reference_size(f: &Frame) -> Option<[f32; 2]> {
+    if let [w, h, ..] = numbers(f, "Sizing")[..] {
+        if w > 0. && h > 0. && w.is_finite() && h.is_finite() {
+            return Some([w, h]);
+        }
+    }
+    f.children.iter().find_map(|c| match c {
+        Node::Frame(c) => reference_size(c),
+        _ => None,
+    })
+}
 
 fn first_number(props: &Frame, key: &str) -> Option<f32> {
     props
@@ -24,7 +52,7 @@ fn first_number(props: &Frame, key: &str) -> Option<f32> {
         .filter(|v| v.is_finite())
 }
 
-fn frame(b: &mut Builder, f: &Frame, uid: Uid) {
+fn frame(b: &mut Builder, f: &Frame, uid: Uid, reference: Option<[f32; 2]>) {
     let gap = first_number(f, "DefaultChildSpacing").map_or(4., |v| v.clamp(0., 64.));
     let padding = first_number(f, "Borders").map_or(4., |v| v.clamp(0., 64.));
     let style = if f.props.is_empty() {
@@ -40,11 +68,15 @@ fn frame(b: &mut Builder, f: &Frame, uid: Uid) {
         padding,
         gap,
         |b| {
+            if let (Some(r), [w, h, ..]) = (reference, &numbers(f, "Sizing")[..]) {
+                let part = |v: f32, r: f32| (v > 0.).then_some(v / r);
+                b.set_frame_size([part(*w, r[0]), part(*h, r[1])]);
+            }
             for c in &f.children {
                 match c {
                     Node::Frame(child) => {
                         let id = b.auto_id();
-                        frame(b, child, id);
+                        frame(b, child, id, reference);
                     }
                     Node::Text { text, .. } => b.text(text.clone(), TextStyle::Body),
                     Node::Button {
@@ -69,13 +101,25 @@ fn frame(b: &mut Builder, f: &Frame, uid: Uid) {
 }
 
 /// The script's root frame as a [`UiTree`] under `root`, with `header` lines (counts,
-/// faults) drawn above it as small text.
+/// faults) drawn above it as small text. Everything sits in one column frame so the header
+/// stacks above the script's frames instead of beside them (PC check of #46).
 pub fn ui_tree(script_root: &Frame, root: Uid, header: &[String], input: FrameInput) -> UiTree {
     let mut b = Builder::new(root, input);
-    for line in header {
-        b.text(line.clone(), TextStyle::Small);
-    }
-    let id = b.auto_id();
-    frame(&mut b, script_root, id);
+    let column = b.auto_id();
+    b.frame(
+        column,
+        Layout::Column,
+        Align::Start,
+        PanelStyle::Plain,
+        0.,
+        4.,
+        |b| {
+            for line in header {
+                b.text(line.clone(), TextStyle::Small);
+            }
+            let id = b.auto_id();
+            frame(b, script_root, id, reference_size(script_root));
+        },
+    );
     b.finish()
 }
