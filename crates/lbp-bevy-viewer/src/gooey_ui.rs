@@ -3,9 +3,12 @@
 //! Each frame the active screen rebuilds its `UiTree`; when the tree differs from the last
 //! one, the bevy_ui entities are despawned and spawned again (menus are small, and focus is
 //! kept by widget id, so a full rebuild is simpler than a keyed diff). Keyboard arrows move
-//! focus with `lbp_gooey::navigate` over the laid-out rectangles; Enter/Space activate;
+//! focus with `lbp_gooey::navigate` over the laid-out rectangles; Enter/Space activate
+//! (Enter only on screens with a text box);
 //! mouse hover focuses and click activates. Gamepad input is not wired (bevy_gilrs is not
-//! enabled). Text uses Bevy's default font until game fonts (U2 atlas) are hooked up.
+//! enabled). Text uses the generic sans-serif family resolved through the OS fonts
+//! (Bevy `system_font_discovery`; not bundled), so strings with characters outside Bevy's
+//! built-in subset font render; game fonts (U2) are shown by the U3 font sheet instead.
 //! The demo content is authored and synthetic: no game data, not a copy of game screens.
 //! Other screens (U7 `--slot-browser`) plug in through [`run_gooey`]; game images reach the
 //! adapter as decoded RGBA keyed by [`ImageRef`].
@@ -18,6 +21,13 @@ use std::collections::HashMap;
 
 #[derive(Component, Clone, Copy)]
 struct GooeyId(Uid);
+
+/// Text typed into a screen that takes text (`run_gooey` `text`): characters are appended,
+/// Backspace removes the last one. With a text box, Space types instead of activating.
+pub type SharedText = std::sync::Arc<std::sync::Mutex<String>>;
+
+#[derive(Resource)]
+struct GooeyText(Option<SharedText>);
 
 /// The active screen: builds this frame's tree from the input.
 pub type ScreenFn = Box<dyn FnMut(FrameInput) -> UiTree + Send + Sync>;
@@ -150,6 +160,7 @@ pub fn run_ui_demo() {
         Box::new(move |input| demo_screen(input, &mut state)),
         Vec::new(),
         None,
+        None,
     );
 }
 
@@ -160,6 +171,7 @@ pub fn run_gooey(
     screen: ScreenFn,
     mut images: Vec<GooeyImage>,
     loader: Option<ImageLoader>,
+    text: Option<SharedText>,
 ) {
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.045)))
@@ -174,6 +186,7 @@ pub fn run_gooey(
         }))
         .init_resource::<GooeyHost>()
         .insert_resource(GooeyScreen(screen))
+        .insert_resource(GooeyText(text))
         .insert_resource(GooeyLoader {
             load: loader,
             failed: Default::default(),
@@ -211,7 +224,22 @@ fn gooey_input(
     interactions: Query<(&GooeyId, &Interaction), Changed<Interaction>>,
     laid_out: Query<(&GooeyId, &ComputedNode, &UiGlobalTransform), With<Button>>,
     mut host: ResMut<GooeyHost>,
+    mut typed: MessageReader<bevy::input::keyboard::KeyboardInput>,
+    text: Res<GooeyText>,
 ) {
+    if let Some(shared) = &text.0 {
+        let mut value = shared.lock().unwrap_or_else(|e| e.into_inner());
+        for key in typed.read() {
+            if !key.state.is_pressed() {
+                continue;
+            }
+            if key.key_code == KeyCode::Backspace {
+                value.pop();
+            } else if let Some(t) = &key.text {
+                value.extend(t.chars().filter(|c| !c.is_control()));
+            }
+        }
+    }
     for (id, interaction) in &interactions {
         match interaction {
             Interaction::Pressed => {
@@ -253,7 +281,9 @@ fn gooey_input(
             host.focused = Some(next);
         }
     }
-    if keys.any_just_pressed([KeyCode::Enter, KeyCode::Space, KeyCode::NumpadEnter]) {
+    // With a text box, Space is typed instead of activating.
+    let space = text.0.is_none() && keys.just_pressed(KeyCode::Space);
+    if keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) || space {
         host.activated = host.focused;
     }
 }
@@ -362,11 +392,14 @@ fn gooey_rebuild(
 }
 
 fn font(style: TextStyle) -> TextFont {
-    TextFont::from_font_size(match style {
-        TextStyle::Title => 28.,
-        TextStyle::Body => 18.,
-        TextStyle::Small => 14.,
-    })
+    TextFont {
+        font: bevy::text::FontSource::SansSerif,
+        ..TextFont::from_font_size(match style {
+            TextStyle::Title => 28.,
+            TextStyle::Body => 18.,
+            TextStyle::Small => 14.,
+        })
+    }
 }
 
 /// Draws `image`: a loaded game image, else a swatch / neutral grey placeholder.
