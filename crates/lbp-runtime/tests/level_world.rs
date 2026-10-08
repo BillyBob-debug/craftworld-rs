@@ -4,7 +4,7 @@ use lbp_level::parts::{Pos, ScriptField, ScriptPart, ScriptValue, World as World
 use lbp_level::script::{FieldDef, FunctionDef, MemberRef, Script, Span, TypeRef};
 use lbp_level::serial::Descriptor;
 use lbp_level::thing::ThingRecord;
-use lbp_runtime::{instances, LevelWorld, Outcome, Runner};
+use lbp_runtime::{instances, LevelScripts, LevelWorld, Outcome, Runner};
 use lbp_script_vm::natives::{Bindings, World};
 use lbp_script_vm::{MemberKind, Value, Vm};
 
@@ -292,4 +292,35 @@ fn class_defaults_inherited_natives_and_parts() {
     let o = Runner::default().start(&mut vm, &mut host, inst, "Ask", &mut budget);
     assert!(matches!(o, Outcome::Fault(_)));
     assert_eq!(host.unbound.keys().collect::<Vec<_>>(), ["Base.Mode__"]);
+}
+
+#[test]
+fn schedule_creates_then_updates_and_resumes_suspended_scripts() {
+    // Lamp with `Tick` renamed to `Update__` and no `OnCreate__`.
+    let mut ticker = lamp();
+    ticker.strings_a[4] = lbp_runtime::UPDATE.into();
+    let mut vm = Vm::default();
+    vm.load(ticker, Some(GUID));
+    let mut host = Bindings::new(LevelWorld::from_things(&level()));
+    let mut level = LevelScripts::new(&vm, &host.world);
+    let count = |host: &mut Bindings<LevelWorld>| {
+        host.world
+            .get_member(MemberKind::Thing, &Value::Thing(Some(1)), "Lamp", "count")
+    };
+    let created = level.create(&mut vm, &mut host, 1000);
+    assert_eq!(created.no_function, 1);
+    // Tick 1: Update runs and yields.
+    let t = level.tick(&mut vm, &mut host, 1000);
+    assert_eq!((t.yielded, t.resumed), (1, 0));
+    assert_eq!(count(&mut host), Ok(Value::Int(42)));
+    // Tick 2: the suspended Update finishes; no new Update for that Thing this tick.
+    let t = level.tick(&mut vm, &mut host, 1000);
+    assert_eq!((t.yielded, t.resumed, t.done), (0, 1, 0));
+    assert_eq!(count(&mut host), Ok(Value::Int(42)));
+    // Tick 3: Update runs again.
+    let t = level.tick(&mut vm, &mut host, 1000);
+    assert_eq!(t.yielded, 1);
+    assert_eq!(count(&mut host), Ok(Value::Int(43)));
+    assert_eq!((level.ticks, level.pending()), (3, 1));
+    assert!(level.stopped.is_empty());
 }
