@@ -3251,6 +3251,7 @@ name = "lbp-script-vm"
 version = "0.1.0"
 dependencies = [
  "lbp-level",
+ "serde_json",
 ]
 
 [[package]]
