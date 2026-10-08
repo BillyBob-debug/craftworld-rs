@@ -655,7 +655,8 @@ mod tests {
         let (d, q) = project_instance_color(&still, color()).unwrap();
         let s = crate::select_instance_diffuse(&d, &q.unwrap(), true).unwrap();
         assert!(s.animation_base.is_none() && s.tint == color());
-        // Two animated leaves under THING stay unsupported.
+        // D92: two animated leaves under THING are the D75 tinted product, each leaf
+        // on its own base rows, tinted by the supplied color (both opt-ins).
         let mut two = graph(
             &[0, 10, 2, 10, 1, 1],
             vec![
@@ -670,6 +671,40 @@ mod tests {
         animate(&mut two, 5);
         two.boxes[5].animations[0].name_hex = "636400".into();
         let (d, q) = project_instance_color(&two, color()).unwrap();
+        let q = q.unwrap();
+        assert!(crate::select_instance_diffuse(&d, &q, false).is_err());
+        let s = crate::select_instance_diffuse(&d, &q, true).unwrap();
+        assert_eq!((s.tint, s.color_index), (color(), Some(2)));
+        let leaves = [s.animation_base, s.animation_base_more[0]].map(|b| b.unwrap().sample_index);
+        assert_eq!(
+            leaves
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .len(),
+            2
+        );
+        assert!(leaves.iter().all(|l| [4, 5].contains(l)));
+        assert!(s.animation_base_more[1].is_none());
+        // A nested (T × THING) × T folds the sampler (nested tint): one animated leaf
+        // keeps the existing D78 route, two animated leaves stay unsupported.
+        let mut nested = graph(
+            &[0, 10, 10, 2, 1, 1],
+            vec![
+                edge(4, 2, 0),
+                edge(3, 2, 1),
+                edge(2, 1, 0),
+                edge(5, 1, 1),
+                edge(1, 0, 0),
+            ],
+        );
+        animate(&mut nested, 5);
+        let (d, q) = project_instance_color(&nested, color()).unwrap();
+        let q = q.unwrap();
+        assert!(q.folded_sampler.is_some());
+        assert!(crate::select_instance_diffuse(&d, &q, true).is_ok());
+        animate(&mut nested, 4);
+        nested.boxes[4].animations[0].name_hex = "636400".into();
+        let (d, q) = project_instance_color(&nested, color()).unwrap();
         assert!(crate::select_instance_diffuse(&d, &q.unwrap(), true).is_err());
     }
     #[test]

@@ -138,6 +138,8 @@ fn run() -> Result<(), String> {
         mismatches += usize::from(!equal);
         let mut instance_selection = None;
         let mut instance_expected = Value::Null;
+        // D92: (ThingColor or folded operand index, oracle-side white tint bits).
+        let mut instance_tint: Option<(usize, [u32; 4])> = None;
         if instance_white {
             let white = lbp_preview::DiffuseTint {
                 bits: [1f32.to_bits(); 4],
@@ -173,6 +175,13 @@ fn run() -> Result<(), String> {
                             instance_expected =
                                 oracle_instance_tint(sample, &p, m, c, s.sample_index)
                                     .map_or(Value::Null, |bits| json!({"multiply_index":m,"sample_index":s.sample_index,"color_index":c,"tint_bits":bits}));
+                            instance_selection = Some(s);
+                        } else if s.second_sample.is_some() && s.animation_base.is_some() {
+                            // D92: a 2+ texture product with animated leaves under the
+                            // supplied color; the tint is checked in the product branch.
+                            instance_tint = s.color_index.and_then(|c| {
+                                oracle_instance_color(sample, &p, c).map(|bits| (c, bits))
+                            });
                             instance_selection = Some(s);
                         }
                     }
@@ -240,12 +249,17 @@ fn run() -> Result<(), String> {
             match selected {
                 Ok(s) => {
                     let sample_node = &graph.graph.boxes[s.sample_index];
-                    // D78: the one animated leaf, in any product role, must equal its
-                    // base-row transform; every static leaf must equal its parameters.
+                    // D78/D92: each animated leaf, in any product role, must equal its
+                    // own base-row transform; every static leaf must equal its parameters.
+                    let bases = [s.animation_base]
+                        .into_iter()
+                        .chain(s.animation_base_more)
+                        .flatten()
+                        .collect::<Vec<_>>();
                     let transform_equal =
                         |index: usize, transform: lbp_preview::SamplingTransform| {
-                            match s.animation_base {
-                                Some(base) if base.sample_index == index => {
+                            match bases.iter().find(|b| b.sample_index == index) {
+                                Some(base) => {
                                     transform.bits()
                                         == if base.subtype_raw == 1 {
                                             vec![
@@ -531,10 +545,17 @@ fn run() -> Result<(), String> {
                             && [root, inner].iter().all(|i| {
                                 nodes[*i]["type_raw"] == 10 && nodes[*i]["subtype_raw"] == 0
                             })
-                            && nodes[color]["type_raw"] == 3
-                            && s.tint.bits.iter().enumerate().all(|(i, b)| {
-                                nodes[color]["parameters_raw"][i].as_u64() == Some(u64::from(*b))
-                            })
+                            && match instance_tint {
+                                // D92: supplied white ThingColor (or its fold) as the tint.
+                                Some((c, bits)) => c == color && s.tint.bits == bits,
+                                None => {
+                                    nodes[color]["type_raw"] == 3
+                                        && s.tint.bits.iter().enumerate().all(|(i, b)| {
+                                            nodes[color]["parameters_raw"][i].as_u64()
+                                                == Some(u64::from(*b))
+                                        })
+                                }
+                            }
                             && second_node["type_raw"] == 1
                             && second_node["subtype_raw"].as_u64()
                                 == Some(u64::from(second.uv_transform.subtype()))
@@ -655,28 +676,36 @@ fn run() -> Result<(), String> {
                             _ => false,
                         }
                     };
-                    let base_equal = s.animation_base.is_none_or(|base| {
-                        let leaves = [Some(s.sample_index)].into_iter().chain(
-                            [s.second_sample, s.third_sample, s.fourth_sample]
-                                .map(|l| l.map(|l| l.sample_index)),
-                        );
-                        let node = &sample["graph"]["boxes"][base.sample_index];
-                        leaves.flatten().any(|l| l == base.sample_index)
-                            && node["subtype_raw"].as_u64() == Some(u64::from(base.subtype_raw))
-                            && [0, 1, 2, 3, 6, 7].iter().zip(base.static_matrix_bits).all(
-                                |(i, bits)| {
-                                    node["parameters_raw"][*i].as_u64() == Some(u64::from(bits))
-                                },
-                            )
-                            && (0..2).all(|row| {
-                                node["animations"][row]["derived_key_count"].as_u64()
-                                    == Some(base.key_counts[row] as u64)
-                                    && (0..4).all(|c| {
-                                        node["animations"][row]["base_value_bits"][c].as_u64()
-                                            == Some(u64::from(base.row_bits[row][c]))
-                                    })
-                            })
-                    });
+                    let distinct = bases
+                        .iter()
+                        .map(|b| b.sample_index)
+                        .collect::<std::collections::BTreeSet<_>>()
+                        .len()
+                        == bases.len();
+                    let base_equal = distinct
+                        && (s.animation_base.is_some() || bases.is_empty())
+                        && bases.iter().all(|base| {
+                            let leaves = [Some(s.sample_index)].into_iter().chain(
+                                [s.second_sample, s.third_sample, s.fourth_sample]
+                                    .map(|l| l.map(|l| l.sample_index)),
+                            );
+                            let node = &sample["graph"]["boxes"][base.sample_index];
+                            leaves.flatten().any(|l| l == base.sample_index)
+                                && node["subtype_raw"].as_u64() == Some(u64::from(base.subtype_raw))
+                                && [0, 1, 2, 3, 6, 7].iter().zip(base.static_matrix_bits).all(
+                                    |(i, bits)| {
+                                        node["parameters_raw"][*i].as_u64() == Some(u64::from(bits))
+                                    },
+                                )
+                                && (0..2).all(|row| {
+                                    node["animations"][row]["derived_key_count"].as_u64()
+                                        == Some(base.key_counts[row] as u64)
+                                        && (0..4).all(|c| {
+                                            node["animations"][row]["base_value_bits"][c].as_u64()
+                                                == Some(u64::from(base.row_bits[row][c]))
+                                        })
+                                })
+                        });
                     if s.output_index != output
                         || !base_equal
                         || !multiply_equal
@@ -689,7 +718,7 @@ fn run() -> Result<(), String> {
                     }
                     projected += 1;
                     // Versioned diagnostics retain all three original selectors/root indices.
-                    json!({"status":"projected","texture_add":s.texture_add.map(|a|json!({"add_index":a.add_index,"addend_index":a.addend_index,"addend_bits":a.addend.map(|c|c.bits),"policy":"linear_sum_clamped"})),"sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+                    json!({"status":"projected","texture_add":s.texture_add.map(|a|json!({"add_index":a.add_index,"addend_index":a.addend_index,"addend_bits":a.addend.map(|c|c.bits),"policy":"linear_sum_clamped"})),"sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"animation_base_more":s.animation_base_more.iter().flatten().map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})).collect::<Vec<_>>(),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
                 }
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
@@ -697,7 +726,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection,"instance_white_expected":instance_expected}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":18,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":19,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -910,7 +939,16 @@ fn oracle_instance_tint(
     {
         return None;
     }
-    match boxes[color]["type_raw"].as_u64()? {
+    oracle_instance_color(sample, projection, color)
+}
+/// The supplied white color as seen from the oracle graph: an unswizzled ThingColor
+/// node itself, or the oracle-side constant fold of a folded operand.
+fn oracle_instance_color(
+    sample: &Value,
+    projection: &lbp_preview::InstanceProjection,
+    color: usize,
+) -> Option<[u32; 4]> {
+    match sample["graph"]["boxes"][color]["type_raw"].as_u64()? {
         2 => Some([1f32.to_bits(); 4]),
         10 | 12 if projection.folded_operand == Some(color) => oracle_constant_fold(sample, color),
         _ => None,
