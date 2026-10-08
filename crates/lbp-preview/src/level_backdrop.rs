@@ -310,6 +310,8 @@ pub fn add_backdrop_plan<T>(
     load: impl FnMut(&MeshSource) -> Result<T, String>,
     local_bounds: impl Fn(&T) -> Option<[[f32; 3]; 2]>,
     neutral_groups: impl Fn(&T) -> bool,
+    bind_poses: impl Fn(&T) -> Vec<crate::level_scene::BindPose>,
+    placement: crate::level_scene::PosPlacement,
 ) {
     counts.plan_things += plan_things.len();
     counts.plan_shapes_not_drawn += plan_things
@@ -330,7 +332,14 @@ pub fn add_backdrop_plan<T>(
             return;
         }
     };
-    let sub = build_scene(plan_things, load, local_bounds, neutral_groups);
+    let sub = build_scene(
+        plan_things,
+        load,
+        local_bounds,
+        neutral_groups,
+        bind_poses,
+        placement,
+    );
     let c = &sub.counts;
     counts.plan_render_mesh += c.with_render_mesh;
     counts.plan_meshes_loaded += c.meshes_loaded;

@@ -62,6 +62,8 @@ struct LevelLoaded {
 struct LevelMode {
     guid: Option<u32>,
     path: Option<String>,
+    /// D120 POS placement (`--level-placement`; default POS x inverse bind of bone 0).
+    placement: level_scene::PosPlacement,
     report: bool,
     lines: Vec<String>,
     home: Option<Orbit>,
@@ -145,10 +147,13 @@ impl Viewer {
         } else {
             self.guid.clone()
         };
-        let level_target = self
-            .level
-            .active()
-            .then(|| (self.level.guid, self.level.path.clone()));
+        let level_target = self.level.active().then(|| {
+            (
+                self.level.guid,
+                self.level.path.clone(),
+                self.level.placement,
+            )
+        });
         let options = self.preview_options();
         let animation_guid = self.animation_guid.trim().to_ascii_lowercase();
         self.playing = None;
@@ -198,14 +203,14 @@ impl Viewer {
                         )
                         .map(Some)
                     })();
-                    let level = level_target.map(|(level_guid, level_path)| {
+                    let level = level_target.map(|(level_guid, level_path, placement)| {
                         let (key, identity) = level_scene::resolve_level(
                             &catalog,
                             level_guid,
                             level_path.as_deref(),
                         )?;
-                        let scene = level_scene::load_level_scene(
-                            &source, &catalog, &key, &worker, options,
+                        let scene = level_scene::load_level_scene_with(
+                            &source, &catalog, &key, &worker, options, placement,
                         )?;
                         Ok(LevelLoaded { scene, identity })
                     });
@@ -352,7 +357,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -382,6 +387,7 @@ fn options() -> Result<Viewer, String> {
                 );
             }
             "--level-path" => v.level.path = Some(value),
+            "--level-placement" => v.level.placement = level_scene::PosPlacement::parse(&value)?,
             "--qa-capture" => {
                 let base = std::fs::canonicalize("local-analysis").map_err(|e| e.to_string())?;
                 let path = PathBuf::from(value);
@@ -1118,6 +1124,7 @@ fn spawn_level(
 fn level_report(v: &Viewer) -> Result<(), String> {
     let (snapshot, game) = (PathBuf::from(&v.snapshot), PathBuf::from(&v.game));
     let (level_guid, level_path) = (v.level.guid, v.level.path.clone());
+    let placement = v.level.placement;
     let options = v.preview_options();
     let lines = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
@@ -1127,7 +1134,9 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             let source = AttachedSource::attach(&game, &catalog, &control)?;
             let (key, identity) =
                 level_scene::resolve_level(&catalog, level_guid, level_path.as_deref())?;
-            let scene = level_scene::load_level_scene(&source, &catalog, &key, &control, options)?;
+            let scene = level_scene::load_level_scene_with(
+                &source, &catalog, &key, &control, options, placement,
+            )?;
             let plan = plan_level(&scene)?;
             let mut lines = vec![format!("Level: {identity}")];
             lines.extend(plan.lines);

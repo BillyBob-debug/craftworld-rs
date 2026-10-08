@@ -103,6 +103,7 @@ public class LevelOracle {
     }
     static List<Float> m44(Matrix4f m){if(m==null)return null;float[] f=m.get(new float[16]);List<Float> l=new ArrayList<>();for(float v:f)l.add(v);return l;}
     static List<Float> v4(Vector4f v){return v==null?null:List.of(v.x,v.y,v.z,v.w);}
+    static List<Float> v3(Vector3f v){return v==null?null:List.of(v.x,v.y,v.z);}
     static void inc(Map<String,Long> m,String k){m.merge(k,1L,Long::sum);}
 
     static Map<String,Object> thingRef(Thing t,IdentityHashMap<Object,Integer> tag) {
@@ -128,6 +129,14 @@ public class LevelOracle {
             r.put("render_mesh",row("mesh",desc(rm.mesh),"bone_count",bones.size(),"bones",bones,
                 "anim",desc(rm.anim),"editor_color",rm.editorColor,"visibility_flags",(int)rm.visibilityFlags,
                 "cast_shadows",rm.castShadows==null?null:rm.castShadows.name()));
+        }
+        PJoint jt=t.getPart(Part.JOINT);
+        if(jt!=null) {
+            List<Integer> bi=new ArrayList<>();if(jt.boneIdx!=null)for(int v:jt.boneIdx)bi.add(v);
+            r.put("joint",row("a",thingRef(jt.a,tag),"b",thingRef(jt.b,tag),"a_contact",v3(jt.aContact),
+                "b_contact",v3(jt.bContact),"length",jt.length,"angle",jt.angle,"settings",desc(jt.settings),
+                "bone_idx",bi,"bone_lengths",v4(jt.boneLengths),"type",jt.type,"render_scale",jt.renderScale,
+                "hide_in_play_mode",jt.hideInPlayMode));
         }
         PShape sh=t.getPart(Part.SHAPE);
         if(sh!=null) {
