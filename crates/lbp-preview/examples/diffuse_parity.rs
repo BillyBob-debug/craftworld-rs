@@ -140,6 +140,8 @@ fn run() -> Result<(), String> {
         let mut instance_expected = Value::Null;
         // D92: (ThingColor or folded operand index, oracle-side white tint bits).
         let mut instance_tint: Option<(usize, [u32; 4])> = None;
+        // D96: derived samplers whose port inputs were folded into scale/offset.
+        let mut folded_ports: Vec<usize> = vec![];
         if instance_white {
             let white = lbp_preview::DiffuseTint {
                 bits: [1f32.to_bits(); 4],
@@ -162,6 +164,11 @@ fn run() -> Result<(), String> {
                     rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"route":route,"projection":projection}));
                     continue;
                 }
+                folded_ports = p
+                    .sampler_port_folds
+                    .iter()
+                    .map(|f| f.sample_index)
+                    .collect();
                 if p.folded_sampler.is_none() && p.alpha_subtract_samplers.is_empty() {
                     if let Ok(s) =
                         lbp_preview::select_instance_diffuse(&derived, &p, animation_base)
@@ -182,6 +189,10 @@ fn run() -> Result<(), String> {
                             instance_tint = s.color_index.and_then(|c| {
                                 oracle_instance_color(sample, &p, c).map(|bits| (c, bits))
                             });
+                            instance_selection = Some(s);
+                        } else if !folded_ports.is_empty() && s.color_index.is_none() {
+                            // D96: untinted shapes (e.g. a two-texture product) whose
+                            // samplers carried ThingColor port inputs; leaves checked below.
                             instance_selection = Some(s);
                         }
                     }
@@ -319,6 +330,12 @@ fn run() -> Result<(), String> {
                                         }
                                         _ => false,
                                     }
+                                }
+                                // D96: recomputed from the oracle's sampler, port wires
+                                // and constant rows with the supplied white ThingColor.
+                                _ if folded_ports.contains(&index) => {
+                                    oracle_sampler_fold(sample, index)
+                                        .is_some_and(|bits| transform.bits() == bits)
                                 }
                                 _ => transform
                                     .parameter_indices()
@@ -723,10 +740,10 @@ fn run() -> Result<(), String> {
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
         };
-        rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection,"instance_white_expected":instance_expected}));
+        rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection,"instance_white_expected":instance_expected,"instance_folded_samplers":folded_ports}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":19,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":20,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -953,6 +970,139 @@ fn oracle_instance_color(
         10 | 12 if projection.folded_operand == Some(color) => oracle_constant_fold(sample, color),
         _ => None,
     }
+}
+/// D96 independent expectation from the oracle's graph rows only (Toolkit GfxAssembler
+/// subtype-0 sampler: uv × scale + offset, then + port 0, × port 1, − port 2, each as
+/// `.xy` or a broadcast scalar). Port sources: THING_COLOR = supplied white, COLOR and
+/// CONSTANT..CONSTANT4 words, MULTIPLY l×r, MIX ((r−l)×w)+l (w = port 2 or word 0),
+/// MAKE_FLOAT2 of scalars (unwired lanes = words); swizzles pick named lanes.
+fn oracle_sampler_fold(sample: &Value, index: usize) -> Option<Vec<u32>> {
+    let boxes = &sample["graph"]["boxes"];
+    let wires = sample["graph"]["wires"].as_array()?;
+    let word = |i: usize, k: usize| {
+        boxes[i]["parameters_raw"][k]
+            .as_u64()
+            .map(|v| f32::from_bits(v as u32))
+    };
+    let mut scale = [word(index, 0)?, word(index, 1)?];
+    let mut offset = [word(index, 2)?, word(index, 3)?];
+    let mut ports: [Option<[f32; 2]>; 3] = [None; 3];
+    for w in wires {
+        if w["box_to"].as_u64() != Some(index as u64) {
+            continue;
+        }
+        let p = w["port_to_raw"].as_u64()? as usize;
+        let v = oracle_port_value(boxes, wires, w, 0, &word)?;
+        let xy = if v.0 == 1 {
+            [v.1[0]; 2]
+        } else {
+            [v.1[0], v.1[1]]
+        };
+        if p > 2 || ports[p].replace(xy).is_some() {
+            return None;
+        }
+    }
+    for axis in 0..2 {
+        if let Some(a) = ports[0] {
+            offset[axis] += a[axis];
+        }
+        if let Some(m) = ports[1] {
+            scale[axis] *= m[axis];
+            offset[axis] *= m[axis];
+        }
+        if let Some(b) = ports[2] {
+            offset[axis] -= b[axis];
+        }
+    }
+    Some(
+        [scale[0], scale[1], offset[0], offset[1]]
+            .map(f32::to_bits)
+            .to_vec(),
+    )
+}
+/// (width, lanes) carried by an oracle wire; width 1 broadcasts.
+fn oracle_port_value(
+    boxes: &Value,
+    wires: &[Value],
+    wire: &Value,
+    depth: usize,
+    word: &dyn Fn(usize, usize) -> Option<f32>,
+) -> Option<(usize, [f32; 4])> {
+    if depth > 8 || wire["port_from_raw"] != 0 {
+        return None;
+    }
+    let from = wire["box_from"].as_u64()? as usize;
+    let port = |p: u64| {
+        wires
+            .iter()
+            .find(|w| w["box_to"].as_u64() == Some(from as u64) && w["port_to_raw"] == p)
+            .map(|w| oracle_port_value(boxes, wires, w, depth + 1, word))
+    };
+    let lane = |v: (usize, [f32; 4]), i: usize| if v.0 == 1 { v.1[0] } else { v.1[i] };
+    let words = |n: usize| -> Option<[f32; 4]> {
+        let mut out = [0.; 4];
+        for (k, o) in out.iter_mut().enumerate().take(n) {
+            *o = word(from, k)?;
+        }
+        Some(out)
+    };
+    let value = match boxes[from]["type_raw"].as_u64()? {
+        2 => (4, [1.; 4]),
+        3 | 7 => (4, words(4)?),
+        4 => (1, words(1)?),
+        5 => (2, words(2)?),
+        6 => (3, words(3)?),
+        kind @ (10 | 12) => {
+            let l = port(0)??;
+            let r = port(1)??;
+            let w = match port(2) {
+                Some(w) => w?,
+                None => (1, words(1)?),
+            };
+            let lanes = std::array::from_fn(|i| {
+                if kind == 10 {
+                    lane(l, i) * lane(r, i)
+                } else {
+                    (lane(r, i) - lane(l, i)) * lane(w, i) + lane(l, i)
+                }
+            });
+            let width = l.0.max(r.0).max(if kind == 12 { w.0 } else { 1 });
+            (width, lanes)
+        }
+        13 => {
+            let mut out = [word(from, 0)?, word(from, 1)?, 0., 0.];
+            for k in 0..2u64 {
+                if let Some(v) = port(k) {
+                    let v = v?;
+                    if v.0 != 1 {
+                        return None;
+                    }
+                    out[k as usize] = v.1[0];
+                }
+            }
+            (2, out)
+        }
+        _ => return None,
+    };
+    let names: Vec<char> = wire["swizzle_raw"]
+        .as_array()?
+        .iter()
+        .filter_map(Value::as_u64)
+        .filter(|&c| c != 0)
+        .map(|c| c as u8 as char)
+        .collect();
+    if names.is_empty() {
+        return Some(value);
+    }
+    let mut out = [0.; 4];
+    for (k, c) in names.iter().enumerate() {
+        let i = "xyzw".find(*c).or("rgba".find(*c))?;
+        if value.0 == 1 || i >= value.0 || k >= 4 {
+            return None;
+        }
+        out[k] = value.1[i];
+    }
+    Some((names.len(), out))
 }
 fn main() {
     if let Err(e) = run() {

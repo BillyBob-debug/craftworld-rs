@@ -19,6 +19,8 @@ mod product;
 pub use matrix::{SamplingTransform, UvMatrix};
 mod instance;
 mod instance_fold;
+mod instance_sampler;
+pub use instance_sampler::SamplerPortFold;
 mod instance_textured;
 pub use instance::{project_instance_color, InstanceProjection, PreviewOptions};
 pub use instance_textured::select_instance_diffuse;
