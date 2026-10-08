@@ -39,7 +39,7 @@ impl BrowserState {
     }
 }
 
-fn image_ref(key: ResourceKey) -> ImageRef {
+pub(crate) fn image_ref(key: ResourceKey) -> ImageRef {
     match key {
         ResourceKey::Guid(g) => ImageRef::Guid(g),
         ResourceKey::Hash(h) => ImageRef::Hash(h),
@@ -327,6 +327,7 @@ pub fn run_slot_browser() -> Result<(), String> {
         "Story slot browser",
         Box::new(move |input| browser_screen(input, &mut state)),
         images,
+        None,
     );
     Ok(())
 }

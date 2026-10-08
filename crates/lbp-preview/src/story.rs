@@ -69,6 +69,13 @@ pub struct Strings {
 }
 
 impl Strings {
+    /// The string for a LAMS key, patch table first.
+    pub fn get(&self, key: u32) -> Option<&str> {
+        [&self.patch, &self.base]
+            .into_iter()
+            .flatten()
+            .find_map(|t| t.get(key))
+    }
     pub fn translate(&self, tag: &str) -> Option<&str> {
         [&self.patch, &self.base]
             .into_iter()
@@ -419,7 +426,7 @@ fn load_table(
     }
 }
 
-fn resolve_key(
+pub fn resolve_key(
     catalog: &Catalog,
     key: ResourceKey,
 ) -> Result<lbp_catalog::attachment::LocationKey, String> {
@@ -429,7 +436,8 @@ fn resolve_key(
     }
 }
 
-fn decode_icon(
+/// Decodes one icon texture (2D top mip, RGBA8).
+pub fn decode_icon(
     source: &AttachedSource,
     catalog: &Catalog,
     key: ResourceKey,
@@ -454,12 +462,12 @@ fn decode_icon(
     })
 }
 
-/// Reads every magic-confirmed slot list, the English tables and the slot icons.
-pub fn load_story(
+/// The English base table with the patch table over it, and how each loaded.
+pub fn load_strings(
     source: &AttachedSource,
     catalog: &Catalog,
     control: &LoadControl,
-) -> Result<Story, String> {
+) -> (Strings, Vec<TableStatus>) {
     let mut strings = Strings::default();
     let mut tables = Vec::new();
     for (guid, patch) in [
@@ -474,6 +482,16 @@ pub fn load_story(
         }
         tables.push(status);
     }
+    (strings, tables)
+}
+
+/// Reads every magic-confirmed slot list, the English tables and the slot icons.
+pub fn load_story(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    control: &LoadControl,
+) -> Result<Story, String> {
+    let (strings, tables) = load_strings(source, catalog, control);
     // Content hash -> sorted paths.
     let mut by_hash: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for r in &catalog.snapshot.resources {
