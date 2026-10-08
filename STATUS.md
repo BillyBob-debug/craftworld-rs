@@ -3275,3 +3275,42 @@ Not tested: viewer window layout of the census panel; B8 identity-remap colour o
 hardware; patch-archive textures vs oracle; animated playback.
 Next: BLEND (thresholds, 38 with THING); ThingColor wired into sampler ports (14);
 25 B8 textures over the pixel budget; cubes/volumes.
+
+## Batch 2026-10-08a — local D94, D95, D96 merged (2026-10-07)
+
+Local subagents on plan usage. Detail: [d94-blend.md](docs/d94-blend.md),
+[d95-texture-rest.md](docs/d95-texture-rest.md), [d96-thing-sampler-ports.md](docs/d96-thing-sampler-ports.md).
+
+- D94: BLEND factor = clamp((m - p0)/(p1 - p0), 0, 1) for any finite p0 < p1
+  (Toolkit + shader-constant byte search in the BLEND materials' own shader blobs:
+  CONFIRMED_FROM_LOCAL_DATA for 0.67/0.8 and 0.3/0.7; 0/1 STRONG_INFERENCE). All 50
+  BLEND locations still refused: RGB (red) mask colour space UNKNOWN. 0 class changes.
+  Its byte dumps moved to ignored local-analysis/d94-blend-shader-blobs/.
+- D95: B8 pixel cap 16 Mi (byte caps unchanged, new 64 MiB RGBA cap; viewers still
+  refuse > 4 Mi pixels at GPU upload). BC1 cubes decode via layered API (face 0 2D,
+  faces 1-5 data only; 128-byte face padding measured locally, conflicts with Toolkit).
+  Volume and remap 0x02ff stay refused. TextureOracle.java extended.
+- D96: under a supplied instance color, constants/ThingColor on sampler ports 0/1/2 fold
+  into the sampler scale/offset (6 materials); instance option no longer refuses graphs
+  without ThingColor. Default unchanged.
+- Texture census on 01.33: decoded 23,215 -> 23,244 of 23,247 hashes (23,474 of 23,477
+  GUIDs); 3 unsupported (volume 1, remap 0x02ff 2).
+- Route census (material locations, 8,094): instance-only 247 -> 253, unsupported 144 -> 138.
+- Corpus mesh census (4,261 GUIDs; viewable 4,257 every mode): all-diffuse default
+  3,669, --animation-base 3,733 (unchanged), --instance-rgba 3,899 -> 3,902, both
+  3,980 -> 3,983. Complete 0.
+**+0 newly viewable / +0 newly Complete** (textures +29 hashes).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests for 7 crates, both viewer builds, python OK.
+- diffuse_route_census -> b96-diffuse-route-shapes-0133.json; corpus_texture_census -> b96-texture-census-0133.json (220 s).
+- diffuse_parity: d96 DATA 4/0/3 and patch_0128 2/0/2 (--animation-base --instance-white), default 4/0/0 and 2/0/0; regressions d78 38/0/36, d75 48/0/41, d83 8/0/2, d68 26/0/20, d86 5/0/5, d87 18/0/18, d89 5/0/2, d88 4/0/4, d92 17/0/14, d64 17/0/17, d65 48/0/48, d67 18/0/18, d46 32/0/29 and 48/0/46.
+- D95 agent: Toolkit texture parity 7/0 (B8 masks and cube face 0), D91 samples 20/0.
+- compatibility_census: d68-new 48/45/0, D61 48/43/0, D75 48/44/0 (unchanged).
+- corpus_mesh_census -> b96-corpus-{default,anim,inst,both}.json; viewer --print-census reads them (exit 0).
+
+Failed: none. diffuse_parity schema 20.
+Not tested: viewers on large B8 or cube textures; cube faces 1-5 and patch-only textures
+vs oracle; real instance colors.
+Next: BLEND mask colour space (needs evidence); remaining THING_COLOR (MIX on non-grid,
+FRESNEL/ADD); UV channel raw 2; viewer Complete QA.

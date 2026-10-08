@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after batch D91-D93, 2026-10-07
+# Current state (overwrite each milestone) — after batch D94-D96, 2026-10-08
 
 ## Product
 Independent LBP2 Asset Explorer (Rust). Bevy viewer (main) and legacy viewer read
@@ -30,18 +30,20 @@ UV scale (D87). Constant THING_COLOR products fold under a supplied color (D86);
 textured THING_COLOR shapes too (D88). ADD of two textures / TEX x COLOR + COLOR (D89).
 Animation base for 2+ animated leaves (D92). GTF A8R8G8B8 and B8 textures (D91).
 Both viewers show census counts: --mesh-census/--texture-census/--census-baseline (D93).
+B8 up to 16 Mi pixels and BC1 cube faces decode (D95). Sampler-port constants and
+ThingColor fold under the instance color (D96). BLEND threshold rule general (D94).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).
 - D69 new cohort d68-new-mesh-samples.json (48 post-951 meshes): 48/45/0.
-- Corpus mesh census on 01.33 after D92 (all 4,261 mesh GUIDs): 4,257 viewable, 3,669
+- Corpus mesh census on 01.33 after D96 (all 4,261 mesh GUIDs): 4,257 viewable, 3,669
   all-diffuse, 0 Complete (D81 baseline 3,657). Opt-ins: --animation-base 3,733;
-  --instance-rgba 3,899; both 3,980. Files b93-corpus-*.json.
-- Corpus texture census on 01.33 after D91: 23,215 of 23,247 texture hashes decode
-  (23,445 of 23,477 GUIDs); 7 unsupported (cubes/volume/remap), 25 over pixel budget.
-- Corpus selection census on 01.33 after D92 (8,094 material locations with MAP rows):
-  6,953 texture, 619 solid, 10 unwired, 121 animation-base-only, 247 instance-only, 144
-  unsupported (after D89: 106 / 244 / 162) (after D75: 60 / 225 / 258; before D75: 6,828 texture, 386 unsupported) (01.00: 5,163 / 4,306 / 459 / 7 / 34 / 122 / 235). Not asset counts.
+  --instance-rgba 3,902; both 3,983. Files b96-corpus-*.json.
+- Corpus texture census on 01.33 after D95: 23,244 of 23,247 texture hashes decode
+  (23,474 of 23,477 GUIDs); 3 unsupported (volume 1, remap 0x02ff 2). b96-texture-census-0133.json.
+- Corpus selection census on 01.33 after D96 (8,094 material locations with MAP rows):
+  6,953 texture, 619 solid, 10 unwired, 121 animation-base-only, 253 instance-only, 138
+  unsupported (after D92: 247 / 144) (after D75: 60 / 225 / 258; before D75: 6,828 texture, 386 unsupported) (01.00: 5,163 / 4,306 / 459 / 7 / 34 / 122 / 235). Not asset counts.
 - D69: +48 newly viewable in the tested cohort, +0 newly Complete; corpus totals unknown.
 - Batch D72/D71/D73: tests and CI only, +0 viewable / +0 Complete.
 - Batch D77/D76/D75: +0 viewable / +0 Complete; D75 cohort (48 meshes) 48/0/0 -> 48/44/0.
@@ -50,6 +52,7 @@ Both viewers show census counts: --mesh-census/--texture-census/--census-baselin
 - Batch D85-D87: +0 viewable / +0 Complete; corpus all-diffuse +8.
 - Batch D88-D90: +0 viewable / +0 Complete; corpus all-diffuse +4.
 - Batch D91-D93: +0 viewable / +0 Complete; textures +242 hashes decode.
+- Batch D94-D96: +0 viewable / +0 Complete; textures +29 hashes decode.
 
 ## Open blockers
 - Glow, reflection and other non-diffuse channels are not rendered.
@@ -59,8 +62,8 @@ Both viewers show census counts: --mesh-census/--texture-census/--census-baselin
   FNTb +8 word meaning unknown; patch.edat not decrypted.
 
 ## Next
-BLEND thresholds (38 with THING_COLOR); ThingColor wired into sampler ports (14); B8
-textures over the pixel budget (25); cubes/volumes. See docs/backlog.md.
+BLEND mask colour space (all 50 BLEND locations; needs evidence); remaining THING_COLOR
+(non-grid MIX, FRESNEL/ADD); UV channel raw 2; viewer QA toward Complete. See docs/backlog.md.
 
 ## Environment
 - Toolchain: `. ./scripts/use-local-rust.ps1` (project-local, windows-gnu).

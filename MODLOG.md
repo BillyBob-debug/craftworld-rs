@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 — Batch: local D94, D95, D96 merged
+
+D94 general BLEND threshold rule (mask colour space still unknown; 0 changes). D95
+large B8 and cube textures: 23,244 of 23,247 decode. D96 sampler-port folds under the
+instance color: unsupported 144 -> 138. +0 viewable / +0 Complete.
+
 ## 2026-10-07 — Batch: local D91, D92, D93 merged
 
 D91 GTF A8R8G8B8/B8 decode: textures 23,215 of 23,247 decode (+242). D92 2+ animated
