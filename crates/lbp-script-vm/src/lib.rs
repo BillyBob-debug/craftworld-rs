@@ -718,7 +718,7 @@ impl Vm {
                                 .ok_or(Fault::Index {
                                     pc,
                                     what: "s64 constant",
-                                })? as i64,
+                                })?,
                         ),
                         // LCv4: four consecutive f32 constants (INFERRED).
                         0xb8 => {
@@ -866,14 +866,15 @@ impl Vm {
                     match op {
                         0x9a => *a.get_mut(idx(&index).ok_or(bad.clone())?).ok_or(bad)? = src,
                         0x9d => {
-                            // Index -1 inserts at the end (INFERRED from the D140 test
-                            // script's ARRAY_INSERT with -1).
+                            // An index past either end inserts at the end (INFERRED from
+                            // the test script: ARRAY_INSERT with -1 (D140) and with 100 into
+                            // a 5-element array (D143)).
                             let i = match index {
-                                Value::Int(-1) => Some(a.len()),
-                                _ => idx(&index),
-                            }
-                            .filter(|&i| i <= a.len())
-                            .ok_or(bad)?;
+                                Value::Int(i) => {
+                                    usize::try_from(i).map_or(a.len(), |i| i.min(a.len()))
+                                }
+                                _ => return Err(bad),
+                            };
                             if a.len() >= MAX_ARRAY_LEN {
                                 return Err(Fault::Heap);
                             }

@@ -49,7 +49,8 @@ INFERRED (no executable or Toolkit statement; each is a place a real script can 
 | `LCb` | Bit 63 (Toolkit), switchable by `Rules::lcb` (`Bit63`, `AnyHighBit`, `Bit32`) | Bit 63 calls NeverEvaluated in TestBool (D139); any high bit breaks 20 TestLogical checks (D140); bit 32 untested. PC compares with `script_tests --lcb=` |
 | Construction | `NEW_OBJECT` allocates the class's and its superclasses' fields, then runs `.init__` (found through the superclass chain) with `this` in its single argument row, else register 0. `.ctor__` is called by the script itself | D139 listings: `.init__` calls the superclass `.init__` and sets the members, `.ctor__` only chains; checks read members only `.init__` sets |
 | Superclass by GUID | Falls back to the class name that any loaded script's type references give that GUID | Scripts loaded from a directory have no GUID; Test's superclass is named only by GUID |
-| `ARRAY_INSERT` at -1 | Inserts at the end | D140 TestArray inserts at -1 after appends; its checks settle it |
+| `ARRAY_INSERT` past the end | Any index below 0 or above the length inserts at the end | D140 TestArray inserts at -1; D143 TestArray inserts at 100 into a 5-element array and continues |
+| `LCs64` constants | Compressed long vectors hold zigzag values, `(n >> 1) ^ -(n & 1)`, decoded by the `lbp-level` reader; uncompressed u64 is two's complement | D143: with zigzag, TestS64 1551 (`1 << 63` = i64::MIN) and 1562 (AND of two constants) pass; without it no decode makes 1562 pass |
 
 UNKNOWN: native function semantics (they live in the executable). Each one gets a host
 binding from recorded findings, in call-count order (items Rr/Rs).
@@ -59,6 +60,14 @@ the script framework's own counters (`TestBase` `.get.NumSucceeded__` / `.get.Nu
 `Check*` are TestBase script methods, not natives, D140) plus any `Test.*` native calls,
 and `WRITE` lines (failed-check details) are kept per function. Its JSON also records each
 test class's superclass chain, every native call that reached the host, and instructions per function.
+
+Open after D143 (4 failed checks before this change, 2 expected after it):
+- TestLocals 417: a block local inside a loop is read before any write and the game
+  expects 0 on every iteration; the VM keeps the previous iteration's value. The locals
+  rows carry no scope range, so the reset mechanism is not known yet.
+- TestMatrix44 662: the W row (`GET_M44_WZ`, `GET_M44_WW`) of a matrix result is expected
+  to be 0. Which instruction produced that matrix decides between the m44 layout and
+  `MULm44` operand order.
 
 `Vm::last_site()` names the class, function and relative pc of the last executed
 instruction, which after a fault is the faulting one. `script_tests` prints it with each fault.
