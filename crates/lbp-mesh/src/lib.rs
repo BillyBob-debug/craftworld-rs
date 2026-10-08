@@ -214,5 +214,9 @@ fn prefix(
 
 mod geometry;
 mod skeleton;
+mod skin;
 pub use geometry::{decode_geometry, Geometry, GeometryMetadata, Primitive};
 pub use skeleton::{anim_hash, Bone, ShapeInfo, ShapeVertex, Skeleton, SkeletonCheck, MAX_BONES};
+pub use skin::{
+    decode_skin, unpack_normal24, unpack_normal32, MorphTarget, SkinMetadata, SkinStreams,
+};
