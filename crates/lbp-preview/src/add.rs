@@ -394,6 +394,9 @@ mod tests {
         // Swizzle, missing port, animated ADD, same sample twice.
         let mut g = base.clone();
         g.wires[0].swizzle_raw[0] = b'x';
+        // D100: a one-component swizzle broadcasts; the graph evaluator bakes it.
+        assert!(crate::select_diffuse(&g).unwrap().grid_graph.is_some());
+        g.wires[0].swizzle_raw[1] = b'y';
         assert!(crate::select_diffuse(&g).unwrap_err().contains("ADD needs"));
         let mut g = base.clone();
         g.wires[1].port_to_raw = 2;
@@ -401,11 +404,17 @@ mod tests {
         let mut g = base.clone();
         g.boxes[1].animations[0].name_hex = "410000".into();
         assert!(crate::select_diffuse(&g).unwrap_err().contains("ADD needs"));
+        // D100: the same sample twice is one source, evaluated per texel.
         let mut g = base;
         g.wires[1].box_from = 3;
-        assert!(crate::select_diffuse(&g)
-            .unwrap_err()
-            .contains("ADD supports"));
+        assert_eq!(
+            crate::select_diffuse(&g)
+                .unwrap()
+                .grid_graph
+                .unwrap()
+                .sources,
+            1
+        );
     }
     #[test]
     fn texture_times_color_plus_color_and_three_texture_add() {
@@ -455,6 +464,16 @@ mod tests {
         let mut g = base.clone();
         g.boxes[4] = sample(2., 1);
         g.boxes[2] = sample(1., 2);
+        // D100: the graph evaluator bakes it on the Repeat grid.
+        assert_eq!(
+            crate::select_diffuse(&g)
+                .unwrap()
+                .grid_graph
+                .unwrap()
+                .sources,
+            3
+        );
+        g.boxes[2].parameters_raw[0] = 1.5f32.to_bits();
         assert!(crate::select_diffuse(&g)
             .unwrap_err()
             .contains("three-texture"));

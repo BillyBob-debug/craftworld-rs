@@ -413,10 +413,17 @@ mod tests {
             .contains("COLOR-only"));
         let mut add = g.clone();
         add.boxes[3].type_raw = 11;
-        let fixed = crate::select_diffuse(&add).unwrap_err();
-        assert!(!fixed.contains("product tree"), "{fixed}");
+        // D100: an ADD inside the tree is no product tree; the graph evaluator bakes it.
+        let evaluated = crate::select_diffuse(&add).unwrap();
+        assert!(evaluated.product_tree.is_none() && evaluated.grid_graph.is_some());
         let mut swizzled = g.clone();
         swizzled.wires[0].swizzle_raw[0] = b'r';
+        // D100: a one-component swizzle broadcasts in the graph evaluator.
+        assert!(crate::select_diffuse(&swizzled)
+            .unwrap()
+            .grid_graph
+            .is_some());
+        swizzled.wires[0].swizzle_raw[1] = b'g';
         assert!(!crate::select_diffuse(&swizzled)
             .unwrap_err()
             .contains("product tree"));
@@ -469,9 +476,9 @@ mod tests {
         g.boxes[4] = sample(2., 2, 0);
         assert!(crate::select_diffuse(&g).unwrap().third_sample.is_some());
         g.boxes[4].parameters_raw[0] = 0;
-        assert!(crate::select_diffuse(&g)
-            .unwrap_err()
-            .contains("nonzero scale/offset"));
+        // D100: off the integer grid the evaluator adds its reason after D65's.
+        let reason = crate::select_diffuse(&g).unwrap_err();
+        assert!(reason.contains("nonzero scale/offset") && reason.contains("graph evaluator"));
     }
     #[test]
     fn d99_four_texture_trees_need_two_sharing_pairs() {
@@ -512,6 +519,7 @@ mod tests {
         assert_eq!(s.tint, crate::DiffuseTint::default());
         assert_eq!((s.ignored_nodes, s.ignored_wires), (0, 0));
         g.boxes[4].parameters_raw[0] = 2f32.to_bits();
+        // UV0/UV1 leaves: off the D100 grid too, so the D99 reason stays first.
         assert!(crate::select_diffuse(&g)
             .unwrap_err()
             .contains("two exact coordinate-sharing pairs"));

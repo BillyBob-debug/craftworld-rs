@@ -140,6 +140,7 @@ impl Asset {
         self.product.is_some()
             || self.selection.alpha_mix.is_some()
             || self.selection.blend_mask.is_some()
+            || self.selection.grid_graph.is_some()
     }
     pub fn display_extent(&self) -> [u32; 2] {
         self.product.as_ref().map_or(
@@ -232,6 +233,7 @@ impl MaterialAsset {
     }
     fn source_label(&self) -> String {
         match self {
+            Self::Texture(a) if a.selection.grid_graph.is_some() => crate::grid_graph::label(a),
             Self::Texture(a) if a.selection.blend_mask.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.blend_mask.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.selection.alpha_mix.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.alpha_mix.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.border_domain.map_or_else(||a.wrap.label(),|b|b.label()),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.selection.animation_base.is_some()=>format!("Animation base-value snapshot • local/global rows verified • {} keys per row {:?} • UV{} {} • time/motion unverified • diffuse only",a.selection.animation_base.unwrap().key_counts[0],a.selection.animation_base.unwrap().key_counts,a.selection.uv_channel,a.selection.uv_transform.label()),
@@ -261,6 +263,8 @@ pub struct DiffuseSelection {
     pub fourth_sample: Option<SamplerSelection>,
     /// D99: static MULTIPLY tree; COLOR leaves folded into `tint`.
     pub product_tree: Option<crate::ProductTree>,
+    /// D100: evaluated static graph (docs/d100-grid-graph-bake.md); loaded by `grid_graph`.
+    pub grid_graph: Option<crate::GridGraph>,
     /// D87: CONST/CONST2 UV scale on sampler port 1, folded into `uv_transform`.
     pub sampler_scale: Option<crate::SamplerScale>,
     pub deep_multiply_index: Option<usize>,
@@ -880,6 +884,8 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
 fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<DiffuseSelection, String> {
     select_fixed_products(graph, leaves)
         .or_else(|error| crate::product_tree::select(graph, leaves.animated, error))
+        // D100: bounded static graph evaluator (docs/d100-grid-graph-bake.md).
+        .or_else(|error| crate::grid_graph::select(graph, leaves.animated, error))
 }
 fn select_fixed_products(
     graph: &GraphMetadata,
@@ -1114,6 +1120,7 @@ fn select_fixed_products(
         texture_blend: None,
         fourth_sample: None,
         product_tree: None,
+        grid_graph: None,
         sampler_scale: None,
         deep_multiply_index: None,
         third_sample,
@@ -1381,6 +1388,18 @@ pub(crate) fn load_primitive(
     }
     let (descriptor, wrap, mut selection) =
         binding(&graph, options.animation_base, instance_projection.as_ref())?;
+    if selection.grid_graph.is_some() {
+        let cx = crate::grid_graph::LoadContext {
+            source,
+            catalog,
+            geometry,
+            mesh_bytes,
+            graph: &graph,
+            original_graph: &original_graph,
+            control,
+        };
+        return crate::grid_graph::load(cx, material_key, instance_projection, wrap, selection);
+    }
     if selection.texture_add.is_some() && instance_projection.is_some() {
         return Err("Unsupported: D89 ADD applies to the original graph only, not under a supplied instance color".into());
     }
@@ -1654,7 +1673,7 @@ pub(crate) fn load_primitive(
 }
 
 // Clone the selected raw coordinates; never mutate, reorder or substitute another channel.
-fn selected_uv(
+pub(crate) fn selected_uv(
     coordinates: &lbp_mesh::UvCoordinates,
     channel: usize,
     vertices: usize,
@@ -1812,6 +1831,9 @@ mod tests {
         assert!(select_diffuse(&graph).is_err());
         graph.wires[2].port_to_raw = 1;
         graph.wires[1].swizzle_raw[0] = b'r';
+        // D100: a one-component swizzle broadcasts; only the graph evaluator takes it.
+        assert!(select_diffuse(&graph).unwrap().grid_graph.is_some());
+        graph.wires[1].swizzle_raw[1] = b'g';
         assert!(select_diffuse(&graph).is_err());
         graph.wires[1].swizzle_raw = [0; 5];
         graph.boxes[2].animations[0].name_hex = "41".into();
@@ -1941,6 +1963,9 @@ mod tests {
         assert_eq!(second.uv_transform, squared.uv_transform);
         assert_eq!((squared.ignored_nodes, squared.ignored_wires), (0, 0));
         square.wires[1].swizzle_raw[0] = b'a';
+        // D100: T × T.a (broadcast) is one source, evaluated per texel.
+        assert!(select_diffuse(&square).unwrap().grid_graph.is_some());
+        square.wires[1].swizzle_raw[1] = b'a';
         assert!(select_diffuse(&square).is_err());
         square.wires[1].swizzle_raw[0] = 0;
         square.wires[1].port_to_raw = 0;
@@ -2176,7 +2201,8 @@ mod tests {
         assert!(select_diffuse(&graph).is_err());
         graph.boxes[5].parameters_raw[0] = 0.6f32.to_bits();
         graph.wires.push(wire(2, 5, 2));
-        assert!(select_diffuse(&graph).is_err());
+        // D100: a wired factor is a component-wise MIX in the graph evaluator.
+        assert!(select_diffuse(&graph).unwrap().grid_graph.is_some());
         graph.wires.pop();
         graph.boxes[3].parameters_raw[4] = 1;
         assert!(select_diffuse(&graph).is_err());
@@ -2185,6 +2211,9 @@ mod tests {
         assert!(select_diffuse(&graph).is_err());
         graph.boxes[1].animations[0].component_value_count = 0;
         graph.wires[1].swizzle_raw[0] = b'r';
+        // D100: one-component swizzles broadcast in the graph evaluator.
+        assert!(select_diffuse(&graph).unwrap().grid_graph.is_some());
+        graph.wires[1].swizzle_raw[1] = b'g';
         assert!(select_diffuse(&graph).is_err());
         graph.wires[1].swizzle_raw = [0; 5];
         graph.wires[3].box_from = 5;
@@ -2235,11 +2264,12 @@ mod tests {
         );
         graph.wires.reverse();
         assert!(select_diffuse(&graph).is_ok());
+        // D100: red factor, or the COLOR's own alpha, only via the graph evaluator.
         graph.wires[0].swizzle_raw[0] = b'r';
-        assert!(select_diffuse(&graph).is_err());
+        assert!(select_diffuse(&graph).unwrap().grid_graph.is_some());
         graph.wires[0].swizzle_raw[0] = b'a';
         graph.wires[0].box_from = 1;
-        assert!(select_diffuse(&graph).is_err());
+        assert!(select_diffuse(&graph).unwrap().grid_graph.is_some());
         graph.wires.reverse();
         graph.wires.pop();
         graph.boxes[3].parameters_raw[0] = 0.25f32.to_bits();
@@ -2641,6 +2671,9 @@ mod tests {
         assert!(select_diffuse(&graph).is_err());
         graph.wires.pop();
         graph.wires[0].swizzle_raw[0] = b'r';
+        // D100: one-component swizzles broadcast in the graph evaluator.
+        assert!(select_diffuse(&graph).unwrap().grid_graph.is_some());
+        graph.wires[0].swizzle_raw[1] = b'g';
         assert!(select_diffuse(&graph).is_err());
         graph.wires[0].swizzle_raw = [0; 5];
         graph.boxes[2].animations[0].component_value_count = 1;
@@ -2888,16 +2921,21 @@ mod tests {
                 .factor_port,
             0
         );
-        // Factor from a third sample, or a non-alpha swizzle, is rejected.
+        // Factor from a third sample, or a non-alpha swizzle, is rejected by D83;
+        // D100's graph evaluator bakes them (grid / per texel).
+        let evaluated = |g: &GraphMetadata| {
+            let s = select_diffuse(g).unwrap();
+            s.texture_alpha_mix.is_none() && s.grid_graph.is_some()
+        };
         graph.wires[2].box_from = 4;
-        assert!(select_diffuse(&graph).is_err());
+        assert!(evaluated(&graph));
         graph.wires[2].box_from = 2;
         graph.wires[2].swizzle_raw[0] = b'r';
-        assert!(select_diffuse(&graph).is_err());
+        assert!(evaluated(&graph));
         graph.wires[2].swizzle_raw[0] = b'a';
-        // Same sample on both ports is rejected.
+        // Same sample on both ports is rejected by D83.
         graph.wires[0].box_from = 2;
-        assert!(select_diffuse(&graph).is_err());
+        assert!(evaluated(&graph));
         graph.wires[0].box_from = 1;
         // D99: different UV channels or a non-integer scale leave the grid; the
         // port-1 alpha factor then selects the dual path, a port-0 factor does not.
@@ -3024,6 +3062,9 @@ mod tests {
         assert!(reason(&g).contains("exactly unswizzled ports 0/1"));
         let mut g = base.clone();
         g.wires[2].swizzle_raw[0] = b'x';
+        // D100: a one-component port swizzle broadcasts in the graph evaluator.
+        assert!(select_diffuse(&g).unwrap().grid_graph.is_some());
+        g.wires[2].swizzle_raw[1] = b'y';
         assert!(reason(&g).contains("exactly unswizzled ports 0/1"));
         // T5 (D94): any finite p0 < p1 selects (0/1 and 0.67/0.8 are the corpus pairs);
         // equal, reversed or non-finite pairs are rejected.
@@ -3070,11 +3111,14 @@ mod tests {
             let mut g = base.clone();
             g.wires[3].swizzle_raw = [0; 5];
             g.wires[3].swizzle_raw[..swizzle.len()].copy_from_slice(swizzle);
-            assert_eq!(
-                reason(&g),
-                "Unsupported: BLEND mask must be the red or alpha channel",
-                "{swizzle:?}"
-            );
+            match select_diffuse(&g) {
+                // D100: green/blue masks are the decoded component in the evaluator.
+                Ok(s) => assert!(s.grid_graph.is_some() && swizzle.len() == 1 && swizzle != b"q"),
+                Err(e) => assert_eq!(
+                    e, "Unsupported: BLEND mask must be the red or alpha channel",
+                    "{swizzle:?}"
+                ),
+            }
         }
         // Products under an input are still refused (the mask check runs first).
         let mut g = base.clone();
@@ -3125,21 +3169,26 @@ mod tests {
             h.boxes[4].parameters_raw[i] = v;
             assert!(reason(&h).contains("two-texture BLEND requires"), "{i}");
         }
-        // Three distinct samples, two COLORs, the same input on both ports.
+        // Three distinct samples, two COLORs, the same input on both ports, a COLOR
+        // mask: no fixed BLEND route; D100's graph evaluator bakes each (grid or
+        // per texel). Off the grid the fixed reason stays first.
+        let evaluated = |h: &GraphMetadata| select_diffuse(h).unwrap().grid_graph.unwrap().sources;
         let mut h = g.clone();
         h.boxes.push(node(1, 6));
         h.wires[3].box_from = 5;
+        assert_eq!(evaluated(&h), 3);
+        h.boxes[5].parameters_raw[4] = 1;
         assert!(reason(&h).contains("three distinct texture samples"));
         let mut h = base.clone();
         h.boxes[3] = node(3, 0);
         h.wires[3].box_from = 4;
-        assert!(reason(&h).contains("two COLORs"));
+        assert_eq!(evaluated(&h), 1);
         let mut h = base.clone();
         h.wires[1].box_from = 3;
-        assert!(reason(&h).contains("must be distinct inputs"));
+        assert_eq!(evaluated(&h), 1);
         let mut h = base.clone();
         h.wires[3].box_from = 2;
-        assert!(reason(&h).contains("mask must be a texture sample"));
+        assert_eq!(evaluated(&h), 1);
         // T7: animated/subtype-1 root, wired COLOR, invalid COLOR, animated sampler.
         let mut g = base.clone();
         g.boxes[1].subtype_raw = 1;

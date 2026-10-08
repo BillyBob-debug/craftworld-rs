@@ -197,6 +197,10 @@ fn run() -> Result<(), String> {
                                 oracle_instance_color(sample, &p, c).map(|bits| (c, bits))
                             });
                             instance_selection = Some(s);
+                        } else if s.grid_graph.is_some() {
+                            // D100: evaluated graph; ThingColor nodes are compared as
+                            // the supplied white COLOR in graph_equal.
+                            instance_selection = Some(s);
                         } else if !folded_ports.is_empty() && s.color_index.is_none() {
                             // D96: untinted shapes (e.g. a two-texture product) whose
                             // samplers carried ThingColor port inputs; leaves checked below.
@@ -355,7 +359,29 @@ fn run() -> Result<(), String> {
                                     }),
                             }
                         };
-                    let multiply_equal = if let Some(tree) = s.product_tree {
+                    let multiply_equal = if let Some(g) = s.grid_graph {
+                        let preview = if instance_white {
+                            let white = lbp_preview::DiffuseTint {
+                                bits: [1f32.to_bits(); 4],
+                            };
+                            match lbp_preview::project_instance_color(&graph.graph, white)? {
+                                (derived, Some(_)) => derived,
+                                (original, None) => original,
+                            }
+                        } else {
+                            graph.graph.clone()
+                        };
+                        let program = lbp_preview::grid_graph_program(&preview, g.root)?;
+                        graph_equal(
+                            sample,
+                            &s,
+                            g,
+                            &program,
+                            wire.box_from as usize,
+                            instance_white,
+                            &transform_equal,
+                        )?
+                    } else if let Some(tree) = s.product_tree {
                         tree_equal(sample, &s, tree, wire.box_from as usize, &transform_equal)?
                     } else if let Some(add) = s.texture_add {
                         add_equal(sample, &s, add, wire.box_from as usize, &transform_equal)?
@@ -854,7 +880,7 @@ fn run() -> Result<(), String> {
                     }
                     projected += 1;
                     // Versioned diagnostics retain all three original selectors/root indices.
-                    json!({"status":"projected","product_tree":s.product_tree.map(|t|json!({"root":t.root,"multiply_nodes":t.multiply_nodes,"texture_leaves":t.texture_leaves,"color_leaves":t.color_leaves,"policy":"folded_color_product"})),"texture_add":s.texture_add.map(|a|json!({"add_index":a.add_index,"addend_index":a.addend_index,"addend_bits":a.addend.map(|c|c.bits),"policy":"linear_sum_clamped"})),"sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"texture_blend":s.texture_blend.map(|b|json!({"blend_index":b.blend_index,"ports":format!("{:?}",b.ports),"mask_texture":b.mask_texture,"mask_red_srgb_decoded":b.mask_red,"threshold_bits":b.threshold_bits,"filter":"nearest_grid"})),"blend_mask":s.blend_mask.map(|b|json!({"blend_index":b.blend_index,"color_bits":b.color.bits,"color_first":b.color_first,"mask_red_srgb_decoded":b.mask_red,"threshold_bits":b.threshold_bits,"filter":"nearest"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"animation_base_more":s.animation_base_more.iter().flatten().map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})).collect::<Vec<_>>(),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+                    json!({"status":"projected","grid_graph":s.grid_graph.map(|g|json!({"root":g.root,"nodes":g.nodes,"samples":g.samples,"sources":g.sources,"policy":"evaluated_static_graph_nearest","bake":if g.sources==1 {"per_texel"} else {"repeat_grid"}})),"product_tree":s.product_tree.map(|t|json!({"root":t.root,"multiply_nodes":t.multiply_nodes,"texture_leaves":t.texture_leaves,"color_leaves":t.color_leaves,"policy":"folded_color_product"})),"texture_add":s.texture_add.map(|a|json!({"add_index":a.add_index,"addend_index":a.addend_index,"addend_bits":a.addend.map(|c|c.bits),"policy":"linear_sum_clamped"})),"sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"texture_blend":s.texture_blend.map(|b|json!({"blend_index":b.blend_index,"ports":format!("{:?}",b.ports),"mask_texture":b.mask_texture,"mask_red_srgb_decoded":b.mask_red,"threshold_bits":b.threshold_bits,"filter":"nearest_grid"})),"blend_mask":s.blend_mask.map(|b|json!({"blend_index":b.blend_index,"color_bits":b.color.bits,"color_first":b.color_first,"mask_red_srgb_decoded":b.mask_red,"threshold_bits":b.threshold_bits,"filter":"nearest"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"animation_base_more":s.animation_base_more.iter().flatten().map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})).collect::<Vec<_>>(),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
                 }
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
@@ -862,7 +888,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection,"instance_white_expected":instance_expected,"instance_folded_samplers":folded_ports}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":22,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":23,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -987,6 +1013,162 @@ fn tree_equal(
         && usize::from(tree.multiply_nodes) == multiplies.len()
         && s.tint.bits == folded
         && leaves_equal)
+}
+/// D100 (docs/d100-grid-graph-bake.md): the evaluated program re-read from the oracle's
+/// graph rows. Independent walk from the diffuse root: TEXTURE_SAMPLE (slot, channel,
+/// subtype; transform via `transform_equal`), COLOR/CONSTANT4 words (ThingColor = the
+/// supplied white under --instance-white), CONSTANT word, MULTIPLY/ADD ports 0/1, MIX
+/// ports 0/1 plus port 2 or weight word 0, BLEND ports 0/1/2 plus threshold words 0/1;
+/// one-letter swizzles as lanes. Any other row makes the comparison fail.
+fn graph_equal(
+    sample: &Value,
+    s: &lbp_preview::DiffuseSelection,
+    g: lbp_preview::GridGraph,
+    program: &lbp_preview::GraphProgram,
+    root: usize,
+    instance_white: bool,
+    transform_equal: &dyn Fn(usize, lbp_preview::SamplingTransform) -> bool,
+) -> Result<bool, String> {
+    use std::collections::BTreeMap;
+    let nodes = &sample["graph"]["boxes"];
+    let wires = sample["graph"]["wires"]
+        .as_array()
+        .ok_or("oracle wires required")?;
+    let word = |i: usize, k: usize| nodes[i]["parameters_raw"][k].as_u64();
+    let lane = |w: &Value| -> Option<Value> {
+        let bytes: Vec<u64> = w["swizzle_raw"]
+            .as_array()?
+            .iter()
+            .map(|b| b.as_u64())
+            .collect::<Option<_>>()?;
+        if bytes.iter().all(|b| *b == 0) {
+            return Some(Value::Null);
+        }
+        if bytes.len() != 5 || bytes[1..].iter().any(|b| *b != 0) {
+            return None;
+        }
+        let lane = match bytes[0] as u8 {
+            b'r' | b'x' => 0,
+            b'g' | b'y' => 1,
+            b'b' | b'z' => 2,
+            b'a' | b'w' => 3,
+            _ => return None,
+        };
+        Some(json!(lane))
+    };
+    let mut expected: BTreeMap<usize, Value> = BTreeMap::new();
+    let mut pending = vec![root];
+    let mut visits = 0;
+    while let Some(i) = pending.pop() {
+        visits += 1;
+        if visits > 256 {
+            return Ok(false);
+        }
+        if expected.contains_key(&i) {
+            continue;
+        }
+        let mut into: Vec<&Value> = wires
+            .iter()
+            .filter(|w| w["box_to"].as_u64() == Some(i as u64))
+            .collect();
+        into.sort_by_key(|w| w["port_to_raw"].as_u64());
+        let mut inputs = vec![];
+        for w in &into {
+            if w["port_from_raw"] != 0 {
+                return Ok(false);
+            }
+            let from = w["box_from"].as_u64().ok_or("wire source")?;
+            let Some(lane) = lane(w) else {
+                return Ok(false);
+            };
+            inputs.push(json!([w["port_to_raw"], from, lane]));
+            pending.push(from as usize);
+        }
+        let ports: Vec<u64> = into
+            .iter()
+            .filter_map(|w| w["port_to_raw"].as_u64())
+            .collect();
+        let row = match (nodes[i]["type_raw"].as_u64(), ports.as_slice()) {
+            (Some(1), []) => {
+                json!({"op":"sample","slot":word(i, 5),"channel":word(i, 4),"subtype":nodes[i]["subtype_raw"]})
+            }
+            (Some(3 | 7), []) => {
+                json!({"op":"color","bits":(0..4).map(|k| word(i, k)).collect::<Vec<_>>()})
+            }
+            (Some(2), []) if instance_white => {
+                json!({"op":"color","bits":[1f32.to_bits(), 1f32.to_bits(), 1f32.to_bits(), 1f32.to_bits()]})
+            }
+            (Some(4), []) => json!({"op":"constant","bits":word(i, 0)}),
+            (Some(10), [0, 1]) => json!({"op":"multiply","inputs":inputs}),
+            (Some(11), [0, 1]) => json!({"op":"add","inputs":inputs}),
+            (Some(12), [0, 1]) => json!({"op":"mix","inputs":inputs,"weight":word(i, 0)}),
+            (Some(12), [0, 1, 2]) => json!({"op":"mix","inputs":inputs,"weight":null}),
+            (Some(16), [0, 1, 2]) => {
+                json!({"op":"blend","inputs":inputs,"thresholds":[word(i, 0), word(i, 1)]})
+            }
+            _ => return Ok(false),
+        };
+        expected.insert(i, row);
+    }
+    let input = |port: u64, i: lbp_preview::GraphInput| json!([port, i.node, i.lane]);
+    let mut selected: BTreeMap<usize, Value> = BTreeMap::new();
+    let mut transforms = true;
+    for n in &program.nodes {
+        let row = match n.op {
+            lbp_preview::GraphOp::Sample {
+                slot,
+                uv_channel,
+                transform,
+            } => {
+                transforms &= transform_equal(n.index, transform);
+                json!({"op":"sample","slot":slot,"channel":uv_channel,"subtype":transform.subtype()})
+            }
+            lbp_preview::GraphOp::Color(bits) => json!({"op":"color","bits":bits}),
+            lbp_preview::GraphOp::Constant(bits) => json!({"op":"constant","bits":bits}),
+            lbp_preview::GraphOp::Multiply([a, b]) => {
+                json!({"op":"multiply","inputs":[input(0, a), input(1, b)]})
+            }
+            lbp_preview::GraphOp::Add([a, b]) => {
+                json!({"op":"add","inputs":[input(0, a), input(1, b)]})
+            }
+            lbp_preview::GraphOp::Mix {
+                inputs: [a, b],
+                factor,
+            } => match factor {
+                lbp_preview::MixFactor::Input(f) => {
+                    json!({"op":"mix","inputs":[input(0, a), input(1, b), input(2, f)],"weight":null})
+                }
+                lbp_preview::MixFactor::Weight(w) => {
+                    json!({"op":"mix","inputs":[input(0, a), input(1, b)],"weight":w})
+                }
+            },
+            lbp_preview::GraphOp::Blend {
+                inputs: [a, b, m],
+                threshold_bits,
+            } => {
+                json!({"op":"blend","inputs":[input(0, a), input(1, b), input(2, m)],"thresholds":threshold_bits})
+            }
+        };
+        selected.insert(n.index, row);
+    }
+    Ok(g.root == root
+        && program.root == root
+        && usize::from(g.nodes) == expected.len()
+        && selected == expected
+        && transforms
+        && selected
+            .get(&s.sample_index)
+            .is_some_and(|r| r["op"] == "sample")
+        && s.product_tree.is_none()
+        && s.texture_add.is_none()
+        && s.texture_blend.is_none()
+        && s.blend_mask.is_none()
+        && s.alpha_mix.is_none()
+        && s.texture_alpha_mix.is_none()
+        && s.blend.is_none()
+        && s.second_sample.is_none()
+        && s.multiply_index.is_none()
+        && s.tint == lbp_preview::DiffuseTint::default())
 }
 fn add_equal(
     sample: &Value,
