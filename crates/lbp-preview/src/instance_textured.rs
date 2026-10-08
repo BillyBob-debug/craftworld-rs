@@ -12,6 +12,16 @@ pub fn select_instance_diffuse(
     animation_base: bool,
 ) -> Result<crate::DiffuseSelection, String> {
     let error = match crate::select_diffuse_with_animation_base(derived, animation_base) {
+        // D92 (docs/d92-multi-animated.md): two or more animated leaves under a
+        // supplied color only as a direct ThingColor tint; not with a folded nested
+        // sampler or alpha subtraction (no oracle parity for those rewrites).
+        Ok(selection)
+            if selection.animation_base_more[0].is_some()
+                && (projection.folded_sampler.is_some()
+                    || !projection.alpha_subtract_samplers.is_empty()) =>
+        {
+            return Err("Unsupported: several animated samplers under a folded or alpha-subtracted instance input".into());
+        }
         Ok(selection) => return Ok(selection),
         Err(error) => error,
     };

@@ -250,6 +250,8 @@ impl MaterialAsset {
 pub struct DiffuseSelection {
     pub alpha_mix: Option<crate::AlphaDiffuseMix>,
     pub animation_base: Option<crate::AnimationBaseSnapshot>,
+    /// D92: further distinct animated product leaves, each with its own base rows.
+    pub animation_base_more: [Option<crate::AnimationBaseSnapshot>; 3],
     pub blend: Option<crate::DiffuseBlend>,
     /// D84 BLEND (box 16) phase 1: COLOR and one sample stepped by its alpha.
     pub blend_mask: Option<crate::BlendDiffuseMask>,
@@ -332,11 +334,12 @@ pub(crate) fn sampler(graph: &GraphMetadata, index: usize) -> Result<SamplerSele
         uv_transform,
     })
 }
-/// Product leaves. Static samplers first; with the animation-base opt-in, at most
-/// one distinct leaf may instead use its named base rows (D78, docs/d78-animated-product.md).
+/// Product leaves. Static samplers first; with the animation-base opt-in, any
+/// distinct leaf may instead use its own named base rows (D78 one leaf,
+/// docs/d78-animated-product.md; D92 several, docs/d92-multi-animated.md).
 struct Leaves {
     animated: bool,
-    base: Option<crate::AnimationBaseSnapshot>,
+    base: crate::animation_base::AnimatedLeaves,
 }
 impl Leaves {
     fn sample(&mut self, graph: &GraphMetadata, index: usize) -> Result<SamplerSelection, String> {
@@ -347,10 +350,7 @@ impl Leaves {
         };
         let (selection, snapshot) =
             crate::animation_base::sampler(graph, index).map_err(|_| error)?;
-        if self.base.is_some_and(|b| b.sample_index != index) {
-            return Err("Unsupported: animation base allows one animated product sampler".into());
-        }
-        self.base = Some(snapshot);
+        self.base.insert(snapshot)?;
         Ok(selection)
     }
 }
@@ -439,6 +439,8 @@ fn four_chain(
         return Err("Unsupported: four-texture chain needs exact first/fourth and second/third coordinate sharing".into());
     }
     Ok(Some(DiffuseSelection {
+        animation_base: leaves.base.primary(),
+        animation_base_more: leaves.base.more(),
         fourth_sample: Some(fourth),
         deep_multiply_index: Some(deep),
         third_sample: Some(third),
@@ -785,7 +787,7 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
         graph,
         &mut Leaves {
             animated: false,
-            base: None,
+            base: Default::default(),
         },
     )
 }
@@ -1012,7 +1014,8 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
     }
     Ok(DiffuseSelection {
         alpha_mix: None,
-        animation_base: leaves.base,
+        animation_base: leaves.base.primary(),
+        animation_base_more: leaves.base.more(),
         blend: None,
         blend_mask: None,
         fourth_sample: None,
@@ -1049,13 +1052,16 @@ pub fn select_diffuse_with_animation_base(
         Err(_) => crate::animation_base::select(graph).or_else(|_| {
             let mut leaves = Leaves {
                 animated: true,
-                base: None,
+                base: Default::default(),
             };
             let selection = select_products(graph, &mut leaves)?;
             // D78 scope: products of two or more texture samples only.
             match (selection.animation_base, selection.second_sample) {
                 (Some(_), Some(_)) => Ok(selection),
-                _ => Err("Unsupported: animation base product needs 2+ textures and one animated sampler".into()),
+                _ => Err(
+                    "Unsupported: animation base product needs 2+ textures and an animated sampler"
+                        .into(),
+                ),
             }
         }),
     }
@@ -1066,7 +1072,7 @@ pub(crate) fn select_animated_products(graph: &GraphMetadata) -> Result<DiffuseS
         graph,
         &mut Leaves {
             animated: true,
-            base: None,
+            base: Default::default(),
         },
     )
 }
@@ -2339,9 +2345,12 @@ mod tests {
         let mut verified = s;
         let globals = graph.boxes[2].animations[..1].to_vec();
         crate::animation_base::verify_global(&graph, &mut verified, &globals).unwrap();
-        // Two distinct animated leaves are not taken.
+        // D92: two distinct animated leaves each keep their own base rows.
         animate(&mut graph, 1, "623100");
-        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        let both = select_diffuse_with_animation_base(&graph, true).unwrap();
+        assert_eq!(both.animation_base.unwrap().sample_index, 1);
+        assert_eq!(both.animation_base_more[0].unwrap().sample_index, 2);
+        assert!(select_diffuse_with_animation_base(&graph, false).is_err());
         graph.boxes[1] = node(1, 0);
         // One animated sample on both ports is that sample squared.
         graph.wires[0].box_from = 2;

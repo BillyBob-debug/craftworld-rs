@@ -24,7 +24,8 @@ keep the D49 sampler rule. A sampler is tried as static first. The snapshot now
 records `sample_index`, so `verify_global` reconciles the animated leaf (any role)
 against the global declarations; the UI still excludes snapshots from Complete.
 
-Still unsupported (explicit errors): two or more distinct animated leaves; animated
+Still unsupported (explicit errors): two or more distinct animated leaves (since D92
+supported, see [d92-multi-animated.md](d92-multi-animated.md)); animated
 MULTIPLY/COLOR nodes; wired or UV2+ animated samplers; subtype 1 with only one named
 row (Toolkit applies it per row, existing selector requires both); animated leaves
 under MIX/BLEND/THING_COLOR; a single animated texture × COLOR (not a 2+ product).

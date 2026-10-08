@@ -11,6 +11,38 @@ pub struct AnimationBaseSnapshot {
     pub row_bits: [[u32; 4]; 2],
     pub key_counts: [usize; 2],
 }
+
+/// Distinct animated product leaves in first-use order (D78 one, D92 up to four).
+/// Each leaf keeps its own base-row snapshot; a sampler seen twice (squared) is one.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct AnimatedLeaves([Option<AnimationBaseSnapshot>; 4]);
+impl AnimatedLeaves {
+    pub(crate) fn insert(&mut self, snapshot: AnimationBaseSnapshot) -> Result<(), String> {
+        if self
+            .0
+            .iter()
+            .flatten()
+            .any(|b| b.sample_index == snapshot.sample_index)
+        {
+            return Ok(());
+        }
+        let free =
+            self.0.iter_mut().find(|b| b.is_none()).ok_or(
+                "Unsupported: animation base allows at most four animated product samplers",
+            )?;
+        *free = Some(snapshot);
+        Ok(())
+    }
+    /// The first animated leaf (`DiffuseSelection::animation_base`).
+    pub(crate) fn primary(&self) -> Option<AnimationBaseSnapshot> {
+        self.0[0]
+    }
+    /// D92: the second and later distinct animated leaves.
+    pub(crate) fn more(&self) -> [Option<AnimationBaseSnapshot>; 3] {
+        [self.0[1], self.0[2], self.0[3]]
+    }
+}
+
 pub(crate) fn select(
     graph: &lbp_resource::material::GraphMetadata,
 ) -> Result<crate::DiffuseSelection, String> {
@@ -172,16 +204,31 @@ pub(crate) fn sampler(
     ))
 }
 
-/// Reconcile both local bindings against unique global curve declarations.
-/// Matching metadata establishes input identity, never a game time or playback rule.
+/// Reconcile both local bindings of every animated leaf (D92: each leaf on its own)
+/// against unique global curve declarations. Matching metadata establishes input
+/// identity, never a game time or playback rule.
 pub(crate) fn verify_global(
     graph: &lbp_resource::material::GraphMetadata,
     selection: &mut crate::DiffuseSelection,
     globals: &[lbp_resource::material::AnimationMetadata],
 ) -> Result<(), String> {
-    let Some(snapshot) = selection.animation_base.as_mut() else {
-        return Ok(());
-    };
+    let mut leaves = [selection.animation_base]
+        .into_iter()
+        .chain(selection.animation_base_more)
+        .collect::<Vec<_>>();
+    for snapshot in leaves.iter_mut().flatten() {
+        verify_leaf(graph, snapshot, globals)?;
+    }
+    selection.animation_base = leaves[0];
+    selection.animation_base_more = [leaves[1], leaves[2], leaves[3]];
+    Ok(())
+}
+
+fn verify_leaf(
+    graph: &lbp_resource::material::GraphMetadata,
+    snapshot: &mut AnimationBaseSnapshot,
+    globals: &[lbp_resource::material::AnimationMetadata],
+) -> Result<(), String> {
     let named = if snapshot.subtype_raw == 1 { 2 } else { 1 };
     for local in &graph.boxes[snapshot.sample_index].animations[..named] {
         let matches = globals
@@ -205,4 +252,252 @@ pub(crate) fn verify_global(
     }
     snapshot.global_rows_verified = true;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::verify_global;
+    use crate::select_diffuse_with_animation_base as select;
+    use lbp_resource::material::{AnimationMetadata, BoxMetadata, GraphMetadata, WireMetadata};
+
+    fn node(kind: u32, slot: u32) -> BoxMetadata {
+        let mut parameters_raw = [0; 8];
+        if kind == 1 {
+            parameters_raw = [1f32.to_bits(), 1f32.to_bits(), 0, 0, 0, slot, 0, 0];
+        } else if kind == 3 {
+            parameters_raw[..4].copy_from_slice(&[0.5f32, 1., 0.25, 1.].map(f32::to_bits));
+        }
+        BoxMetadata {
+            type_raw: kind,
+            declared_parameter_count: 8,
+            parameters_raw,
+            position_bits: [0; 4],
+            subtype_raw: 0,
+            animations: std::array::from_fn(|_| AnimationMetadata {
+                base_value_bits: [0; 4],
+                component_value_count: 0,
+                component_bytes_sha256: String::new(),
+                name_hex: "000000".into(),
+                components_raw: 0,
+                derived_key_count: 0,
+            }),
+            texture_slot_raw: None,
+            texture_slot_in_range: None,
+        }
+    }
+    fn wire(from: i32, to: i32, port: u8) -> WireMetadata {
+        WireMetadata {
+            box_from: from,
+            box_to: to,
+            port_from_raw: 0,
+            port_to_raw: port,
+            swizzle_raw: [0; 5],
+            from_in_range: true,
+            to_in_range: true,
+        }
+    }
+    fn graph(kinds: &[u32], wires: Vec<WireMetadata>) -> GraphMetadata {
+        GraphMetadata {
+            box_count: kinds.len(),
+            wire_count: wires.len(),
+            boxes: kinds
+                .iter()
+                .enumerate()
+                .map(|(i, k)| node(*k, i as u32))
+                .collect(),
+            wires,
+            graph_start: 0,
+            parsed_graph_bytes: 0,
+            unparsed_bytes: 0,
+        }
+    }
+    /// Subtype 0: one scale/offset curve (D62), base (x, y, z, w).
+    fn scale_offset(g: &mut GraphMetadata, index: usize, name: &str, base: [f32; 4]) {
+        let a = &mut g.boxes[index].animations[0];
+        a.name_hex = name.into();
+        (
+            a.components_raw,
+            a.component_value_count,
+            a.derived_key_count,
+        ) = (15, 8, 2);
+        a.base_value_bits = base.map(f32::to_bits);
+    }
+    /// Subtype 1: two named XYZ matrix-row curves (D56).
+    fn matrix(g: &mut GraphMetadata, index: usize, names: [&str; 2]) {
+        g.boxes[index].subtype_raw = 1;
+        for (row, name) in names.into_iter().enumerate() {
+            let a = &mut g.boxes[index].animations[row];
+            a.name_hex = name.into();
+            (
+                a.components_raw,
+                a.component_value_count,
+                a.derived_key_count,
+            ) = (7, 3, 1);
+            a.base_value_bits = [1. + row as f32, 0.5, 0.25 * row as f32, 0.].map(f32::to_bits);
+        }
+    }
+    fn globals(g: &GraphMetadata) -> Vec<AnimationMetadata> {
+        let mut all = g
+            .boxes
+            .iter()
+            .flat_map(|b| b.animations.iter())
+            .filter(|a| a.name_hex.bytes().any(|c| c != b'0'))
+            .cloned()
+            .collect::<Vec<_>>();
+        all.sort_by(|a, b| a.name_hex.cmp(&b.name_hex));
+        all.dedup_by(|a, b| a.name_hex == b.name_hex);
+        all
+    }
+    fn animated_indices(s: &crate::DiffuseSelection) -> Vec<usize> {
+        let mut v = [s.animation_base]
+            .into_iter()
+            .chain(s.animation_base_more)
+            .flatten()
+            .map(|b| b.sample_index)
+            .collect::<Vec<_>>();
+        v.sort_unstable();
+        v
+    }
+
+    #[test]
+    fn d92_each_animated_product_leaf_uses_its_own_base_rows() {
+        // T1 × T2 (boxes 1/2, root multiply 3), both animated with distinct curves.
+        let product = || {
+            graph(
+                &[0, 1, 1, 10],
+                vec![wire(1, 3, 0), wire(2, 3, 1), wire(3, 0, 0)],
+            )
+        };
+        let mut g = product();
+        scale_offset(&mut g, 1, "613100", [2., 4., 0.5, -3.]);
+        matrix(&mut g, 2, ["623100", "633100"]);
+        assert!(crate::select_diffuse(&g).is_err());
+        assert!(select(&g, false).is_err());
+        let s = select(&g, true).unwrap();
+        assert_eq!(animated_indices(&s), [1, 2]);
+        let leaf = |i: usize| {
+            [s.animation_base]
+                .into_iter()
+                .chain(s.animation_base_more)
+                .flatten()
+                .find(|b| b.sample_index == i)
+                .unwrap()
+        };
+        assert_eq!((leaf(1).subtype_raw, leaf(2).subtype_raw), (0, 1));
+        let transform = |i: usize| {
+            if s.sample_index == i {
+                s.uv_transform
+            } else {
+                s.second_sample.unwrap().uv_transform
+            }
+        };
+        assert_eq!(
+            transform(1).bits(),
+            [2f32, 4., -(0.5f32 * 2.), -(-3f32 * 4.)].map(f32::to_bits)
+        );
+        let rows = leaf(2).row_bits;
+        assert_eq!(
+            transform(2).bits(),
+            [rows[0][0], rows[0][1], rows[0][2], rows[1][0], rows[1][1], rows[1][2]]
+        );
+        assert!(!crate::linked::uses_grid(s));
+        // Every leaf is reconciled on its own; one missing global fails the whole.
+        let mut verified = s;
+        verify_global(&g, &mut verified, &globals(&g)).unwrap();
+        assert!(verified.animation_base.unwrap().global_rows_verified);
+        assert!(
+            verified.animation_base_more[0]
+                .unwrap()
+                .global_rows_verified
+        );
+        let partial = globals(&g)
+            .into_iter()
+            .filter(|a| a.name_hex != "633100")
+            .collect::<Vec<_>>();
+        assert!(verify_global(&g, &mut s.clone(), &partial).is_err());
+        // Both leaves on one shared curve: identical transforms, still two leaves.
+        let mut shared = product();
+        scale_offset(&mut shared, 1, "613100", [2., 2., 0., 0.]);
+        scale_offset(&mut shared, 2, "613100", [2., 2., 0., 0.]);
+        let s = select(&shared, true).unwrap();
+        assert_eq!(animated_indices(&s), [1, 2]);
+        assert_eq!(s.uv_transform, s.second_sample.unwrap().uv_transform);
+        verify_global(&shared, &mut s.clone(), &globals(&shared)).unwrap();
+        // Per-leaf rules still apply to every animated leaf.
+        let mut uneven = g.clone();
+        uneven.boxes[2].animations[1].name_hex = "000000".into();
+        assert!(select(&uneven, true).is_err());
+        let mut uv2 = g.clone();
+        uv2.boxes[2].parameters_raw[4] = 2;
+        assert!(select(&uv2, true).is_err());
+        let mut wired = g.clone();
+        wired.wires.push(wire(1, 2, 0));
+        assert!(select(&wired, true).is_err());
+        let mut moving_root = g.clone();
+        scale_offset(&mut moving_root, 3, "643100", [1., 1., 0., 0.]);
+        assert!(select(&moving_root, true).is_err());
+    }
+
+    #[test]
+    fn d92_tinted_three_and_four_leaf_products() {
+        let nested = |third: u32| {
+            graph(
+                &[0, 10, 1, 1, third, 10],
+                vec![
+                    wire(2, 1, 0),
+                    wire(3, 1, 1),
+                    wire(1, 5, 0),
+                    wire(4, 5, 1),
+                    wire(5, 0, 0),
+                ],
+            )
+        };
+        // (T1 × T2) × COLOR, both leaves animated (D75 tint).
+        let mut tinted = nested(3);
+        scale_offset(&mut tinted, 2, "613100", [2., 2., 0.5, 0.]);
+        scale_offset(&mut tinted, 3, "623100", [3., 3., 0., 0.25]);
+        let s = select(&tinted, true).unwrap();
+        assert_eq!(s.tint.values(), [0.5, 1., 0.25, 1.]);
+        assert_eq!(animated_indices(&s), [2, 3]);
+        // (T1 × T2) × T3 with an independent third: all three animated, subtype 0.
+        let mut three = nested(1);
+        scale_offset(&mut three, 2, "613100", [2., 2., 0.5, 0.]);
+        scale_offset(&mut three, 3, "623100", [3., 3., 0., 0.25]);
+        scale_offset(&mut three, 4, "633100", [4., 4., 0., 0.]);
+        let s = select(&three, true).unwrap();
+        assert!(s.third_sample.is_some());
+        assert_eq!(animated_indices(&s), [2, 3, 4]);
+        verify_global(&three, &mut s.clone(), &globals(&three)).unwrap();
+        // An independent subtype-1 third keeps the D65 scale/offset rejection.
+        let mut matrix_third = three.clone();
+        matrix(&mut matrix_third, 4, ["643100", "653100"]);
+        assert!(select(&matrix_third, true).is_err());
+        // ((A × B) × C) × D: D shares A's curve and C shares B's, so the exact
+        // coordinate sharing holds; four leaves, each with its own snapshot.
+        let mut four = graph(
+            &[0, 10, 10, 10, 1, 1, 1, 1],
+            vec![
+                wire(4, 3, 0),
+                wire(5, 3, 1),
+                wire(3, 2, 0),
+                wire(6, 2, 1),
+                wire(2, 1, 0),
+                wire(7, 1, 1),
+                wire(1, 0, 0),
+            ],
+        );
+        for (index, name, v) in [
+            (4, "613100", 2.),
+            (5, "623100", 3.),
+            (6, "623100", 3.),
+            (7, "613100", 2.),
+        ] {
+            scale_offset(&mut four, index, name, [v, v, 0.5, 0.]);
+        }
+        assert!(select(&four, false).is_err());
+        let s = select(&four, true).unwrap();
+        assert!(s.fourth_sample.is_some());
+        assert_eq!(animated_indices(&s), [4, 5, 6, 7]);
+        verify_global(&four, &mut s.clone(), &globals(&four)).unwrap();
+    }
 }
