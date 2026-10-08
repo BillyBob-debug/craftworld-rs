@@ -16,6 +16,8 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 pub mod check;
+pub mod natives;
+pub mod signature;
 
 /// Hard limits; every one fails with a [`Fault`], never a panic.
 pub const MAX_CALL_DEPTH: usize = 256;
@@ -89,21 +91,63 @@ const IDENTITY: [f32; 16] = [
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Fault {
-    UnknownOpcode { pc: usize, opcode: u8 },
-    Register { pc: usize, register: u16 },
-    Type { pc: usize, op: &'static str },
-    DivideByZero { pc: usize },
-    Branch { pc: usize },
-    Index { pc: usize, what: &'static str },
-    NullObject { pc: usize },
+    UnknownOpcode {
+        pc: usize,
+        opcode: u8,
+    },
+    Register {
+        pc: usize,
+        register: u16,
+    },
+    Type {
+        pc: usize,
+        op: &'static str,
+    },
+    DivideByZero {
+        pc: usize,
+    },
+    Branch {
+        pc: usize,
+    },
+    Index {
+        pc: usize,
+        what: &'static str,
+    },
+    NullObject {
+        pc: usize,
+    },
     MissingClass(String),
-    MissingFunction { class: String, function: String },
-    Arity { expected: usize, got: usize },
-    Assert { pc: usize },
+    MissingFunction {
+        class: String,
+        function: String,
+    },
+    Arity {
+        expected: usize,
+        got: usize,
+    },
+    Assert {
+        pc: usize,
+    },
     Native(String),
     Budget,
     CallDepth,
     Heap,
+    /// `System.Yield` reached from [`Vm::call`], which cannot suspend; use [`Vm::start`].
+    YieldInCall,
+}
+
+/// Result of [`Vm::start`] / [`Vm::resume`].
+#[derive(Debug)]
+pub enum Step {
+    Done(Value),
+    /// `System.Yield` suspended the script; resume it on a later tick.
+    Yielded(Task),
+}
+
+/// A suspended script call (its frames), resumed with [`Vm::resume`].
+#[derive(Debug)]
+pub struct Task {
+    stack: Vec<Frame>,
 }
 
 /// Which member access reaches the host.
@@ -174,6 +218,7 @@ enum HeapObject {
     Array(Vec<Value>),
 }
 
+#[derive(Debug)]
 struct Frame {
     class: ClassId,
     function: usize,
@@ -321,7 +366,8 @@ impl Vm {
     }
 
     /// Calls `function` on `class` from the host. `args` fill the function's argument
-    /// rows in order (receiver first for member functions, INFERRED).
+    /// rows in order (receiver first for member functions, INFERRED). A script that
+    /// yields fails with [`Fault::YieldInCall`]; coroutines go through [`Vm::start`].
     pub fn call(
         &mut self,
         host: &mut dyn Host,
@@ -330,6 +376,21 @@ impl Vm {
         args: &[Value],
         budget: &mut u64,
     ) -> Result<Value, Fault> {
+        match self.start(host, class, function, args, budget)? {
+            Step::Done(v) => Ok(v),
+            Step::Yielded(_) => Err(Fault::YieldInCall),
+        }
+    }
+
+    /// Like [`Vm::call`], but `System.Yield` suspends the call and returns a [`Task`].
+    pub fn start(
+        &mut self,
+        host: &mut dyn Host,
+        class: ClassId,
+        function: &str,
+        args: &[Value],
+        budget: &mut u64,
+    ) -> Result<Step, Fault> {
         let (c, f) = self
             .find(class, function)
             .ok_or_else(|| Fault::MissingFunction {
@@ -363,6 +424,22 @@ impl Vm {
         self.run(host, vec![frame], budget)
     }
 
+    /// Continues a task after the instruction that yielded.
+    pub fn resume(
+        &mut self,
+        host: &mut dyn Host,
+        task: Task,
+        budget: &mut u64,
+    ) -> Result<Step, Fault> {
+        self.run(host, task.stack, budget)
+    }
+
+    /// Does `function` resolve to script code in `class` or a superclass? `false` means
+    /// a call to it goes to the host as a native.
+    pub fn has_code(&self, class: ClassId, function: &str) -> bool {
+        self.find(class, function).is_some()
+    }
+
     fn frame(
         &self,
         class: ClassId,
@@ -393,7 +470,7 @@ impl Vm {
         host: &mut dyn Host,
         mut stack: Vec<Frame>,
         budget: &mut u64,
-    ) -> Result<Value, Fault> {
+    ) -> Result<Step, Fault> {
         let mut staged: BTreeMap<u16, Value> = BTreeMap::new();
         loop {
             if *budget == 0 {
@@ -804,6 +881,11 @@ impl Vm {
                             let callee = self.frame(c, f, args, dest)?;
                             stack.push(callee);
                         }
+                        // INFERRED: Yield suspends the script until the next tick
+                        // (docs/script-natives.md).
+                        None if owner == "System" && function == "Yield__" => {
+                            return Ok(Step::Yielded(Task { stack }));
+                        }
                         None => {
                             let values: Vec<Value> = args.into_values().collect();
                             let v = host
@@ -824,7 +906,7 @@ impl Vm {
                     let done = stack.pop().expect("frame");
                     staged.clear();
                     match stack.last_mut() {
-                        None => return Ok(v),
+                        None => return Ok(Step::Done(v)),
                         Some(caller) => {
                             if let Some(d) = done.dest {
                                 *caller
