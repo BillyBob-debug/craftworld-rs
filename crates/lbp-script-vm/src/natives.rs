@@ -536,6 +536,7 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
         report(w, c, ok)
     }),
     ("Test", "Fail__Q7StringAi", |w, c| report(w, c, false)),
+    ("Test", "Succeed__Q7StringAi", |w, c| report(w, c, true)),
     ("Test", "CheckEqual__iiQ7StringAi", equal_values),
     ("Test", "CheckEqual__bbQ7StringAi", equal_values),
     ("Test", "CheckEqual__jjQ7StringAi", equal_values),

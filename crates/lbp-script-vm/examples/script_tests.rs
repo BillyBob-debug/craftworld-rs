@@ -1,7 +1,8 @@
 //! Runs the game's own test scripts in the VM (docs/script-natives.md, "PC checks").
 //! A test script is one that calls a `Test.*` native. Every function of it that takes no
 //! arguments and has code is run once with the bindings over a world that only records
-//! `Test.*` checks. A yield resumes on the next "tick", up to a tick limit. Writes the
+//! `Test.*` checks. A non-static function runs on a fresh instance of its class, placed in
+//! register 0 as `this` (as the U12 Gooey host does, INFERRED from the D134 trace). A yield resumes on the next "tick", up to a tick limit. Writes the
 //! totals and one row per function (class and function names, outcome, checks) to a NEW
 //! JSON file under ignored `local-analysis/`.
 //! Usage: script_tests SCRIPT-DIR NEW-JSON
@@ -9,7 +10,7 @@
 use lbp_level::script::{self, class, Class, Script};
 use lbp_level::Limits;
 use lbp_script_vm::natives::{Bindings, World};
-use lbp_script_vm::{Fault, Step, Vm};
+use lbp_script_vm::{Fault, Step, Value, Vm};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -57,12 +58,12 @@ fn calls_test(s: &Script) -> bool {
     })
 }
 
-/// Functions with code and no argument rows.
-fn entry_points(s: &Script) -> Vec<String> {
+/// Functions with code and no argument rows, with whether they are static (modifier bit 0).
+fn entry_points(s: &Script) -> Vec<(String, bool)> {
     s.function_defs
         .iter()
         .filter(|f| f.modifiers & 2 == 0 && f.arguments.begin == f.arguments.end)
-        .filter_map(|f| s.name(f.name).map(str::to_owned))
+        .filter_map(|f| s.name(f.name).map(|n| (n.to_owned(), f.modifiers & 1 != 0)))
         .collect()
 }
 
@@ -125,11 +126,23 @@ fn run() -> Result<(), String> {
     let mut rows = Vec::new();
     let (mut passed, mut failed) = (0usize, 0usize);
     for (id, entries) in &tests {
-        for name in entries {
+        for (name, is_static) in entries {
             host.world = Recorder::default();
             let mut budget = BUDGET;
             let mut ticks = 0usize;
-            let mut step = vm.start(&mut host, *id, name, &[], &mut budget);
+            let mut step = if *is_static {
+                vm.start(&mut host, *id, name, &[], &mut budget)
+            } else {
+                vm.instantiate(*id).and_then(|this| {
+                    vm.start_registers(
+                        &mut host,
+                        *id,
+                        name,
+                        &[(0, Value::Object(Some(this)))],
+                        &mut budget,
+                    )
+                })
+            };
             let outcome = loop {
                 match step {
                     Ok(Step::Done(_)) => break ("done".to_owned(), None),
@@ -147,6 +160,7 @@ fn run() -> Result<(), String> {
             rows.push(serde_json::json!({
                 "class": vm.class_name(*id),
                 "function": name,
+                "static": is_static,
                 "outcome": outcome.0,
                 "fault": outcome.1,
                 "ticks": ticks,

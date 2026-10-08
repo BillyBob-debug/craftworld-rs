@@ -53,6 +53,24 @@ Part 2 changes from that run:
 - The `Test.*` natives are bound, so the game's own test scripts can check the VM
   (`script_tests` below).
 
+PC run after part 2 (D137, unit: call instruction):
+- **Coverage:** 2,970 of 17,704 native calls are bound. In gameplay, 756 of 1,935 calls
+  across 254 scripts are bound. In the 1 test script, 524 of 537 are bound. No unknown
+  codes remain.
+- **`script_tests`:** 47 functions ran and 24 finished. Stops: Type 15 (mostly
+  `SET_V4_X` and `GET_OBJ_MEMBER`), Unbound 3 (all `Test.Succeed`), Native 2, Register 2,
+  Index 1.
+- **Checks:** 532 passed and 3 failed. The failures are `NeverEvaluated` at test.cod:438
+  and `TestS64` at :1551 and :1562.
+
+Part 3:
+- `Test.Succeed` is bound.
+- Non-static test functions now run on a fresh instance placed in register 0 as `this`,
+  the same `start_registers` setup the U12 Gooey host uses.
+- This PR carries the same VM change as #34: `start_registers`, zeroed v4/m44 on a fresh
+  register, and a typed default for a Void native result. It is identical text, so
+  merging #34 later stays clean.
+
 ## Evidence
 
 CONFIRMED_FROM_COMMUNITY_CODE: Toolkit d6a2ef80 `cwlib/enums/BuiltinType.java` lists
