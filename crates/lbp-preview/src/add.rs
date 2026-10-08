@@ -378,13 +378,21 @@ mod tests {
         assert_eq!((second.sample_index, second.slot), (2, 0));
         assert_eq!((s.ignored_nodes, s.ignored_wires), (1, 1));
         assert!(s.multiply_index.is_none() && s.tint == DiffuseTint::default());
-        // Non-integer scale or a different UV channel cannot use the grid.
+        // Non-integer scale cannot use the grid: D103 resampled approximation. A
+        // different UV channel under an ADD is not a separable product: refused.
         let mut g = base.clone();
         g.boxes[2].parameters_raw[0] = 1.5f32.to_bits();
-        assert!(crate::select_diffuse(&g).unwrap_err().contains("grid"));
+        assert!(crate::select_diffuse(&g)
+            .unwrap()
+            .grid_graph
+            .unwrap()
+            .off_grid
+            .is_some());
         let mut g = base.clone();
         g.boxes[2].parameters_raw[4] = 1;
-        assert!(crate::select_diffuse(&g).unwrap_err().contains("grid"));
+        assert!(crate::select_diffuse(&g)
+            .unwrap_err()
+            .contains("outside a separable product"));
         // UV channel raw 2 stays unsupported (docs/d89-add-uv2.md).
         let mut g = base.clone();
         g.boxes[2].parameters_raw[4] = 2;
@@ -473,10 +481,19 @@ mod tests {
                 .sources,
             3
         );
+        // D103: off the grid (scale 1.5 on one axis) a labelled resampled bake.
         g.boxes[2].parameters_raw[0] = 1.5f32.to_bits();
-        assert!(crate::select_diffuse(&g)
-            .unwrap_err()
-            .contains("three-texture"));
+        assert_eq!(
+            crate::select_diffuse(&g)
+                .unwrap()
+                .grid_graph
+                .unwrap()
+                .off_grid,
+            Some(crate::OffGrid::Resampled {
+                channel: 0,
+                period: [2, 1]
+            })
+        );
         // Animated COLOR addend.
         let mut g = base;
         g.boxes[2].animations[1].name_hex = "410000".into();

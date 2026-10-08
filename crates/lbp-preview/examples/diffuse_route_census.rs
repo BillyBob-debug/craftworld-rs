@@ -5,6 +5,10 @@ use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, fs::OpenOptions, io::Write, path::Path};
 
+/// D103 (docs/d103-offgrid-bake.md): off-grid bakes are preview policy, not game behaviour.
+fn approximation(s: &lbp_preview::DiffuseSelection) -> Option<String> {
+    s.grid_graph.and_then(|g| g.off_grid).map(|o| o.label())
+}
 fn classify(graph: &lbp_resource::material::GraphMetadata) -> (String, Option<String>) {
     let default = match lbp_preview::select_solid_diffuse(graph) {
         Ok(Some(s)) if s.unwired_diffuse => return ("unwired_black".into(), None),
@@ -15,7 +19,8 @@ fn classify(graph: &lbp_resource::material::GraphMetadata) -> (String, Option<St
         },
     };
     let reason = match default {
-        Ok(_) => return ("texture_route".into(), None),
+        // D103: off-grid evaluator bakes are labelled preview approximations.
+        Ok(s) => return ("texture_route".into(), approximation(&s)),
         Err(e) => e,
     };
     if lbp_preview::select_diffuse_with_animation_base(graph, true).is_ok() {
@@ -30,7 +35,14 @@ fn classify(graph: &lbp_resource::material::GraphMetadata) -> (String, Option<St
             || lbp_preview::select_instance_diffuse(&derived, &p, true)
                 .is_ok_and(|s| s.texture_add.is_none())
         {
-            return ("instance_color_only".into(), Some(reason));
+            let note = lbp_preview::select_instance_diffuse(&derived, &p, true)
+                .ok()
+                .and_then(|s| approximation(&s))
+                .map_or(String::new(), |a| format!(" [instance route {a}]"));
+            return (
+                "instance_color_only".into(),
+                Some(format!("{reason}{note}")),
+            );
         }
     }
     ("unsupported".into(), Some(reason))
@@ -277,7 +289,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"class":class,"reason":reason,"shape":signature,"thing_color_reason":thing_reason}));
     }
     rows.sort_by(|a, b| a["sha1"].as_str().cmp(&b["sha1"].as_str()));
-    let report = json!({"schema_version":3,"scope":"diffuse_route_selection_only_not_payload_or_asset_count","materials":rows.len(),"archived_bytes_read":bytes_read,"class_counts":classes,"reason_counts":reasons,"thing_color_reason_counts":thing_reasons,"thing_color_node_counts":thing_nodes,"materials_detail":rows});
+    let report = json!({"schema_version":4,"scope":"diffuse_route_selection_only_not_payload_or_asset_count; texture_route rows whose reason starts with preview approximation are D103 off-grid bakes (authored resampling, not game behaviour)","materials":rows.len(),"archived_bytes_read":bytes_read,"class_counts":classes,"reason_counts":reasons,"thing_color_reason_counts":thing_reasons,"thing_color_node_counts":thing_nodes,"materials_detail":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

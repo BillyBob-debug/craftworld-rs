@@ -32,13 +32,20 @@ pub struct GridGraph {
     pub samples: u8,
     /// Distinct sampling sources (slot, UV channel, transform); 1 = per-texel bake.
     pub sources: u8,
+    /// D103: off the integer Repeat grid, a labelled preview approximation
+    /// (docs/d103-offgrid-bake.md). `None` = the D100 per-texel or grid bake.
+    pub off_grid: Option<crate::OffGrid>,
 }
 impl GridGraph {
     pub fn label(self) -> String {
-        format!(
+        let base = format!(
             "evaluated graph: {} nodes, {} texture samples, {} sources",
             self.nodes, self.samples, self.sources
-        )
+        );
+        match self.off_grid {
+            Some(o) => format!("{base} • {}", o.label()),
+            None => base,
+        }
     }
 }
 
@@ -93,10 +100,10 @@ pub struct GraphProgram {
     pub nodes: Vec<GraphNode>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Source {
-    slot: usize,
-    uv_channel: usize,
-    transform: crate::SamplingTransform,
+pub(crate) struct Source {
+    pub(crate) slot: usize,
+    pub(crate) uv_channel: usize,
+    pub(crate) transform: crate::SamplingTransform,
 }
 impl GraphProgram {
     fn sources(&self) -> Vec<Source> {
@@ -404,16 +411,29 @@ pub(crate) fn select(
         return Err(earlier);
     };
     let sources = program.sources();
-    if let Err(reason) = grid_scales(&sources) {
-        // Keep the fixed route's reason first (stable census groups), then say why
-        // the otherwise evaluable graph has no bake.
-        return Err(format!(
-            "{earlier} (graph evaluator: {})",
-            reason.trim_start_matches("Unsupported: graph evaluator ")
-        ));
-    }
     let first = program.samples().next().expect("one sample");
     let primary = crate::linked::sampler(graph, first)?;
+    let mut off_grid = None;
+    let mut second_sample = None;
+    if grid_scales(&sources).is_err() {
+        // D103: off the grid, a labelled resampled bake or a separable split. Keep the
+        // fixed route's reason first (stable census groups), then say why the
+        // otherwise evaluable graph has no bake.
+        match crate::offgrid::plan(&program, &sources, primary.uv_channel) {
+            Ok(plan) => {
+                if let Some(index) = plan.second_sample {
+                    second_sample = Some(crate::linked::sampler(graph, index)?);
+                }
+                off_grid = Some(plan.kind);
+            }
+            Err(reason) => {
+                return Err(format!(
+                    "{earlier} (graph evaluator: {})",
+                    reason.trim_start_matches("Unsupported: graph evaluator ")
+                ))
+            }
+        }
+    }
     let edges = graph
         .wires
         .iter()
@@ -425,7 +445,9 @@ pub(crate) fn select(
             nodes: program.nodes.len() as u8,
             samples: program.samples().count() as u8,
             sources: sources.len() as u8,
+            off_grid,
         }),
+        second_sample,
         output_index: output,
         sample_index: first,
         slot: primary.slot,
@@ -511,6 +533,118 @@ fn bake(
     if count > lbp_texture::MAX_PIXELS as u64 {
         return Err("Unsupported: graph evaluator pixel budget".into());
     }
+    let steps = steps(program, sources)?;
+    if cancelled() {
+        return Err("Cancelled".into());
+    }
+    let linear: [f64; 256] = std::array::from_fn(|v| crate::blend_mask::srgb_decode(v as u8));
+    let mut values = vec![[0f64; 4]; steps.len()];
+    let mut texels = vec![0usize; textures.len()];
+    let mut output = Vec::with_capacity(count as usize * 4);
+    for y in 0..height {
+        for x in 0..width {
+            if output.len().is_multiple_of(16384) && cancelled() {
+                return Err("Cancelled".into());
+            }
+            for (t, ((d, _), s)) in texels.iter_mut().zip(textures.iter().zip(scales)) {
+                let px = (u64::from(x) * u64::from(d[0]) * u64::from(s[0]) / u64::from(width))
+                    % u64::from(d[0]);
+                let py = (u64::from(y) * u64::from(d[1]) * u64::from(s[1]) / u64::from(height))
+                    % u64::from(d[1]);
+                *t = (py as usize * d[0] as usize + px as usize) * 4;
+            }
+            let sample = |source: usize| {
+                let (rgba, i) = (textures[source].1, texels[source]);
+                [
+                    linear[usize::from(rgba[i])],
+                    linear[usize::from(rgba[i + 1])],
+                    linear[usize::from(rgba[i + 2])],
+                    f64::from(rgba[i + 3]) / 255.,
+                ]
+            };
+            evaluate(&steps, &mut values, None, &sample);
+            output.extend_from_slice(&encode_texel(values[steps.len() - 1])?);
+        }
+    }
+    if cancelled() {
+        return Err("Cancelled".into());
+    }
+    Ok((width, height, output))
+}
+
+/// sRGB-encoded RGB and linear alpha, each clamped at 8-bit encoding (D100 policy).
+pub(crate) fn encode_texel(v: [f64; 4]) -> Result<[u8; 4], String> {
+    if v.iter().any(|c| !c.is_finite()) {
+        return Err("Invalid: graph evaluator produced a non-finite value".into());
+    }
+    Ok([
+        encode(v[0]),
+        encode(v[1]),
+        encode(v[2]),
+        (v[3] * 255.).round().clamp(0., 255.) as u8,
+    ])
+}
+
+/// One evaluation step; inputs refer to earlier step positions with an optional lane.
+pub(crate) enum Step {
+    /// Index into the program's source list.
+    Sample(usize),
+    Value([f64; 4]),
+    Multiply([(usize, Option<u8>); 2]),
+    Add([(usize, Option<u8>); 2]),
+    Mix([(usize, Option<u8>); 2], Result<(usize, Option<u8>), f64>),
+    Blend([(usize, Option<u8>); 3], [f64; 2]),
+}
+
+/// Lane-selected value of an earlier step (a one-letter swizzle broadcasts its lane).
+pub(crate) fn lane_value(values: &[[f64; 4]], (p, lane): (usize, Option<u8>)) -> [f64; 4] {
+    let v: [f64; 4] = values[p];
+    lane.map_or(v, |l| [v[usize::from(l)]; 4])
+}
+
+/// Evaluate `steps` in order into `values`; `needed` (D103 split targets) skips steps
+/// that no requested factor depends on. `sample` returns the linear RGBA of a source.
+pub(crate) fn evaluate(
+    steps: &[Step],
+    values: &mut [[f64; 4]],
+    needed: Option<&[bool]>,
+    sample: &dyn Fn(usize) -> [f64; 4],
+) {
+    for k in 0..steps.len() {
+        if needed.is_some_and(|n| !n[k]) {
+            continue;
+        }
+        let get = |input: (usize, Option<u8>)| lane_value(values, input);
+        values[k] = match &steps[k] {
+            Step::Sample(source) => sample(*source),
+            Step::Value(v) => *v,
+            Step::Multiply([a, b]) => {
+                let (a, b) = (get(*a), get(*b));
+                std::array::from_fn(|c| a[c] * b[c])
+            }
+            Step::Add([a, b]) => {
+                let (a, b) = (get(*a), get(*b));
+                std::array::from_fn(|c| a[c] + b[c])
+            }
+            Step::Mix([l, r], f) => {
+                let (l, r) = (get(*l), get(*r));
+                let f = match f {
+                    Ok(input) => get(*input),
+                    Err(w) => [*w; 4],
+                };
+                std::array::from_fn(|c| (r[c] - l[c]) * f[c] + l[c])
+            }
+            Step::Blend([l, r, m], thresholds) => {
+                let (l, r) = (get(*l), get(*r));
+                let f = crate::blend_factor(get(*m)[0], *thresholds);
+                std::array::from_fn(|c| (r[c] - l[c]) * f + l[c])
+            }
+        };
+    }
+}
+
+/// Compile `program` into evaluation steps over `sources` (inputs before users, root last).
+pub(crate) fn steps(program: &GraphProgram, sources: &[Source]) -> Result<Vec<Step>, String> {
     // Steps refer to earlier positions; samples to their source.
     let position = |index: usize| {
         program
@@ -519,14 +653,6 @@ fn bake(
             .position(|n| n.index == index)
             .ok_or("Invalid: graph evaluator input")
     };
-    enum Step {
-        Sample(usize),
-        Value([f64; 4]),
-        Multiply([(usize, Option<u8>); 2]),
-        Add([(usize, Option<u8>); 2]),
-        Mix([(usize, Option<u8>); 2], Result<(usize, Option<u8>), f64>),
-        Blend([(usize, Option<u8>); 3], [f64; 2]),
-    }
     let mut steps = vec![];
     for (k, node) in program.nodes.iter().enumerate() {
         let at = |i: GraphInput| -> Result<(usize, Option<u8>), String> {
@@ -579,80 +705,7 @@ fn bake(
     if program.nodes.last().map(|n| n.index) != Some(program.root) {
         return Err("Invalid: graph evaluator root".into());
     }
-    if cancelled() {
-        return Err("Cancelled".into());
-    }
-    let linear: [f64; 256] = std::array::from_fn(|v| crate::blend_mask::srgb_decode(v as u8));
-    let mut values = vec![[0f64; 4]; steps.len()];
-    let mut texels = vec![0usize; textures.len()];
-    let mut output = Vec::with_capacity(count as usize * 4);
-    for y in 0..height {
-        for x in 0..width {
-            if output.len().is_multiple_of(16384) && cancelled() {
-                return Err("Cancelled".into());
-            }
-            for (t, ((d, _), s)) in texels.iter_mut().zip(textures.iter().zip(scales)) {
-                let px = (u64::from(x) * u64::from(d[0]) * u64::from(s[0]) / u64::from(width))
-                    % u64::from(d[0]);
-                let py = (u64::from(y) * u64::from(d[1]) * u64::from(s[1]) / u64::from(height))
-                    % u64::from(d[1]);
-                *t = (py as usize * d[0] as usize + px as usize) * 4;
-            }
-            for k in 0..steps.len() {
-                let get = |(p, lane): (usize, Option<u8>)| {
-                    let v: [f64; 4] = values[p];
-                    lane.map_or(v, |l| [v[usize::from(l)]; 4])
-                };
-                values[k] = match &steps[k] {
-                    Step::Sample(source) => {
-                        let (rgba, i) = (textures[*source].1, texels[*source]);
-                        [
-                            linear[usize::from(rgba[i])],
-                            linear[usize::from(rgba[i + 1])],
-                            linear[usize::from(rgba[i + 2])],
-                            f64::from(rgba[i + 3]) / 255.,
-                        ]
-                    }
-                    Step::Value(v) => *v,
-                    Step::Multiply([a, b]) => {
-                        let (a, b) = (get(*a), get(*b));
-                        std::array::from_fn(|c| a[c] * b[c])
-                    }
-                    Step::Add([a, b]) => {
-                        let (a, b) = (get(*a), get(*b));
-                        std::array::from_fn(|c| a[c] + b[c])
-                    }
-                    Step::Mix([l, r], f) => {
-                        let (l, r) = (get(*l), get(*r));
-                        let f = match f {
-                            Ok(input) => get(*input),
-                            Err(w) => [*w; 4],
-                        };
-                        std::array::from_fn(|c| (r[c] - l[c]) * f[c] + l[c])
-                    }
-                    Step::Blend([l, r, m], thresholds) => {
-                        let (l, r) = (get(*l), get(*r));
-                        let f = crate::blend_factor(get(*m)[0], *thresholds);
-                        std::array::from_fn(|c| (r[c] - l[c]) * f + l[c])
-                    }
-                };
-            }
-            let v = values[steps.len() - 1];
-            if v.iter().any(|c| !c.is_finite()) {
-                return Err("Invalid: graph evaluator produced a non-finite value".into());
-            }
-            output.extend_from_slice(&[
-                encode(v[0]),
-                encode(v[1]),
-                encode(v[2]),
-                (v[3] * 255.).round().clamp(0., 255.) as u8,
-            ]);
-        }
-    }
-    if cancelled() {
-        return Err("Cancelled".into());
-    }
-    Ok((width, height, output))
+    Ok(steps)
 }
 
 /// Inputs shared with `linked::load_primitive`.
@@ -666,7 +719,7 @@ pub(crate) struct LoadContext<'a> {
     pub(crate) control: &'a LoadControl,
 }
 
-fn decode(
+pub(crate) fn decode(
     cx: &LoadContext,
     slot: usize,
     repeat: bool,
@@ -723,6 +776,17 @@ pub(crate) fn load(
     let sources = program.sources();
     if sources.len() != usize::from(marker.sources) {
         return Err("Invalid: graph evaluator program changed".into());
+    }
+    if let Some(kind) = marker.off_grid {
+        return crate::offgrid::load(
+            &cx,
+            material_key,
+            instance_projection,
+            selection,
+            &program,
+            &sources,
+            kind,
+        );
     }
     let scales = grid_scales(&sources)?;
     let grid = sources.len() > 1;
@@ -823,6 +887,9 @@ pub(crate) fn load(
 /// Display label for a `grid_graph` asset.
 pub(crate) fn label(a: &crate::Asset) -> String {
     let g = a.selection.grid_graph.expect("grid graph label");
+    if g.off_grid.is_some() {
+        return crate::offgrid::label(a, g);
+    }
     let sampling = if a.product.is_some() {
         format!("nearest Repeat grid {:?}", a.display_extent())
     } else {
@@ -945,7 +1012,7 @@ mod tests {
         assert_eq!(
             crate::select_diffuse(&off).unwrap_err(),
             "Unsupported: BLEND inputs must be COLOR or texture samples (graph evaluator: \
-             requires same-channel integer Repeat grid samplers)"
+             off-grid samplers mix UV channels outside a separable product)"
         );
         // An unknown box keeps the fixed route's reason.
         let mut unknown = blend_of_product();

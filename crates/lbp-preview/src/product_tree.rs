@@ -582,9 +582,13 @@ mod tests {
         g.boxes[4] = sample(2., 2, 0);
         assert!(crate::select_diffuse(&g).unwrap().third_sample.is_some());
         g.boxes[4].parameters_raw[0] = 0;
-        // D100: off the integer grid the evaluator adds its reason after D65's.
-        let reason = crate::select_diffuse(&g).unwrap_err();
-        assert!(reason.contains("nonzero scale/offset") && reason.contains("graph evaluator"));
+        // D103: off the integer grid (zero scale) the evaluator resamples, labelled.
+        assert!(crate::select_diffuse(&g)
+            .unwrap()
+            .grid_graph
+            .unwrap()
+            .off_grid
+            .is_some());
     }
     #[test]
     fn d99_four_texture_trees_need_two_sharing_pairs() {
@@ -661,9 +665,15 @@ mod tests {
         g.wires.pop();
         g.wires
             .extend([wire(7, 9, 0), wire(8, 9, 1), wire(9, 0, 0)]);
-        assert!(crate::select_diffuse(&g)
-            .unwrap_err()
-            .contains("more than four"));
+        // D103: the five leaves span UV0 and UV1 as a separable product: split.
+        assert!(matches!(
+            crate::select_diffuse(&g)
+                .unwrap()
+                .grid_graph
+                .unwrap()
+                .off_grid,
+            Some(crate::OffGrid::Split { .. })
+        ));
     }
     #[test]
     fn d101_constant_leaves_fold_and_color_only_trees_are_solids() {

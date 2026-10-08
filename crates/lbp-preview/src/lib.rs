@@ -15,9 +15,11 @@ pub use blend_mask::{
 };
 mod border_domain;
 mod grid_graph;
+mod offgrid;
 pub use grid_graph::{
     grid_graph_program, GraphInput, GraphNode, GraphOp, GraphProgram, GridGraph, MixFactor,
 };
+pub use offgrid::OffGrid;
 pub mod census;
 pub use blend::DiffuseBlend;
 pub use border_domain::{BorderDomain, INTERIOR_MARGIN};
