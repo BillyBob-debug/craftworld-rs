@@ -67,3 +67,32 @@ local observation and an error estimate.
   the game's create mode on a local save.
 - Script VM checks (Phase RS): compare scripted gadget behaviour (scoreboard, magic
   mouth) with our VM in the same level.
+
+## 5. Status and movement-measurement plan (2026-10-08, D133)
+
+Done on the user's PC:
+- RPCS3 v0.0.43-20247-222754bf in `%USERPROFILE%\Emulatorspcs3`; firmware 4.93
+  (`--installfw`); the 32 update packages A0101..A0133 (`--installpkg`, game reports 01.33).
+- The extracted `game-data/a1-disc` folder does not boot (no disc root RPCS3 accepts). A
+  read-only copy of the user's ISO in `%USERPROFILE%\Emulators\lbp2-iso` boots with
+  `rpcs3.exe --game-screen 1 <iso>` (second monitor). Vulkan, default settings
+  (per-game database config applied); ~26 FPS during the intro on this PC.
+- patch.edat decrypted (D133); no X1/S9 samples taken yet.
+
+Because the emulator runs below full speed, measure in game ticks, not wall time: count
+frames between samples with a game-side counter found in memory, or RPCS3's frame
+counter, and never fit against host seconds.
+
+Proposed route (no human needed if it works):
+1. Turn on RPCS3's local IPC server (`config/ipc.yml`: server enabled, port 28012). A
+   local script reads guest memory over it each frame (big-endian floats).
+2. Send keyboard input to the game window. Set up a keyboard pad profile in RPCS3 and
+   record its key map in the milestone doc.
+3. Get to a flat story level. Find Sackboy's x/y/z by scanning while walking and
+   standing still (values that change only while moving). Record the guest addresses.
+4. Run the section 3 table: walk 3+ s, standing jump, long drop, layer shift. One CSV
+   per run in `local-analysis/` (new names): tick, x, y, z, input state.
+
+Steps that may need the user at the controls: first-run prompts (profile, save data,
+network), and anything the keyboard profile cannot reach. If keyboard input does not
+reach the game, the whole run needs the user playing while the script samples.
