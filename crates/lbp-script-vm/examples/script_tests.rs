@@ -11,7 +11,7 @@
 use lbp_level::script::{self, class, Class, Script};
 use lbp_level::Limits;
 use lbp_script_vm::natives::{Bindings, World};
-use lbp_script_vm::{Fault, Step, Value, Vm};
+use lbp_script_vm::{Fault, Rules, Step, Value, Vm};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -83,9 +83,12 @@ fn fault_kind(f: &Fault) -> String {
 }
 
 fn run() -> Result<(), String> {
-    let args: Vec<_> = std::env::args().collect();
+    let all: Vec<_> = std::env::args().collect();
+    let no_init = all.iter().any(|a| a == "--no-init");
+    let lcb_bit63 = all.iter().any(|a| a == "--lcb-bit63");
+    let args: Vec<_> = all.iter().filter(|a| !a.starts_with("--")).collect();
     if args.len() != 3 {
-        return Err("usage: script_tests SCRIPT-DIR NEW-JSON".into());
+        return Err("usage: script_tests [--no-init] [--lcb-bit63] SCRIPT-DIR NEW-JSON".into());
     }
     let output = Path::new(&args[2]);
     if !output.starts_with("local-analysis") {
@@ -94,7 +97,7 @@ fn run() -> Result<(), String> {
     if output.exists() {
         return Err("output exists".into());
     }
-    let mut paths: Vec<_> = std::fs::read_dir(&args[1])
+    let mut paths: Vec<_> = std::fs::read_dir(args[1])
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "ff"))
@@ -104,7 +107,10 @@ fn run() -> Result<(), String> {
         return Err("file count budget".into());
     }
     // Load every script so test scripts can call into the others.
-    let mut vm = Vm::default();
+    let mut vm = Vm::new(Rules {
+        lcb_any_high_bit: !lcb_bit63,
+        ..Rules::default()
+    });
     let mut tests = Vec::new();
     for p in &paths {
         if std::fs::metadata(p).map_err(|e| e.to_string())?.len() > MAX_FILE_BYTES {
@@ -134,7 +140,12 @@ fn run() -> Result<(), String> {
             let mut step = if *is_static {
                 vm.start(&mut host, *id, name, &[], &mut budget)
             } else {
-                vm.construct(&mut host, *id, &mut budget).and_then(|this| {
+                let this = if no_init {
+                    vm.instantiate(*id)
+                } else {
+                    vm.construct(&mut host, *id, &mut budget)
+                };
+                this.and_then(|this| {
                     vm.start_registers(
                         &mut host,
                         *id,
@@ -168,6 +179,7 @@ fn run() -> Result<(), String> {
                 "outcome": outcome.0,
                 "fault": outcome.1,
                 "ticks": ticks,
+                "instructions": BUDGET - budget,
                 "checks_passed": host.world.passed,
                 "checks_failed": host.world.failed,
                 "first_failures": host.world.failures,
@@ -185,6 +197,12 @@ fn run() -> Result<(), String> {
         "outcomes": outcomes,
         "checks_passed": passed,
         "checks_failed": failed,
+        "options": {"no_init": no_init, "lcb_bit63": lcb_bit63},
+        "test_class_chains": tests
+            .iter()
+            .map(|(id, _)| vm.super_chain(*id))
+            .collect::<Vec<_>>(),
+        "native_calls": host.calls,
         "unbound_natives": host.unbound,
         "rows": rows,
     });

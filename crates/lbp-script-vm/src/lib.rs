@@ -211,12 +211,15 @@ pub trait Host {
 pub struct Rules {
     /// Branch target = `pc + offset` (true) or `pc + 1 + offset` (false).
     pub branch_from_current: bool,
+    /// `LCb` is true when any high-word bit is set (true) or only bit 63 (false, Toolkit).
+    pub lcb_any_high_bit: bool,
 }
 
 impl Default for Rules {
     fn default() -> Self {
         Self {
             branch_from_current: true,
+            lcb_any_high_bit: true,
         }
     }
 }
@@ -374,12 +377,30 @@ impl Vm {
 
     fn super_class(&self, c: ClassId) -> Option<ClassId> {
         let g = self.classes[c.0 as usize].script.super_class?.guid?;
-        self.by_guid.get(&g).copied().or_else(|| {
-            self.guid_names
-                .get(&g)
-                .and_then(|n| self.by_name.get(n))
-                .copied()
-        })
+        self.by_guid
+            .get(&g)
+            .copied()
+            .or_else(|| {
+                self.guid_names
+                    .get(&g)
+                    .and_then(|n| self.by_name.get(n))
+                    .copied()
+            })
+            .filter(|&s| s != c)
+    }
+
+    /// Class names from `class` up its superclass chain (for diagnostics).
+    pub fn super_chain(&self, class: ClassId) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut at = Some(class);
+        while let Some(c) = at {
+            if out.len() > MAX_CALL_DEPTH {
+                break;
+            }
+            out.push(self.class_name(c).to_owned());
+            at = self.super_class(c);
+        }
+        out
     }
 
     /// Frame running `.init__` (field initialisers) on a new object, if the class or a
@@ -651,7 +672,11 @@ impl Vm {
                     let v = match op {
                         // Toolkit reads bit 63; D138 showed `true` constants reading false,
                         // so any set bit in the high word counts (INFERRED).
-                        0x01 => Value::Bool(hi32 != 0),
+                        0x01 => Value::Bool(if self.rules.lcb_any_high_bit {
+                            hi32 != 0
+                        } else {
+                            bits >> 63 != 0
+                        }),
                         0x02 => Value::Char(r16(48)),
                         0x03 => Value::Int(hi32 as i32),
                         0x04 => Value::Float(f32::from_bits(hi32)),

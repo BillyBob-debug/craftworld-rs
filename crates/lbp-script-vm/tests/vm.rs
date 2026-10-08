@@ -244,6 +244,7 @@ fn loops_branch_both_rules_and_budget() {
     for rule in [true, false] {
         let mut vm = Vm::new(Rules {
             branch_from_current: rule,
+            ..Rules::default()
         });
         let c = vm.load(sum_script(rule), None);
         let mut budget = 10_000;
@@ -663,4 +664,92 @@ fn new_object_runs_inherited_init_and_finds_superclass_by_learned_guid() {
     );
     let o = vm.construct(&mut host, d, &mut budget).unwrap();
     assert_eq!(vm.field(o, "x"), Some(&Value::Int(7)));
+}
+
+/// A test-script shape end to end: a class with a GUID-only superclass that has
+/// `.init__`, a native `Test.Check` declared on the class, and a non-static test function
+/// run on a constructed instance with `this` in register 0. Checks must reach the world.
+#[test]
+fn test_script_checks_reach_the_world_through_construct() {
+    #[derive(Default)]
+    struct Recorder(Vec<(bool, i32)>);
+    impl World for Recorder {
+        fn test_check(&mut self, passed: bool, _message: &str, line: i32) {
+            self.0.push((passed, line));
+        }
+    }
+    let mut b = Builder::new();
+    let int_ty = b.ty(INT, "int", None, 0);
+    let ready = b.field(int_ty, "ready", true);
+    let base = b.build(
+        "TestBase",
+        None,
+        vec![func(
+            ".init__",
+            &[0],
+            vec![
+                hi(0x03, 4, 1),
+                i(0xb4, INT, 4, 0, ready),
+                i(0xa5, 0, 0, 0, 0),
+            ],
+        )],
+    );
+    let mut b = Builder::new();
+    let me = b.ty(OBJ, "Test", Some(0x401), 0);
+    b.ty(OBJ, "TestBase", Some(0x400), 0);
+    let check = b.fref(me, "Check__bQ7StringAi");
+    let msg = b.s("msg");
+    let test = b.build(
+        "Test",
+        Some(0x400),
+        vec![
+            Func {
+                name: "Check__bQ7StringAi",
+                native: true,
+                args: vec![],
+                stack: 0,
+                code: vec![],
+            },
+            func(
+                "TestSomething",
+                &[],
+                vec![
+                    hi(0x01, 4, 1),               // LCb r4 = true (value in the high word)
+                    hi(0xbc, 8, msg),             // LCsa r8
+                    hi(0x03, 12, 42),             // LCi r12 = line
+                    i(0xa3, OBJ, 0, 0, 0),        // ARG this
+                    i(0xa3, 1, 4, 4, 0),          // ARG r4
+                    i(0xa3, OBJ, 8, 8, 0),        // ARG r8
+                    i(0xa3, INT, 12, 12, 0),      // ARG r12
+                    i(0xa4, 0, 0xffff, check, 0), // CALL Test.Check
+                    i(0xa5, 0, 0, 0, 0),          // RETURN
+                ],
+            ),
+        ],
+    );
+    for (any_bit, expect) in [(true, true), (false, false)] {
+        let mut vm = Vm::new(Rules {
+            lcb_any_high_bit: any_bit,
+            ..Rules::default()
+        });
+        vm.load(base.clone(), None);
+        let t = vm.load(test.clone(), None);
+        assert_eq!(vm.super_chain(t), ["Test", "TestBase"]);
+        let mut host = Bindings::new(Recorder::default());
+        let mut budget = 1_000;
+        let this = vm.construct(&mut host, t, &mut budget).unwrap();
+        assert_eq!(vm.field(this, "ready"), Some(&Value::Int(1)));
+        let step = vm
+            .start_registers(
+                &mut host,
+                t,
+                "TestSomething",
+                &[(0, Value::Object(Some(this)))],
+                &mut budget,
+            )
+            .unwrap();
+        assert!(matches!(step, Step::Done(_)));
+        assert_eq!(host.world.0, [(expect, 42)]);
+        assert_eq!(host.calls.get("Test.Check__bQ7StringAi"), Some(&1));
+    }
 }
