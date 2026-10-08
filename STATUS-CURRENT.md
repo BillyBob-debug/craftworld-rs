@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after batch D113-D114, 2026-10-08
+# Current state (overwrite each milestone) — after batch D115-D123, 2026-10-08
 
 ## Product
 Independent LBP2 Asset Explorer (Rust). Bevy viewer (main) and legacy viewer read
@@ -41,7 +41,10 @@ Evaluator on instance-color graphs (D105). Asset work paused 2026-10-08.
 Levels: lbp-level crate reads 236 in-band 01.33 levels (D107); Toolkit LevelOracle (D106).
 Also: .trans string tables (D109), mesh bones (D110), font glyphs (D112).
 Bevy level mode --level-path/--level-guid (D113) with straight-extruded shapes (D114);
-tutorial_23 renders (14/14 meshes, 9/9 visible shapes; no backdrop/bevels).
+tutorial_23 renders with its backdrop (D119), inverse-bind/joint placement (D120),
+--preview-lighting from level settings (D121), --shape-bevels (D122, inferred).
+Runtime: skin/morphs (D115), animation keys (D116), --play-animation GPU/CPU skinning
+(D118), lbp-gooey UI + --ui-demo (D117), slot/pin/palette readers (D123).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).
@@ -77,8 +80,8 @@ tutorial_23 renders (14/14 meshes, 9/9 visible shapes; no backdrop/bevels).
   FNTb +8 word meaning unknown; patch.edat not decrypted.
 
 ## Next
-Queued PRs #18-#20. Level: backdrop (REF plan), bevels, bone-attached props, lighting;
-then Rookie Test (333/455 meshes, 599/857 shapes headless).
+Level visual QA against the game; joint skinning; bevel/UV calibration; Rookie Test and
+more story levels on screen; Toolkit spot-check for U4 slot lists.
 
 ## Environment
 - Toolchain: `. ./scripts/use-local-rust.ps1` (project-local, windows-gnu).

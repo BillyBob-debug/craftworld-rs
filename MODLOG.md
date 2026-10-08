@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 — Level v2 + queued PRs (D115-D123)
+
+tutorial_23 now draws its workshop backdrop, inverse-bind props, opt-in bevels and level
+lighting. Merged skin/morphs, animation keys, UI layer, Sackboy animation preview (GPU =
+CPU), slot/pin readers. +0 viewable / +0 Complete.
+
 ## 2026-10-08 — First level on screen (D113, D114)
 
 tutorial_23 renders in the Bevy viewer from 01.33 data: 14/14 meshes at POS and 9/9

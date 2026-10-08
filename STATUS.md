@@ -3501,3 +3501,38 @@ Not tested: backdrop/REF plans, bevels, lighting, bone-attached props, other lev
 the window, legacy viewer level mode (none).
 Next: queued PRs #18 (skin weights/morphs), #19 (animation keyframes), #20 (UI layer);
 level: backdrop plan, bevels, bone-attached props.
+
+## Batch 2026-10-08g — level v2 (D119-D122) + queued PRs D115-D118, D123 (2026-10-08)
+
+Docs: d119-level-backdrop, d120-bone-props, d121-preview-lighting, d122-shape-bevels,
+mesh-skin, animation-keys, u6-ui-layer, skinned-preview, u4-slot-pin-palette (docs/).
+
+- D119: backdrop = PWorld backdrop Thing's PLevelSettings backdropMesh (STATIC_MESH) +
+  backdrop plan; tutorial_23 static mesh 000190ca 409/409 primitives. Plan parity 42/42.
+- D120: POS Things placed POS x inverse bind of bone 0 (Toolkit StaticMeshBuilder);
+  joints placed from contact points (inferred). rookie_test 333 -> 455/455 meshes.
+- D121: --preview-lighting from PLevelSettings (sun, ambient, fog), approximate.
+  Integrator fix: light uses the display bounds (fog had covered the view).
+- D122: RBevel reader (146/146 Toolkit parity) and --shape-bevels (inferred geometry);
+  90,374 of 121,167 shapes bevelled in the census.
+- D115 (PR #18): skin weights/morphs; 4,245/4,245 meshes, Sackboy 29-morph face set.
+- D116 (PR #19): ANMb keys; 767/772 decode, 531 on the 43-bone set; fat byte mostly
+  absent; locators are sound cues; trailing bytes up to 28 (16-bit-everywhere not shown).
+- D117 (PR #20): lbp-gooey UI layer + --ui-demo (Integrator added --qa-capture for it);
+  adds Bevy UI/text deps and Bevy's default font (OFL; needs a notice if distributed).
+- D118 (PR #21): skinned preview; Sackboy 0000043f + walk_medium 0001a697: 43/43 bones,
+  29/29 morphs, finite; GPU vs CPU frame 8 differ in 8 of 3,072,800 bytes.
+- D123 (PR #22): slot/pin/palette/pack readers; 15/16 files complete, 1 slot list
+  wrapper_error; Toolkit spot-check not done.
+- Animation bank/set/map (ABK/AST/AMP): 0 on 01.33.
+**+0 newly viewable / +0 newly Complete.** tutorial_23 now shows its workshop backdrop.
+
+Commands: fmt, workspace Clippy -D warnings, tests for 10 crates, both viewer builds;
+census/probe runs (d115/d116/d123 censuses, skinned_clip_probe); captures on non-primary
+monitor 213v0: b122-tutorial23-{nolight,lit2}.png, d118-sackboy-walk-f8-{gpu,cpu}.png,
+d117-ui-demo.png (shared privately, not committed).
+
+Failed/notes: disk filled (agent build dirs, ~250 GB) and was cleared; many merge
+conflicts in level_scene/viewer resolved (LevelSceneOptions now has shape_bevels and
+placement; one LevelSettings). UI demo rebuilds every frame (perf, later).
+Next: level visual QA vs game; joint skinning; bevel/UV calibration; more levels.

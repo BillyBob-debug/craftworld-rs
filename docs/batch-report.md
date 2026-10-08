@@ -1,18 +1,18 @@
-# Batch report — 2026-10-08f (Integrator)
+# Batch report — 2026-10-08g (Integrator)
 
 ## Merged
-- D114 `cloud/D114-shape-extrude` (Lx): straight shape extrusion; 121,167 of 121,286 shapes.
-- D113 `cloud/D113-level-scene` (L2/L5): Bevy level mode with meshes and shapes.
-- Integrator: `--qa-hide-ui` flag for clean captures.
+- Level: D119 backdrop, D120 bone/joint props + inverse-bind placement, D121 preview
+  lighting, D122 bevels (+ Integrator fog-bounds fix).
+- PRs: D115 (#18 skin/morphs), D116 (#19 animation keys), D117 (#20 UI layer, + demo
+  capture), D118 (#21 skinned preview), D123 (#22 slots/pins/palettes).
 
 ## Failed
-None.
+None. D123: 1 slot list wrapper_error recorded; Toolkit spot-check not done.
 
 ## Counts
-tutorial_23: 14/14 RENDER_MESH drawn, 9/9 visible shapes drawn (27 collision-only shapes
-have no GENERATED_MESH), 3 decorations not drawn. Visual check passed (recognisable,
-upright); capture shared privately, not committed. Assets: +0 newly viewable / +0 newly
-Complete.
+Assets +0 newly viewable / +0 newly Complete. tutorial_23: 14 meshes, 9 shapes, 75
+backdrop items (115 draw entities). rookie_test meshes 455/455 placed.
 
-## Backlog
-Next: PRs #18-#20; level backdrop, bevels, bone-attached props.
+## Visual checks
+tutorial_23 (lit and unlit), Sackboy walk frame 8 (GPU = CPU), UI demo: all look right;
+shared privately with the owner.
