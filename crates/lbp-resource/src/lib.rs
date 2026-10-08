@@ -9,6 +9,7 @@ pub mod font;
 pub mod material;
 mod metadata;
 pub mod plan;
+pub mod translation;
 pub use metadata::{
     inspect, is_protected_prefix, Dependency, Header, Inspection, InspectionLimits, ResourceType,
     DOUBLE11_BRANCH_ID, DOUBLE11_HEADS, DOUBLE11_MAX_BRANCH_REVISION, LBP2_MAX_REVISION,

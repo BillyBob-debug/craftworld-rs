@@ -29,6 +29,7 @@
 !/scripts/AnimationOracle.java
 !/scripts/PlanOracle.java
 !/scripts/PlanInventoryOracle.java
+!/scripts/TranslationOracle.java
 !/crates/
 !/crates/**/
 !/crates/**/Cargo.toml
