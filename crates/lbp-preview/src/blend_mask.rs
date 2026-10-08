@@ -1,7 +1,8 @@
 //! D84 BLEND (box 16) phase 1: static COLOR and one texture sample, stepped by that
-//! sample's alpha with the community-generator factor clamp(100·m − 15, 0, 1).
-//! Rule, evidence labels, pin and limits: docs/d84-blend-route.md (from docs/d76-blend.md).
-/// The only threshold pair observed in community code (0.15 / 0.16 as f32 bits).
+//! sample's alpha. D94 generalises the thresholds: factor = clamp((m − p0)/(p1 − p0), 0, 1)
+//! for parameter words p0 < p1 (the community literals 100/15 are p0/p1 = 0.15/0.16).
+//! Rule, evidence labels, pin and limits: docs/d94-blend.md, docs/d84-blend-route.md.
+/// The threshold pair observed in community code (0.15 / 0.16 as f32 bits).
 pub const BLEND_THRESHOLD_BITS: [u32; 2] = [0x3e19_999a, 0x3e23_d70a];
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlendDiffuseMask {
@@ -9,23 +10,32 @@ pub struct BlendDiffuseMask {
     pub color: crate::DiffuseTint,
     /// true: COLOR on port 0 (factor 0), sample on port 1 (factor 1).
     pub color_first: bool,
-    /// Raw parameter words 0 and 1; accepted only when equal to BLEND_THRESHOLD_BITS.
+    /// Raw parameter words 0 and 1 (lower/upper threshold); see `blend_thresholds`.
     pub threshold_bits: [u32; 2],
 }
-/// Mask value m to blend factor; port 0 at 0, port 1 at 1.
-pub fn blend_factor(mask: f64) -> f64 {
-    (100. * mask - 15.).clamp(0., 1.)
+/// Parameter words 0/1 as thresholds: both finite, p0 < p1, finite scale 1/(p1 − p0).
+pub fn blend_thresholds(bits: [u32; 2]) -> Result<[f64; 2], String> {
+    let [p0, p1] = bits.map(f32::from_bits);
+    // The compiled form stores 1/(p1 − p0) as an f32 constant, so it must be finite there.
+    if !(p0.is_finite() && p1.is_finite() && p0 < p1 && (1. / (p1 - p0)).is_finite()) {
+        return Err("Unsupported: BLEND thresholds must be finite with param0 < param1".into());
+    }
+    Ok([p0, p1].map(f64::from))
+}
+/// Mask value m to blend factor for thresholds p0 < p1; port 0 at 0, port 1 at 1.
+/// Equal to the compiled scale/bias form clamp(m/(p1 − p0) − p0/(p1 − p0), 0, 1).
+pub fn blend_factor(mask: f64, [p0, p1]: [f64; 2]) -> f64 {
+    ((mask - p0) / (p1 - p0)).clamp(0., 1.)
 }
 impl BlendDiffuseMask {
     pub fn validate(self) -> Result<(), String> {
-        if self.threshold_bits != BLEND_THRESHOLD_BITS {
-            return Err("Unsupported: BLEND thresholds other than 0.15/0.16".into());
-        }
+        blend_thresholds(self.threshold_bits)?;
         self.color.validate()
     }
     pub fn label(self) -> String {
+        let [p0, p1] = self.threshold_bits.map(f32::from_bits);
         format!(
-            "BLEND mask alpha of sample, thresholds 0.15/0.16, color {:?} on port {} • nearest filtering",
+            "BLEND mask alpha of sample, thresholds {p0}/{p1}, color {:?} on port {} • nearest filtering",
             self.color.values(),
             if self.color_first { 0 } else { 1 }
         )
@@ -35,6 +45,7 @@ impl BlendDiffuseMask {
     /// RGB lerp in linear space (sRGB-decoded sample), alpha linear. Source untouched.
     pub fn pixels(self, rgba: &[u8], cancelled: impl Fn() -> bool) -> Result<Vec<u8>, String> {
         self.validate()?;
+        let thresholds = blend_thresholds(self.threshold_bits)?;
         if !rgba.len().is_multiple_of(4) || rgba.len() > 4 * lbp_texture::MAX_PIXELS {
             return Err("Invalid: BLEND pixel extent/budget".into());
         }
@@ -66,14 +77,14 @@ impl BlendDiffuseMask {
                 ((x + 0.055) / 1.055).powf(2.4)
             }
         });
-        // At most four distinct factors occur on 8-bit alpha; the table is per alpha
-        // byte (256 x 256 x 3 bytes on the heap), like the alpha MIX bake.
+        // One factor per alpha byte; the table is per alpha byte
+        // (256 x 256 x 3 bytes on the heap), like the alpha MIX bake.
         let mut table = Vec::<[u8; 3]>::with_capacity(65536);
         for alpha in 0..256 {
             if alpha % 16 == 0 && cancelled() {
                 return Err("Cancelled".into());
             }
-            let f = blend_factor(alpha as f64 / 255.);
+            let f = blend_factor(alpha as f64 / 255., thresholds);
             for value in decoded {
                 table.push(std::array::from_fn(|c| encode(lerp(value, c, f))));
             }
@@ -89,7 +100,9 @@ impl BlendDiffuseMask {
                 table[a * 256 + p[0] as usize][0],
                 table[a * 256 + p[1] as usize][1],
                 table[a * 256 + p[2] as usize][2],
-                (lerp(m, 3, blend_factor(m)) * 255.).round().clamp(0., 255.) as u8,
+                (lerp(m, 3, blend_factor(m, thresholds)) * 255.)
+                    .round()
+                    .clamp(0., 255.) as u8,
             ]);
         }
         if cancelled() {
@@ -111,9 +124,54 @@ mod tests {
             threshold_bits: BLEND_THRESHOLD_BITS,
         }
     }
+    const COMMUNITY: [f64; 2] = [0.15000000596046448, 0.1599999964237213];
+    fn blend_factor_community(m: f64) -> f64 {
+        blend_factor(m, COMMUNITY)
+    }
     #[test]
     fn factor_steps_between_thresholds_and_clamps() {
         assert_eq!(BLEND_THRESHOLD_BITS.map(f32::from_bits), [0.15, 0.16]);
+        assert_eq!(blend_thresholds(BLEND_THRESHOLD_BITS).unwrap(), COMMUNITY);
+        // The general form reproduces the community literals clamp(100·m − 15, 0, 1).
+        for i in 0..=1000 {
+            let m = f64::from(i) / 1000.;
+            let literal = (100. * m - 15.).clamp(0., 1.);
+            assert!((blend_factor_community(m) - literal).abs() < 1e-4, "{m}");
+        }
+        // D94 corpus pairs: 0/1 is the clamped mask itself; 0.67/0.8 and 0.3/0.7 use the
+        // scale/bias observed in the materials' compiled constants (7.6923/-5.1538, 2.5/-0.75).
+        let unit = blend_thresholds([0, 1f32.to_bits()]).unwrap();
+        for m in [0., 0.25, 0.5, 1.] {
+            assert_eq!(blend_factor(m, unit), m);
+        }
+        let high = blend_thresholds([0x3f2b_851e, 0x3f4c_cccc]).unwrap();
+        let mid = blend_thresholds([0x3e99_999a, 0x3f33_3333]).unwrap();
+        for m in [0.7, 0.75, 0.78] {
+            let (scale, bias) = (1. / (high[1] - high[0]), -high[0] / (high[1] - high[0]));
+            assert!((scale - 7.6923).abs() < 1e-3 && (bias + 5.1538).abs() < 1e-3);
+            assert!((blend_factor(m, high) - (m * scale + bias)).abs() < 1e-9);
+            assert!((blend_factor(m, mid) - (2.5 * m - 0.75).clamp(0., 1.)).abs() < 1e-6);
+        }
+        assert_eq!(blend_factor(0.6, high), 0.);
+        assert_eq!(blend_factor(0.81, high), 1.);
+        // Invalid pairs: equal, reversed, non-finite, scale overflow.
+        for bits in [
+            [0x3f00_0000, 0x3f00_0000],
+            [0x3f80_0000, 0],
+            [f32::NAN.to_bits(), 0x3f80_0000],
+            [0, f32::INFINITY.to_bits()],
+            [0, 1],
+        ] {
+            assert_eq!(
+                blend_thresholds(bits).unwrap_err(),
+                "Unsupported: BLEND thresholds must be finite with param0 < param1",
+                "{bits:x?}"
+            );
+        }
+    }
+    #[test]
+    fn community_pair_steps_between_thresholds_and_clamps() {
+        let blend_factor = blend_factor_community;
         for (m, f) in [
             (0., 0.),
             (0.15, 0.),
@@ -154,12 +212,26 @@ mod tests {
         let expect = |f: f64| (1.055 * f.powf(1. / 2.4) - 0.055) * 255.;
         assert_eq!(
             f64::from(stepped[0]),
-            expect(blend_factor(39. / 255.)).round()
+            expect(blend_factor_community(39. / 255.)).round()
         );
         assert_eq!(
             f64::from(stepped[4]),
-            expect(blend_factor(40. / 255.)).round()
+            expect(blend_factor_community(40. / 255.)).round()
         );
+        // D94: thresholds 0/1 make the factor the alpha itself (a plain alpha lerp).
+        let mut unit = mask([0., 0., 0., 1.], true);
+        unit.threshold_bits = [0, 1f32.to_bits()];
+        let lerped = unit
+            .pixels(
+                &[255, 255, 255, 0, 255, 255, 255, 128, 255, 255, 255, 255],
+                || false,
+            )
+            .unwrap();
+        assert_eq!(
+            [lerped[0], lerped[4], lerped[8]],
+            [0, expect(128. / 255.).round() as u8, 255]
+        );
+        assert_eq!([lerped[3], lerped[7], lerped[11]], [255, 191, 255]);
         // Determinism.
         assert_eq!(
             mask([0.2, 0.4, 0.6, 1.], true).pixels(&raw, || false),
@@ -183,19 +255,26 @@ mod tests {
         );
     }
     #[test]
-    fn thresholds_and_color_are_validated_by_exact_bits() {
+    fn thresholds_and_color_are_validated() {
         let mut m = mask([0., 0., 0., 1.], true);
         assert!(m.validate().is_ok());
         for bits in [
             [0x3e19_999a, 0x3e2e_147b],
-            [0x3e19_999b, 0x3e23_d70a],
             [0, 0x3f80_0000],
+            [0x3f2b_851e, 0x3f4c_cccc],
         ] {
+            m.threshold_bits = bits;
+            assert!(m.validate().is_ok(), "{bits:x?}");
+        }
+        // The corpus words are one ulp below 0.67 and 0.8; the label shows them exactly.
+        assert!(m.label().contains("thresholds 0.66999996/0.79999995"));
+        for bits in [[0x3f80_0000, 0], [0x3e19_999a, 0x3e19_999a]] {
             m.threshold_bits = bits;
             assert_eq!(
                 m.validate().unwrap_err(),
-                "Unsupported: BLEND thresholds other than 0.15/0.16"
+                "Unsupported: BLEND thresholds must be finite with param0 < param1"
             );
+            assert!(m.pixels(&[0; 4], || false).is_err());
         }
         m.threshold_bits = BLEND_THRESHOLD_BITS;
         for bad in [1.5, f32::NAN] {
