@@ -1032,7 +1032,13 @@ fn plan_level(scene: &LevelScene) -> Result<LevelPlan, String> {
 /// (sun direction from the displayed bounds centre; fog distances scaled to display).
 fn level_light(scene: &LevelScene, buckets: &[Result<usize, String>]) -> lighting::PreviewLight {
     let shown = |i: &level_scene::SceneItem| buckets.get(i.mesh).is_some_and(Result::is_ok);
-    let (Some(settings), Some([lo, hi])) = (&scene.settings, scene.bounds_where(shown)) else {
+    // Same bounds as `place_items` (D119: backdrop excluded) so the fog scale and sun
+    // centre match the display normalization.
+    let backdrop = |i: &level_scene::SceneItem| Some(i.thing) == scene.counts.backdrop.thing;
+    let bounds = scene
+        .bounds_where(|i| shown(i) && !backdrop(i))
+        .or_else(|| scene.bounds_where(shown));
+    let (Some(settings), Some([lo, hi])) = (&scene.settings, bounds) else {
         let mut light = lighting::PreviewLight::generic();
         light
             .notes
