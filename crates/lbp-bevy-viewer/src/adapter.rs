@@ -7,6 +7,27 @@ use bevy::{
     render::render_resource::{Extent3d, PrimitiveTopology, TextureDimension, TextureFormat},
 };
 
+/// Bind-pose centre and largest extent; posed frames reuse it so the view stays still.
+pub type DisplayFrame = ([f64; 3], f64);
+pub fn display_frame(positions: &[[f32; 3]]) -> Option<DisplayFrame> {
+    let mut lo = [f64::INFINITY; 3];
+    let mut hi = [f64::NEG_INFINITY; 3];
+    for p in positions {
+        for i in 0..3 {
+            lo[i] = lo[i].min(f64::from(p[i]));
+            hi[i] = hi[i].max(f64::from(p[i]));
+        }
+    }
+    let span = (0..3).map(|i| hi[i] - lo[i]).fold(0f64, f64::max);
+    (span > 0.).then(|| (std::array::from_fn(|i| (lo[i] + hi[i]) * 0.5), span))
+}
+/// Display-only centering and uniform normalization in f64 avoids finite f32 overflow.
+pub fn to_display(positions: &[[f32; 3]], (centre, span): DisplayFrame) -> Vec<[f32; 3]> {
+    positions
+        .iter()
+        .map(|p| std::array::from_fn(|i| ((f64::from(p[i]) - centre[i]) / span) as f32))
+        .collect()
+}
 pub fn mesh(
     positions: &[[f32; 3]],
     triangles: &[[u32; 3]],
@@ -39,26 +60,9 @@ fn build_mesh(
     {
         return Err("Invalid: nonfinite position/UV or UV correspondence".into());
     }
-    let mut lo = [f64::INFINITY; 3];
-    let mut hi = [f64::NEG_INFINITY; 3];
-    for p in positions {
-        for i in 0..3 {
-            lo[i] = lo[i].min(f64::from(p[i]));
-            hi[i] = hi[i].max(f64::from(p[i]));
-        }
-    }
-    let span = (0..3).map(|i| hi[i] - lo[i]).fold(0f64, f64::max);
-    if span <= 0. {
-        return Err("Unsupported: zero-size geometry".into());
-    }
-    // Display-only centering and uniform normalization in f64 avoids finite f32 overflow.
+    let frame = display_frame(positions).ok_or("Unsupported: zero-size geometry")?;
     let display: Vec<[f32; 3]> = if normalize {
-        positions
-            .iter()
-            .map(|p| {
-                std::array::from_fn(|i| ((f64::from(p[i]) - (lo[i] + hi[i]) * 0.5) / span) as f32)
-            })
-            .collect()
+        to_display(positions, frame)
     } else {
         positions.to_vec()
     };

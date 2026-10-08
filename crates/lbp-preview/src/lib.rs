@@ -39,6 +39,7 @@ mod instance_textured;
 pub use instance::{project_instance_color, InstanceProjection, PreviewOptions};
 pub use instance_textured::select_instance_diffuse;
 mod linked;
+pub mod skinned;
 mod small_family;
 pub use small_family::{select_small_solid, SamplerScale};
 mod solid;
@@ -75,7 +76,7 @@ pub fn load_mesh(
     source.check_stable()?;
     Ok(LoadedMesh { geometry, linked })
 }
-fn read_mesh(
+pub(crate) fn read_mesh(
     source: &AttachedSource,
     key: &LocationKey,
     control: &LoadControl,

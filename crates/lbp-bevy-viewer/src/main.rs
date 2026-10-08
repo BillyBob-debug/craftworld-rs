@@ -5,6 +5,7 @@ use dual::ViewerMaterial;
 mod browser;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
+    mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
     prelude::*,
     render::view::screenshot::{save_to_disk, Screenshot, ScreenshotCaptured},
 };
@@ -33,6 +34,23 @@ struct Completed {
     identity: String,
     guid: String,
     level: Option<Result<LevelLoaded, String>>,
+    clip: Option<Result<lbp_preview::skinned::SkinnedClip, String>>,
+}
+/// Rd: CPU-skinned playback of one animation on the displayed mesh.
+struct Playing {
+    clip: lbp_preview::skinned::SkinnedClip,
+    frame: adapter::DisplayFrame,
+    started: f32,
+    shown: Option<i64>,
+    gpu: Option<GpuRig>,
+}
+/// Re: joint entities under a root carrying the display normalisation; the standard
+/// vertex shader skins. Mesh positions stay in display space (see `gpu_rig`).
+struct GpuRig {
+    root: Entity,
+    joints: Vec<Entity>,
+    /// Morph weights are applied on the CPU into positions; skip when there are none.
+    morphs: bool,
 }
 type LevelScene = level_scene::LevelScene<level_scene::ScenePayload>;
 struct LevelLoaded {
@@ -74,6 +92,10 @@ struct Viewer {
     instance_input_enabled: bool,
     instance_rgba: [f32; 4],
     animation_base: bool,
+    animation_guid: String,
+    animation_frame: Option<i64>,
+    cpu_skinning: bool,
+    playing: Option<Playing>,
     snapshot: String,
     game: String,
     guid: String,
@@ -128,6 +150,8 @@ impl Viewer {
             .active()
             .then(|| (self.level.guid, self.level.path.clone()));
         let options = self.preview_options();
+        let animation_guid = self.animation_guid.trim().to_ascii_lowercase();
+        self.playing = None;
         let control = LoadControl::default();
         let worker = control.clone();
         let (tx, rx) = mpsc::sync_channel(1);
@@ -152,6 +176,7 @@ impl Viewer {
                     // Attachment succeeds independently of a particular preview failure.
                     // The catalog remains browsable even when the initial GUID is unsupported.
                     let mut identity = String::new();
+                    let mut mesh_key = None;
                     let preview = (|| {
                         if guid.trim().is_empty() {
                             return Ok(None);
@@ -162,6 +187,7 @@ impl Viewer {
                             return Err("GUID must be eight hexadecimal digits".into());
                         }
                         let key = lbp_preview::resolve(&catalog, Some(number), None)?;
+                        mesh_key = Some(key.clone());
                         identity = catalog.by_guid[&format!("{number:08x}")]
                             .iter()
                             .map(|&i| catalog.snapshot.resources[i].map_row.path.as_str())
@@ -183,6 +209,17 @@ impl Viewer {
                         )?;
                         Ok(LevelLoaded { scene, identity })
                     });
+                    let clip = (preview.as_ref().is_ok_and(Option::is_some)
+                        && !animation_guid.is_empty())
+                    .then(|| {
+                        let number = u32::from_str_radix(&animation_guid, 16)
+                            .ok()
+                            .filter(|_| animation_guid.len() == 8)
+                            .ok_or("Animation GUID must be eight hexadecimal digits")?;
+                        let key = lbp_preview::skinned::resolve_animation(&catalog, number)?;
+                        let mesh_key = mesh_key.as_ref().ok_or("No mesh key")?;
+                        lbp_preview::skinned::load_clip(&source, mesh_key, &key, &worker)
+                    });
                     worker.check()?;
                     Ok(Completed {
                         context: (catalog, source),
@@ -190,6 +227,7 @@ impl Viewer {
                         identity,
                         guid,
                         level,
+                        clip,
                     })
                 };
                 let _ = tx.send(run());
@@ -227,6 +265,10 @@ fn options() -> Result<Viewer, String> {
         instance_input_enabled: false,
         instance_rgba: [1.; 4],
         animation_base: false,
+        animation_guid: String::new(),
+        animation_frame: None,
+        cpu_skinning: false,
+        playing: None,
         snapshot: String::new(),
         game: String::new(),
         guid: String::new(),
@@ -309,8 +351,8 @@ fn options() -> Result<Viewer, String> {
             continue;
         }
         if flag == "--help" {
-            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-report: with a level, print scene counts and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
+--qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -318,6 +360,17 @@ fn options() -> Result<Viewer, String> {
             "--snapshot" => v.snapshot = value,
             "--game-dir" => v.game = value,
             "--select-guid" => v.guid = value,
+            "--play-animation" => v.animation_guid = value,
+            "--animation-frame" => {
+                v.animation_frame = Some(value.parse().map_err(|_| "invalid animation frame")?)
+            }
+            "--skinning" => {
+                v.cpu_skinning = match value.as_str() {
+                    "cpu" => true,
+                    "gpu" => false,
+                    _ => return Err("--skinning takes cpu or gpu".into()),
+                }
+            }
             "--browse-query" => v.browser.query = value,
             "--level-guid" => {
                 if value.len() != 8 {
@@ -415,7 +468,7 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (place_on_second_monitor, load, camera, capture).chain(),
+            (place_on_second_monitor, load, animate, camera, capture).chain(),
         )
         .add_systems(EguiPrimaryContextPass, panel)
         .run();
@@ -459,6 +512,9 @@ fn clear(
     materials: &mut Assets<ViewerMaterial>,
     images: &mut Assets<Image>,
 ) {
+    if let Some(gpu) = v.playing.take().and_then(|p| p.gpu) {
+        commands.entity(gpu.root).despawn();
+    }
     for (entity, mesh, material, image) in v.scene.drain(..) {
         commands.entity(entity).despawn();
         meshes.remove(mesh.id());
@@ -493,6 +549,7 @@ fn load(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<ViewerMaterial>>,
     mut images: ResMut<Assets<Image>>,
+    mut bindposes: ResMut<Assets<SkinnedMeshInverseBindposes>>,
 ) {
     if v.requested {
         v.requested = false;
@@ -592,6 +649,55 @@ fn load(
             v.scene.push((entity, mesh, material, image));
         }
         *orbit = Orbit::default();
+        let clip_status = match done.clip {
+            None => String::new(),
+            Some(Err(e)) => format!("\nAnimation not played: {e}"),
+            Some(Ok(clip)) => {
+                let r = &clip.report;
+                let text = format!(
+                    "\nAnimation: {} frames at {} fps{} • {}/{} mesh bones driven ({} animation bones unmatched) • morphs {} mesh / {} animation",
+                    r.frames,
+                    r.fps,
+                    if r.looped { ", looped" } else { "" },
+                    r.matched_bones,
+                    r.mesh_bones,
+                    r.unmatched_animation_bones,
+                    r.mesh_morphs,
+                    r.animation_morphs
+                );
+                let frame = adapter::display_frame(&g.positions)
+                    .ok_or("Unsupported: zero-size geometry")?;
+                let gpu = if v.cpu_skinning {
+                    None
+                } else {
+                    let scene: Vec<_> = v.scene.iter().map(|s| (s.0, s.1.clone())).collect();
+                    let mut rig = gpu_rig(
+                        &mut commands,
+                        &mut meshes,
+                        &mut bindposes,
+                        &clip.rig,
+                        (&clip.skin.joints, &clip.skin.weights),
+                        frame,
+                        &scene,
+                    )?;
+                    rig.morphs = !clip.skin.morphs.is_empty() && clip.report.animation_morphs > 0;
+                    Some(rig)
+                };
+                let path = if gpu.is_some() {
+                    "GPU joints"
+                } else {
+                    "CPU reference"
+                };
+                v.playing = Some(Playing {
+                    clip,
+                    frame,
+                    started: -1.,
+                    shown: None,
+                    gpu,
+                });
+                format!("{text} • skinning: {path}")
+            }
+        };
         v.status = format!(
             "Loaded {}\n{}\n{} vertices • {} triangles • {} primitives{}{}",
             done.guid,
@@ -599,7 +705,7 @@ fn load(
             g.positions.len(),
             g.triangles.len(),
             g.metadata.primitives.len(),
-            "\n",
+            clip_status + "\n",
             details.join("\n")
         );
         println!("{}", v.status);
@@ -1029,6 +1135,128 @@ fn level_report(v: &Viewer) -> Result<(), String> {
     }
     Ok(())
 }
+/// Spawns the joint hierarchy and turns every scene mesh into a skinned mesh.
+fn gpu_rig(
+    commands: &mut Commands,
+    meshes: &mut Assets<Mesh>,
+    bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
+    rig: &lbp_preview::skinned::Rig,
+    (skin_joints, skin_weights): (&[[u8; 4]], &[[f32; 4]]),
+    (centre, span): adapter::DisplayFrame,
+    scene: &[(Entity, Handle<Mesh>)],
+) -> Result<GpuRig, String> {
+    let bones = rig.bone_count();
+    // One extra static joint holds vertices without a usable weight in place.
+    if bones + 1 > bevy::pbr::MAX_JOINTS {
+        return Err(format!(
+            "Unsupported: {bones} bones exceed the GPU joint limit; use --skinning cpu"
+        ));
+    }
+    // display = N × raw, N = scale(1/span) × translate(−centre). Joint globals become
+    // N × world, so inverse binds take N⁻¹ to cancel it on display-space vertices.
+    let centre = Vec3::from_array(centre.map(|c| c as f32));
+    let span = span as f32;
+    let n = Mat4::from_scale(Vec3::splat(1. / span)) * Mat4::from_translation(-centre);
+    let n_inv = Mat4::from_translation(centre) * Mat4::from_scale(Vec3::splat(span));
+    let mut inverse: Vec<Mat4> = rig
+        .inverse_binds()
+        .iter()
+        .map(|m| Mat4::from_cols_array(m) * n_inv)
+        .collect();
+    inverse.push(n_inv);
+    let root = commands
+        .spawn((Transform::from_matrix(n), Visibility::default()))
+        .id();
+    let local = rig.local_matrices(None);
+    let mut joints: Vec<Entity> = local
+        .iter()
+        .map(|m| {
+            commands
+                .spawn(Transform::from_matrix(Mat4::from_cols_array(m)))
+                .id()
+        })
+        .collect();
+    for (i, parent) in rig.parents().into_iter().enumerate() {
+        let parent = usize::try_from(parent).map_or(root, |p| joints[p]);
+        commands.entity(joints[i]).insert(ChildOf(parent));
+    }
+    joints.push(commands.spawn((Transform::IDENTITY, ChildOf(root))).id());
+    let inverse_bindposes = bindposes.add(SkinnedMeshInverseBindposes::from(inverse));
+    let (joint_index, joint_weight) =
+        lbp_preview::skinned::gpu_skin_attributes(skin_joints, skin_weights, bones);
+    for (entity, handle) in scene {
+        let mut mesh = meshes.get_mut(handle).ok_or("Missing scene mesh")?;
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_JOINT_INDEX,
+            bevy::mesh::VertexAttributeValues::Uint16x4(joint_index.clone()),
+        );
+        mesh.insert_attribute(Mesh::ATTRIBUTE_JOINT_WEIGHT, joint_weight.clone());
+        commands.entity(*entity).insert((
+            SkinnedMesh {
+                // Strong handles: the asset is freed with the scene entities.
+                inverse_bindposes: inverse_bindposes.clone(),
+                joints: joints.clone(),
+            },
+            bevy::camera::visibility::NoFrustumCulling,
+        ));
+    }
+    Ok(GpuRig {
+        root,
+        joints,
+        morphs: false,
+    })
+}
+fn animate(
+    time: Res<Time>,
+    mut v: ResMut<Viewer>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut transforms: Query<&mut Transform>,
+) {
+    let held = v.animation_frame;
+    let handles: Vec<Handle<Mesh>> = v.scene.iter().map(|s| s.1.clone()).collect();
+    let Some(playing) = v.playing.as_mut() else {
+        return;
+    };
+    let now = time.elapsed_secs();
+    if playing.started < 0. {
+        playing.started = now;
+    }
+    let fps = f32::from(playing.clip.report.fps.max(1));
+    let frame = held.unwrap_or(((now - playing.started) * fps) as i64);
+    if playing.shown == Some(frame) {
+        return;
+    }
+    playing.shown = Some(frame);
+    let posed = if let Some(gpu) = &playing.gpu {
+        let Some(pose) = playing.clip.frame_pose(frame) else {
+            return;
+        };
+        for (joint, m) in gpu
+            .joints
+            .iter()
+            .zip(playing.clip.rig.local_matrices(Some(&pose)))
+        {
+            if let Ok(mut t) = transforms.get_mut(*joint) {
+                *t = Transform::from_matrix(Mat4::from_cols_array(&m));
+            }
+        }
+        if !gpu.morphs {
+            return;
+        }
+        playing.clip.morphed_bind(&pose)
+    } else {
+        let Some(posed) = playing.clip.frame_positions(frame) else {
+            return;
+        };
+        posed
+    };
+    let display = adapter::to_display(&posed, playing.frame);
+    for handle in handles {
+        if let Some(mut mesh) = meshes.get_mut(&handle) {
+            mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, display.clone());
+        }
+    }
+}
 fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Orbit>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if v.hide_ui {
@@ -1071,6 +1299,8 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
             ui.text_edit_singleline(&mut v.game);
             ui.label("Mesh GUID (blank: attach and browse)");
             ui.text_edit_singleline(&mut v.guid);
+            ui.label("Play animation GUID (blank: bind pose)");
+            ui.text_edit_singleline(&mut v.animation_guid);
             if ui.button("Load / reload").clicked() { v.requested = true; }
             if v.job.is_some() && ui.button("Cancel").clicked() {
                 v.job = None;
@@ -1107,7 +1337,7 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
         egui::ScrollArea::vertical().max_height(260.).show(ui, |ui| { ui.label(&v.status); });
         ui.separator();
         ui.label("Left drag: orbit\nRight / middle drag: pan\nWheel: zoom • R: reset • F: frame");
-        ui.small("Unlit • opaque • sRGB • double-sided\nGenerated diagnostic normals; no bone/morph pose.\nTop mip only. Original game lighting, alpha and axis conventions unverified.");
+        ui.small("Unlit • opaque • sRGB • double-sided\nGenerated diagnostic normals. Animation: positions only, integer frames.\nTop mip only. Original game lighting, alpha and axis conventions unverified.");
     });
     if !v.synthetic || !v.census.is_empty() {
         census_window(ctx, &v.census);
@@ -1417,6 +1647,73 @@ fn synthetic_groups(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Re: the joint hierarchy spawned for GPU skinning gives, after transform
+    /// propagation, joint global × inverse bind = N × CPU skin matrix × N⁻¹.
+    #[test]
+    fn gpu_joint_hierarchy_matches_cpu_skin_matrices() {
+        use lbp_preview::skinned::{trs, Rig, RigBone};
+        let at = |y: f32| trs([0., y, 0.], [0., 0., 0., 1.], [1.; 3]);
+        let rig = Rig::new(
+            vec![
+                RigBone {
+                    parent: -1,
+                    anim_hash: 10,
+                    skin_pose: at(0.),
+                    inv_skin_pose: at(0.),
+                },
+                RigBone {
+                    parent: 0,
+                    anim_hash: 20,
+                    skin_pose: at(1.),
+                    inv_skin_pose: at(-1.),
+                },
+            ],
+            &[20, 10],
+        )
+        .unwrap();
+        let pose = lbp_preview::skinned::Pose {
+            rotations: vec![[0.6, 0., 0., 0.8], [0., 0., 0.6, 0.8]],
+            positions: vec![[0., 1., 0.], [2., 0., 0.]],
+            scales: vec![[1.; 3], [1.5; 3]],
+            morphs: vec![],
+        };
+        let frame = ([1., 2., 3.], 4.);
+        let mut app = App::new();
+        app.add_plugins(bevy::transform::TransformPlugin);
+        let world = app.world_mut();
+        let mut meshes = Assets::<Mesh>::default();
+        let mut bindposes = Assets::<SkinnedMeshInverseBindposes>::default();
+        let mut queue = bevy::ecs::world::CommandQueue::default();
+        let mut commands = Commands::new(&mut queue, world);
+        let gpu = gpu_rig(
+            &mut commands,
+            &mut meshes,
+            &mut bindposes,
+            &rig,
+            (&[], &[]),
+            frame,
+            &[],
+        )
+        .unwrap();
+        queue.apply(world);
+        for (joint, m) in gpu.joints.iter().zip(rig.local_matrices(Some(&pose))) {
+            *world.get_mut::<Transform>(*joint).unwrap() =
+                Transform::from_matrix(Mat4::from_cols_array(&m));
+        }
+        app.update();
+        let (_, inverse) = bindposes.iter().next().unwrap();
+        let n =
+            Mat4::from_scale(Vec3::splat(0.25)) * Mat4::from_translation(-Vec3::new(1., 2., 3.));
+        for (i, cpu) in rig.skin_matrices(Some(&pose)).iter().enumerate() {
+            let global = app.world().get::<GlobalTransform>(gpu.joints[i]).unwrap();
+            let got = global.to_matrix() * inverse[i];
+            let want = n * Mat4::from_cols_array(cpu) * n.inverse();
+            assert!(got.abs_diff_eq(want, 1e-4), "{i}: {got} vs {want}");
+        }
+        // The static joint leaves display-space vertices where they are.
+        let fixed = app.world().get::<GlobalTransform>(gpu.joints[2]).unwrap();
+        assert!((fixed.to_matrix() * inverse[2]).abs_diff_eq(Mat4::IDENTITY, 1e-5));
+    }
     #[test]
     fn hidden_window_only_becomes_visible_on_non_primary_monitor() {
         let mut app = App::new();
@@ -1534,6 +1831,10 @@ mod tests {
             instance_input_enabled: false,
             instance_rgba: [1.; 4],
             animation_base: false,
+            animation_guid: String::new(),
+            animation_frame: None,
+            cpu_skinning: false,
+            playing: None,
             snapshot: String::new(),
             game: String::new(),
             guid: String::new(),
