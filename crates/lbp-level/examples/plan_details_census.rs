@@ -94,6 +94,7 @@ fn run() -> Result<(), String> {
     let mut rows = Vec::new();
     let mut total_bytes = 0u64;
     let mut statuses = BTreeMap::<&str, usize>::new();
+    let mut wrapper_errors = BTreeMap::<String, usize>::new();
     let mut stops = BTreeMap::<String, usize>::new();
     let mut heads = BTreeMap::<String, usize>::new();
     let mut types = BTreeMap::<String, usize>::new();
@@ -133,6 +134,13 @@ fn run() -> Result<(), String> {
                 row["status"] = json!("wrapper_error");
                 row["reason"] = json!(e.to_string());
                 *statuses.entry("wrapper_error").or_default() += 1;
+                // Leading magic bytes help separate text-form, foreign and wrapped rows.
+                let magic: String = bytes
+                    .iter()
+                    .take(4)
+                    .map(|&b| if b.is_ascii_graphic() { b as char } else { '.' })
+                    .collect();
+                *wrapper_errors.entry(format!("{magic}: {e}")).or_default() += 1;
                 rows.push(row);
                 continue;
             }
@@ -228,6 +236,7 @@ fn run() -> Result<(), String> {
         "unit": "distinct content hash",
         "files": by_hash.len(),
         "status_counts": statuses,
+        "wrapper_error_counts": wrapper_errors,
         "stop_counts": stops,
         "head_counts": heads,
         "detail_counts": counts,
@@ -243,6 +252,7 @@ fn run() -> Result<(), String> {
     serde_json::to_writer_pretty(&mut file, &value).map_err(|e| e.to_string())?;
     file.write_all(b"\n").map_err(|e| e.to_string())?;
     println!("plans {}; status {:?}", by_hash.len(), statuses);
+    println!("wrapper errors {wrapper_errors:?}");
     println!("details {counts:?}");
     for (k, n) in stops.iter().take(12) {
         println!("  stop {n:>4}  {k}");

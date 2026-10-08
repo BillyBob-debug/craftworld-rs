@@ -39,7 +39,7 @@ every value for every plan on 01.33, with icons resolved in the catalog?
   - Negative sizes and lengths are Invalid. NetworkPlayerID length prefixes must match.
   - Reference nesting goes through `enter`/`leave`.
   - Input is capped at 16 MiB and the expanded payload at 64 MiB.
-  - Heads below 0x233, branches other than 0, LBP3 heads and heads above `LBP2_MAX` are Unsupported.
+  - Heads below 0x197 (no plan details), branches other than 0, LBP3 heads and heads above `LBP2_MAX` are Unsupported.
 
 ## Tests (synthetic recipes only, `crates/lbp-level/tests/item_details.rs`)
 - `u5_modern_details_values_and_plan_keys` (flags 0 and 7, every reference present)
@@ -67,5 +67,40 @@ Cloud results (Linux, Rust 1.99.0):
 ## Expected effect / not tested
 - Viewable/Complete: +0 (data only).
 - New count for the Popit track: plans with full details read and icon resolved. Unit: distinct content hash. Scope: 01.33 overlay outside `patch.edat`.
-- Not tested: real plans, early LBP1 layouts (refused), Vita/LBP3.
+- Not tested: real plans, Vita/LBP3.
 - Next: U8 (Popit-style inventory browser) needs U5 plus U1/U6. U7 (story slot browser) needs U1, U4 and U6, which are all merged.
+
+## U5b follow-up (2026-10-08): early layout and wrapper errors
+D127 on 01.33: 11,936 of 12,245 plans complete, 225 stopped, 84 wrapper_error. The PC
+split them (D127 verification): 106 stopped plans are branch 0 at heads 0x19f..0x232
+(early layout), 119 are Leerdammer (branch 0x4c44) at head 0x272, refused by the band
+check; all 84 wrapper errors are `Unsupported("DOUBLE11 branch payload")` (Vita branch,
+excluded by design).
+
+- Early layout, 0x197 <= head < 0x233, from `InventoryItemDetails.serialize` (`head <
+  0x233` branch), CONFIRMED_FROM_COMMUNITY_CODE: `str` translation tag; fixed i32
+  location, category, primary indices and a pad word; fixed type bits, subType,
+  toolType; icon descriptor; fixed numUses then lastUsed above 0x1c0; fixed highlight
+  sound GUID; fixed colour; EyeToy reference; photo reference; SlotID with compressed
+  type and fixed number; copyright bool and NetworkPlayerID struct (length-prefixed runs
+  below 0x234); UserCreatedDetails above 0x1aa; CreationHistory (i32 count, wide names)
+  above 0x1b0; allowEmit above 0x204; fixed s64 dateAdded above 0x221; shareable above
+  0x222. The branches Toolkit keeps for heads at or below 0x196 (wide tags, a str sound
+  path) are not implemented: plans carry no details there.
+- Leerdammer: branch 0x4c44 is accepted only at `LD_HEAD` 0x272 and reads the middle
+  layout. Title/description keys (and RPlan placement keys) replace the tag when the
+  branch revision is at least `LD_LAMS_KEYS` 0x8 (`InventoryItemDetails` line 351,
+  `RPlan.serialize`, `Revision.has`), CONFIRMED_FROM_COMMUNITY_CODE. The other LD
+  revisions change CThing/profile/world data, which this reader skips.
+  Test: `u5b_leerdammer_branch_keys_follow_its_revision` (branch revisions 0x7, 0x8,
+  0x17; flags 0/7; another head on the branch is Unsupported).
+- Test: `u5b_early_layout_fixed_fields_and_tags` (heads 0x19f, 0x1b0, 0x1fe, 0x232; flags
+  0/1/3; every truncation Invalid). The old "0x232 is refused" assertion now only checks
+  that mismatched bytes do not panic.
+- The census prints and writes `wrapper_error_counts` (first 4 bytes as ASCII + error)
+  so later wrapper errors are classified in the output.
+
+PC check: rerun step 2 with a new output name
+(`local-analysis/u5b-plan-details-census-0133.json`); expected stopped 225 -> 0 (or a
+labelled remainder) and wrapper_error 84 all DOUBLE11. Toolkit spot-check one plan at
+head 0x1fe (tag, icon, type, location/category tags) and one Leerdammer plan (keys).

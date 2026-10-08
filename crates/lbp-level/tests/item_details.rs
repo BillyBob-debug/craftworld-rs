@@ -179,6 +179,181 @@ fn u5_middle_layout_fixed_fields() {
     assert_eq!(d.icon.unwrap().guid, Some(0x99));
 }
 
+/// NetworkPlayerID below 0x234: every run carries an i32 length.
+fn player_prefixed(w: &mut W, name: &str) {
+    let mut n = [0u8; 16];
+    n[..name.len()].copy_from_slice(name.as_bytes());
+    w.u32(16).raw(&n).u8(0).u32(3).raw(&[0; 3]);
+    w.u32(8).raw(&[0; 8]).u32(8).raw(&[0; 8]);
+}
+
+fn str8(w: &mut W, s: &str) {
+    w.s32(s.len() as i32).raw(s.as_bytes());
+}
+
+/// Early layout (0x197 <= head < 0x233), U5b.
+fn early_plan(head: u32, flags: u8) -> Vec<u8> {
+    let mut w = W::new(flags);
+    prefix(&mut w);
+    str8(&mut w, "BOX");
+    for v in [4u32, 5, 6, 0, 1 << 3, 2, 3] {
+        w.raw(&v.to_be_bytes()); // location, category, primary, pad, type, subType, tool
+    }
+    desc_guid(&mut w, 0x99);
+    if head > 0x1c0 {
+        w.raw(&12u32.to_be_bytes()).raw(&13u32.to_be_bytes()); // numUses, lastUsed
+    }
+    w.raw(&0x55u32.to_be_bytes()).raw(&0xffu32.to_be_bytes()); // sound, colour
+    w.u32(0).u32(0); // eyetoy, photo null
+    w.u32(0).raw(&9u32.to_be_bytes()); // levelUnlock: compressed type, fixed number
+    w.u8(1); // copyright
+    player_prefixed(&mut w, "mm");
+    if head > 0x1aa {
+        wstr(&mut w, "Box");
+        wstr(&mut w, "");
+    }
+    if head > 0x1b0 {
+        w.u32(1);
+        wstr(&mut w, "creator");
+    }
+    if head > 0x204 {
+        w.u8(1);
+    }
+    if head > 0x221 {
+        w.raw(&(-7i64).to_be_bytes());
+    }
+    if head > 0x222 {
+        w.u8(0);
+    }
+    str8(&mut w, "LOC"); // placement tags below 0x2bb
+    str8(&mut w, "CAT");
+    w.b
+}
+
+#[test]
+fn u5b_early_layout_fixed_fields_and_tags() {
+    for (head, flags) in [(0x19fu32, 0u8), (0x1b0, 0), (0x1fe, 1), (0x232, 3)] {
+        let report = read_plan_details_payload(
+            &early_plan(head, flags),
+            rev(head, flags),
+            Limits::default(),
+            &none,
+        );
+        let p = report
+            .result
+            .unwrap_or_else(|e| panic!("head {head:x}: {e:?}"));
+        assert_eq!(report.trailing_bytes, 0, "head {head:x}");
+        let d = p.details.unwrap();
+        assert_eq!(d.translation_tag.as_deref(), Some("BOX"));
+        assert_eq!(
+            (d.location_index, d.category_index, d.primary_index),
+            (4, 5, 6)
+        );
+        assert_eq!(type_names(d.type_bits, head), vec!["sticker"]);
+        assert_eq!((d.sub_type, d.tool_type), (2, 3));
+        assert_eq!(d.icon.unwrap().guid, Some(0x99));
+        let uses = (head > 0x1c0).then_some(12);
+        assert_eq!(d.num_uses, uses);
+        assert_eq!((d.highlight_sound, d.colour), (Some(0x55), 0xff));
+        assert_eq!(d.level_unlock.number, 9);
+        assert_eq!(d.copyright, Some(true));
+        assert_eq!(d.creator, Ref::Value("mm".to_owned()));
+        assert_eq!(d.user_created.value().is_some(), head > 0x1aa);
+        assert_eq!(d.allow_emit, (head > 0x204).then_some(true));
+        assert_eq!(d.date_added, if head > 0x221 { -7 } else { 0 });
+        assert_eq!(d.shareable, (head > 0x222).then_some(false));
+        assert_eq!(
+            p.placement,
+            Some(Placement::Tags {
+                location: "LOC".into(),
+                category: "CAT".into()
+            })
+        );
+    }
+    // Every truncation stops with Invalid.
+    let good = early_plan(0x1fe, 0);
+    for cut in 0..good.len() {
+        let r = read_plan_details_payload(&good[..cut], rev(0x1fe, 0), Limits::default(), &none);
+        assert!(matches!(r.result, Err(Stop::Invalid { .. })), "cut {cut}");
+    }
+}
+
+/// Leerdammer branch plan at its head 0x272 (middle layout).
+fn leerdammer_plan(keys: bool, flags: u8) -> Vec<u8> {
+    let mut w = W::new(flags);
+    prefix(&mut w);
+    for v in [0x55u32, 0, 9, 1, 2, 3, 10, 11, 0] {
+        w.raw(&v.to_be_bytes()); // sound, slot, indices, lastUsed, numUses, pad (> 0x234)
+    }
+    w.raw(&5i64.to_be_bytes());
+    for v in [100u32, 0xff, 1 << 3, 2, 5] {
+        w.raw(&v.to_be_bytes());
+    }
+    player(&mut w, "mm"); // no length prefixes from 0x234
+    w.u8(1).u8(0).u8(1); // allowEmit, shareable, copyright (no flags byte below 0x335)
+    if keys {
+        w.u32(0x77).u32(0x88);
+    } else {
+        str8(&mut w, "BOX");
+    }
+    wstr(&mut w, "");
+    wstr(&mut w, "");
+    w.u32(0); // creation history
+    desc_guid(&mut w, 0x99);
+    w.u32(0).u32(0); // photo, eyetoy
+    if keys {
+        w.u32(0x12).u32(0x34);
+    } else {
+        str8(&mut w, "LOC");
+        str8(&mut w, "CAT");
+    }
+    w.b
+}
+
+#[test]
+fn u5b_leerdammer_branch_keys_follow_its_revision() {
+    for (branch_revision, keys) in [(0x8u16, true), (0x17, true), (0x7, false)] {
+        for flags in [0u8, 7] {
+            let mut rv = rev(0x272, flags);
+            rv.branch_id = 0x4c44;
+            rv.branch_revision = branch_revision;
+            let report = read_plan_details_payload(
+                &leerdammer_plan(keys, flags),
+                rv,
+                Limits::default(),
+                &none,
+            );
+            let p = report
+                .result
+                .unwrap_or_else(|e| panic!("branch rev {branch_revision}: {e:?}"));
+            assert_eq!(report.trailing_bytes, 0);
+            let d = p.details.unwrap();
+            assert_eq!(d.date_added, 5);
+            assert_eq!(d.creator, Ref::Value("mm".to_owned()));
+            assert_eq!(d.icon.unwrap().guid, Some(0x99));
+            if keys {
+                assert_eq!((d.title_key, d.description_key), (Some(0x77), Some(0x88)));
+                assert_eq!(
+                    p.placement,
+                    Some(Placement::Keys {
+                        location: 0x12,
+                        category: 0x34
+                    })
+                );
+            } else {
+                assert_eq!(d.translation_tag.as_deref(), Some("BOX"));
+                assert!(matches!(p.placement, Some(Placement::Tags { .. })));
+            }
+        }
+    }
+    // The branch is read only at its own head.
+    let mut rv = rev(0x273, 0);
+    rv.branch_id = 0x4c44;
+    rv.branch_revision = 8;
+    let r = read_plan_details_payload(&leerdammer_plan(true, 0), rv, Limits::default(), &none);
+    assert!(matches!(r.result, Err(Stop::Unsupported { .. })));
+}
+
 #[test]
 fn u5_type_bits_follow_the_game_version() {
     // Bit 17 is FLOOD_FILL in LBP1 and EDIT_MODE_TOOL in LBP2; bit 12 PAINT vs SEQUENCER.
@@ -211,9 +386,8 @@ fn u5_untrusted_input_stops_explicitly() {
         let r = read_plan_details_payload(&good, rv, lim, &none);
         assert!(matches!(r.result, Err(Stop::Unsupported { .. })), "{rv:?}");
     }
-    // Early LBP1 details layout is refused after the thingData skip.
-    let r = read_plan_details_payload(&good, rev(0x232, 0), lim, &none);
-    assert!(matches!(r.result, Err(Stop::Unsupported { .. })));
+    // Modern bytes read with the early layout stop explicitly or misparse, never panic.
+    let _ = read_plan_details_payload(&good, rev(0x232, 0), lim, &none);
     // Below PLAN_DETAILS there are no details.
     let mut w = W::new(0);
     prefix(&mut w);
