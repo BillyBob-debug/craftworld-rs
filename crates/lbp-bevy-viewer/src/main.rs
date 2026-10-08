@@ -63,6 +63,8 @@ type LevelScene = level_scene::LevelScene<level_scene::ScenePayload>;
 struct LevelLoaded {
     scene: LevelScene,
     identity: String,
+    /// P2b `--pod-shell HEX`: the Pod shell level drawn over this one.
+    shell: Option<LevelScene>,
 }
 /// D113 level mode (docs/d113-level-scene.md). Empty target = single-mesh mode.
 #[derive(Default)]
@@ -79,6 +81,8 @@ struct LevelMode {
     /// P2 `--pod-camera N`: home view placing Thing N (the Pod globe) where the RPCS3
     /// reference shows it (pod_menu::pod_camera).
     pod: Option<usize>,
+    /// P2b `--pod-shell HEX`: the Pod shell level (000027b9) as a layer over the view.
+    shell: Option<u32>,
     lines: Vec<String>,
     home: Option<Orbit>,
 }
@@ -169,6 +173,7 @@ impl Viewer {
             .level
             .active()
             .then(|| (self.level.guid, self.level.path.clone()));
+        let shell_guid = self.level.shell;
         let scene_options = level_scene::LevelSceneOptions {
             shape_bevels: self.level.shape_bevels,
             placement: self.level.placement,
@@ -236,7 +241,24 @@ impl Viewer {
                             options,
                             scene_options,
                         )?;
-                        Ok(LevelLoaded { scene, identity })
+                        let shell = shell_guid
+                            .map(|g| {
+                                let (key, _) = level_scene::resolve_level(&catalog, Some(g), None)?;
+                                level_scene::load_level_scene_with_options(
+                                    &source,
+                                    &catalog,
+                                    &key,
+                                    &worker,
+                                    options,
+                                    scene_options,
+                                )
+                            })
+                            .transpose()?;
+                        Ok(LevelLoaded {
+                            scene,
+                            identity,
+                            shell,
+                        })
                     });
                     let clip = (preview.as_ref().is_ok_and(Option::is_some)
                         && !animation_guid.is_empty())
@@ -404,7 +426,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space opens/closes the Puter (camera dolly)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -442,6 +464,14 @@ fn options() -> Result<Viewer, String> {
             }
             "--level-path" => v.level.path = Some(value),
             "--level-placement" => v.level.placement = level_scene::PosPlacement::parse(&value)?,
+            "--pod-shell" => {
+                v.level.shell = Some(
+                    u32::from_str_radix(&value, 16)
+                        .ok()
+                        .filter(|_| value.len() == 8)
+                        .ok_or("--pod-shell requires eight hexadecimal digits")?,
+                )
+            }
             "--pod-camera" => {
                 v.level.pod = Some(value.parse().map_err(|_| "invalid --pod-camera")?)
             }
@@ -586,6 +616,7 @@ fn main() {
                 load,
                 animate,
                 apply_lighting,
+                pod_dolly,
                 camera,
                 capture,
             )
@@ -745,6 +776,10 @@ fn load(
         if let Some(level) = done.level {
             let level = level?;
             let plan = plan_level(&level.scene, v.level.focus, v.level.pod)?;
+            let rig = match (&level.shell, v.level.pod) {
+                (Some(shell), Some(globe)) => Some(pod_shell(&level.scene, &plan, globe, shell)?),
+                _ => None,
+            };
             spawn_level(
                 &mut v,
                 &mut commands,
@@ -754,6 +789,27 @@ fn load(
                 plan,
             );
             *orbit = v.level.home.unwrap_or_default();
+            if let Some((rig, shell_plan)) = rig {
+                let root = commands
+                    .spawn((rig.shell_root(0.), Visibility::default(), PodShellRoot))
+                    .id();
+                let first = v.scene.len();
+                spawn_level(
+                    &mut v,
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut images,
+                    shell_plan,
+                );
+                for (entity, ..) in &v.scene[first..] {
+                    commands.entity(root).add_child(*entity);
+                }
+                *orbit = pod_orbit(rig.planet_eye(0.), rig.globe_z);
+                v.level.home = Some(*orbit);
+                commands.insert_resource(PodRigRes(rig));
+                commands.insert_resource(pod_menu::PuterState { t: 0., open: false });
+            }
             v.status = format!(
                 "Loaded level {}\n{}",
                 level.identity,
@@ -1072,6 +1128,8 @@ struct LevelPlan {
     placed: Vec<(usize, Transform)>,
     lines: Vec<String>,
     home: Orbit,
+    /// Level units to display units (centre and unit-size scale).
+    normalize: Mat4,
     /// D121: level-settings preview light (generic when absent or unusable).
     light: lighting::PreviewLight,
 }
@@ -1113,7 +1171,7 @@ fn plan_level(
         .iter()
         .map(|p| p.as_ref().map(Vec::len).map_err(Clone::clone))
         .collect();
-    let (placed, home, display) = place_items(scene, &buckets, focus, pod)?;
+    let (placed, home, display, normalize) = place_items(scene, &buckets, focus, pod)?;
     let mut lines = scene.counts.lines();
     lines.extend(display);
     let light = level_light(scene, &buckets);
@@ -1122,6 +1180,7 @@ fn plan_level(
         placed,
         lines,
         home,
+        normalize,
         light,
     })
 }
@@ -1174,7 +1233,7 @@ fn level_home(lo: Vec3, hi: Vec3) -> Result<(Mat4, Orbit), String> {
     ))
 }
 /// Items whose mesh has display buckets get a Transform; others are counted by reason.
-type Placement = (Vec<(usize, Transform)>, Orbit, Vec<String>);
+type Placement = (Vec<(usize, Transform)>, Orbit, Vec<String>, Mat4);
 fn place_items<T>(
     scene: &level_scene::LevelScene<T>,
     buckets: &[Result<usize, String>],
@@ -1292,7 +1351,90 @@ fn place_items<T>(
             ));
         }
     }
-    Ok((placed, home, lines))
+    Ok((placed, home, lines, normalize))
+}
+/// P2b: the shell level planned on its own, and the rig that places it over the view
+/// (pod_menu::PodRig). The DualShock (mesh 000042af, PC d155) anchors the shell camera.
+fn pod_shell(
+    scene: &LevelScene,
+    plan: &LevelPlan,
+    globe: usize,
+    shell: &LevelScene,
+) -> Result<(pod_menu::PodRig, LevelPlan), String> {
+    const DUALSHOCK: u32 = 0x0000_42af;
+    let display = |m: &Mat4, [a, b]: [[f32; 3]; 2]| {
+        let (a, b) = (
+            m.transform_point3(Vec3::from(a)),
+            m.transform_point3(Vec3::from(b)),
+        );
+        ((a + b) / 2., b - a)
+    };
+    let g = scene
+        .bounds_where(|i| i.thing == globe)
+        .ok_or("--pod-camera: Thing not drawn")?;
+    let (g_centre, g_size) = display(&plan.normalize, g);
+    let shell_plan = plan_level(shell, None, None)?;
+    let pad = shell
+        .bounds_where(|i| {
+            matches!(
+                shell.meshes[i.mesh].source,
+                level_scene::MeshSource::Guid(DUALSHOCK)
+            )
+        })
+        .ok_or("--pod-shell: no DualShock (mesh 000042af) in the shell level")?;
+    let (p_centre, p_size) = display(&shell_plan.normalize, pad);
+    let [lo, _] = shell.bounds().ok_or("--pod-shell: empty shell level")?;
+    let near = shell_plan.normalize.transform_point3(Vec3::from(lo)).z;
+    let rig = pod_menu::PodRig::new(
+        (g_centre, g_size.max_element() / 2.),
+        (p_centre, p_size.x),
+        near,
+        PerspectiveProjection::default().fov,
+    );
+    Ok((rig, shell_plan))
+}
+#[derive(Component)]
+struct PodShellRoot;
+#[derive(Resource)]
+struct PodRigRes(pod_menu::PodRig);
+fn pod_orbit(eye: Vec3, globe_z: f32) -> Orbit {
+    Orbit {
+        yaw: 0.,
+        pitch: 0.,
+        distance: eye.z - globe_z,
+        target: Vec3::new(eye.x, eye.y, globe_z),
+    }
+}
+/// P2b: Space opens or closes the Puter: the view dollies through the Pod window in
+/// `DOLLY_SECONDS` while the shell layer follows its own camera.
+fn pod_dolly(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    rig: Option<Res<PodRigRes>>,
+    state: Option<ResMut<pod_menu::PuterState>>,
+    mut orbit: ResMut<Orbit>,
+    mut roots: Query<&mut Transform, With<PodShellRoot>>,
+) {
+    let (Some(rig), Some(mut state)) = (rig, state) else {
+        return;
+    };
+    if keys.just_pressed(KeyCode::Space) {
+        state.open = !state.open;
+    }
+    let target = if state.open { 1. } else { 0. };
+    if state.t == target {
+        return;
+    }
+    let step = time.delta_secs() / pod_menu::DOLLY_SECONDS;
+    state.t = if state.open {
+        (state.t + step).min(1.)
+    } else {
+        (state.t - step).max(0.)
+    };
+    *orbit = pod_orbit(rig.0.planet_eye(state.t), rig.0.globe_z);
+    for mut root in &mut roots {
+        *root = rig.0.shell_root(state.t);
+    }
 }
 fn spawn_level(
     v: &mut Viewer,
@@ -2139,7 +2281,7 @@ mod tests {
                 })
                 .unwrap();
         }
-        let (placed, home, lines) = place_items(
+        let (placed, home, lines, _) = place_items(
             &scene,
             &[Ok(2), Err("Unavailable: test".into())],
             None,
