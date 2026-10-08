@@ -572,5 +572,44 @@ fn bindings_run_natives_and_count_unbound_ones() {
         vm.call(&mut host, c, "Ui", &[], &mut budget),
         Err(Fault::Native(_))
     ));
+    assert_eq!(vm.last_site().unwrap().to_string(), "UsesNatives.Ui+0");
     assert_eq!(host.unbound.get("Gooey.EndFrame__"), Some(&1));
+}
+
+#[test]
+fn locals_start_at_defaults_and_no_register_operands_are_ignored() {
+    let mut b = Builder::new();
+    let int_ty = b.ty(INT, "int", None, 0);
+    let native = b.ty(OBJ, "Engine", None, 0);
+    let twice = b.fref(native, "Twice");
+    let mut s = b.build(
+        "Locals",
+        None,
+        vec![func(
+            "Run",
+            &[],
+            vec![
+                i(0x0b, 0, 4, 4, 0),            // INCi local (never written) += 1
+                i(0xa3, INT, 4, 0, 0),          // ARG @0 = local
+                i(0xa4, INT, 0xffff, twice, 0), // typed CALL, result discarded
+                hi(0xa6, 0xffff, 1),            // B +1 with the "no register" source
+                i(0xa5, INT, 0, 4, 0),          // RETURN local
+            ],
+        )],
+    );
+    let name = s.function_defs[0].name;
+    s.locals.push(lbp_level::script::LocalVariable {
+        modifiers: 0,
+        type_ref: u32::from(int_ty),
+        name,
+        offset: 4,
+    });
+    s.function_defs[0].locals = Span { begin: 0, end: 1 };
+    let mut vm = Vm::default();
+    let c = vm.load(s, None);
+    let mut host = TestHost::default();
+    let mut budget = 100;
+    let r = vm.call(&mut host, c, "Run", &[], &mut budget);
+    assert_eq!(r, Ok(Value::Int(1)));
+    assert_eq!(host.calls.len(), 1);
 }

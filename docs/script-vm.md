@@ -44,9 +44,14 @@ INFERRED (no executable or Toolkit statement; each is a place a real script can 
 | `ARRAY_FIND` | Index of the first equal element or -1 | Script behaviour |
 | Function lookup | By name through the superclass chain; first definition wins and repeats are counted (`ambiguous_calls`) | Census of duplicate names per class |
 | Strings | `LCsa`/`LCsw` produce string values (MachineType has no string type) | Listings |
+| No register | Operand `0xffff` = no register: reads give Void, writes are dropped, a typed `CALL` with that dest discards its result | D138 listings (`B` source, discarded `CALL` results); Register 65535 faults in the test script and the Gooey trace |
+| Locals | Declared locals (the function's local-variable rows) start at their type's default; other registers start Void | D138 test script: `CheckEqual` got Void in TestLocals and the vector tests |
 
 UNKNOWN: native function semantics (they live in the executable). Each one gets a host
 binding from recorded findings, in call-count order (items Rr/Rs).
+
+`Vm::last_site()` names the class, function and relative pc of the last executed
+instruction, which after a fault is the faulting one. `script_tests` prints it with each fault.
 
 ## Verification
 

@@ -24,6 +24,10 @@ pub const MAX_CALL_DEPTH: usize = 256;
 pub const MAX_HEAP_OBJECTS: usize = 1 << 20;
 pub const MAX_ARRAY_LEN: usize = 1 << 20;
 
+/// Operand value meaning "no register" (D138 listings: a discarded CALL result, `B`'s
+/// unused source). Reads give `Void`; writes are dropped.
+pub const NO_REGISTER: u16 = 0xffff;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct ClassId(pub u32);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -136,6 +140,21 @@ pub enum Fault {
     YieldInCall,
 }
 
+/// An instruction's place: class, function and pc relative to the function's first
+/// instruction (as listings number them).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Site {
+    pub class: String,
+    pub function: String,
+    pub pc: usize,
+}
+
+impl std::fmt::Display for Site {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}.{}+{}", self.class, self.function, self.pc)
+    }
+}
+
 /// Result of [`Vm::start`] / [`Vm::resume`].
 #[derive(Debug)]
 pub enum Step {
@@ -236,6 +255,8 @@ pub struct Vm {
     heap: Vec<HeapObject>,
     /// Calls into functions that matched more than one definition by name.
     pub ambiguous_calls: usize,
+    /// (class, function, absolute pc) of the instruction being executed.
+    at: Option<(ClassId, usize, usize)>,
 }
 
 impl Default for Vm {
@@ -253,6 +274,7 @@ impl Vm {
             by_name: HashMap::new(),
             heap: Vec::new(),
             ambiguous_calls: 0,
+            at: None,
         }
     }
 
@@ -434,6 +456,19 @@ impl Vm {
         self.run(host, task.stack, budget)
     }
 
+    /// Where the last executed instruction was; after a [`Fault`] this is the faulting
+    /// instruction (the budget fault names the next one).
+    pub fn last_site(&self) -> Option<Site> {
+        let (c, f, pc) = self.at?;
+        let lc = &self.classes[c.0 as usize];
+        let def = lc.script.function_defs.get(f)?;
+        Some(Site {
+            class: lc.name.clone(),
+            function: lc.script.name(def.name).unwrap_or("").to_owned(),
+            pc: pc.saturating_sub(def.bytecode.begin as usize),
+        })
+    }
+
     /// Does `function` resolve to script code in `class` or a superclass? `false` means
     /// a call to it goes to the host as a native.
     pub fn has_code(&self, class: ClassId, function: &str) -> bool {
@@ -468,9 +503,25 @@ impl Vm {
         staged: BTreeMap<u16, Value>,
         dest: Option<u16>,
     ) -> Result<Frame, Fault> {
-        let def = &self.classes[class.0 as usize].script.function_defs[function];
+        let script = &self.classes[class.0 as usize].script;
+        let def = &script.function_defs[function];
         let size = usize::try_from(def.stack_size).unwrap_or(0).min(1 << 16);
         let mut regs = vec![Value::Void; size];
+        // Declared locals start at their type's default (INFERRED from the D138 test
+        // script: reads of never-written locals).
+        let locals = script
+            .locals
+            .get(def.locals.begin as usize..def.locals.end as usize)
+            .unwrap_or(&[]);
+        for l in locals {
+            let ty = script
+                .type_refs
+                .get(l.type_ref as usize)
+                .map_or(0, |t| t.machine_type);
+            if let Some(slot) = usize::try_from(l.offset).ok().and_then(|o| regs.get_mut(o)) {
+                *slot = Value::default_for(ty);
+            }
+        }
         for (at, v) in staged {
             *regs.get_mut(usize::from(at)).ok_or(Fault::Register {
                 pc: def.bytecode.begin as usize,
@@ -500,6 +551,7 @@ impl Vm {
             *budget -= 1;
             let depth = stack.len();
             let fr = stack.last_mut().expect("non-empty stack");
+            self.at = Some((fr.class, fr.function, fr.pc));
             let script = &self.classes[fr.class.0 as usize].script;
             let def = &script.function_defs[fr.function];
             let pc = fr.pc;
@@ -514,19 +566,27 @@ impl Vm {
             let cls = class(op).ok_or(Fault::UnknownOpcode { pc, opcode: op })?;
             let mut next = pc + 1;
             macro_rules! get {
-                ($r:expr) => {
-                    fr.regs
-                        .get(usize::from($r))
-                        .cloned()
-                        .ok_or(Fault::Register { pc, register: $r })?
-                };
+                ($r:expr) => {{
+                    let r: u16 = $r;
+                    if r == NO_REGISTER {
+                        Value::Void
+                    } else {
+                        fr.regs
+                            .get(usize::from(r))
+                            .cloned()
+                            .ok_or(Fault::Register { pc, register: r })?
+                    }
+                }};
             }
             macro_rules! set {
                 ($r:expr, $v:expr) => {{
+                    let r: u16 = $r;
                     let v = $v;
-                    *fr.regs
-                        .get_mut(usize::from($r))
-                        .ok_or(Fault::Register { pc, register: $r })? = v;
+                    if r != NO_REGISTER {
+                        *fr.regs
+                            .get_mut(usize::from(r))
+                            .ok_or(Fault::Register { pc, register: r })? = v;
+                    }
                 }};
             }
             let mismatch = || Fault::Type {
@@ -837,7 +897,7 @@ impl Vm {
                     set!(r16(16), out);
                 }
                 Class::Call => {
-                    let dest = (ty != 0).then(|| r16(16));
+                    let dest = (ty != 0 && r16(16) != NO_REGISTER).then(|| r16(16));
                     let (owner, function, owner_class) =
                         {
                             let fref = script.function_refs.get(usize::from(r16(32))).ok_or(
