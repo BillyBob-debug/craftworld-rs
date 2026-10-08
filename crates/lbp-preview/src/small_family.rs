@@ -157,7 +157,7 @@ pub(crate) fn select_scaled_sampler(
     let p = &sample.parameters_raw;
     if !plain(wire)
         || !unanimated(sample)
-        || p[4] > 1
+        || crate::sampler_uv_channel(p[4]).is_none()
         || !unanimated(constant)
         || !inputs(graph, const_index).is_empty()
         || const_index == sample_index
@@ -198,7 +198,7 @@ pub(crate) fn select_scaled_sampler(
         output_index,
         sample_index,
         slot: p[5] as usize,
-        uv_channel: p[4] as usize,
+        uv_channel: crate::sampler_uv_channel(p[4]).unwrap_or_default(),
         uv_transform,
         ignored_nodes: graph.boxes.len() - 3,
         ignored_wires: graph.wires.len() - 2,
@@ -363,7 +363,7 @@ mod tests {
         g.boxes[1].subtype_raw = 1;
         assert!(select_scaled_sampler(&g).is_err());
         let mut g = base.clone();
-        g.boxes[1].parameters_raw[4] = 2;
+        g.boxes[1].parameters_raw[4] = 3;
         assert!(select_scaled_sampler(&g).is_err());
         let mut g = base.clone();
         g.boxes[2].animations[0].name_hex = "410000".into();

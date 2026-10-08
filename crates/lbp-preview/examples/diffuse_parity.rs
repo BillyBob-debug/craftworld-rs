@@ -2,6 +2,15 @@
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use serde_json::{json, Value};
 use std::{fs::OpenOptions, io::Write, path::Path};
+/// D104: oracle rows carry the raw sampler channel word; compare it through the
+/// preview's word-to-attribute rule (word 2 samples UV0).
+fn channel_word(raw: &Value, channel: usize) -> bool {
+    raw.as_u64()
+        .and_then(|r| u32::try_from(r).ok())
+        .and_then(lbp_preview::sampler_uv_channel)
+        == Some(channel)
+}
+
 fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().collect();
     let flags = args.get(5..).unwrap_or_default();
@@ -480,8 +489,7 @@ fn run() -> Result<(), String> {
                             && second_node["type_raw"] == 1
                             && second_node["subtype_raw"].as_u64()
                                 == Some(u64::from(second.uv_transform.subtype()))
-                            && second_node["parameters_raw"][4].as_u64()
-                                == Some(second.uv_channel as u64)
+                            && channel_word(&second_node["parameters_raw"][4], second.uv_channel)
                             && second_node["parameters_raw"][5].as_u64() == Some(second.slot as u64)
                             && transform_equal(second.sample_index, second.uv_transform)
                     } else if s.texture_blend.is_some() || s.blend_mask.is_some() {
@@ -588,8 +596,7 @@ fn run() -> Result<(), String> {
                                     && node["type_raw"] == 1
                                     && node["subtype_raw"].as_u64()
                                         == Some(u64::from(second.uv_transform.subtype()))
-                                    && node["parameters_raw"][4].as_u64()
-                                        == Some(second.uv_channel as u64)
+                                    && channel_word(&node["parameters_raw"][4], second.uv_channel)
                                     && node["parameters_raw"][5].as_u64()
                                         == Some(second.slot as u64)
                                     && transform_equal(second.sample_index, second.uv_transform)
@@ -671,8 +678,7 @@ fn run() -> Result<(), String> {
                             && second_node["type_raw"] == 1
                             && second_node["subtype_raw"].as_u64()
                                 == Some(u64::from(second.uv_transform.subtype()))
-                            && second_node["parameters_raw"][4].as_u64()
-                                == Some(second.uv_channel as u64)
+                            && channel_word(&second_node["parameters_raw"][4], second.uv_channel)
                             && second_node["parameters_raw"][5].as_u64() == Some(second.slot as u64)
                             && transform_equal(second.sample_index, second.uv_transform)
                     } else if let (Some(inner), None, Some(color), Some(second), Some(root)) = (
@@ -731,8 +737,7 @@ fn run() -> Result<(), String> {
                             && second_node["type_raw"] == 1
                             && second_node["subtype_raw"].as_u64()
                                 == Some(u64::from(second.uv_transform.subtype()))
-                            && second_node["parameters_raw"][4].as_u64()
-                                == Some(second.uv_channel as u64)
+                            && channel_word(&second_node["parameters_raw"][4], second.uv_channel)
                             && second_node["parameters_raw"][5].as_u64() == Some(second.slot as u64)
                             && transform_equal(second.sample_index, second.uv_transform)
                     } else if let (Some(inner), Some(third), Some(second), Some(root)) = (
@@ -802,8 +807,7 @@ fn run() -> Result<(), String> {
                                     node["type_raw"] == 1
                                         && node["subtype_raw"].as_u64()
                                             == Some(u64::from(leaf.uv_transform.subtype()))
-                                        && node["parameters_raw"][4].as_u64()
-                                            == Some(leaf.uv_channel as u64)
+                                        && channel_word(&node["parameters_raw"][4], leaf.uv_channel)
                                         && node["parameters_raw"][5].as_u64()
                                             == Some(leaf.slot as u64)
                                         && transform_equal(leaf.sample_index, leaf.uv_transform)
@@ -839,8 +843,7 @@ fn run() -> Result<(), String> {
                                     && node["type_raw"] == 1
                                     && node["subtype_raw"].as_u64()
                                         == Some(u64::from(second.uv_transform.subtype()))
-                                    && node["parameters_raw"][4].as_u64()
-                                        == Some(second.uv_channel as u64)
+                                    && channel_word(&node["parameters_raw"][4], second.uv_channel)
                                     && node["parameters_raw"][5].as_u64()
                                         == Some(second.slot as u64)
                                     && transform_equal(second.sample_index, second.uv_transform)
@@ -882,7 +885,8 @@ fn run() -> Result<(), String> {
                         || !base_equal
                         || !multiply_equal
                         || s.slot != sample_node.parameters_raw[5] as usize
-                        || s.uv_channel != sample_node.parameters_raw[4] as usize
+                        || lbp_preview::sampler_uv_channel(sample_node.parameters_raw[4])
+                            != Some(s.uv_channel)
                         || s.uv_transform.subtype() != sample_node.subtype_raw
                         || !transform_equal(s.sample_index, s.uv_transform)
                     {
@@ -1026,7 +1030,7 @@ fn tree_equal(
         .all(|leaf| {
             let node = &nodes[leaf.sample_index];
             node["subtype_raw"].as_u64() == Some(u64::from(leaf.uv_transform.subtype()))
-                && node["parameters_raw"][4].as_u64() == Some(leaf.uv_channel as u64)
+                && channel_word(&node["parameters_raw"][4], leaf.uv_channel)
                 && node["parameters_raw"][5].as_u64() == Some(leaf.slot as u64)
                 && transform_equal(leaf.sample_index, leaf.uv_transform)
         });
@@ -1239,7 +1243,7 @@ fn add_equal(
         |index: usize, slot: usize, channel: usize, t: lbp_preview::SamplingTransform| {
             nodes[index]["type_raw"] == 1
                 && nodes[index]["subtype_raw"].as_u64() == Some(u64::from(t.subtype()))
-                && nodes[index]["parameters_raw"][4].as_u64() == Some(channel as u64)
+                && channel_word(&nodes[index]["parameters_raw"][4], channel)
                 && nodes[index]["parameters_raw"][5].as_u64() == Some(slot as u64)
                 && all_in(index) == 0
                 && transform_equal(index, t)

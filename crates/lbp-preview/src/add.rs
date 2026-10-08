@@ -385,9 +385,15 @@ mod tests {
         let mut g = base.clone();
         g.boxes[2].parameters_raw[4] = 1;
         assert!(crate::select_diffuse(&g).unwrap_err().contains("grid"));
-        // UV channel raw 2 stays unsupported (docs/d89-add-uv2.md).
+        // D104: UV channel word 2 samples UV0, so the grid sum still applies; an
+        // unobserved word stays unsupported.
         let mut g = base.clone();
         g.boxes[2].parameters_raw[4] = 2;
+        assert_eq!(
+            crate::select_diffuse(&g).unwrap(),
+            crate::select_diffuse(&base).unwrap()
+        );
+        g.boxes[2].parameters_raw[4] = 3;
         assert!(crate::select_diffuse(&g)
             .unwrap_err()
             .contains("sampler must be static"));

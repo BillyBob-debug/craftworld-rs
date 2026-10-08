@@ -213,7 +213,7 @@ pub(crate) fn fold_sampler_ports(
     }
     let node = &derived.boxes[sample];
     // Toolkit only applies sampler ports on a subtype-0 sampler without named animation.
-    if !unanimated(node) || node.parameters_raw[4] > 1 {
+    if !unanimated(node) || crate::sampler_uv_channel(node.parameters_raw[4]).is_none() {
         return Err(
             "Unsupported: sampler port inputs need a static subtype-0 UV0/UV1 sampler".into(),
         );
