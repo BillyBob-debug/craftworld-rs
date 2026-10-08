@@ -3239,6 +3239,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "lbp-script-vm"
+version = "0.1.0"
+dependencies = [
+ "lbp-level",
+]
+
+[[package]]
 name = "lbp-texture"
 version = "0.1.0"
 dependencies = [
