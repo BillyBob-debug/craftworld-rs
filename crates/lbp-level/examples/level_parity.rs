@@ -328,6 +328,38 @@ fn scene_thing(r: &LevelReport, t: &ThingRecord, o: &Value, out: &mut BTreeMap<&
             floats_equal(&g.uv_offset, &og["uv_offset"]),
         );
     }
+    // D121: only oracle dumps that project PLevelSettings carry the key.
+    if let Some(ol) = o.get("level_settings") {
+        let absent = ol.as_str() == Some("absent");
+        check(
+            "level_settings_present",
+            absent == d.level_settings.is_none(),
+        );
+        if let (Some(s), false) = (&d.level_settings, absent) {
+            let fields: [(&'static str, &[f32]); 11] = [
+                ("level_settings_sun_position", &s.sun_position),
+                ("level_settings_sun_position_scale", &[s.sun_position_scale]),
+                ("level_settings_sun_color", &s.sun_color),
+                ("level_settings_ambient_color", &s.ambient_color),
+                ("level_settings_sun_multiplier", &[s.sun_multiplier]),
+                ("level_settings_exposure", &[s.exposure]),
+                ("level_settings_fog_color", &s.fog_color),
+                ("level_settings_fog_near", &[s.fog_near]),
+                ("level_settings_fog_far", &[s.fog_far]),
+                ("level_settings_rim_color", &s.rim_color),
+                ("level_settings_rim_color2", &s.rim_color2),
+            ];
+            for (field, ours) in fields {
+                let value = &ol[&field["level_settings_".len()..]];
+                let oracle = match value {
+                    Value::Array(_) => value.clone(),
+                    v => json!([v]),
+                };
+                check(field, floats_equal(ours, &oracle));
+            }
+            check("level_settings_presets", ol["presets"] == json!(s.presets));
+        }
+    }
 }
 
 fn run() -> Result<(), String> {

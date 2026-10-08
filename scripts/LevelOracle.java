@@ -145,6 +145,13 @@ public class LevelOracle {
             "uv_offset",v4(gm.uvOffset),"plan_guid",guid(gm.planGUID),"visibility_flags",(int)gm.visibilityFlags,
             "uv_mode",gm.uvMode,"texture_scale",gm.textureScale,"no_bevel",gm.noBevel,"sharded",gm.sharded,
             "include_sides",gm.includeSides));
+        // D121: PLevelSettings own fields ("absent" marks a dump that projects the part).
+        PLevelSettings ls=t.getPart(Part.LEVEL_SETTINGS);
+        r.put("level_settings",ls==null?"absent":row("sun_position",List.of(ls.sunPosition.x,ls.sunPosition.y,ls.sunPosition.z),
+            "sun_position_scale",ls.sunPositionScale,"sun_color",v4(ls.sunColor),"ambient_color",v4(ls.ambientColor),
+            "sun_multiplier",ls.sunMultiplier,"exposure",ls.exposure,"fog_color",v4(ls.fogColor),"fog_near",ls.fogNear,
+            "fog_far",ls.fogFar,"rim_color",v4(ls.rimColor),"rim_color2",v4(ls.rimColor2),
+            "presets",ls.presets==null?0:ls.presets.size()));
         PRef ref=t.getPart(Part.REF);
         if(ref!=null)r.put("ref",row("plan",desc(ref.plan),"strip_children",ref.stripChildren,"children_selectable",ref.childrenSelectable));
         return r;

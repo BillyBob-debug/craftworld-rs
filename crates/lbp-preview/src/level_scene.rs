@@ -21,6 +21,7 @@ use lbp_catalog::{
     attachment::{AttachedSource, LocationKey},
     Catalog, LoadControl,
 };
+pub use lbp_level::parts::LevelSettings;
 use lbp_level::shape_mesh::{self, ShapeMesh};
 use lbp_level::thing::ThingRecord;
 use std::collections::{BTreeMap, HashMap};
@@ -197,6 +198,8 @@ pub struct LevelScene<T> {
     pub meshes: Vec<SceneMesh<T>>,
     pub items: Vec<SceneItem>,
     pub counts: SceneCounts,
+    /// D121: stored PLevelSettings (world holder first), for opt-in preview lighting.
+    pub settings: Option<LevelSettings>,
 }
 
 impl<T> Default for LevelScene<T> {
@@ -205,6 +208,7 @@ impl<T> Default for LevelScene<T> {
             meshes: Vec::new(),
             items: Vec::new(),
             counts: SceneCounts::default(),
+            settings: None,
         }
     }
 }
@@ -687,6 +691,7 @@ pub fn load_level_scene(
     control.check()?;
     source.check_stable()?;
     scene.counts.reader_stop = report.stop.as_ref().map(|s| format!("{s:?}"));
+    scene.settings = LevelSettings::find(&report.things).map(|(_, s)| *s);
     Ok(scene)
 }
 

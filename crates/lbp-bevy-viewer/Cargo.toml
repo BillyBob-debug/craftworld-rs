@@ -12,3 +12,6 @@ lbp-mesh.workspace = true
 lbp-texture.workspace = true
 lbp-preview.workspace = true
 
+[dev-dependencies]
+# D121: headless WGSL validation of the authored preview shader (same major as Bevy).
+naga = { version = "29.0.3", features = ["wgsl-in"] }

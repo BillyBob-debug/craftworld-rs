@@ -1,0 +1,291 @@
+//! D121 opt-in preview lighting (docs/d121-preview-lighting.md). A directional key light
+//! plus ambient (Lambert on the generated diagnostic normals), multiplied onto every
+//! material mode's finished colour in `dual.rs`. Not game lighting: LBP's renderer,
+//! PWorld lights, rim light, exposure and backdrop lighting are not reproduced.
+use bevy::prelude::*;
+use lbp_preview::level_scene::LevelSettings;
+
+pub const LABEL: &str = "preview lighting (not game lighting)";
+pub const LEVEL_LABEL: &str =
+    "preview lighting from level settings (approximate, not game shading)";
+
+/// Linear fog in display units (Bevy `FogFalloff::Linear`).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fog {
+    pub color: Vec3,
+    pub start: f32,
+    pub end: f32,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PreviewLight {
+    /// Unit direction toward the light (display space = world space up to scale).
+    pub toward_light: Vec3,
+    pub key: Vec3,
+    pub ambient: Vec3,
+    pub fog: Option<Fog>,
+    pub from_level: bool,
+    /// Values used and every preview choice, for the panel and QA log.
+    pub notes: Vec<String>,
+}
+
+impl Default for PreviewLight {
+    fn default() -> Self {
+        Self::generic()
+    }
+}
+
+/// Fully lit factor never exceeds 1 per channel (preview choice: no tonemapping here,
+/// so brighter factors would clip textures to white).
+fn fit(key: Vec3, ambient: Vec3) -> (Vec3, Vec3, f32) {
+    let peak = (key + ambient).max_element();
+    let scale = if peak > 1. { 1. / peak } else { 1. };
+    (key * scale, ambient * scale, scale)
+}
+
+fn finite_rgb(v: [f32; 4]) -> Option<Vec3> {
+    let c = Vec3::new(v[0], v[1], v[2]);
+    (c.is_finite() && c.min_element() >= 0.).then_some(c)
+}
+
+impl PreviewLight {
+    /// Generic key light from upper left, in front (LBP side-on view looks along -Z).
+    pub fn generic() -> Self {
+        Self {
+            toward_light: Vec3::new(-0.45, 0.75, 0.5).normalize(),
+            key: Vec3::splat(0.65),
+            ambient: Vec3::splat(0.35),
+            fog: None,
+            from_level: false,
+            notes: vec!["generic key (upper left, front) 0.65 + ambient 0.35".into()],
+        }
+    }
+
+    /// Level settings mapping. `centre` is the displayed bounds centre in level units and
+    /// `scale` the display units per level unit (scene normalization). Any unusable value
+    /// falls back to the generic light, with the reason noted.
+    pub fn from_settings(s: &LevelSettings, centre: Vec3, scale: f32) -> Self {
+        match Self::try_settings(s, centre, scale) {
+            Ok(light) => light,
+            Err(e) => {
+                let mut light = Self::generic();
+                light
+                    .notes
+                    .push(format!("level settings not used ({e}); generic light"));
+                light
+            }
+        }
+    }
+
+    fn try_settings(s: &LevelSettings, centre: Vec3, scale: f32) -> Result<Self, String> {
+        let sun = Vec3::from(s.sun_position) * s.sun_position_scale;
+        let toward = (sun - centre)
+            .try_normalize()
+            .filter(|_| sun.is_finite() && centre.is_finite())
+            .ok_or("sun position unusable")?;
+        let multiplier = Some(s.sun_multiplier)
+            .filter(|m| m.is_finite() && *m >= 0.)
+            .ok_or("sun multiplier unusable")?;
+        let key = finite_rgb(s.sun_color).ok_or("sun colour unusable")? * multiplier;
+        let ambient = finite_rgb(s.ambient_color).ok_or("ambient colour unusable")?;
+        let (key, ambient, fitted) = fit(key, ambient);
+        let fog = finite_rgb(s.fog_color)
+            .filter(|_| {
+                s.fog_near.is_finite()
+                    && s.fog_far.is_finite()
+                    && s.fog_far > s.fog_near
+                    && scale.is_finite()
+                    && scale > 0.
+            })
+            .map(|color| Fog {
+                color,
+                start: s.fog_near * scale,
+                end: s.fog_far * scale,
+            });
+        let mut notes = vec![
+            format!(
+                "sun position ({:.4}, {:.4}, {:.4}) x {:.1}; toward light ({:.3}, {:.3}, {:.3})",
+                s.sun_position[0],
+                s.sun_position[1],
+                s.sun_position[2],
+                s.sun_position_scale,
+                toward.x,
+                toward.y,
+                toward.z
+            ),
+            format!(
+                "sun colour ({:.3}, {:.3}, {:.3}) x multiplier {:.3}; ambient ({:.3}, {:.3}, {:.3})",
+                s.sun_color[0],
+                s.sun_color[1],
+                s.sun_color[2],
+                multiplier,
+                s.ambient_color[0],
+                s.ambient_color[1],
+                s.ambient_color[2]
+            ),
+            format!("preview fit: key and ambient x {fitted:.3} (lit peak 1; exposure {:.3}, rim colours not applied)", s.exposure),
+        ];
+        notes.push(match fog {
+            Some(f) => format!(
+                "fog ({:.3}, {:.3}, {:.3}) linear {:.1}..{:.1} level units (Bevy distance fog)",
+                f.color.x, f.color.y, f.color.z, s.fog_near, s.fog_far
+            ),
+            None => "fog not used (unusable colour or range)".into(),
+        });
+        Ok(Self {
+            toward_light: toward,
+            key,
+            ambient,
+            fog,
+            from_level: true,
+            notes,
+        })
+    }
+
+    pub fn label(&self) -> &'static str {
+        if self.from_level {
+            LEVEL_LABEL
+        } else {
+            LABEL
+        }
+    }
+
+    /// CPU mirror of the shader's `preview_light` for an already oriented unit normal.
+    #[allow(dead_code)] // shader mirror, exercised by tests
+    pub fn factor(&self, normal: Vec3) -> Vec3 {
+        self.ambient + self.key * normal.dot(self.toward_light).max(0.)
+    }
+}
+
+/// CPU mirror of the shader's double-sided orientation: the smooth normal is turned into
+/// the hemisphere of the face normal that points at the viewer.
+#[allow(dead_code)] // shader mirror, exercised by tests
+pub fn facing_normal(smooth: Vec3, face: Vec3, to_view: Vec3) -> Vec3 {
+    let n = smooth.normalize_or_zero();
+    let Some(mut f) = face.try_normalize() else {
+        return n;
+    };
+    if f.dot(to_view) < 0. {
+        f = -f;
+    }
+    if n.dot(f) < 0. {
+        -n
+    } else {
+        n
+    }
+}
+
+/// Viewer-side toggle state.
+#[derive(Default)]
+pub struct LightingState {
+    pub enabled: bool,
+    pub light: PreviewLight,
+    /// Set when the toggle or scene changes; `apply` runs once per change.
+    pub dirty: bool,
+    /// Lighting was applied last time (so turning it off restores materials).
+    pub applied: bool,
+    pub lines: Vec<String>,
+}
+
+/// Summary lines (panel and QA log). `unlit` of `total` draw entities kept unlit.
+pub fn summary(light: &PreviewLight, unlit: usize, total: usize) -> Vec<String> {
+    let mut lines = vec![format!("Lighting: {}", light.label())];
+    lines.extend(light.notes.iter().map(|n| format!("  {n}")));
+    lines.push(format!(
+        "  {unlit} of {total} draw entities unlit (untrusted generated normals or fixture)"
+    ));
+    lines
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn settings() -> LevelSettings {
+        LevelSettings {
+            sun_position: [0., 1., 0.],
+            sun_position_scale: 1000.,
+            sun_color: [1., 0.5, 0.25, 1.],
+            ambient_color: [0.5, 0.5, 0.5, 1.],
+            sun_multiplier: 2.,
+            exposure: 1.,
+            fog_color: [0.1, 0.2, 0.3, 1.],
+            fog_near: 100.,
+            fog_far: 300.,
+            rim_color: [0.; 4],
+            rim_color2: [0.; 4],
+            presets: 0,
+        }
+    }
+
+    #[test]
+    fn lambert_factor_is_ambient_plus_clamped_key() {
+        let l = PreviewLight::generic();
+        assert!((l.factor(l.toward_light) - Vec3::ONE).abs().max_element() < 1e-6);
+        assert_eq!(l.factor(-l.toward_light), Vec3::splat(0.35));
+        assert!(l.toward_light.is_normalized());
+    }
+
+    #[test]
+    fn back_faces_and_mirrored_winding_light_like_front_faces() {
+        let to_view = Vec3::Z;
+        // Front face, smooth normal toward the viewer: kept.
+        assert_eq!(facing_normal(Vec3::Z, Vec3::Z, to_view), Vec3::Z);
+        // Back face seen from behind (face normal away from the viewer): flipped.
+        assert_eq!(facing_normal(-Vec3::Z, -Vec3::Z, to_view), Vec3::Z);
+        // Mirrored instance: winding reversed, face normal sign arbitrary; still faces view.
+        assert_eq!(facing_normal(-Vec3::Z, Vec3::Z, to_view), Vec3::Z);
+        // Grazing smooth normal on a front face keeps its tangential part.
+        let n = facing_normal(Vec3::new(1., 0., 0.1), Vec3::Z, to_view);
+        assert!(n.z > 0. && n.x > 0.9);
+        // No face normal: smooth normal unchanged.
+        assert_eq!(facing_normal(Vec3::X, Vec3::ZERO, to_view), Vec3::X);
+    }
+
+    #[test]
+    fn level_settings_map_sun_ambient_fog_and_fit_to_unit_peak() {
+        let l = PreviewLight::from_settings(&settings(), Vec3::ZERO, 0.01);
+        assert!(l.from_level);
+        assert_eq!(l.label(), LEVEL_LABEL);
+        assert!((l.toward_light - Vec3::Y).length() < 1e-6);
+        // key (2, 1, 0.5) + ambient 0.5: red peak 2.5 fitted to 1.
+        assert!((l.key - Vec3::new(0.8, 0.4, 0.2)).length() < 1e-6);
+        assert!((l.ambient - Vec3::splat(0.2)).length() < 1e-6);
+        assert!(l.factor(Vec3::Y).max_element() <= 1. + 1e-6);
+        let fog = l.fog.unwrap();
+        assert!((fog.start - 1.).abs() < 1e-6 && (fog.end - 3.).abs() < 1e-6);
+        // Sun direction is taken from the scene centre.
+        let l = PreviewLight::from_settings(&settings(), Vec3::new(1000., 0., 0.), 0.01);
+        assert!((l.toward_light - Vec3::new(-1., 1., 0.).normalize()).length() < 1e-6);
+    }
+
+    #[test]
+    fn unusable_settings_fall_back_to_generic_and_say_why() {
+        let mut s = settings();
+        s.sun_position = [0.; 3];
+        let l = PreviewLight::from_settings(&s, Vec3::ZERO, 1.);
+        assert!(!l.from_level);
+        assert_eq!(l.toward_light, PreviewLight::generic().toward_light);
+        assert!(l.notes.last().unwrap().contains("sun position unusable"));
+        let mut s = settings();
+        s.ambient_color[1] = f32::NAN;
+        assert!(!PreviewLight::from_settings(&s, Vec3::ZERO, 1.).from_level);
+        // Bad fog range keeps the light but drops fog.
+        let mut s = settings();
+        s.fog_far = s.fog_near;
+        let l = PreviewLight::from_settings(&s, Vec3::ZERO, 1.);
+        assert!(l.from_level && l.fog.is_none());
+    }
+
+    #[test]
+    fn summary_labels_never_claim_game_lighting() {
+        for light in [
+            PreviewLight::generic(),
+            PreviewLight::from_settings(&settings(), Vec3::ZERO, 1.),
+        ] {
+            let lines = summary(&light, 2, 5);
+            assert!(lines[0].contains("not game"));
+            assert!(lines.last().unwrap().contains("2 of 5"));
+        }
+    }
+}
