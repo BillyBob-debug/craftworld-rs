@@ -361,8 +361,10 @@ fn wstr(r: &mut Reader, c: &mut Checks) -> Result<String> {
     })?;
     let units: Vec<u16> = r
         .bytes(bytes)?
-        .chunks_exact(2)
-        .map(|b| u16::from_be_bytes([b[0], b[1]]))
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|b| u16::from_be_bytes(*b))
         .collect();
     let s = String::from_utf16(&units).unwrap_or_else(|_| {
         c.invalid_utf16 += 1;
