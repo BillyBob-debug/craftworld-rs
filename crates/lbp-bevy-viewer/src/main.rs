@@ -574,12 +574,14 @@ fn load(
                 .and_then(|a| a.texture())
                 .and_then(|a| a.fourth.as_ref())
                 .map(|fourth| {
+                    let relative = fourth.relative.ok_or("Missing fourth-sample coordinates")?;
                     adapter::image(
                         fourth.texture.header.width,
                         fourth.texture.header.height,
                         fourth.texture.rgba.clone(),
                         true,
                     )
+                    .map(|image| (image, relative))
                 })
                 .transpose()?;
             prepared.push((
@@ -614,8 +616,8 @@ fn load(
             if let Some((third, relative)) = third_image {
                 dual::enable_third(&mut surface, images.add(third), relative);
             }
-            if let Some(fourth) = fourth_image {
-                dual::enable_fourth(&mut surface, images.add(fourth));
+            if let Some((fourth, relative)) = fourth_image {
+                dual::enable_fourth(&mut surface, images.add(fourth), relative);
             }
             let material = materials.add(surface);
             let mesh = meshes.add(mesh);
@@ -1118,7 +1120,15 @@ mod tests {
                 },
             );
             let fourth = images.add(adapter::image(1, 1, vec![32; 4], true).unwrap());
-            dual::enable_fourth(&mut surface, fourth);
+            dual::enable_fourth(
+                &mut surface,
+                fourth,
+                lbp_preview::RelativeSampling {
+                    from_primary: true,
+                    scale: [1., 1.],
+                    offset: [0., 0.],
+                },
+            );
             let material = materials.add(surface);
             let entity = world.spawn_empty().id();
             entities.push(entity);

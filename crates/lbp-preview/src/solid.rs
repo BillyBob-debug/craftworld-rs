@@ -14,6 +14,8 @@ pub struct SolidSelection {
     pub unwired_diffuse: bool,
     /// D87 COLOR × COLOR: the two operand nodes; `color_index` is then the multiply.
     pub product_of: Option<[usize; 2]>,
+    /// D101: COLOR-only MULTIPLY tree folded to `color`; `color_index` is its root.
+    pub product_tree: Option<crate::ProductTree>,
 }
 pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelection>, String> {
     let boxes = &graph.boxes;
@@ -63,6 +65,7 @@ pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelecti
             ignored_wires: wires.len(),
             unwired_diffuse: true,
             product_of: None,
+            product_tree: None,
         }));
     }
     if diffuse.len() != 1 {
@@ -100,5 +103,6 @@ pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelecti
         ignored_wires: wires.len() - 1,
         unwired_diffuse: false,
         product_of: None,
+        product_tree: None,
     }))
 }

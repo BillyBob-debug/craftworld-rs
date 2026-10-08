@@ -219,7 +219,17 @@ fn run() -> Result<(), String> {
                     .as_u64()
                     .map(|v| f32::from_bits(v as u32))
             };
-            let color_equal = if let Some([l, r]) = s.product_of {
+            let color_equal = if let Some(tree) = s.product_tree {
+                // D101: COLOR-only tree; independent oracle walk and ascending f32 fold.
+                oracle_tree(sample, s.color_index)?.is_some_and(|(t, c, m, bits)| {
+                    t.is_empty()
+                        && tree.texture_leaves == 0
+                        && tree.root == s.color_index
+                        && usize::from(tree.color_leaves) == c
+                        && usize::from(tree.multiply_nodes) == m
+                        && bits == s.color.bits
+                })
+            } else if let Some([l, r]) = s.product_of {
                 // Independent f32 recomputation of the oracle's two COLOR inputs.
                 let oracle_wires = sample["graph"]["wires"]
                     .as_array()
@@ -256,7 +266,7 @@ fn run() -> Result<(), String> {
                 mismatches += 1;
             }
             projected += 1;
-            json!({"status":"solid_projected","output_index":s.output_index,"color_index":s.color_index,"product_of":s.product_of,"color_bits":s.color.bits,"texture":null,"uv_channel":null,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+            json!({"status":"solid_projected","output_index":s.output_index,"color_index":s.color_index,"product_of":s.product_of,"product_tree":s.product_tree.map(|t|json!({"root":t.root,"multiply_nodes":t.multiply_nodes,"color_leaves":t.color_leaves,"policy":"folded_color_product"})),"color_bits":s.color.bits,"texture":null,"uv_channel":null,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
         } else {
             let selected = match instance_selection {
                 Some(s) => Ok(s),
@@ -862,7 +872,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection,"instance_white_expected":instance_expected,"instance_folded_samplers":folded_ports}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":22,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":23,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -886,13 +896,11 @@ fn run() -> Result<(), String> {
 /// D99 (docs/d99-product-trees.md): walk the oracle's MULTIPLY rows from the diffuse
 /// root; texture leaves (with multiplicity) must equal the selected roles and the tint
 /// must equal the f32 product of the oracle's COLOR rows in ascending box order.
-fn tree_equal(
-    sample: &Value,
-    s: &lbp_preview::DiffuseSelection,
-    tree: lbp_preview::ProductTree,
-    root: usize,
-    transform_equal: &dyn Fn(usize, lbp_preview::SamplingTransform) -> bool,
-) -> Result<bool, String> {
+/// Oracle MULTIPLY tree walk from `root`: sorted texture leaves (with multiplicity),
+/// constant leaf count, distinct MULTIPLY count and the folded constant bits. D101: CONST
+/// (4) contributes word 0 to every component, CONST4 (7) words 0..4 like COLOR (3).
+type OracleTree = (Vec<usize>, usize, usize, [u32; 4]);
+fn oracle_tree(sample: &Value, root: usize) -> Result<Option<OracleTree>, String> {
     let nodes = &sample["graph"]["boxes"];
     let wires = sample["graph"]["wires"]
         .as_array()
@@ -903,7 +911,7 @@ fn tree_equal(
     while let Some(index) = pending.pop() {
         visits += 1;
         if visits > 64 {
-            return Ok(false);
+            return Ok(None);
         }
         match nodes[index]["type_raw"].as_u64() {
             Some(10) => {
@@ -922,7 +930,7 @@ fn tree_equal(
                         w["port_from_raw"] != 0 || w["swizzle_raw"] != json!([0, 0, 0, 0, 0])
                     })
                 {
-                    return Ok(false);
+                    return Ok(None);
                 }
                 if !multiplies.contains(&index) {
                     multiplies.push(index);
@@ -932,16 +940,21 @@ fn tree_equal(
                 }
             }
             Some(1) => textures.push(index),
-            Some(3) => colors.push(index),
-            _ => return Ok(false),
+            Some(3 | 4 | 7) => colors.push(index),
+            _ => return Ok(None),
         }
     }
     colors.sort_unstable();
     let rows = colors
         .iter()
         .map(|&c| {
+            let scalar = nodes[c]["type_raw"].as_u64() == Some(4);
             let row: Option<Vec<u32>> = (0..4)
-                .map(|i| nodes[c]["parameters_raw"][i].as_u64().map(|v| v as u32))
+                .map(|i| {
+                    nodes[c]["parameters_raw"][if scalar { 0 } else { i }]
+                        .as_u64()
+                        .map(|v| v as u32)
+                })
                 .collect();
             row.map(|r| [r[0], r[1], r[2], r[3]])
         })
@@ -954,7 +967,25 @@ fn tree_equal(
             *v *= f32::from_bits(bits);
         }
     }
-    let folded = folded.map(f32::to_bits);
+    textures.sort_unstable();
+    Ok(Some((
+        textures,
+        colors.len(),
+        multiplies.len(),
+        folded.map(f32::to_bits),
+    )))
+}
+fn tree_equal(
+    sample: &Value,
+    s: &lbp_preview::DiffuseSelection,
+    tree: lbp_preview::ProductTree,
+    root: usize,
+    transform_equal: &dyn Fn(usize, lbp_preview::SamplingTransform) -> bool,
+) -> Result<bool, String> {
+    let nodes = &sample["graph"]["boxes"];
+    let Some((textures, colors, multiplies, folded)) = oracle_tree(sample, root)? else {
+        return Ok(false);
+    };
     let mut selected: Vec<_> = [Some(s.sample_index)]
         .into_iter()
         .chain(
@@ -963,7 +994,6 @@ fn tree_equal(
         .flatten()
         .collect();
     selected.sort_unstable();
-    textures.sort_unstable();
     let leaves_equal = [s.second_sample, s.third_sample, s.fourth_sample]
         .into_iter()
         .flatten()
@@ -983,8 +1013,8 @@ fn tree_equal(
         && s.texture_add.is_none()
         && selected == textures
         && usize::from(tree.texture_leaves) == textures.len()
-        && usize::from(tree.color_leaves) == colors.len()
-        && usize::from(tree.multiply_nodes) == multiplies.len()
+        && usize::from(tree.color_leaves) == colors
+        && usize::from(tree.multiply_nodes) == multiplies
         && s.tint.bits == folded
         && leaves_equal)
 }

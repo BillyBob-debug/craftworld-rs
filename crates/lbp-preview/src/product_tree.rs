@@ -4,6 +4,9 @@
 //! (with multiplicity) map onto the existing single, two-texture, three-texture
 //! and four-chain render roles. Runs only after the fixed product routes refused a
 //! graph. Evidence, scope and limits: docs/d99-product-trees.md.
+//! D101 (docs/d101-multiply-rest.md): CONST/CONST4 leaves fold like COLOR (a scalar
+//! CONST broadcasts), a tree without texture leaves folds to a solid color, and four
+//! leaves without two sharing pairs sample the fourth relative to a displayed set.
 use lbp_resource::material::{BoxMetadata, GraphMetadata};
 
 /// Bounded walk over the diffuse MULTIPLY tree (a DAG is expanded with multiplicity).
@@ -19,11 +22,18 @@ pub struct ProductTree {
     pub multiply_nodes: u8,
     /// Texture leaves counted with multiplicity (a squared sampler counts twice).
     pub texture_leaves: u8,
-    /// COLOR leaves counted with multiplicity; their product is `DiffuseSelection::tint`.
+    /// COLOR (and D101 CONST/CONST4) leaves counted with multiplicity; their product is
+    /// `DiffuseSelection::tint` (or the D101 solid color when there are no textures).
     pub color_leaves: u8,
 }
 impl ProductTree {
     pub fn label(self) -> String {
+        if self.texture_leaves == 0 {
+            return format!(
+                "COLOR-only product tree: {} folded constant leaves under {} MULTIPLY",
+                self.color_leaves, self.multiply_nodes
+            );
+        }
         format!(
             "product tree: {} texture leaves × {} folded COLOR leaves under {} MULTIPLY",
             self.texture_leaves, self.color_leaves, self.multiply_nodes
@@ -93,18 +103,34 @@ pub(crate) fn flatten(graph: &GraphMetadata, root: usize) -> Result<Option<Flat>
                 }
             }
             1 => flat.textures.push(index),
-            3 => {
+            // D101: CONST (4, scalar broadcast) and CONST4 (7) fold like COLOR (3).
+            3 | 4 | 7 => {
                 if !unanimated(node) || graph.wires.iter().any(|w| w.box_to as usize == index) {
                     return Err(
-                        "Unsupported: product tree COLOR must be unanimated and unwired".into(),
+                        "Unsupported: product tree COLOR must be unanimated and unwired (CONST too)"
+                            .into(),
                     );
                 }
                 flat.colors.push(index);
+            }
+            5 | 6 => {
+                return Err("Unsupported: product tree CONST2/CONST3 leaf (vector-width product semantics not established)".into());
             }
             _ => return Ok(None),
         }
     }
     Ok(Some(flat))
+}
+
+/// Four parameter words a constant leaf contributes: COLOR/CONST4 words 0..4, CONST
+/// word 0 broadcast (Toolkit emits a scalar, multiplied into every component).
+pub(crate) fn leaf_row(node: &BoxMetadata) -> [u32; 4] {
+    let p = &node.parameters_raw;
+    if node.type_raw == 4 {
+        [p[0]; 4]
+    } else {
+        [p[0], p[1], p[2], p[3]]
+    }
 }
 
 /// Component-wise f32 product of the COLOR leaves, in ascending box index order
@@ -158,15 +184,15 @@ pub(crate) fn select(
         return Err("Unsupported: product tree without texture leaves (COLOR-only product)".into());
     }
     if flat.textures.len() > MAX_TEXTURE_LEAVES {
-        return Err("Unsupported: product tree with more than four texture leaves".into());
+        return Err("Unsupported: product tree with more than four texture leaves (no fifth sampler binding in the render paths)".into());
     }
     let mut colors = flat.colors.clone();
     colors.sort_unstable();
-    let tint = fold_colors(colors.iter().map(|&c| {
-        let p = &boxes[c].parameters_raw;
-        [p[0], p[1], p[2], p[3]]
-    }));
-    tint.validate()?;
+    let tint = fold_colors(colors.iter().map(|&c| leaf_row(&boxes[c])));
+    tint.validate().map_err(|_| {
+        "Unsupported: product tree folded COLOR/CONST tint outside finite 0..1 preview bounds"
+            .to_string()
+    })?;
     let mut leaves = crate::linked::Leaves::new(animated);
     let mut sampled = vec![];
     for &index in &flat.textures {
@@ -208,7 +234,70 @@ pub(crate) fn select(
         // Same rule the loader applies (D65): fail at selection so census reasons match.
         crate::linked::relative_third(&selection, &[])?;
     }
+    if selection.fourth_sample.is_some() {
+        relative_fourth(&selection, &[])?;
+    }
     Ok(selection)
+}
+
+/// D101: a MULTIPLY tree whose leaves are only static COLOR/CONST/CONST4 folds to one
+/// solid color (same fold as the tint). `Ok(None)`: not such a tree.
+pub(crate) fn select_color_tree(
+    graph: &GraphMetadata,
+    output_index: usize,
+    root: usize,
+) -> Result<Option<crate::SolidSelection>, String> {
+    // Tree errors (budget, animated leaves) are left to the texture routes' reasons.
+    let Ok(Some(flat)) = flatten(graph, root) else {
+        return Ok(None);
+    };
+    if !flat.textures.is_empty() || flat.colors.is_empty() {
+        return Ok(None);
+    }
+    let mut colors = flat.colors.clone();
+    colors.sort_unstable();
+    let color = fold_colors(colors.iter().map(|&c| leaf_row(&graph.boxes[c])));
+    color.validate()?;
+    colors.dedup();
+    let used_nodes = 1 + flat.multiplies.len() + colors.len();
+    let used_wires = 1 + 2 * flat.multiplies.len();
+    Ok(Some(crate::SolidSelection {
+        output_index,
+        color_index: root,
+        color,
+        ignored_nodes: graph.boxes.len().saturating_sub(used_nodes),
+        ignored_wires: graph.wires.len().saturating_sub(used_wires),
+        unwired_diffuse: false,
+        product_of: None,
+        product_tree: Some(ProductTree {
+            root,
+            multiply_nodes: flat.multiplies.len() as u8,
+            texture_leaves: 0,
+            color_leaves: flat.colors.len() as u8,
+        }),
+    }))
+}
+
+/// D101: coordinates of the fourth sample. Exact sharing with the primary keeps the
+/// D60 behaviour (primary coordinates, identity); otherwise the D65 third-sample rule
+/// (exact second, or a scale/offset base on the same channel) applies to the fourth.
+pub(crate) fn relative_fourth(
+    selection: &crate::DiffuseSelection,
+    subtracted: &[usize],
+) -> Result<crate::RelativeSampling, String> {
+    let fourth = selection
+        .fourth_sample
+        .ok_or("Unsupported: fourth sample")?;
+    if fourth.uv_channel == selection.uv_channel && fourth.uv_transform == selection.uv_transform {
+        return Ok(crate::RelativeSampling {
+            from_primary: true,
+            scale: [1., 1.],
+            offset: [0., 0.],
+        });
+    }
+    let mut probe = *selection;
+    probe.third_sample = Some(fourth);
+    crate::linked::relative_third(&probe, subtracted).map_err(|e| e.replace("third", "fourth"))
 }
 
 type Leaf = crate::linked::SamplerSelection;
@@ -278,10 +367,27 @@ fn roles(leaves: &[Leaf]) -> Result<(Leaf, [Option<Leaf>; 3]), String> {
                     return Ok((leaves[0], [Some(b), Some(c), Some(d)]));
                 }
             }
-            Err(
-                "Unsupported: product tree four textures need two exact coordinate-sharing pairs"
-                    .into(),
-            )
+            // D101: no two exact pairs; take the first leaf order (lexicographic) whose
+            // third and fourth each have an exact share or a scale/offset base on their
+            // channel, as the loader derives their coordinates from a displayed set.
+            for a in 0..4 {
+                for b in (0..4).filter(|&b| b != a) {
+                    for c in (0..4).filter(|&c| c != a && c != b) {
+                        let d = 6 - a - b - c;
+                        let mut t = trial(leaves[a], leaves[b], leaves[c]);
+                        t.fourth_sample = Some(leaves[d]);
+                        if crate::linked::relative_third(&t, &[]).is_ok()
+                            && relative_fourth(&t, &[]).is_ok()
+                        {
+                            return Ok((
+                                leaves[a],
+                                [Some(leaves[b]), Some(leaves[c]), Some(leaves[d])],
+                            ));
+                        }
+                    }
+                }
+            }
+            Err("Unsupported: product tree four textures need two exact coordinate-sharing pairs or scale/offset bases for the third and fourth".into())
         }
         _ => Err("Unsupported: product tree texture leaf count".into()),
     }
@@ -511,10 +617,37 @@ mod tests {
         );
         assert_eq!(s.tint, crate::DiffuseTint::default());
         assert_eq!((s.ignored_nodes, s.ignored_wires), (0, 0));
+        // D101: no second pair; the fourth takes a relative base on its channel.
         g.boxes[4].parameters_raw[0] = 2f32.to_bits();
-        assert!(crate::select_diffuse(&g)
+        let relaxed = crate::select_diffuse(&g).unwrap();
+        let roles = [
+            relaxed.sample_index,
+            relaxed.second_sample.unwrap().sample_index,
+            relaxed.third_sample.unwrap().sample_index,
+            relaxed.fourth_sample.unwrap().sample_index,
+        ];
+        assert_eq!(roles, [1, 2, 3, 4]);
+        // Third shares the primary (UV1) exactly; fourth is UV0 relative to the second.
+        let third = crate::linked::relative_third(&relaxed, &[]).unwrap();
+        assert!(third.from_primary && third.is_identity());
+        let fourth = relative_fourth(&relaxed, &[]).unwrap();
+        assert!(!fourth.from_primary);
+        assert_eq!((fourth.scale, fourth.offset), ([2. / 3., 1.], [0., 0.]));
+        // The D60 chain keeps primary coordinates for its fourth leaf.
+        let chain = relative_fourth(&s, &[]).unwrap();
+        assert!(chain.from_primary && chain.is_identity());
+        // Two distinct matrix leaves leave the scale/offset pair without a base.
+        let mut matrix = g.clone();
+        for (i, v) in [(1usize, 0.5f32), (3, 0.25)] {
+            matrix.boxes[i].subtype_raw = 1;
+            matrix.boxes[i].parameters_raw[..4]
+                .copy_from_slice(&[1f32, v, 0., 0.].map(f32::to_bits));
+            matrix.boxes[i].parameters_raw[6] = 1f32.to_bits();
+            matrix.boxes[i].parameters_raw[7] = 0;
+        }
+        assert!(crate::select_diffuse(&matrix)
             .unwrap_err()
-            .contains("two exact coordinate-sharing pairs"));
+            .contains("scale/offset bases for the third and fourth"));
         // Five texture leaves exceed the render roles.
         g.boxes[4].parameters_raw[0] = 3f32.to_bits();
         g.boxes.extend([sample(1., 4, 0), node(MUL, [0.; 4])]);
@@ -524,6 +657,62 @@ mod tests {
         assert!(crate::select_diffuse(&g)
             .unwrap_err()
             .contains("more than four"));
+    }
+    #[test]
+    fn d101_constant_leaves_fold_and_color_only_trees_are_solids() {
+        // (C1 × C2) × K: 1/2 COLOR, 3 inner, 4 CONST, 5 root.
+        let mut g = graph(
+            vec![
+                node(0, [0.; 4]),
+                node(3, [0.5, 1., 0.25, 1.]),
+                node(3, [0.5, 0.5, 1., 0.5]),
+                node(MUL, [0.; 4]),
+                node(4, [0.5, 9., 9., 9.]),
+                node(MUL, [0.; 4]),
+            ],
+            vec![
+                wire(1, 3, 0),
+                wire(2, 3, 1),
+                wire(3, 5, 0),
+                wire(4, 5, 1),
+                wire(5, 0, 0),
+            ],
+        );
+        assert!(crate::select_diffuse(&g)
+            .unwrap_err()
+            .contains("COLOR-only"));
+        let solid = crate::select_small_solid(&g).unwrap().unwrap();
+        // CONST broadcasts word 0 to all four components.
+        assert_eq!(solid.color.values(), [0.125, 0.25, 0.125, 0.25]);
+        assert_eq!((solid.color_index, solid.product_of), (5, None));
+        let tree = solid.product_tree.unwrap();
+        assert_eq!(
+            (tree.texture_leaves, tree.color_leaves, tree.multiply_nodes),
+            (0, 3, 2)
+        );
+        assert_eq!((solid.ignored_nodes, solid.ignored_wires), (0, 0));
+        assert!(tree.label().contains("COLOR-only"));
+        // CONST4 (7) folds like COLOR.
+        let mut c4 = g.clone();
+        c4.boxes[4] = node(7, [1., 0.5, 1., 1.]);
+        let c4 = crate::select_small_solid(&c4).unwrap().unwrap();
+        assert_eq!(c4.color.values(), [0.25, 0.25, 0.25, 0.5]);
+        // A texture leaf takes the texture route with the same broadcast tint.
+        g.boxes[1] = sample(2., 0, 0);
+        assert!(crate::select_small_solid(&g).unwrap().is_none());
+        let s = crate::select_diffuse(&g).unwrap();
+        assert_eq!(s.tint.values(), [0.25, 0.25, 0.5, 0.25]);
+        assert_eq!(s.product_tree.unwrap().color_leaves, 2);
+        // Overbright CONST: refused with the tint bound reason.
+        g.boxes[4].parameters_raw[0] = 4.888889f32.to_bits();
+        assert!(crate::select_diffuse(&g)
+            .unwrap_err()
+            .contains("tint outside finite 0..1"));
+        // CONST2/CONST3 leaves: vector width not established.
+        g.boxes[4].type_raw = 5;
+        assert!(crate::select_diffuse(&g)
+            .unwrap_err()
+            .contains("CONST2/CONST3"));
     }
     #[test]
     fn d99_fold_is_an_ascending_f32_product() {
