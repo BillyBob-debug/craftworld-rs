@@ -3834,3 +3834,23 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   range vs overview camera).
 - Checks: fmt; tests lbp-mesh, lbp-preview, lbp-bevy-viewer (26); workspace Clippy; builds.
 **+0 newly viewable / +0 newly Complete.**
+
+## D151-D159 — menus, runtime, level polish, Pod (2026-10-08)
+
+- D151 (PR #46): script frame sizes as minimums; --ui-script menu fills the window.
+- D152 (Rt part 2): class field defaults, part handles, inherited natives; Rookie Test
+  OnCreate 189 done / 23 fault (D150 170/42), Update 21/1 (0/22); 57 natives bound.
+- D153: undrawn level shapes classified, all hidden by data (hulls, tree colliders,
+  invisible colliders, edit-only); report split, counts unchanged.
+- D154-D157 (PRs #47, #48, #50): --puter-screen debug view; --pod-menu globe menu with
+  pills from the RPCS3 reference; preview budgets 500k tris / 1M verts (globe draws);
+  --pod-camera solved from the globe. Pod levels: 000027b9 pod.bin (shell, controller,
+  spawn), 00018fdb pod_planets.bin (globe, moon, room plan 0001d054). Capture
+  d163-pod-camera-menu.png: globe 0.32w/0.39h r 0.21h vs RPCS3 0.35/0.40/0.22.
+  Notes local-analysis/d155-pod-assets.md; RPCS3 references d156-rpcs3-pod-*.png (local).
+- D158: level decorations drawn: Rookie 51/51, Grab and Swing 84/84, Hedge Hopping 15/15
+  (inferred placement); sticker decals 910/444/118 counted, not drawn.
+- D159 (PR #49): per-tick LevelScripts; Rookie --play=300: create 189/23, no tick faults.
+- Checks per merge: fmt, tests, workspace Clippy -D warnings, both viewer builds.
+**+150 newly viewable (decorations drawn, unit DECORATIONS entries, scope three Da Vinci
+levels, baseline D149 0) / +0 newly Complete.**

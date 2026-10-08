@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D151-D159 Pod menu, decorations, runtime ticks
+
+Pod main menu renders over the real Pod level with a solved camera; 150 level decorations
+drawn; level scripts run per tick. +150 viewable (decorations) / +0 Complete.
+
 ## 2026-10-08 — D146-D150 level polish, UI objects, runtime
 
 Sackboy shown upright facing the camera; Rookie Test joints skinned; three Da Vinci
