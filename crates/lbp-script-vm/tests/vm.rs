@@ -796,7 +796,7 @@ fn test_script_checks_reach_the_world_through_construct() {
 }
 
 #[test]
-fn array_insert_at_minus_one_appends() {
+fn array_insert_clamps_the_index() {
     let mut b = Builder::new();
     let ints = b.ty(OBJ, "int[]", None, INT);
     let s = b.build(
@@ -812,9 +812,17 @@ fn array_insert_at_minus_one_appends() {
                 i(0x9e, INT, 12, 8, 0xffff), // append r12 (no index operand)
                 hi(0x03, 16, -1i32 as u32),  // r16 = -1
                 hi(0x03, 20, 8),             // r20 = 8
-                i(0x9d, INT, 20, 8, 16),     // insert r20 at r16 = -1
-                hi(0x03, 24, 1),             // r24 = 1
-                i(0x99, INT, 28, 8, 24),     // r28 = r8[1]
+                i(0x9d, INT, 20, 8, 16),     // insert r20 at r16 = -1: front
+                hi(0x03, 16, 100),           // r16 = 100
+                hi(0x03, 20, 9),             // r20 = 9
+                i(0x9d, INT, 20, 8, 16),     // insert r20 at r16 = 100: end
+                hi(0x03, 24, 0),             // r24 = 0
+                i(0x99, INT, 28, 8, 24),     // r28 = r8[0] = 8
+                hi(0x03, 24, 2),             // r24 = 2
+                i(0x99, INT, 32, 8, 24),     // r32 = r8[2] = 9
+                hi(0x03, 24, 10),            // r24 = 10
+                i(0x2c, INT, 28, 28, 24),    // r28 = r28 * 10 (MULi)
+                i(0x2a, INT, 28, 28, 32),    // r28 = r28 + r32 (ADDi)
                 i(0xa5, INT, 0, 28, 0),      // RETURN r28
             ],
         )],
@@ -824,6 +832,6 @@ fn array_insert_at_minus_one_appends() {
     let mut budget = 100;
     assert_eq!(
         vm.call(&mut TestHost::default(), c, "Run", &[], &mut budget),
-        Ok(Value::Int(8))
+        Ok(Value::Int(89))
     );
 }

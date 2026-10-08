@@ -865,15 +865,14 @@ impl Vm {
                     match op {
                         0x9a => *a.get_mut(idx(&index).ok_or(bad.clone())?).ok_or(bad)? = src,
                         0x9d => {
-                            // Index -1 inserts at the end (INFERRED from the D140 test
-                            // script's ARRAY_INSERT with -1). Other out-of-range indices
-                            // fault: appending them broke 20 TestArray checks (D144).
+                            // The index is clamped to [0, len]: -1 inserts at the front and
+                            // an index past the end appends (INFERRED from the test script's
+                            // TestArray, D145: inserts at 1, -1 and 100 then length and
+                            // element checks).
                             let i = match index {
-                                Value::Int(-1) => Some(a.len()),
-                                _ => idx(&index),
-                            }
-                            .filter(|&i| i <= a.len())
-                            .ok_or(bad)?;
+                                Value::Int(i) => usize::try_from(i).map_or(0, |i| i.min(a.len())),
+                                _ => return Err(bad),
+                            };
                             if a.len() >= MAX_ARRAY_LEN {
                                 return Err(Fault::Heap);
                             }

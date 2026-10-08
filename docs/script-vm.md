@@ -50,7 +50,7 @@ INFERRED (no executable or Toolkit statement; each is a place a real script can 
 | `LCb` | Bit 63 (Toolkit), switchable by `Rules::lcb` (`Bit63`, `AnyHighBit`, `Bit32`) | Bit 63 calls NeverEvaluated in TestBool (D139); any high bit breaks 20 TestLogical checks (D140); bit 32 untested. PC compares with `script_tests --lcb=` |
 | Construction | `NEW_OBJECT` allocates the class's and its superclasses' fields, then runs `.init__` (found through the superclass chain) with `this` in its single argument row, else register 0. `.ctor__` is called by the script itself | D139 listings: `.init__` calls the superclass `.init__` and sets the members, `.ctor__` only chains; checks read members only `.init__` sets |
 | Superclass by GUID | Falls back to the class name that any loaded script's type references give that GUID | Scripts loaded from a directory have no GUID; Test's superclass is named only by GUID |
-| `ARRAY_INSERT` at -1 | Inserts at the end; other out-of-range indices fault | D140 TestArray inserts at -1 after appends. D144: appending for an insert at 100 into a 5-element array broke 20 later TestArray checks, so that case is still open |
+| `ARRAY_INSERT` index | Clamped to [0, len]: -1 inserts at the front, past the end appends | D145 TestArray: three appends, then inserts at 1, -1 and 100; the length and first two element checks fit only this rule (appending at -1 or at 100 alone broke them in D140/D144) |
 | `LCs64` constants | Compressed long vectors hold zigzag values, `(n >> 1) ^ -(n & 1)`, decoded by the `lbp-level` reader; uncompressed u64 is two's complement | D143: with zigzag, TestS64 1551 (`1 << 63` = i64::MIN) and 1562 (AND of two constants) pass; without it no decode makes 1562 pass |
 
 UNKNOWN: native function semantics (they live in the executable). Each one gets a host
@@ -62,15 +62,14 @@ the script framework's own counters (`TestBase` `.get.NumSucceeded__` / `.get.Nu
 and `WRITE` lines (failed-check details) are kept per function. Its JSON also records each
 test class's superclass chain, every native call that reached the host, and instructions per function.
 
-Open after D144 (the PC run of this change before the m44 and insert rework: 488 pass,
-22 fail; TestS64 1551 and 1562 pass):
+Open after D145 (1 failed check of 480):
 - TestLocals 417: a local declared inside a loop body without an initialiser is read
-  before it is written and the game expects 0 on every iteration; the VM keeps the
-  previous iteration's value. No instruction resets it, the locals rows carry no scope
-  range, and re-zeroing locals on the back-branch would also reset the loop counter.
-  Undecided; possibly the game fails this check too.
-- TestArray: `ARRAY_INSERT` at 100 into a 5-element array. Appending broke 20 later
-  checks, so the case faults again until its listing settles it.
+  before it is written, and the check expects 0 on every iteration. The source lines of
+  the declaration emit no instructions and nothing resets the register, so the VM reads
+  the previous iteration's value. The same function's second loop initialises its body
+  local explicitly and passes. Re-zeroing locals on the back-branch would also reset the
+  loop counter. Kept as is: the check may fail on hardware too (an RPCS3 run of the test
+  script would settle it).
 
 `Vm::last_site()` names the class, function and relative pc of the last executed
 instruction, which after a fault is the faulting one. `script_tests` prints it with each fault.
