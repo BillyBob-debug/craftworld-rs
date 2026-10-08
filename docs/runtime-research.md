@@ -129,9 +129,9 @@ Phase R1 (skinning, animation playback) shipped as D110, D115, D116 and D118.
   −100..+100. **UNKNOWN:** per-gate frame delay, evaluation order, multi-wire fan-in, analog XOR.
 
 ### 3.4 Shared unknowns
-1. **Simulation tick rate.** All counters are integer frames; 30 Hz is INFERRED, not
-   confirmed. Physics, logic timers, emitters, piston periods and animation playback all
-   depend on it. One measurement (check X1) unblocks all three areas.
+1. **Simulation tick rate.** All counters are integer frames. 30 Hz is
+   CONFIRMED_FROM_LOCAL_DATA (emulated, X1, 2026-10-08; `docs/rpcs3-measurement.md`).
+   Physics, logic timers, emitters, piston periods and animation playback all use it.
 2. Determinism expectations: the game's own replays (Sackbot recordings, motion
    recorder) imply reproducible input playback, not bit-identical physics. Our target is
    deterministic within our own build.
@@ -155,7 +155,7 @@ research agent wrote them from 0.15-0.18 knowledge). Costume pieces share the bo
 joint entities.
 
 **Physics.** avian2d 0.7.0, `enhanced-determinism`, no `parallel`/`simd` if replays must
-be bit-exact; fixed 30 Hz (pending X1), 4-8 substeps. One 2D world; component
+be bit-exact; fixed 30 Hz (X1), 4-8 substeps. One 2D world; component
 `ZSlab { z, half_thickness }`; a `CollisionHooks` pair filter rejects non-overlapping
 slabs (thin layers and cross-layer joints then work). collideType/collideIgnore →
 `CollisionLayers`. Mass set explicitly from area × massDepth × density. Colliders:

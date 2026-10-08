@@ -53,11 +53,15 @@ story levels add cameras, triggers and logic that can move or hold Sackboy.
 
 | Check | What to record |
 |---|---|
-| X1 tick rate | Done 2026-10-08 (local observation, RPCS3 at full speed): 30 game ticks per second, one tick every 2 display refreshes, within 0.1%. The runtime uses 30 Hz for its fixed update. |
+| X1 tick rate | Done 2026-10-08, CONFIRMED_FROM_LOCAL_DATA (emulated): 30 game ticks per second, one tick every 2 vblanks, within 0.1%. The runtime uses 30 Hz for its fixed update. Details below. |
 | S9 walk / run | Ground speed in level units per second: find Sackboy's x in memory, walk for 3+ s, sample x per frame. |
 | S9 jump | Jump height and air time from a standing jump on flat ground (y per frame); fit a parabola for gravity. |
 | S9 fall | Terminal fall speed, if any, from a long drop. |
 | S9 layer shift | Frames from input to arrival on the next layer; z values of the three layers. |
+
+X1 run (game 01.33): RPCS3 0.0.43-20247, Vulkan, offline, full speed (29.98 FPS). Over
+20 s, three game tick counters advanced 599, 598 and 599 while the vblank counter (guest
+0xdb8244) advanced 1,197. Samples: PC `local-analysis/x1-tick-counters-0133-run1.csv`.
 
 Record the method, level, RPCS3 build, and the raw per-frame samples (CSV under
 `local-analysis/`). The milestone doc gets the fitted numbers with the evidence label for
