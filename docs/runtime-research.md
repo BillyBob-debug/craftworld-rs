@@ -30,16 +30,11 @@ this document is the synthesis.
   parts below are therefore the same work as level-research.md L6..Ln; this plan only adds the
   behaviour layer on top.
 
-## 2. Scope decision needed first
+## 2. Scope (decided 2026-10-08)
 
-AGENTS.md defines the product as an *Asset Explorer*; "the future compatible runtime is
-context, not the current implementation scope", and rule 6 says "No GUI, physics,
-gameplay ... during scanner work". Everything in §5 phases R2 onward (physics, logic,
-controller) is gameplay runtime. Before any of it is queued, the user should decide
-whether to amend AGENTS.md (suggested wording: runtime work allowed in separate crates
-that the parsing crates never depend on, dev-only behind a viewer mode until stated
-otherwise). Phase R1 (skinning, animation playback, costume assembly in the viewer) is
-asset viewing and fits the current rules.
+The user approved gameplay runtime work: AGENTS.md now allows physics, logic, scripts
+and a playable Sackboy in separate crates that the parsing crates never depend on.
+Phase R1 (skinning, animation playback) shipped as D110, D115, D116 and D118.
 
 ## 3. What the data says (summary; details in runtime-evidence/)
 
@@ -203,15 +198,19 @@ grab = runtime joint to the grabbed body (PCreature.grabJoint). Layer shifting m
 ZSlab. Sackbots reuse the controller with PNpc input instead of a pad. Controlinator
 reroutes a player's pad input to a Thing's logic outputs.
 
-**Scripts: user decision (not decided here).**
-- (a) Interpret the user's own RScript bytecode at runtime. Fidelity for unknown
-  scripts, but it *executes* original game code from user data (AGENTS.md covers
-  shipping code, not this) and still needs the native API rebuilt by name, which is the
-  larger job.
-- (b) Reimplement each scripted gadget natively and read PScript member values as
-  configuration. Clear legal footing; unknown scripts show as unsupported.
-- Hybrid: (b) by default, (a) behind an off-by-default feature. Recommendation: (b)
-  first; revisit after check G3 shows how many distinct scripts story levels use.
+**Scripts: interpret the user's own RScript (decided 2026-10-08).**
+- The runtime loads RScript resources from the user's game data and runs them in our own
+  register VM. Fidelity covers scripts we have never looked at, as long as the native
+  functions they call exist.
+- The larger job is the native-function API: scripts are classes extending Thing that call
+  engine functions by name. Each one is reimplemented from recorded findings against our
+  runtime (Thing, physics, logic). Unknown natives fail loudly per call, not per level.
+- Opcode semantics come from Toolkit's opcode table (names, operand layout) plus local
+  experiments and targeted executable research; zishzingers stays a behaviour reference
+  only (no licence). Nothing from the executable is copied.
+- One reader for both plans: the "Pod, menus and Popit" plan's U10 owns the RScript reader
+  and disassembler crate; this plan owns the VM and native bindings built on it.
+- Native gadgets (switches, gates) stay native; LBP2 does not script them.
 
 ## 5. Phased path
 
@@ -247,6 +246,10 @@ from the sibling plan.
 and costume decals, scripts (per decision), water/effectors, attract-o-gel, lethal
 effects, sequencer audio.
 
+**Phase RS, scripts (in parallel with R3).** RScript reader (U10, shared) → VM core on
+synthetic bytecode → native-call census over story-level scripts → natives in call-count
+order → scripted gadgets (scoreboard, magic mouth, music trigger, gun) working in a level.
+
 ## 6. Candidate backlog items (unnumbered; Integrator assigns D-numbers)
 
 | # | Item | Where | Done when |
@@ -267,7 +270,11 @@ effects, sequencer audio.
 | Rm | Grab, slap, collectables/score, lethal deaths | PC QA | — |
 | Rn | Sackbots (PNpc behaviours, recorded input replay) + Controlinator | PC QA | — |
 | Ro | PScript instance-data reader (needed by both script options) | cloud-ok + PC parity | All PScript parts in story levels parse |
-| Rp | Scripted gadgets, per the user's decision (native reimplementation first) | split later | — |
+| Rp | RScript reader + disassembler (owned by UI plan U10; shared crate) | cloud-ok + PC parity | All story-level RScripts disassemble; Toolkit parity |
+| Rq | Script VM core: registers, 203 opcodes, calls/returns, instruction budget per tick, deterministic | cloud-ok (synthetic bytecode) | Opcode tests; budget/cycle limits; unknown opcode = explicit error |
+| Rr | Native-call census: native functions called by story-level scripts, with call counts (check G10) | PC | Ranked list in milestone doc |
+| Rs | Native API bindings in call-count order, bound to Thing/physics/logic runtime | cloud-ok + PC QA | Top-N natives cover named story scripts |
+| Rt | Script instance lifecycle: PScript members as fields, create/update entry points, cross-script refs | cloud-ok + PC QA | Scoreboard / magic mouth run in a level |
 | Rz | Softbody, expressions/emotes, water, attract-o-gel, sequencer audio | split later | — |
 
 Dependencies: Ra→Rb→Rc→Rd (no level work needed). Re needs the Thing reader (levels L3,
@@ -325,16 +332,18 @@ the Lx triangulator. Rl needs X1 and S8/S9.
   frame-step.
 - G8. SwitchSignal ternary values and player id range seen.
 - G9. PSwitchInput.updateType usage.
+- G10. For every RScript referenced by story levels: native functions called (by name),
+  call counts, opcodes used. Feeds Rr/Rs.
 
-## 8. User decisions
+## 8. User decisions (answered 2026-10-08)
 
-1. **Scope:** amend AGENTS.md to allow gameplay runtime work (R2 onward). R0, R1 need no change.
-2. **Physics dependency:** avian2d 0.7.0 (MIT OR Apache-2.0); rapier fallback is Apache-2.0.
-3. **Scripts:** native reimplementation (recommended first) vs interpreting the user's
-   own RScript bytecode vs hybrid.
-4. **Measurement method for gameplay constants:** RPCS3 frame-stepping and memory watch
-   of the user's own copy (allowed as research by AGENTS.md; results recorded as local
-   observations, no code copied) vs video timing only.
+1. **Scope:** yes. AGENTS.md amended (runtime work in separate crates).
+2. **Physics dependency:** avian2d 0.7.0 (MIT OR Apache-2.0).
+3. **Scripts:** interpret the user's own RScript bytecode (Phase RS above), not native
+   reimplementation.
+4. **Measurement:** RPCS3 on the user's PC with the user's own 01.33 copy (frame-stepping
+   and memory observation), video as cross-check. Setup and first measurements:
+   `docs/rpcs3-measurement.md`.
 
 ## 9. Overlaps with the sibling plans
 
