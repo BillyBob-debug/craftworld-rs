@@ -86,6 +86,8 @@ struct Viewer {
     qa: bool,
     ready_frames: u32,
     synthetic: bool,
+    /// `--qa-hide-ui`: draw no egui panels (clean level/asset captures).
+    hide_ui: bool,
     browser: browser::Browser,
     census: CorpusCounts,
     level: LevelMode,
@@ -237,6 +239,7 @@ fn options() -> Result<Viewer, String> {
         qa: false,
         ready_frames: 0,
         synthetic: false,
+        hide_ui: false,
         browser: browser::Browser::default(),
         census: CorpusCounts::default(),
         level: LevelMode::default(),
@@ -285,6 +288,10 @@ fn options() -> Result<Viewer, String> {
             v.synthetic = true;
             continue;
         }
+        if flag == "--qa-hide-ui" {
+            v.hide_ui = true;
+            continue;
+        }
         if flag == "--level-report" {
             v.level.report = true;
             continue;
@@ -301,7 +308,8 @@ fn options() -> Result<Viewer, String> {
             continue;
         }
         if flag == "--help" {
-            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+            println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
+--qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -1018,6 +1026,9 @@ fn level_report(v: &Viewer) -> Result<(), String> {
 }
 fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Orbit>) -> Result {
     let ctx = contexts.ctx_mut()?;
+    if v.hide_ui {
+        return Ok(());
+    }
     if !v.synthetic {
         let mut browser_ui = egui::Ui::new(
             ctx.clone(),
@@ -1531,6 +1542,7 @@ mod tests {
             qa: false,
             ready_frames: 0,
             synthetic: false,
+            hide_ui: false,
             browser: browser::Browser::default(),
             census: CorpusCounts::default(),
             level: LevelMode::default(),
