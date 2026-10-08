@@ -1,5 +1,9 @@
 # Development log
 
+## 2026-10-08 — D141 script VM objects
+
+The game's own test script: 850 checks pass, 7 fail (was 826/27). +0 / +0.
+
 ## 2026-10-08 — D140 script menu in the viewer
 
 The viewer draws the main menu from the game's own script (five English buttons;

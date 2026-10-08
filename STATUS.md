@@ -3744,3 +3744,14 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
 - Checks: fmt; tests lbp-ui-script, lbp-bevy-viewer; workspace Clippy -D warnings; viewer
   builds. PR #38 (VM) held: 804 passed / 53 failed vs D139 826 / 27 (LCb rule change).
 **+0 newly viewable / +0 newly Complete.**
+
+## D141 — VM: .init__ on NEW_OBJECT, superclass by GUID, TestBase counters (PR #38) (2026-10-08)
+
+- script_tests now counts the game's TestBase pass/fail counters (Check* are script methods
+  of TestBase, not natives). d142, LCb rule bit 63 (default): 47 functions, 45 done, 2
+  Index stops (TestArray +17, also via main__); checks passed 850 (D139 826), failed 7, no
+  new failing lines. LCb "any bit" 804/53; "bit 32" 746/113 -> bit 63 confirmed.
+- Remaining failures: TestLocals 417, NeverEvaluated 438 (the runner calls it directly),
+  TestMatrix44 662, TestS64 1551 and 1562 (s64 shift loop, s64 AND).
+- Checks: fmt; lbp-script-vm, lbp-ui-script tests; workspace Clippy -D warnings.
+**+0 newly viewable / +0 newly Complete.**
