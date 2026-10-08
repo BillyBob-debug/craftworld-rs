@@ -7,7 +7,9 @@
 //! `Base__argcodes`. Their meaning is not known from the engine; what this host does with
 //! each is guessed from the name only (UNKNOWN), and every call is kept in the trace so a wrong
 //! guess is visible:
-//! - `Gooey.StartFrame*` opens a frame, `Gooey.EndFrame*` closes the innermost one.
+//! - `Gooey.StartFrame*` opens a frame and returns true, `Gooey.EndFrame*` closes the
+//!   innermost one. (PC run d136c: menu scripts branch on the `StartFrameNamed` result
+//!   and skip the whole frame body when it is false; true = frame open is guessed.)
 //! - `Gooey.SetFrame<Prop>` records `<Prop>` = args on the innermost open frame.
 //! - `Gooey.DoText*` adds a text node (first string argument), `Gooey.Do*Button*` a button
 //!   (first string argument as its label), `Gooey.Do*Break*` a break; other `Gooey.Do*`
@@ -228,9 +230,13 @@ impl Host for GooeyHost<'_> {
             self.counts.trace_dropped += 1;
         }
         match (class, base_name(function)) {
-            ("Gooey", _) => {
+            ("Gooey", base) => {
                 self.gooey(function, args, shown);
-                Ok(Value::Void)
+                Ok(if base.starts_with("StartFrame") {
+                    Value::Bool(true)
+                } else {
+                    Value::Void
+                })
             }
             ("LAMS", "Translate") => {
                 let key = match args.first() {
@@ -401,6 +407,8 @@ pub struct RunReport {
     pub argument_offsets: Vec<i32>,
     /// Returned value, or the VM fault that stopped the run.
     pub result: Result<String, String>,
+    /// Where the fault happened (`Class.Function+pc`, pc relative to that function).
+    pub fault_site: Option<String>,
     pub instructions: u64,
     pub counts: HostCounts,
     pub tree: Frame,
@@ -437,6 +445,10 @@ pub fn run(
         function: function.to_owned(),
         receiver: entry.0,
         argument_offsets: entry.1,
+        fault_site: result
+            .is_err()
+            .then(|| vm.last_site().map(|s| s.to_string()))
+            .flatten(),
         result: result.map_err(|f| format!("{f:?}")),
         instructions: budget - left,
         tree: host.finish(),

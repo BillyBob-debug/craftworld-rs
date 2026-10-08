@@ -53,7 +53,7 @@ fn menu() -> Script {
         i(0x79, 0, 32, 36, 0),   // r36.x = r32 on a fresh register
         hi(0x03, 4, 0),          // r4 = 0
         i(0xa3, 0, 4, 0, 0),     // ARG @0 = r4
-        i(0xa4, 0, 0, 0, 0),     // StartFrame(0)
+        i(0xa4, BOOL, 40, 0, 0), // r40 = StartFrame(0)
         hi(0x04, 8, one),        // r8 = 1.0
         i(0xa3, 0, 8, 0, 0),     // ARG @0 = r8
         i(0xa3, 0, 8, 4, 0),     // ARG @4 = r8
@@ -70,7 +70,7 @@ fn menu() -> Script {
         i(0xa4, BOOL, 24, 4, 0), // r24 = DoSpaceButtonNamed(0, "Play")
         i(0xa4, 0, 0, 5, 0),     // EndFrame()
         i(0xa4, 0, 0, 5, 0),     // EndFrame() with no open frame
-        i(0xa5, BOOL, 0, 24, 0), // RETURN r24
+        i(0xa5, BOOL, 0, 40, 0), // RETURN r40 (StartFrame result)
     ];
     let n = bytecode.len() as u32;
     Script {
@@ -135,7 +135,7 @@ fn u12_gooey_calls_build_a_frame_tree_and_trace() {
     let r = run(&mut vm, &mut host, class, &script, "Draw", 10_000);
 
     // The stubbed button returns the default of its bool return type.
-    assert_eq!(r.result, Ok("false".into()));
+    assert_eq!(r.result, Ok("true".into()));
     assert_eq!(r.receiver, Some(Receiver::ImplicitRegister0));
     assert_eq!(r.counts.native_calls, 7);
     assert_eq!(r.counts.translated, 1);

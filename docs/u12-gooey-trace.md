@@ -80,6 +80,15 @@ also takes the catalog input `script_census` uses (SNAPSHOT GAME-DIR), loading e
 under its MAP GUIDs, and prints how many superclasses are still not loaded. Register 65535
 is unexplained (needs the listing lines at that pc).
 
+## Third PC run (83652c6) and fix
+GUIDs: 426 loaded, superclass not loaded 0. Remaining: two register-65535 faults in callees
+(the "no register" operand; fixed in the VM by PR #37, which also reports the fault site,
+now printed by `ui_trace` as `at Class.Function+pc`), one NullObject in `Draw`. `UpdateUI`
+still stopped after 48 instructions: the PC listing shows it calls the Gooey script's
+`StartFrameNamed__i`, which forwards to the native `StartFrameNamed__iQ23Gooey.EGooeyBubbleStyle`,
+and skips the whole frame body when the result is false. The stub returned the bool
+default (false). `Gooey.StartFrame*` now returns true (frame open; guessed, UNKNOWN).
+
 ## Tests (synthetic only)
 `crates/lbp-ui-script/tests/gooey_host.rs` `u12_gooey_calls_build_a_frame_tree_and_trace`:
 frame open/close, frame property, translated text, button label, stub bool return,

@@ -227,7 +227,7 @@ fn run_main() -> Result<(), String> {
              member reads {} writes {}",
             match &r.result {
                 Ok(v) => format!("returned {v}"),
-                Err(f) => format!("FAULT {f}"),
+                Err(f) => format!("FAULT {f} at {}", r.fault_site.as_deref().unwrap_or("?")),
             },
             r.instructions,
             r.receiver,
