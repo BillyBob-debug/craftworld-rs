@@ -3641,7 +3641,7 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   the game holds the key, decrypted a copy of patch.edat: a FARC, 522 entries, 426 FSHb.
 - U10 census d133 (unit distinct content hash, scope decrypted patch.edat): 426/426
   complete (was 0); 6,518 functions, 160,539 instructions, 0 unknown opcodes; gates clean;
-  name_index_out_of_range 1,966 (inferred rule wrong, follow-up).
+  name_index_out_of_range 1,966, all type rows with 0xFFFFFFFF (an "unnamed" sentinel).
 - Toolkit spot check (new scripts/run-script-oracle.ps1): 3/3 equal.
 - G10 (d133-g10): 15,931 native calls of 23,350; 1,964 of 2,538 declared natives called.
 - check() (new lbp-script-vm example script_check): 15,866 branches all in range from the

@@ -46,8 +46,10 @@ patch.edat (disc FARCs contain no `FSHb`).
   0x3f6 74, 0x3f8 36, 0x3ee 25, 0x3e7 20, others small; 0x37c 2. Layouts: i32 ranges 2,
   u16 ranges 424. UI-named classes 61.
 - Listing checks: constant, member and function-range indexes 0 out of range;
-  **name_index_out_of_range 1,966**. The inferred name-index rule is wrong for some rows;
-  follow-up for the U10 reader (not a parse failure).
+  **name_index_out_of_range 1,966**, all on `type` rows with index 0xFFFFFFFF (424 of 426
+  scripts): unnamed builtin types (void, bool, s32, f32, v4, m44, s64) and derived types.
+  0xFFFFFFFF is a "no name" sentinel, not an overrun; the U10 check should accept it.
+  Field, property, function and reference rows: 0 misses.
 - Gates: no script has a head in 0x33b..0x360 or 0x30b. Both 0x37c scripts read with the
   i32 layout.
 - Toolkit spot check (`scripts/run-script-oracle.ps1`, Toolkit d6a2ef80, whole RScript
