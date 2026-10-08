@@ -92,6 +92,8 @@ pub enum MeshSource {
         material: Option<u32>,
         batch: usize,
     },
+    /// D147: per-item skinned copy of a span-JOINT mesh (Thing index in reader order).
+    JointSkin { mesh: Box<MeshSource>, thing: usize },
 }
 
 impl MeshSource {
@@ -112,6 +114,9 @@ impl MeshSource {
                 mesh.map_or("none".into(), |g| format!("{g:08x}")),
                 material.map_or("none".into(), |g| format!("{g:08x}"))
             ),
+            Self::JointSkin { mesh, thing } => {
+                format!("{} skinned for joint Thing {thing}", mesh.label())
+            }
         }
     }
 }
@@ -174,6 +179,12 @@ pub struct SceneCounts {
     pub drawn_joint_pivot: usize,
     /// D120: drawn JOINT Things without POS, fitted between contacts A and B (linear).
     pub drawn_joint_span: usize,
+    /// D147: span-JOINT items drawn skinned (rigid end groups, stretched bridge), the
+    /// ones kept at the D120 stretch by reason, and skinned vertices without a usable
+    /// weight (placed with contact A).
+    pub joint_span_skinned: usize,
+    pub joint_span_skin_failed: BTreeMap<String, usize>,
+    pub joint_skin_unweighted_vertices: usize,
     /// Drawn Things whose mesh has neutral (unsupported material) groups.
     pub drawn_with_neutral_groups: usize,
     pub meshes_loaded: usize,
@@ -250,11 +261,22 @@ impl SceneCounts {
             }
         }
         out.push(format!(
-            "Placed from JOINT endpoints (D120 preview approximation): {} Things ({} pivot at contact A, {} span fitted A to B; no skinning, angle/renderScale not applied)",
+            "Placed from JOINT endpoints (D120 preview approximation): {} Things ({} pivot at contact A, {} span A to B; angle/renderScale not applied)",
             self.drawn_joint_pivot + self.drawn_joint_span,
             self.drawn_joint_pivot,
             self.drawn_joint_span
         ));
+        let kept: usize = self.joint_span_skin_failed.values().sum();
+        out.push(format!(
+            "Span joints skinned (D147, inferred: rigid end groups, stretched bridge): {} of {} Things; {} kept stretched; {} vertices without usable weight",
+            self.joint_span_skinned,
+            self.drawn_joint_span,
+            kept,
+            self.joint_skin_unweighted_vertices
+        ));
+        for (reason, n) in &self.joint_span_skin_failed {
+            out.push(format!("  kept stretched {n}: {reason}"));
+        }
         out.push(format!(
             "Shapes: {} SHAPE Things; {} extruded; {} placed in {} material batches",
             self.shapes_total, self.shapes_extruded, self.shapes_placed, self.shape_batches
@@ -545,7 +567,8 @@ fn frame(x: [f64; 3]) -> Option<M3> {
 /// - Pivot: bone 0's bind position lands on pA.
 /// - Span: the mesh's extent along its bind bone0->bone1 axis is fitted onto pA..pB,
 ///   rotated so that axis follows pA->pB (cross-section rigid, local Z kept nearest
-///   world Z). Static: no skinning, so end pieces stretch with the span.
+///   world Z). Static stretch; the real-data loader replaces it with D147 skinning
+///   (`skin_span_joints`) where the mesh's skin streams decode.
 ///
 /// `bind` = bone skin-pose matrices of the joint mesh (column-major, bone order);
 /// `bounds` = model-space bounds of the mesh.
@@ -555,6 +578,45 @@ pub fn joint_world(
     bind: &[[f32; 16]],
     bounds: Option<[[f32; 3]; 2]>,
 ) -> Result<([f32; 16], JointPlacement), String> {
+    let base = joint_base(things, joint, bind)?;
+    let (linear, translation) = match base.kind {
+        JointPlacement::Pivot => (base.p0_inv, sub(base.pa, mul_mv(&base.p0_inv, base.t0))),
+        JointPlacement::Span => {
+            let fit = span_fit(&base, bind, bounds)?;
+            let k = fit.length / (fit.hi - fit.lo);
+            // Stretch along `axis` by k: I + (k - 1) axis axis^T.
+            let stretch: M3 = std::array::from_fn(|c| {
+                std::array::from_fn(|r| {
+                    f64::from(u8::from(r == c)) + (k - 1.) * fit.axis[r] * fit.axis[c]
+                })
+            });
+            let linear = mul_mm(&fit.rot, &mul_mm(&stretch, &base.p0_inv));
+            let translation = sub(
+                sub(base.pa, mul_mv(&linear, base.t0)),
+                scaled(fit.dir, k * fit.lo),
+            );
+            (linear, translation)
+        }
+    };
+    let m = affine(&linear, translation, [0.; 3]);
+    world_matrix_check(&m).map_err(|e| format!("JOINT placement {e}"))?;
+    Ok((m, base.kind))
+}
+
+/// Contact points and the de-rotating bone-0 bind frame shared by both placements.
+struct JointBase {
+    kind: JointPlacement,
+    pa: [f64; 3],
+    pb: [f64; 3],
+    t0: [f64; 3],
+    p0_inv: M3,
+}
+
+fn joint_base(
+    things: &[ThingRecord],
+    joint: &lbp_level::parts::Joint,
+    bind: &[[f32; 16]],
+) -> Result<JointBase, String> {
     let kind = joint_placement_kind(joint.joint_type).ok_or_else(|| {
         format!(
             "JOINT type {} without POS (placement not implemented)",
@@ -589,50 +651,73 @@ pub fn joint_world(
     if (0..3).any(|i| (i + 1..3).any(|j| dot(p0[i], p0[j]).abs() > 1e-3)) {
         return Err("JOINT mesh bone 0 bind pose not a scaled rotation".into());
     }
-    let p0_inv = transpose(&p0);
-    let (linear, translation) = match kind {
-        JointPlacement::Pivot => (p0_inv, sub(pa, mul_mv(&p0_inv, t0))),
-        JointPlacement::Span => {
-            let skin1 = bind
-                .get(1)
-                .ok_or("span JOINT mesh with fewer than 2 bones")?
-                .map(f64::from);
-            let t1 = [skin1[12], skin1[13], skin1[14]];
-            let axis = unit(mul_mv(&p0_inv, sub(t1, t0)))
-                .ok_or("JOINT mesh bones coincide in bind pose")?;
-            let d = sub(pb, pa);
-            let length = dot(d, d).sqrt();
-            let dir = unit(d).ok_or("span JOINT contacts coincide")?;
-            let [lo_b, hi_b] = bounds.ok_or("JOINT mesh without bounds")?;
-            let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
-            for corner in 0..8 {
-                let v = [
-                    if corner & 1 == 0 { lo_b[0] } else { hi_b[0] },
-                    if corner & 2 == 0 { lo_b[1] } else { hi_b[1] },
-                    if corner & 4 == 0 { lo_b[2] } else { hi_b[2] },
-                ]
-                .map(f64::from);
-                let s = dot(mul_mv(&p0_inv, sub(v, t0)), axis);
-                lo = lo.min(s);
-                hi = hi.max(s);
-            }
-            if (hi - lo).is_nan() || hi - lo <= 1e-6 {
-                return Err("JOINT mesh has no extent along its bone axis".into());
-            }
-            let k = length / (hi - lo);
-            let (Some(f), Some(w)) = (frame(axis), frame(dir)) else {
-                return Err("JOINT frame degenerate".into());
-            };
-            let rot = mul_mm(&w, &transpose(&f));
-            // Stretch along `axis` by k: I + (k - 1) axis axis^T.
-            let stretch: M3 = std::array::from_fn(|c| {
-                std::array::from_fn(|r| f64::from(u8::from(r == c)) + (k - 1.) * axis[r] * axis[c])
-            });
-            let linear = mul_mm(&rot, &mul_mm(&stretch, &p0_inv));
-            let translation = sub(sub(pa, mul_mv(&linear, t0)), scaled(dir, k * lo));
-            (linear, translation)
-        }
+    Ok(JointBase {
+        kind,
+        pa,
+        pb,
+        t0,
+        p0_inv: transpose(&p0),
+    })
+}
+
+/// Span geometry in the de-rotated bind frame (bone 0 at the origin): the bind axis
+/// bone0 -> bone1, the mesh extent [lo, hi] along it, and the rotation taking the axis
+/// onto the world direction pA -> pB (local Z kept nearest world Z).
+struct SpanFit {
+    axis: [f64; 3],
+    dir: [f64; 3],
+    length: f64,
+    lo: f64,
+    hi: f64,
+    rot: M3,
+}
+
+fn span_fit(
+    base: &JointBase,
+    bind: &[[f32; 16]],
+    bounds: Option<[[f32; 3]; 2]>,
+) -> Result<SpanFit, String> {
+    let skin1 = bind
+        .get(1)
+        .ok_or("span JOINT mesh with fewer than 2 bones")?
+        .map(f64::from);
+    let t1 = [skin1[12], skin1[13], skin1[14]];
+    let axis = unit(mul_mv(&base.p0_inv, sub(t1, base.t0)))
+        .ok_or("JOINT mesh bones coincide in bind pose")?;
+    let d = sub(base.pb, base.pa);
+    let length = dot(d, d).sqrt();
+    let dir = unit(d).ok_or("span JOINT contacts coincide")?;
+    let [lo_b, hi_b] = bounds.ok_or("JOINT mesh without bounds")?;
+    let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    for corner in 0..8 {
+        let v = [
+            if corner & 1 == 0 { lo_b[0] } else { hi_b[0] },
+            if corner & 2 == 0 { lo_b[1] } else { hi_b[1] },
+            if corner & 4 == 0 { lo_b[2] } else { hi_b[2] },
+        ]
+        .map(f64::from);
+        let s = dot(mul_mv(&base.p0_inv, sub(v, base.t0)), axis);
+        lo = lo.min(s);
+        hi = hi.max(s);
+    }
+    if (hi - lo).is_nan() || hi - lo <= 1e-6 {
+        return Err("JOINT mesh has no extent along its bone axis".into());
+    }
+    let (Some(f), Some(w)) = (frame(axis), frame(dir)) else {
+        return Err("JOINT frame degenerate".into());
     };
+    Ok(SpanFit {
+        axis,
+        dir,
+        length,
+        lo,
+        hi,
+        rot: mul_mm(&w, &transpose(&f)),
+    })
+}
+
+/// Column-major affine matrix from a linear part and a translation minus `origin`.
+fn affine(linear: &M3, translation: [f64; 3], origin: [f64; 3]) -> [f32; 16] {
     let mut m = [0f32; 16];
     for c in 0..3 {
         for r in 0..3 {
@@ -640,11 +725,199 @@ pub fn joint_world(
         }
     }
     for r in 0..3 {
-        m[12 + r] = translation[r] as f32;
+        m[12 + r] = (translation[r] - origin[r]) as f32;
     }
     m[15] = 1.;
-    world_matrix_check(&m).map_err(|e| format!("JOINT placement {e}"))?;
-    Ok((m, kind))
+    m
+}
+
+/// D147 span-joint skinning (INFERRED_FROM_LOCAL_DATA; docs/d147-joint-skinning.md).
+/// Every bone of a linear joint's mesh is rigid (bind scale, no stretch) and follows
+/// the endpoint on its side of the mesh: a bone whose bind position lies on the
+/// bone-0 half of the mesh extent (along the bind axis bone0 -> bone1) follows contact
+/// A, the others contact B. The A group's mesh end (axial `lo`) lands on pA and the B
+/// group's end (`hi`) on pB; both are rotated so the bind axis follows pA -> pB. Only
+/// vertices weighted to both groups (bridging cord / piston rod) stretch, by linear
+/// blend skinning.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpanSkin {
+    /// World position the matrices are relative to (contact A, f32-rounded).
+    pub origin: [f32; 3],
+    /// Per mesh bone: model -> (world - origin), column-major.
+    pub matrices: Vec<[f32; 16]>,
+    /// Per mesh bone: true when the bone follows contact B.
+    pub follows_b: Vec<bool>,
+}
+
+pub fn joint_span_skin(
+    things: &[ThingRecord],
+    joint: &lbp_level::parts::Joint,
+    bind: &[[f32; 16]],
+    bounds: Option<[[f32; 3]; 2]>,
+) -> Result<SpanSkin, String> {
+    let base = joint_base(things, joint, bind)?;
+    if base.kind != JointPlacement::Span {
+        return Err("not a span joint".into());
+    }
+    let fit = span_fit(&base, bind, bounds)?;
+    let origin = base.pa.map(|v| v as f32);
+    let origin64 = origin.map(f64::from);
+    let linear = mul_mm(&fit.rot, &base.p0_inv);
+    // Model point v -> anchor + rot (P0^T (v - t0) - end * axis).
+    let side = |anchor: [f64; 3], end: f64| {
+        let t = sub(
+            sub(anchor, mul_mv(&linear, base.t0)),
+            mul_mv(&fit.rot, scaled(fit.axis, end)),
+        );
+        affine(&linear, t, origin64)
+    };
+    let (ma, mb) = (side(base.pa, fit.lo), side(base.pb, fit.hi));
+    let mid = (fit.lo + fit.hi) / 2.;
+    let follows_b: Vec<bool> = bind
+        .iter()
+        .map(|s| {
+            let t = [s[12], s[13], s[14]].map(f64::from);
+            dot(mul_mv(&base.p0_inv, sub(t, base.t0)), fit.axis) > mid
+        })
+        .collect();
+    if follows_b.first() != Some(&false) || !follows_b.iter().any(|&b| b) {
+        return Err("span JOINT bones do not split into an A and a B group".into());
+    }
+    for m in [&ma, &mb] {
+        world_matrix_check(m).map_err(|e| format!("JOINT skin {e}"))?;
+    }
+    Ok(SpanSkin {
+        origin,
+        matrices: follows_b.iter().map(|&b| if b { mb } else { ma }).collect(),
+        follows_b,
+    })
+}
+
+/// Linear blend skinning with `SpanSkin` matrices. Influences past the bone list or
+/// with non-positive weight are dropped and the rest normalized; a vertex with no usable
+/// influence follows bone 0 (contact A). Returns positions and that fallback count.
+pub fn skin_span_positions(
+    positions: &[[f32; 3]],
+    joints: &[[u8; 4]],
+    weights: &[[f32; 4]],
+    matrices: &[[f32; 16]],
+) -> Result<(Vec<[f32; 3]>, usize), String> {
+    if joints.len() != positions.len() || weights.len() != positions.len() {
+        return Err("skin streams do not match the vertex count".into());
+    }
+    let first = matrices.first().ok_or("no bone matrices")?;
+    let mut unweighted = 0;
+    let out = positions
+        .iter()
+        .zip(joints.iter().zip(weights))
+        .map(|(&p, (j, w))| {
+            let mut acc = [0f64; 3];
+            let mut total = 0f64;
+            for k in 0..4 {
+                let Some(m) = matrices.get(usize::from(j[k])) else {
+                    continue;
+                };
+                if !(w[k] > 0. && w[k].is_finite()) {
+                    continue;
+                }
+                let q = transform_point(m, p);
+                for c in 0..3 {
+                    acc[c] += q[c] * f64::from(w[k]);
+                }
+                total += f64::from(w[k]);
+            }
+            if total > 0. {
+                acc.map(|v| (v / total) as f32)
+            } else {
+                unweighted += 1;
+                transform_point(first, p).map(|v| v as f32)
+            }
+        })
+        .collect();
+    Ok((out, unweighted))
+}
+
+/// Per-vertex bone indices and weights of a mesh (skin stream 1).
+pub type SkinWeights = (Vec<[u8; 4]>, Vec<[f32; 4]>);
+
+/// D147: replaces the D120 stretched placement of drawn span-JOINT items with skinned
+/// copies of their mesh (one scene mesh per item, item matrix = translation to contact
+/// A). `skin_of` returns a mesh's per-vertex bone indices and weights; `skinned` makes
+/// the payload copy with new positions. Items that cannot be skinned keep the D120
+/// stretch and are counted by reason.
+pub fn skin_span_joints<T>(
+    scene: &mut LevelScene<T>,
+    things: &[ThingRecord],
+    mut skin_of: impl FnMut(&SceneMesh<T>) -> Result<SkinWeights, String>,
+    positions_of: impl Fn(&T) -> Option<&[[f32; 3]]>,
+    bind_poses: impl Fn(&T) -> Vec<BindPose>,
+    skinned: impl Fn(&T, Vec<[f32; 3]>) -> T,
+) {
+    let mut skins: HashMap<usize, Result<SkinWeights, String>> = HashMap::new();
+    for item_index in 0..scene.items.len() {
+        let item = &scene.items[item_index];
+        let Some(t) = things.get(item.thing) else {
+            continue;
+        };
+        let (None, Some(joint)) = (&t.data.pos, &t.data.joint) else {
+            continue;
+        };
+        if joint_placement_kind(joint.joint_type) != Some(JointPlacement::Span) {
+            continue;
+        }
+        let mesh_index = item.mesh;
+        let result = (|| {
+            if scene.meshes.len() >= MAX_LEVEL_MESHES {
+                return Err("Unsupported: level distinct-mesh budget".to_string());
+            }
+            let m = &scene.meshes[mesh_index];
+            let skins_bind: Vec<[f32; 16]> =
+                bind_poses(&m.payload).iter().map(|b| b.skin).collect();
+            let skin = joint_span_skin(things, joint, &skins_bind, m.bounds)?;
+            let (joints, weights) = skins
+                .entry(mesh_index)
+                .or_insert_with(|| skin_of(m))
+                .clone()?;
+            let positions = positions_of(&m.payload).ok_or("mesh without positions")?;
+            let (moved, unweighted) =
+                skin_span_positions(positions, &joints, &weights, &skin.matrices)?;
+            if moved.iter().flatten().any(|v| !v.is_finite()) {
+                return Err("skinned position not finite".into());
+            }
+            let payload = skinned(&m.payload, moved);
+            Ok((
+                SceneMesh {
+                    source: MeshSource::JointSkin {
+                        mesh: Box::new(m.source.clone()),
+                        thing: t.index,
+                    },
+                    bounds: None,
+                    neutral_groups: m.neutral_groups,
+                    payload,
+                },
+                skin.origin,
+                unweighted,
+            ))
+        })();
+        let c = &mut scene.counts;
+        match result {
+            Ok((mut mesh, origin, unweighted)) => {
+                mesh.bounds = positions_of(&mesh.payload).and_then(points_bounds);
+                scene.meshes.push(mesh);
+                let item = &mut scene.items[item_index];
+                item.mesh = scene.meshes.len() - 1;
+                let mut world = [0f32; 16];
+                for i in 0..4 {
+                    world[5 * i] = 1.;
+                }
+                world[12..15].copy_from_slice(&origin);
+                item.world = world;
+                c.joint_span_skinned += 1;
+                c.joint_skin_unweighted_vertices += unweighted;
+            }
+            Err(e) => *c.joint_span_skin_failed.entry(e).or_default() += 1,
+        }
+    }
 }
 
 /// Builds the scene from reader Things. `load` is called once per distinct mesh
@@ -1050,6 +1323,37 @@ pub fn read_resource(
     Ok(bytes)
 }
 
+/// D147: a mesh's geometry and its decoded skin streams (stream 1 joints/weights).
+pub fn read_mesh_skin(
+    source: &AttachedSource,
+    key: &LocationKey,
+    control: &LoadControl,
+) -> Result<(lbp_mesh::Geometry, lbp_mesh::SkinStreams), String> {
+    let (geometry, bytes) = crate::read_mesh(source, key, control)?;
+    let skin = lbp_mesh::decode_skin(&bytes, || control.check().is_err())
+        .map_err(|e| format!("Skin streams: {e}"))?;
+    if skin.joints.len() != geometry.positions.len() || skin.weights.len() != skin.joints.len() {
+        return Err("Skin streams: vertex count differs from geometry".into());
+    }
+    Ok((geometry, skin))
+}
+
+fn model_bind_poses(p: &ScenePayload) -> Vec<BindPose> {
+    match p {
+        ScenePayload::Model(m) => m
+            .geometry
+            .skeleton
+            .bones
+            .iter()
+            .map(|b| BindPose {
+                skin: b.skin_pose,
+                inv: b.inv_skin_pose,
+            })
+            .collect(),
+        ScenePayload::Shapes { .. } | ScenePayload::Backdrop { .. } => Vec::new(),
+    }
+}
+
 fn grouped_bounds(g: &GroupedMesh) -> Option<[[f32; 3]; 2]> {
     points_bounds(&g.geometry.positions)
 }
@@ -1200,9 +1504,9 @@ pub fn load_level_scene_with_options(
             let key = match src {
                 MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
                 MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
-                MeshSource::Shapes { .. } | MeshSource::Backdrop { .. } => {
-                    return Err("Invalid: shape source".into())
-                }
+                MeshSource::Shapes { .. }
+                | MeshSource::Backdrop { .. }
+                | MeshSource::JointSkin { .. } => return Err("Invalid: shape source".into()),
             };
             let mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
             charge(retained(&mesh))?;
@@ -1210,20 +1514,39 @@ pub fn load_level_scene_with_options(
         },
         payload_bounds,
         |p| matches!(p, ScenePayload::Model(m) if grouped_neutral(m)),
-        |p| match p {
-            ScenePayload::Model(m) => m
-                .geometry
-                .skeleton
-                .bones
-                .iter()
-                .map(|b| BindPose {
-                    skin: b.skin_pose,
-                    inv: b.inv_skin_pose,
-                })
-                .collect(),
-            ScenePayload::Shapes { .. } | ScenePayload::Backdrop { .. } => Vec::new(),
-        },
+        model_bind_poses,
         scene_options.placement,
+    );
+    control.check()?;
+    skin_span_joints(
+        &mut scene,
+        &report.things,
+        |m| {
+            control.check()?;
+            let key = match &m.source {
+                MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
+                MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
+                _ => return Err("Invalid: joint mesh source".into()),
+            };
+            let (_, skin) = read_mesh_skin(source, &key, control)?;
+            Ok((skin.joints, skin.weights))
+        },
+        |p| match p {
+            ScenePayload::Model(m) => Some(&m.geometry.positions[..]),
+            _ => None,
+        },
+        model_bind_poses,
+        |p, positions| match p {
+            ScenePayload::Model(m) => {
+                let mut copy = GroupedMesh {
+                    geometry: m.geometry.clone(),
+                    bindings: m.bindings.clone(),
+                };
+                copy.geometry.positions = positions;
+                ScenePayload::Model(Box::new(copy))
+            }
+            _ => unreachable!("positions_of returns None for non-model payloads"),
+        },
     );
     control.check()?;
     let bevels = if scene_options.shape_bevels {
@@ -1768,6 +2091,138 @@ mod tests {
         assert!(c.lines().iter().any(|l| l.starts_with(
             "Placed from JOINT endpoints (D120 preview approximation): 2 Things (1 pivot"
         )));
+    }
+
+    /// D147: span joints skin with rigid A/B bone groups; only blended vertices stretch.
+    #[test]
+    fn span_joints_skin_rigid_ends_and_stretch_the_bridge() {
+        let things = vec![
+            thing(0, Some(0x10), Some(identity_at(0.))),
+            thing(1, Some(0x10), Some(identity_at(500.))),
+            joint_thing(2, 0x70, 4, 0, 1), // piston A (1, 2, 0) -> B (500, 0, 0)
+            joint_thing(3, 0x40, 7, 0, 1), // bolt: pivot, untouched
+        ];
+        // Piston-like: bones 0/2 on the +Z (A) end, bones 1/3 on the -Z (B) end.
+        let piston_bind = vec![
+            joint_bone(1.15, [0., 0., 26.]),
+            joint_bone(1.7, [0., 0., -26.]),
+            joint_bone(0.55, [0., 0., 26.]),
+            joint_bone(0.5, [0., 0., -26.]),
+        ];
+        let piston: Vec<[f32; 3]> = vec![
+            [0., 0., 88.],  // A tip, bone 0
+            [0., 0., 9.],   // A inner end, bone 0
+            [10., 0., 88.], // A tip, across
+            [0., 0., -88.], // B tip, bone 1
+            [0., 0., -9.],  // B inner end, bone 1
+            [0., 0., 0.],   // rod middle, bones 2/3 50/50
+            [0., -5., 50.], // unweighted: follows A
+        ];
+        let joints = vec![
+            [0, 0, 0, 0],
+            [0; 4],
+            [0; 4],
+            [1, 0, 0, 0],
+            [1, 0, 0, 0],
+            [2, 3, 0, 0],
+            [0; 4],
+        ];
+        let weights = vec![
+            [1., 0., 0., 0.],
+            [1., 0., 0., 0.],
+            [1., 0., 0., 0.],
+            [1., 0., 0., 0.],
+            [1., 0., 0., 0.],
+            [0.5, 0.5, 0., 0.],
+            [0.; 4],
+        ];
+        let bolt: Vec<[f32; 3]> = vec![[0.; 3], [40., 0., 0.]];
+        let mut scene = build_scene(
+            &things,
+            |s| match s {
+                MeshSource::Guid(0x70) => Ok(piston.clone()),
+                MeshSource::Guid(_) => Ok(bolt.clone()),
+                _ => unreachable!(),
+            },
+            |p| points_bounds(p),
+            |_| false,
+            |p| {
+                if p.len() == piston.len() {
+                    skins_only(&piston_bind)
+                } else {
+                    skins_only(&[joint_bone(0.1, [0.; 3]), joint_bone(0.08, [0.; 3])])
+                }
+            },
+            PosPlacement::InverseBind,
+        );
+        let stretched = scene.items[2].world;
+        let bolt_world = scene.items[3].world;
+        skin_span_joints(
+            &mut scene,
+            &things,
+            |_| Ok((joints.clone(), weights.clone())),
+            |p| Some(&p[..]),
+            |p| {
+                if p.len() == piston.len() {
+                    skins_only(&piston_bind)
+                } else {
+                    Vec::new()
+                }
+            },
+            |_, positions| positions,
+        );
+        let c = &scene.counts;
+        assert_eq!(
+            (c.joint_span_skinned, c.joint_skin_unweighted_vertices),
+            (1, 1)
+        );
+        assert!(c.joint_span_skin_failed.is_empty());
+        assert_eq!(scene.items[3].world, bolt_world);
+        let item = &scene.items[2];
+        assert_ne!(item.world, stretched);
+        assert_eq!(scene.meshes.len(), 4); // 0x10, 0x70, 0x40 + one skinned copy
+        assert_eq!(
+            scene.meshes[item.mesh].source,
+            MeshSource::JointSkin {
+                mesh: Box::new(MeshSource::Guid(0x70)),
+                thing: 2
+            }
+        );
+        let world: Vec<[f64; 3]> = scene.meshes[item.mesh]
+            .payload
+            .iter()
+            .map(|&p| apply(&item.world, p))
+            .collect();
+        let (pa, pb) = ([1., 2., 0.], [500., 0., 0.]);
+        let dir = unit(sub(pb, pa)).unwrap();
+        let along = |p: [f64; 3], from: [f64; 3]| dot(sub(p, from), dir);
+        // Rigid ends: tips on the contacts, inner ends 79 units in, width kept.
+        assert!(close(world[0], pa));
+        assert!((along(world[1], pa) - 79.).abs() < 1e-3);
+        assert!((dot(sub(world[2], world[0]), sub(world[2], world[0])).sqrt() - 10.).abs() < 1e-3);
+        assert!(close(world[3], pb));
+        assert!((along(world[4], pb) + 79.).abs() < 1e-3);
+        // Rod middle: halfway between its A-group (88 in from A) and B-group positions.
+        let span = along(pb, pa);
+        assert!((along(world[5], pa) - span / 2.).abs() < 1e-3);
+        // Unweighted vertex follows the A group: 38 in from A, 5 towards the camera.
+        assert!((along(world[6], pa) - 38.).abs() < 1e-3);
+        assert!((world[6][2] - 5.).abs() < 1e-3);
+        assert!(c
+            .lines()
+            .iter()
+            .any(|l| l.starts_with("Span joints skinned (D147") && l.contains(": 1 of 1 Things")));
+        // A mesh whose bones all sit on one side keeps the D120 stretch.
+        let bind = [joint_bone(1., [0., 0., 26.]), joint_bone(1., [0., 0., 25.])];
+        assert_eq!(
+            joint_span_skin(
+                &things,
+                things[2].data.joint.as_ref().unwrap(),
+                &bind,
+                Some([[-1., -1., -88.], [1., 1., 88.]])
+            ),
+            Err("span JOINT bones do not split into an A and a B group".into())
+        );
     }
 
     #[test]

@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 pub use uv::{decode_uvs, UvChannelMetadata, UvCoordinates, UvMetadata};
 pub const MAX_INPUT: usize = 2 * 1024 * 1024;
 pub const MAX_EXPANDED: usize = 16 * 1024 * 1024;
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MeshPrefix {
     pub revision: u32,
     pub compression_flags: u8,
