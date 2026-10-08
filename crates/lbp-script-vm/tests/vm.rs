@@ -1,7 +1,8 @@
 //! Rq VM on authored synthetic scripts (no game bytecode). docs/script-vm.md.
 use lbp_level::script::{FieldDef, FunctionDef, MemberRef, Script, Span, TypeOffset, TypeRef};
 use lbp_level::serial::Descriptor;
-use lbp_script_vm::{check::check, Fault, Host, MemberKind, Rules, Value, Vm};
+use lbp_script_vm::natives::{Bindings, World};
+use lbp_script_vm::{check::check, Fault, Host, MemberKind, Rules, Step, Value, Vm};
 use std::collections::BTreeMap;
 
 /// `op | ty << 8 | a << 16 | b << 32 | c << 48` (Toolkit field positions).
@@ -18,6 +19,7 @@ fn hi(op: u8, a: u16, value: u32) -> u64 {
 }
 
 const INT: u8 = 3;
+const FLOAT: u8 = 4;
 const OBJ: u8 = 11;
 
 struct Func {
@@ -479,4 +481,96 @@ fn faults_are_explicit() {
         vm.call(&mut TestHost::default(), c, "F", &[], &mut budget),
         Err(Fault::CallDepth)
     );
+}
+
+#[test]
+fn yield_suspends_and_resumes() {
+    let mut b = Builder::new();
+    let system = b.ty(OBJ, "System", None, 0);
+    let yield_ = b.fref(system, "Yield__");
+    // count(n): i = 0; do { i++; Yield(); } while (!(n <= i)); return i.
+    let s = b.build(
+        "Ticker",
+        None,
+        vec![func(
+            "Count",
+            &[0],
+            vec![
+                hi(0x03, 4, 0),            // 0 LCi i = 0
+                i(0x0b, 0, 4, 4, 0),       // 1 INCi i
+                i(0xa4, 0, 0, yield_, 0),  // 2 CALL System.Yield
+                i(0x38, 0, 8, 0, 4),       // 3 LTEi c = n <= i
+                hi(0xa7, 8, -3i32 as u32), // 4 BEZ c -> 1
+                i(0xa5, INT, 0, 4, 0),     // 5 RETURN i
+            ],
+        )],
+    );
+    let mut vm = Vm::default();
+    let c = vm.load(s, None);
+    let mut host = TestHost::default();
+    let mut budget = 1_000;
+    let mut step = vm
+        .start(&mut host, c, "Count", &[Value::Int(3)], &mut budget)
+        .unwrap();
+    let mut yields = 0;
+    let done = loop {
+        match step {
+            Step::Yielded(task) => {
+                yields += 1;
+                step = vm.resume(&mut host, task, &mut budget).unwrap();
+            }
+            Step::Done(v) => break v,
+        }
+    };
+    assert_eq!((yields, done), (3, Value::Int(3)));
+    // Yield never reaches the host, and `call` cannot suspend.
+    assert!(host.calls.is_empty());
+    assert_eq!(
+        vm.call(&mut host, c, "Count", &[Value::Int(3)], &mut budget),
+        Err(Fault::YieldInCall)
+    );
+}
+
+#[test]
+fn bindings_run_natives_and_count_unbound_ones() {
+    struct NoWorld;
+    impl World for NoWorld {}
+    let mut b = Builder::new();
+    let math = b.ty(OBJ, "Math", None, 0);
+    let gooey = b.ty(OBJ, "Gooey", None, 0);
+    let floor = b.fref(math, "floor__f");
+    let end_frame = b.fref(gooey, "EndFrame__");
+    let s = b.build(
+        "UsesNatives",
+        None,
+        vec![
+            func(
+                "Floor",
+                &[0],
+                vec![
+                    i(0xa3, FLOAT, 0, 0, 0),     // ARG @0 = x
+                    i(0xa4, FLOAT, 4, floor, 0), // r4 = Math.floor(x)
+                    i(0xa5, FLOAT, 0, 4, 0),     // RETURN r4
+                ],
+            ),
+            func(
+                "Ui",
+                &[],
+                vec![i(0xa4, 0, 0, end_frame, 0), i(0xa5, 0, 0, 0, 0)],
+            ),
+        ],
+    );
+    let mut vm = Vm::default();
+    let c = vm.load(s, None);
+    let mut host = Bindings::new(NoWorld);
+    let mut budget = 100;
+    assert_eq!(
+        vm.call(&mut host, c, "Floor", &[Value::Float(2.75)], &mut budget),
+        Ok(Value::Float(2.))
+    );
+    assert!(matches!(
+        vm.call(&mut host, c, "Ui", &[], &mut budget),
+        Err(Fault::Native(_))
+    ));
+    assert_eq!(host.unbound.get("Gooey.EndFrame__"), Some(&1));
 }

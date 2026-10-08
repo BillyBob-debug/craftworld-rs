@@ -37,7 +37,7 @@ INFERRED (no executable or Toolkit statement; each is a place a real script can 
 | Register model | One slot per 16-bit address in a frame of `stack_size` slots; values never span slots | Real scripts: no register read before write at another width (VM faults on type mismatch) |
 | Arguments | `ARG` stages at the argument address; `CALL` copies staged values to the same addresses in the callee frame; host calls fill `shared_arguments` offsets in order | Argument rows' offsets vs `ARG` addresses in listings |
 | Receiver | Member functions take the receiver as an argument; virtual dispatch uses the lowest staged address | Listings: argument row typed as the own class |
-| Branch target | `pc + offset` (`Rules::branch_from_current`), alternative `pc + 1 + offset` | `check()` over all scripts: the right rule keeps every target in range |
+| Branch target | `pc + offset` (`Rules::branch_from_current`), alternative `pc + 1 + offset` | Settled by D133: all 15,866 branches in the 426 scripts land in range under `pc + offset` (15,399 under the alternative) |
 | `LCv4` | Four consecutive f32 constants from `index` | Constant-table sizes vs `LCv4` indices |
 | m44 layout | Row-major; `GET_M44_XY` = row X, column Y; `rX` row, `cX` column | RPCS3 comparison of a scripted transform |
 | Comparisons and casts | C semantics: wrapping int arithmetic, truncating division, `f as i32` | Script behaviour vs RPCS3 |
@@ -79,5 +79,5 @@ Counts: +0 newly viewable, +0 newly Complete (no asset change).
 
 ## Next
 
-Rr/Rs: native bindings in call-count order once G10 runs; Rt: PScript instance data as
-Thing members and the create/update entry points.
+Rs started in `docs/script-natives.md` (first bindings, `System.Yield` coroutines);
+Rt: PScript instance data as Thing members and the create/update entry points.
