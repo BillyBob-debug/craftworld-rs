@@ -151,7 +151,10 @@ fn run() -> Result<(), String> {
                         step = vm.resume(&mut host, task, &mut budget);
                     }
                     Ok(Step::Yielded(_)) => break ("tick_limit".to_owned(), None),
-                    Err(f) => break (fault_kind(&f), Some(format!("{f:?}"))),
+                    Err(f) => {
+                        let site = vm.last_site().map_or(String::new(), |s| s.to_string());
+                        break (fault_kind(&f), Some(format!("{f:?} at {site}")));
+                    }
                 }
             };
             *outcomes.entry(outcome.0.clone()).or_default() += 1;
