@@ -26,7 +26,12 @@ slice.
   1280 x 720 texture (the size the Gooey host answers to screen queries), shown unlit on
   a 16:9 quad facing +Z. Arrows/Enter move and activate focus (keyboard only; mouse
   picking on the quad is not wired). The count lines are printed, not drawn.
-- The texture camera spawns in PostStartup so the egui panel stays on the 3D camera.
+- The texture camera spawns in Update once bevy_egui's primary context is on the 3D
+  camera (spawning both in the same frame let egui pick the texture camera: PC check of
+  35e07ad failed with egui's Rgba8 pipeline in the Bgra8 texture pass); the gooey UI
+  waits (`GooeyTarget::pending`) and rebuilds when the target changes.
+- The scripts live in the decrypted patch.edat (D133), so the check uses the d133
+  snapshot and overlay directory.
 
 ## Evidence and limits
 - Placement is a viewer choice (default centre 1.1, 0, 0, width 1.2 display units, to
@@ -36,7 +41,7 @@ slice.
 - Test: `p1_puter_placement_parses_and_rejects_bad_values`.
 
 ## PC check
-`lbp-bevy-viewer --snapshot <d68 snapshot> --game-dir "game-data/a1-disc;game-data/a1-update-0133" --select-guid 0000043f --puter-screen PodStateMainMenu --qa-capture local-analysis/NEW.png`
+`lbp-bevy-viewer --snapshot local-analysis/d133-inventory-0133-edat.json --game-dir "game-data/a1-disc;game-data/a1-update-0133;local-analysis/d133-edat-overlay" --select-guid 0000043f --puter-screen PodStateMainMenu --qa-capture local-analysis/NEW.png`
 Expect Sackboy with a screen to his right showing the five labels (Story, Community,
 Recent Activity, Store, Me); the egui panel still on the main view. Also try arrows on the
 second monitor: the yellow focus outline should move between the buttons.

@@ -53,7 +53,7 @@ through the Pod camera instead of using the measured fractions.
 - `p1b_frame_points_project_back_to_their_fractions`
 
 ## PC check
-`lbp-bevy-viewer --pod-menu PodStateMainMenu --snapshot <d68> --game-dir "game-data/a1-disc;game-data/a1-update-0133" --qa-capture local-analysis/NEW.png`
+`lbp-bevy-viewer --pod-menu PodStateMainMenu --snapshot local-analysis/d133-inventory-0133-edat.json --game-dir "game-data/a1-disc;game-data/a1-update-0133;local-analysis/d133-edat-overlay" --qa-capture local-analysis/NEW.png`
 - Report the printed "Pod menu:" line.
 - Compare the capture with d156-rpcs3-pod-* (main menu): pill positions, globe and moon
   size and position.
