@@ -3249,6 +3249,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lbp-runtime"
+version = "0.1.0"
+dependencies = [
+ "lbp-catalog",
+ "lbp-level",
+ "lbp-preview",
+ "lbp-script-vm",
+ "lbp-ui-script",
+ "serde_json",
+]
+
+[[package]]
 name = "lbp-script-vm"
 version = "0.1.0"
 dependencies = [

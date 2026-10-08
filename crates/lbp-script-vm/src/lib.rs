@@ -325,6 +325,47 @@ impl Vm {
         self.by_name.get(name).copied()
     }
 
+    pub fn class_by_guid(&self, guid: u32) -> Option<ClassId> {
+        self.by_guid.get(&guid).copied()
+    }
+
+    /// Field names of a class and its superclasses (the layout an instance gets).
+    pub fn field_names(&self, class: ClassId) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut at = Some(class);
+        let mut depth = 0;
+        while let Some(c) = at {
+            let s = &self.classes[c.0 as usize].script;
+            out.extend(
+                s.field_defs
+                    .iter()
+                    .filter_map(|f| s.name(f.name).map(str::to_owned)),
+            );
+            at = self.super_class(c);
+            depth += 1;
+            if depth > MAX_CALL_DEPTH {
+                break;
+            }
+        }
+        out
+    }
+
+    /// Names of the class's own functions that have code, sorted.
+    pub fn function_names(&self, class: ClassId) -> Vec<&str> {
+        let c = &self.classes[class.0 as usize];
+        let mut out: Vec<&str> = c
+            .functions
+            .iter()
+            .filter(|(_, &i)| {
+                let f = &c.script.function_defs[i];
+                f.bytecode.begin != f.bytecode.end
+            })
+            .map(|(n, _)| n.as_str())
+            .collect();
+        out.sort_unstable();
+        out
+    }
+
     pub fn class_name(&self, id: ClassId) -> &str {
         &self.classes[id.0 as usize].name
     }

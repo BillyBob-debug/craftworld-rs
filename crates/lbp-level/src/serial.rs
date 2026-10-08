@@ -394,6 +394,29 @@ impl<'a> Reader<'a> {
         self.bytes(n)?;
         Ok(n)
     }
+    /// Toolkit `str()` kept as text (lossy UTF-8, NULs removed).
+    pub fn string8(&mut self) -> Result<String> {
+        let n = self.s32()?;
+        let n = usize::try_from(n).or_else(|_| self.invalid("negative string length"))?;
+        Ok(String::from_utf8_lossy(self.bytes(n)?).replace('\0', ""))
+    }
+    /// Toolkit `wstr()` kept as text (UTF-16BE, lossy, NULs removed).
+    pub fn wstring(&mut self) -> Result<String> {
+        let n = self.s32()?;
+        let n = usize::try_from(n).or_else(|_| self.invalid("negative string length"))?;
+        let b = n.checked_mul(2).ok_or(Stop::Budget {
+            what: "string length",
+            offset: self.pos,
+        })?;
+        let units: Vec<u16> = self
+            .bytes(b)?
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|c| u16::from_be_bytes(*c))
+            .collect();
+        Ok(String::from_utf16_lossy(&units).replace('\0', ""))
+    }
     /// Toolkit `wstr()`: s32 UTF-16 unit count then 2 bytes per unit. Returns the count.
     pub fn wstr(&mut self) -> Result<usize> {
         let n = self.s32()?;
