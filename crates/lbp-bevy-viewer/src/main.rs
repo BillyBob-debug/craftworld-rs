@@ -1,5 +1,6 @@
 mod adapter;
 mod dual;
+mod gooey_ui;
 use dual::ViewerMaterial;
 mod browser;
 use bevy::{
@@ -309,7 +310,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-report: with a level, print scene counts and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -379,6 +380,10 @@ fn options() -> Result<Viewer, String> {
     Ok(v)
 }
 fn main() {
+    if std::env::args().skip(1).any(|a| a == "--ui-demo") {
+        gooey_ui::run_ui_demo();
+        return;
+    }
     let viewer = options().unwrap_or_else(|e| {
         eprintln!("{e}");
         std::process::exit(1)
@@ -416,7 +421,7 @@ fn main() {
         .run();
 }
 // Keep test/launcher windows hidden until positioned on a non-primary display.
-fn place_on_second_monitor(
+pub(crate) fn place_on_second_monitor(
     monitors: Query<(Entity, Option<&bevy::window::PrimaryMonitor>), With<bevy::window::Monitor>>,
     mut windows: Query<&mut Window>,
 ) {

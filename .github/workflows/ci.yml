@@ -17,7 +17,7 @@ env:
   # Non-GUI crates only; lbp-bevy-viewer and lbp-viewer are excluded (see docs/d72-ci.md).
   CRATES: >-
     -p lbp-core -p lbp-io -p lbp-archive -p lbp-resource -p lbp-texture
-    -p lbp-mesh -p lbp-catalog -p lbp-preview -p lbp-cli
+    -p lbp-mesh -p lbp-catalog -p lbp-preview -p lbp-cli -p lbp-gooey
 
 jobs:
   rust:
