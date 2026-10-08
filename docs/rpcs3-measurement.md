@@ -47,7 +47,9 @@ code is copied into the product.
 
 ## 3. First measurements (runtime checks X1 and S9)
 
-Use one story level with flat ground, for example the first tutorial level.
+Use an empty test level: a new level in Create mode (My Moon) with only flat ground,
+Sackboy and nothing else. Not the first story level: it opens with a custom camera, and
+story levels add cameras, triggers and logic that can move or hold Sackboy.
 
 | Check | What to record |
 |---|---|
@@ -88,7 +90,7 @@ Proposed route (no human needed if it works):
    local script reads guest memory over it each frame (big-endian floats).
 2. Send keyboard input to the game window. Set up a keyboard pad profile in RPCS3 and
    record its key map in the milestone doc.
-3. Get to a flat story level. Find Sackboy's x/y/z by scanning while walking and
+3. Open the empty test level from section 3. Find Sackboy's x/y/z by scanning while walking and
    standing still (values that change only while moving). Record the guest addresses.
 4. Run the section 3 table: walk 3+ s, standing jump, long drop, layer shift. One CSV
    per run in `local-analysis/` (new names): tick, x, y, z, input state.
