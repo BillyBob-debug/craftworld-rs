@@ -1,7 +1,8 @@
 //! Runs the game's own test scripts in the VM (docs/script-natives.md, "PC checks").
 //! A test script is one that calls a `Test.*` native. Every function of it that takes no
 //! arguments and has code is run once with the bindings over a world that only records
-//! `Test.*` checks. A non-static function runs on a fresh instance of its class, placed in
+//! `Test.*` checks. A non-static function runs on a fresh instance of its class
+//! (fields of the class and its superclasses, then `.init__`), placed in
 //! register 0 as `this` (as the U12 Gooey host does, INFERRED from the D134 trace). A yield resumes on the next "tick", up to a tick limit. Writes the
 //! totals and one row per function (class and function names, outcome, checks) to a NEW
 //! JSON file under ignored `local-analysis/`.
@@ -133,7 +134,7 @@ fn run() -> Result<(), String> {
             let mut step = if *is_static {
                 vm.start(&mut host, *id, name, &[], &mut budget)
             } else {
-                vm.instantiate(*id).and_then(|this| {
+                vm.construct(&mut host, *id, &mut budget).and_then(|this| {
                     vm.start_registers(
                         &mut host,
                         *id,

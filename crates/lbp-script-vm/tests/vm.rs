@@ -613,3 +613,54 @@ fn locals_start_at_defaults_and_no_register_operands_are_ignored() {
     assert_eq!(r, Ok(Value::Int(1)));
     assert_eq!(host.calls.len(), 1);
 }
+
+#[test]
+fn new_object_runs_inherited_init_and_finds_superclass_by_learned_guid() {
+    // Base (loaded without a GUID) initialises x = 7 in .init__.
+    let mut b = Builder::new();
+    let int_ty = b.ty(INT, "int", None, 0);
+    let x = b.field(int_ty, "x", true);
+    let base = b.build(
+        "Base",
+        None,
+        vec![func(
+            ".init__",
+            &[0],
+            vec![
+                hi(0x03, 4, 7),        // r4 = 7
+                i(0xb4, INT, 4, 0, x), // this.x = r4
+                i(0xa5, 0, 0, 0, 0),   // RETURN
+            ],
+        )],
+    );
+    // Derived names Base only by GUID; its own type references carry that GUID's name.
+    let mut b = Builder::new();
+    let me = b.ty(OBJ, "Derived", Some(0x301), 0);
+    b.ty(OBJ, "Base", Some(0x300), 0);
+    let int_ty = b.ty(INT, "int", None, 0);
+    let x = b.field(int_ty, "x", false);
+    let derived = b.build(
+        "Derived",
+        Some(0x300),
+        vec![func(
+            "Make",
+            &[],
+            vec![
+                i(0xb5, 0, 0, 0, me),  // r0 = new Derived (runs Base.init__)
+                i(0xb3, INT, 4, 0, x), // r4 = r0.x
+                i(0xa5, INT, 0, 4, 0), // RETURN r4
+            ],
+        )],
+    );
+    let mut vm = Vm::default();
+    vm.load(base, None);
+    let d = vm.load(derived, Some(0x301));
+    let mut host = TestHost::default();
+    let mut budget = 100;
+    assert_eq!(
+        vm.call(&mut host, d, "Make", &[], &mut budget),
+        Ok(Value::Int(7))
+    );
+    let o = vm.construct(&mut host, d, &mut budget).unwrap();
+    assert_eq!(vm.field(o, "x"), Some(&Value::Int(7)));
+}

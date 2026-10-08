@@ -326,7 +326,13 @@ fn report(w: &mut dyn World, c: &Call<'_>, passed: bool) -> Result<Value, String
     let n = c.params.len();
     let message = text(param(c, n.wrapping_sub(2))?)?;
     let line = int(param(c, n.wrapping_sub(1))?)?;
-    w.test_check(passed, message, line);
+    if passed {
+        w.test_check(true, message, line);
+    } else {
+        // Failed checks carry the compared values for diagnosis.
+        let values = &c.params[..n.saturating_sub(2)];
+        w.test_check(false, &format!("{message} {values:?}"), line);
+    }
     Ok(Value::Void)
 }
 

@@ -252,6 +252,9 @@ pub struct Vm {
     classes: Vec<LoadedClass>,
     by_guid: HashMap<u32, ClassId>,
     by_name: HashMap<String, ClassId>,
+    /// GUID -> class name, learned from every loaded script's type references, so a
+    /// superclass named only by GUID resolves when its script was loaded without one.
+    guid_names: HashMap<u32, String>,
     heap: Vec<HeapObject>,
     /// Calls into functions that matched more than one definition by name.
     pub ambiguous_calls: usize,
@@ -272,6 +275,7 @@ impl Vm {
             classes: Vec::new(),
             by_guid: HashMap::new(),
             by_name: HashMap::new(),
+            guid_names: HashMap::new(),
             heap: Vec::new(),
             ambiguous_calls: 0,
             at: None,
@@ -292,6 +296,11 @@ impl Vm {
             self.by_guid.insert(g, id);
         }
         self.by_name.entry(name.clone()).or_insert(id);
+        for t in &script.type_refs {
+            if let (Some(g), Some(n)) = (t.script.and_then(|d| d.guid), script.name(t.type_name)) {
+                self.guid_names.entry(g).or_insert_with(|| n.to_owned());
+            }
+        }
         self.classes.push(LoadedClass {
             script,
             name,
@@ -365,7 +374,50 @@ impl Vm {
 
     fn super_class(&self, c: ClassId) -> Option<ClassId> {
         let g = self.classes[c.0 as usize].script.super_class?.guid?;
-        self.by_guid.get(&g).copied()
+        self.by_guid.get(&g).copied().or_else(|| {
+            self.guid_names
+                .get(&g)
+                .and_then(|n| self.by_name.get(n))
+                .copied()
+        })
+    }
+
+    /// Frame running `.init__` (field initialisers) on a new object, if the class or a
+    /// superclass has one. `this` goes to the function's single argument row, else
+    /// register 0 (INFERRED, docs/script-vm.md).
+    fn init_frame(&self, class: ClassId, this: ObjectId) -> Result<Option<Frame>, Fault> {
+        let Some((c, f)) = self.find(class, ".init__") else {
+            return Ok(None);
+        };
+        let s = &self.classes[c.0 as usize].script;
+        let def = &s.function_defs[f];
+        let rows = s
+            .shared_arguments
+            .get(def.arguments.begin as usize..def.arguments.end as usize)
+            .unwrap_or(&[]);
+        let at = match rows {
+            [row] => u16::try_from(row.offset).unwrap_or(0),
+            _ => 0,
+        };
+        let staged = BTreeMap::from([(at, Value::Object(Some(this)))]);
+        self.frame(c, f, staged, None).map(Some)
+    }
+
+    /// `NEW_OBJECT` from the host: allocates the fields of the class and its superclasses
+    /// and runs `.init__`. The constructor (`.ctor__`) is the caller's to run, as scripts do.
+    pub fn construct(
+        &mut self,
+        host: &mut dyn Host,
+        class: ClassId,
+        budget: &mut u64,
+    ) -> Result<ObjectId, Fault> {
+        let id = self.instantiate(class)?;
+        if let Some(frame) = self.init_frame(class, id)? {
+            if let Step::Yielded(_) = self.run(host, vec![frame], budget)? {
+                return Err(Fault::YieldInCall);
+            }
+        }
+        Ok(id)
     }
 
     /// Finds a function with code by name in a class or its superclasses.
@@ -597,7 +649,9 @@ impl Vm {
                 Class::Nop => {}
                 Class::LoadConst => {
                     let v = match op {
-                        0x01 => Value::Bool(bits >> 63 != 0),
+                        // Toolkit reads bit 63; D138 showed `true` constants reading false,
+                        // so any set bit in the high word counts (INFERRED).
+                        0x01 => Value::Bool(hi32 != 0),
                         0x02 => Value::Char(r16(48)),
                         0x03 => Value::Int(hi32 as i32),
                         0x04 => Value::Float(f32::from_bits(hi32)),
@@ -836,6 +890,7 @@ impl Vm {
                 Class::NewObject => {
                     let target = self.type_class(script, r16(48), pc)?;
                     let id = self.instantiate(target)?;
+                    let init = self.init_frame(target, id)?;
                     let fr = stack.last_mut().expect("frame");
                     *fr.regs
                         .get_mut(usize::from(r16(16)))
@@ -844,6 +899,12 @@ impl Vm {
                             register: r16(16),
                         })? = Value::Object(Some(id));
                     fr.pc = next;
+                    if let Some(frame) = init {
+                        if depth >= MAX_CALL_DEPTH {
+                            return Err(Fault::CallDepth);
+                        }
+                        stack.push(frame);
+                    }
                     continue;
                 }
                 Class::Write => {
