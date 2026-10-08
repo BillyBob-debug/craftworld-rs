@@ -243,3 +243,48 @@ fn u12c_null_script_class_fields_are_supplied() {
         Some(Value::Object(Some(_)))
     ));
 }
+
+#[test]
+fn u12d_sizing_is_relative_to_the_first_sized_frame() {
+    use lbp_gooey::{FrameInput, Uid, Widget};
+    use lbp_ui_script::tree::{reference_size, ui_tree};
+    use lbp_ui_script::Frame;
+    let sized = |w: &str, children: Vec<Node>| Frame {
+        start: "StartFrame".into(),
+        props: [("Sizing".to_owned(), w.to_owned())].into(),
+        children,
+    };
+    let root = Frame {
+        start: "root".into(),
+        props: Default::default(),
+        children: vec![Node::Frame(sized(
+            "2400, 1250",
+            vec![
+                Node::Frame(sized("1200, 300", vec![])),
+                Node::Frame(sized("-1, 500", vec![])),
+                Node::Frame(sized("NaN, 0", vec![])),
+            ],
+        ))],
+    };
+    assert_eq!(reference_size(&root), Some([2400., 1250.]));
+    let tree = ui_tree(&root, Uid(1), &[], FrameInput::default());
+    let sizes: Vec<[Option<f32>; 2]> = tree
+        .nodes
+        .iter()
+        .filter_map(|n| match n.widget {
+            Widget::Frame { size, .. } => Some(size),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        sizes,
+        [
+            [None, None],
+            [None, None],
+            [Some(1.), Some(1.)],
+            [Some(0.5), Some(0.24)],
+            [None, Some(0.4)],
+            [None, None],
+        ]
+    );
+}

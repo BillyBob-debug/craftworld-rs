@@ -59,3 +59,18 @@ D140 runs stopped on NullObject in `UpdateUI+888` (the final `Puter` read),
 - Test: `u12c_null_script_class_fields_are_supplied`.
 - PC check: rerun step 1 and step 3 above; report the "Supplied objects" line and any fault
   with its site.
+
+## U12d: frame sizes from the script (after D146)
+D146: the main-menu and Stories scripts run with no faults. Frame `Sizing` values seen:
+outer 2400 x 1250, then -1 x 500, 0 x 0 (three), 1000 x 300 (main menu).
+- `lbp-gooey`: `Widget::Frame` has `size: [Option<f32>; 2]` (fractions of the screen;
+  `None` fits the content) and `Builder::set_frame_size` for the open frame; the viewer
+  maps it to `Vw`/`Vh`.
+- `tree::ui_tree`: the first frame with a positive `Sizing` is the full screen (D146:
+  `GetPuterWidth(2400)` returns 2400, so script units are screen units at 2400 wide,
+  INFERRED); each frame's positive `Sizing` is divided by it; zero or negative axes fit the
+  content (meaning UNKNOWN).
+- Test: `u12d_sizing_is_relative_to_the_first_sized_frame`.
+- PC check: `--ui-script PodStateMainMenu` capture on the second monitor; the outer frame
+  should fill the window and the 1000 x 300 frame should be about 42% x 24% of it. The count
+  header sits above the tree, so the outer frame overflows by the header height (known).

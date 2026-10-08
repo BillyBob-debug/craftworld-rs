@@ -74,6 +74,8 @@ pub enum Widget {
         style: PanelStyle,
         padding: f32,
         gap: f32,
+        /// Width and height as fractions of the screen; `None` fits the content.
+        size: [Option<f32>; 2],
     },
     Text {
         text: String,
@@ -168,6 +170,7 @@ impl Builder {
                 style: PanelStyle::Plain,
                 padding: 0.,
                 gap: 0.,
+                size: [None, None],
             },
         );
         builder.stack.push(0);
@@ -223,11 +226,21 @@ impl Builder {
                 style,
                 padding,
                 gap,
+                size: [None, None],
             },
         );
         self.stack.push(index);
         contents(self);
         self.stack.pop();
+    }
+
+    /// Sets the size of the innermost open frame (fractions of the screen, clamped to
+    /// 0..=1; `None` or a non-finite value fits the content).
+    pub fn set_frame_size(&mut self, size: [Option<f32>; 2]) {
+        let open = *self.stack.last().expect("root frame is always open");
+        if let Widget::Frame { size: s, .. } = &mut self.tree.nodes[open].widget {
+            *s = size.map(|v| v.filter(|v| v.is_finite()).map(|v| v.clamp(0., 1.)));
+        }
     }
 
     pub fn text(&mut self, text: impl Into<String>, style: TextStyle) {

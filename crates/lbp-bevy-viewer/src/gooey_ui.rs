@@ -436,6 +436,7 @@ fn spawn_node(
             style,
             padding,
             gap,
+            size,
         } => {
             let justify = match align {
                 Align::Start => JustifyContent::FlexStart,
@@ -461,6 +462,8 @@ fn spawn_node(
                             FlexWrap::NoWrap
                         },
                         justify_content: justify,
+                        width: size[0].map_or(Val::Auto, |f| Val::Vw(f * 100.)),
+                        height: size[1].map_or(Val::Auto, |f| Val::Vh(f * 100.)),
                         padding: UiRect::all(Val::Px(*padding)),
                         row_gap: Val::Px(*gap),
                         column_gap: Val::Px(*gap),
