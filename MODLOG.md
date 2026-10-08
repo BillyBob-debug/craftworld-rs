@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D124 U4/U6 follow-ups
+
+testrnp.slt is an expected text-form exclusion (U4 census 15 complete + 1 excluded);
+UI demo no longer rebuilds every frame. +0 viewable / +0 Complete.
+
 ## 2026-10-08 — Level v2 + queued PRs (D115-D123)
 
 tutorial_23 now draws its workshop backdrop, inverse-bind props, opt-in bevels and level

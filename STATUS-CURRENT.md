@@ -44,7 +44,8 @@ Bevy level mode --level-path/--level-guid (D113) with straight-extruded shapes (
 tutorial_23 renders with its backdrop (D119), inverse-bind/joint placement (D120),
 --preview-lighting from level settings (D121), --shape-bevels (D122, inferred).
 Runtime: skin/morphs (D115), animation keys (D116), --play-animation GPU/CPU skinning
-(D118), lbp-gooey UI + --ui-demo (D117), slot/pin/palette readers (D123).
+(D118), lbp-gooey UI + --ui-demo (D117, no per-frame rebuild since D124), slot/pin/
+palette readers (D123; 15/16 complete, 1 excluded test file).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).
@@ -81,7 +82,7 @@ Runtime: skin/morphs (D115), animation keys (D116), --play-animation GPU/CPU ski
 
 ## Next
 Level visual QA against the game; joint skinning; bevel/UV calibration; Rookie Test and
-more story levels on screen; Toolkit spot-check for U4 slot lists.
+more story levels on screen; Toolkit spot-check for U4 slot lists (not done).
 
 ## Environment
 - Toolchain: `. ./scripts/use-local-rust.ps1` (project-local, windows-gnu).

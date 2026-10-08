@@ -3536,3 +3536,13 @@ Failed/notes: disk filled (agent build dirs, ~250 GB) and was cleared; many merg
 conflicts in level_scene/viewer resolved (LevelSceneOptions now has shape_bevels and
 placement; one LevelSettings). UI demo rebuilds every frame (perf, later).
 Next: level visual QA vs game; joint skinning; bevel/UV calibration; more levels.
+
+## D124 — U4/U6 follow-ups, PR #23 (2026-10-08)
+
+- U4: gamedata/scratch/testrnp.slt (000056dc, not slot-list magic) is an expected
+  `excluded_text_form` exclusion. ui_data_census -> d124-ui-data-census-0133.json:
+  16 files, 15 complete (slot_list 3, palette 6, packs 5, pins 1), 1 excluded.
+- U6: --ui-demo rebuilds only on change; capture d124-ui-demo.png on non-primary monitor
+  201v0 looks the same as D117.
+- Checks: fmt, tests and Clippy -D warnings for lbp-level, lbp-gooey, lbp-bevy-viewer.
+**+0 newly viewable / +0 newly Complete.**
