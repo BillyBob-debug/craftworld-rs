@@ -27,6 +27,11 @@ pub fn select_instance_diffuse(
         {
             return Err("Unsupported: several animated samplers under a folded or alpha-subtracted instance input".into());
         }
+        // D99 product trees fold static COLOR leaves only; no oracle parity under a
+        // supplied instance color (docs/d99-product-trees.md).
+        Ok(selection) if selection.product_tree.is_some() => {
+            return Err("Unsupported: product tree under a supplied instance color".into());
+        }
         Ok(selection) => return Ok(selection),
         Err(error) => error,
     };

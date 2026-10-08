@@ -2,6 +2,7 @@
 //! docs/nested-preview.md, docs/four-product-preview.md, docs/third-sample-preview.md.
 //! Third samples second (or primary, D65) coordinates through a CPU-derived
 //! scale/offset; fourth shares primary coordinates after exact CPU validation.
+//! D99: `enabled.w` selects the two-texture alpha MIX mode (docs/d99-product-trees.md).
 use bevy::{
     pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
@@ -41,6 +42,11 @@ pub fn material(base: StandardMaterial) -> ViewerMaterial {
 pub fn enable(material: &mut ViewerMaterial, image: Handle<Image>) {
     material.extension.image = Some(image);
     material.extension.enabled = Vec4::X;
+}
+/// D99: off-grid two-texture alpha MIX (docs/d99-product-trees.md): the primary and
+/// second samples are mixed by the second sample's alpha instead of multiplied.
+pub fn enable_alpha_mix(material: &mut ViewerMaterial) {
+    material.extension.enabled.w = 1.;
 }
 pub fn enable_third(
     material: &mut ViewerMaterial,
@@ -90,7 +96,13 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
     var color = pbr.material.base_color;
 #ifdef VERTEX_UVS_B
     if enabled.x > 0.0 {
-        color *= textureSample(second_image, second_sampler, in.uv_b);
+        let second = textureSample(second_image, second_sampler, in.uv_b);
+        if enabled.w > 0.5 {
+            // Toolkit MIX: (port1 - port0) * port1.a + port0, on linear values.
+            color = mix(color, second, second.a);
+        } else {
+            color *= second;
+        }
         if enabled.y > 0.0 {
             var third_base = in.uv_b;
 #ifdef VERTEX_UVS_A

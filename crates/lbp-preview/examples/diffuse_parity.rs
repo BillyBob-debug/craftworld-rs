@@ -348,7 +348,9 @@ fn run() -> Result<(), String> {
                                     }),
                             }
                         };
-                    let multiply_equal = if let Some(add) = s.texture_add {
+                    let multiply_equal = if let Some(tree) = s.product_tree {
+                        tree_equal(sample, &s, tree, wire.box_from as usize, &transform_equal)?
+                    } else if let Some(add) = s.texture_add {
                         add_equal(sample, &s, add, wire.box_from as usize, &transform_equal)?
                     } else if let Some(mix) = s.alpha_mix {
                         let root = mix.mix_index;
@@ -735,7 +737,7 @@ fn run() -> Result<(), String> {
                     }
                     projected += 1;
                     // Versioned diagnostics retain all three original selectors/root indices.
-                    json!({"status":"projected","texture_add":s.texture_add.map(|a|json!({"add_index":a.add_index,"addend_index":a.addend_index,"addend_bits":a.addend.map(|c|c.bits),"policy":"linear_sum_clamped"})),"sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"animation_base_more":s.animation_base_more.iter().flatten().map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})).collect::<Vec<_>>(),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
+                    json!({"status":"projected","product_tree":s.product_tree.map(|t|json!({"root":t.root,"multiply_nodes":t.multiply_nodes,"texture_leaves":t.texture_leaves,"color_leaves":t.color_leaves,"policy":"folded_color_product"})),"texture_add":s.texture_add.map(|a|json!({"add_index":a.add_index,"addend_index":a.addend_index,"addend_bits":a.addend.map(|c|c.bits),"policy":"linear_sum_clamped"})),"sampler_scale":s.sampler_scale.map(|c|json!({"const_index":c.const_index,"factor_bits":c.factor_bits,"source_bits":c.source_bits})),"alpha_mix":s.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":s.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"animation_base":s.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"animation_base_more":s.animation_base_more.iter().flatten().map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})).collect::<Vec<_>>(),"blend":s.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"deep_multiply_index":s.deep_multiply_index,"fourth_sample":s.fourth_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"inner_multiply_index":s.inner_multiply_index,"third_sample":s.third_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"second_sample":s.second_sample.map(|s|json!({"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"transform_bits":s.uv_transform.bits()})),"output_index":s.output_index,"sample_index":s.sample_index,"slot":s.slot,"uv_channel":s.uv_channel,"uv_transform_subtype":s.uv_transform.subtype(),"uv_transform_bits":s.uv_transform.bits(),"sampling":s.uv_transform.label(),"tint_bits":s.tint.bits,"multiply_index":s.multiply_index,"color_index":s.color_index,"ignored_nodes":s.ignored_nodes,"ignored_wires":s.ignored_wires})
                 }
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
@@ -743,7 +745,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection,"instance_white_expected":instance_expected,"instance_folded_samplers":folded_ports}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":20,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":21,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -764,6 +766,111 @@ fn run() -> Result<(), String> {
 /// D89: the ADD root and its operands re-read from the oracle's graph rows (Toolkit
 /// GfxAssembler ADD = port 0 + port 1): two samples on ports 0/1, or COLOR on one port
 /// and the sample (directly or through a sample x COLOR MULTIPLY) on the other.
+/// D99 (docs/d99-product-trees.md): walk the oracle's MULTIPLY rows from the diffuse
+/// root; texture leaves (with multiplicity) must equal the selected roles and the tint
+/// must equal the f32 product of the oracle's COLOR rows in ascending box order.
+fn tree_equal(
+    sample: &Value,
+    s: &lbp_preview::DiffuseSelection,
+    tree: lbp_preview::ProductTree,
+    root: usize,
+    transform_equal: &dyn Fn(usize, lbp_preview::SamplingTransform) -> bool,
+) -> Result<bool, String> {
+    let nodes = &sample["graph"]["boxes"];
+    let wires = sample["graph"]["wires"]
+        .as_array()
+        .ok_or("oracle wires required")?;
+    let (mut textures, mut colors, mut multiplies) = (vec![], vec![], vec![]);
+    let mut pending = vec![root];
+    let mut visits = 0;
+    while let Some(index) = pending.pop() {
+        visits += 1;
+        if visits > 64 {
+            return Ok(false);
+        }
+        match nodes[index]["type_raw"].as_u64() {
+            Some(10) => {
+                let into: Vec<_> = wires
+                    .iter()
+                    .filter(|w| w["box_to"].as_u64() == Some(index as u64))
+                    .collect();
+                let mut ports: Vec<_> = into
+                    .iter()
+                    .filter_map(|w| w["port_to_raw"].as_u64())
+                    .collect();
+                ports.sort_unstable();
+                if nodes[index]["subtype_raw"] != 0
+                    || ports != [0, 1]
+                    || into.iter().any(|w| {
+                        w["port_from_raw"] != 0 || w["swizzle_raw"] != json!([0, 0, 0, 0, 0])
+                    })
+                {
+                    return Ok(false);
+                }
+                if !multiplies.contains(&index) {
+                    multiplies.push(index);
+                }
+                for w in into {
+                    pending.push(w["box_from"].as_u64().ok_or("wire source")? as usize);
+                }
+            }
+            Some(1) => textures.push(index),
+            Some(3) => colors.push(index),
+            _ => return Ok(false),
+        }
+    }
+    colors.sort_unstable();
+    let rows = colors
+        .iter()
+        .map(|&c| {
+            let row: Option<Vec<u32>> = (0..4)
+                .map(|i| nodes[c]["parameters_raw"][i].as_u64().map(|v| v as u32))
+                .collect();
+            row.map(|r| [r[0], r[1], r[2], r[3]])
+        })
+        .collect::<Option<Vec<_>>>()
+        .ok_or("COLOR rows")?;
+    // Independent fold: component-wise f32 product from 1, ascending box order.
+    let mut folded = [1f32; 4];
+    for row in rows {
+        for (v, bits) in folded.iter_mut().zip(row) {
+            *v *= f32::from_bits(bits);
+        }
+    }
+    let folded = folded.map(f32::to_bits);
+    let mut selected: Vec<_> = [Some(s.sample_index)]
+        .into_iter()
+        .chain(
+            [s.second_sample, s.third_sample, s.fourth_sample].map(|l| l.map(|l| l.sample_index)),
+        )
+        .flatten()
+        .collect();
+    selected.sort_unstable();
+    textures.sort_unstable();
+    let leaves_equal = [s.second_sample, s.third_sample, s.fourth_sample]
+        .into_iter()
+        .flatten()
+        .all(|leaf| {
+            let node = &nodes[leaf.sample_index];
+            node["subtype_raw"].as_u64() == Some(u64::from(leaf.uv_transform.subtype()))
+                && node["parameters_raw"][4].as_u64() == Some(leaf.uv_channel as u64)
+                && node["parameters_raw"][5].as_u64() == Some(leaf.slot as u64)
+                && transform_equal(leaf.sample_index, leaf.uv_transform)
+        });
+    Ok(tree.root == root
+        && s.multiply_index == Some(root)
+        && s.color_index.is_none()
+        && s.blend.is_none()
+        && s.alpha_mix.is_none()
+        && s.texture_alpha_mix.is_none()
+        && s.texture_add.is_none()
+        && selected == textures
+        && usize::from(tree.texture_leaves) == textures.len()
+        && usize::from(tree.color_leaves) == colors.len()
+        && usize::from(tree.multiply_nodes) == multiplies.len()
+        && s.tint.bits == folded
+        && leaves_equal)
+}
 fn add_equal(
     sample: &Value,
     s: &lbp_preview::DiffuseSelection,
