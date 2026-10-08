@@ -25,6 +25,9 @@ pub struct InstanceProjection {
     pub folded_operand: Option<usize>,
     /// D96: samplers whose static port 0/1/2 inputs were folded into their scale/offset.
     pub sampler_port_folds: Vec<crate::SamplerPortFold>,
+    /// D105: the derived graph is the plain ThingColor-to-COLOR substitution and is
+    /// selected by the graph evaluator only (docs/d105-instance-graphs.md).
+    pub evaluated: bool,
 }
 
 /// Bound and validate the selected diffuse ancestry before deriving a graph.
@@ -92,6 +95,7 @@ pub fn project_instance_color(
         swizzled_color_edges: vec![],
         folded_operand: None,
         sampler_port_folds: vec![],
+        evaluated: false,
     };
     for (index, node) in graph
         .boxes

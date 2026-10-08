@@ -24,7 +24,8 @@ fn classify(graph: &lbp_resource::material::GraphMetadata) -> (String, Option<St
     let white = lbp_preview::DiffuseTint {
         bits: [1f32.to_bits(); 4],
     };
-    if let Ok((derived, Some(p))) = lbp_preview::project_instance_color(graph, white) {
+    // D105: the loader's projection (plain substitution for the evaluator fallback).
+    if let Ok((derived, Some(p))) = lbp_preview::project_instance_graph(graph, white, true) {
         if matches!(lbp_preview::select_solid_diffuse(&derived), Ok(Some(_)))
             // D89 ADD is refused under a supplied instance color (loader guard).
             || lbp_preview::select_instance_diffuse(&derived, &p, true)
@@ -111,6 +112,11 @@ fn thing_color_reason(
                 Err(e) => format!("projected_unselected: {e}"),
             },
         },
+    };
+    // D105: why the plain ThingColor substitution is not evaluated either.
+    let reason = match lbp_preview::instance_graph_refusal(graph, white) {
+        Some(d105) => format!("{reason} | D105 {d105}"),
+        None => reason,
     };
     Some((reason, things))
 }
@@ -277,7 +283,7 @@ fn run() -> Result<(), String> {
         rows.push(json!({"sha1":sha,"class":class,"reason":reason,"shape":signature,"thing_color_reason":thing_reason}));
     }
     rows.sort_by(|a, b| a["sha1"].as_str().cmp(&b["sha1"].as_str()));
-    let report = json!({"schema_version":3,"scope":"diffuse_route_selection_only_not_payload_or_asset_count","materials":rows.len(),"archived_bytes_read":bytes_read,"class_counts":classes,"reason_counts":reasons,"thing_color_reason_counts":thing_reasons,"thing_color_node_counts":thing_nodes,"materials_detail":rows});
+    let report = json!({"schema_version":4,"scope":"diffuse_route_selection_only_not_payload_or_asset_count","materials":rows.len(),"archived_bytes_read":bytes_read,"class_counts":classes,"reason_counts":reasons,"thing_color_reason_counts":thing_reasons,"thing_color_node_counts":thing_nodes,"materials_detail":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

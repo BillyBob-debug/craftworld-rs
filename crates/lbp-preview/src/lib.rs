@@ -28,6 +28,8 @@ pub use matrix::{SamplingTransform, UvMatrix};
 pub use product_tree::ProductTree;
 mod instance;
 mod instance_fold;
+mod instance_graph;
+pub use instance_graph::{instance_graph_refusal, project_instance_graph, select_evaluated};
 mod instance_sampler;
 pub use instance_sampler::SamplerPortFold;
 mod instance_textured;
