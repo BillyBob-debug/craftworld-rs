@@ -6,6 +6,7 @@ publish.workspace = true
 
 [dependencies]
 lbp-catalog.workspace = true
+lbp-level.workspace = true
 lbp-mesh.workspace = true
 lbp-resource.workspace = true
 lbp-texture.workspace = true
