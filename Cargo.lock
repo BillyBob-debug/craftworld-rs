@@ -3138,6 +3138,7 @@ dependencies = [
  "lbp-mesh",
  "lbp-preview",
  "lbp-texture",
+ "naga 29.0.4",
 ]
 
 [[package]]

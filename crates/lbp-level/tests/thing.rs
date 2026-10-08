@@ -266,6 +266,67 @@ fn null_and_shared_part_references() {
     assert_eq!(r.trailing_bytes, Some(2));
 }
 
+/// D121: one LevelSettings body (head 0x3e5 layout), field values from `base`.
+fn level_settings_body(w: &mut W, base: f32) {
+    for i in 0..3 {
+        w.f32(base + i as f32); // sun position
+    }
+    w.f32(300000.); // sun position scale
+    for v in [1., 0.9, 0.8, 1.] {
+        w.f32(v * base); // sun colour
+    }
+    for v in [0.2, 0.3, 0.4, 1.] {
+        w.f32(v); // ambient colour
+    }
+    w.f32(1.5).f32(1.25); // sun multiplier, exposure
+    for v in [0.3, 0.5, 0.7, 1.] {
+        w.f32(v); // fog colour
+    }
+    w.f32(1000.).f32(4000.); // fog near, far
+    for _ in 0..8 {
+        w.f32(0.5); // rim colours
+    }
+    for _ in 0..(6 + 1 + 3) {
+        w.f32(9.); // baked/DOF, dofFar, zEffect (read through)
+    }
+}
+
+#[test]
+fn level_settings_fields_and_presets() {
+    const LEVEL_SETTINGS_BIT: u32 = 0xa;
+    let mut w = W::new(1);
+    w.u32(1)
+        .thing_header(1, 0, 0, 0, 0x3f, bit(LEVEL_SETTINGS_BIT));
+    w.u32(2);
+    level_settings_body(&mut w, 1.);
+    w.u32(1); // one preset
+    level_settings_body(&mut w, 7.);
+    w.s32(3).raw(b"amb").res_none(); // backdropAmbience, backdropMesh
+    w.u32(0).u32(0).u32(0).u32(0).u32(0).u8(0).u8(0); // RLevel tail at 0x3e5
+    let r = run(&w, 0x3e5);
+    assert_eq!(r.stop, None);
+    assert_eq!(r.trailing_bytes, Some(0));
+    assert_eq!(r.things[0].read[0].state, "parsed");
+    let (at, s) = lbp_level::parts::LevelSettings::find(&r.things).unwrap();
+    assert_eq!(at, 0);
+    assert_eq!(s.sun_position, [1., 2., 3.]);
+    assert_eq!(s.sun_position_scale, 300000.);
+    assert_eq!(s.sun_color, [1., 0.9, 0.8, 1.]);
+    assert_eq!(s.ambient_color, [0.2, 0.3, 0.4, 1.]);
+    assert_eq!((s.sun_multiplier, s.exposure), (1.5, 1.25));
+    assert_eq!(s.fog_color, [0.3, 0.5, 0.7, 1.]);
+    assert_eq!((s.fog_near, s.fog_far), (1000., 4000.));
+    assert_eq!((s.rim_color, s.rim_color2), ([0.5; 4], [0.5; 4]));
+    assert_eq!(s.presets, 1);
+    // Every truncation stops without panic and without settings claimed complete.
+    for n in 0..w.b.len() {
+        let mut t = W::new(1);
+        t.raw(&w.b[..n]);
+        let r = run(&t, 0x3e5);
+        assert!(r.stop.is_some());
+    }
+}
+
 #[test]
 fn shared_part_reference() {
     // The world's groupHead is a new Thing whose POS body is tag 3; the world Thing then

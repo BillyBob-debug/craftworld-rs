@@ -271,14 +271,52 @@ pub struct PartData {
     pub decorations: Vec<Decoration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub world: Option<World>,
-    /// PLevelSettings tail (backdrop mesh, D119).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub level_settings: Option<LevelSettings>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub joint: Option<Joint>,
     /// PScriptName (raw byte count, name length up to the first NUL).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub script_name: Option<(usize, usize)>,
+    /// PLevelSettings: own LevelSettings fields (D121; presets are read through) and the
+    /// backdrop mesh tail (D119).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub level_settings: Option<LevelSettings>,
+}
+
+/// D121: LevelSettings lighting/fog fields as stored (in-band LBP2 layout, see module
+/// doc). Toolkit LevelSettings.java @ d6a2ef80 names; meaning in the game renderer is
+/// UNKNOWN (preview mapping only, docs/d121-preview-lighting.md).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct LevelSettings {
+    pub sun_position: [f32; 3],
+    pub sun_position_scale: f32,
+    pub sun_color: [f32; 4],
+    pub ambient_color: [f32; 4],
+    pub sun_multiplier: f32,
+    pub exposure: f32,
+    pub fog_color: [f32; 4],
+    pub fog_near: f32,
+    pub fog_far: f32,
+    pub rim_color: [f32; 4],
+    pub rim_color2: [f32; 4],
+    /// Number of stored preset LevelSettings (not projected).
+    pub presets: usize,
+    /// D119: `backdropMesh` resource (STATIC_MESH, head >= 0x2f3), after the presets and
+    /// the ambience name.
+    pub backdrop_mesh: Option<Descriptor>,
+}
+
+impl LevelSettings {
+    /// The world Thing's (PWorld holder) settings, else the first Thing carrying the
+    /// part, with that Thing's index. Several holders are not merged.
+    pub fn find(things: &[crate::thing::ThingRecord]) -> Option<(usize, &LevelSettings)> {
+        let held = |t: &&crate::thing::ThingRecord| t.data.level_settings.is_some();
+        let t = things
+            .iter()
+            .filter(held)
+            .find(|t| t.data.world.is_some())
+            .or_else(|| things.iter().find(held))?;
+        t.data.level_settings.as_ref().map(|s| (t.index, s))
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -383,13 +421,6 @@ pub struct World {
     pub backdrop_new: Option<usize>,
     pub backdrop_plan: Option<Descriptor>,
     pub backdrop_new_plan: Option<Descriptor>,
-}
-
-/// D119: the PLevelSettings field after the LevelSettings presets and ambience name.
-#[derive(Debug, Clone, Default, Serialize)]
-pub struct LevelSettings {
-    /// `backdropMesh` resource (STATIC_MESH, head >= 0x2f3).
-    pub backdrop_mesh: Option<Descriptor>,
 }
 
 /// `reference(P*)` for a present part of Thing `me`.
@@ -576,14 +607,15 @@ fn part_body(
             things.list[me].data.decorations = out;
         }
         "LEVEL_SETTINGS" => {
-            level_settings(r)?;
+            let mut own = level_settings(r)?;
             let n = r.count(4)?;
             for _ in 0..n {
                 level_settings(r)?;
             }
+            own.presets = n;
             r.str8()?;
-            let backdrop_mesh = r.resource(false)?;
-            things.list[me].data.level_settings = Some(LevelSettings { backdrop_mesh });
+            own.backdrop_mesh = r.resource(false)?;
+            things.list[me].data.level_settings = Some(own);
         }
         "CAMERA_TWEAK" => camera_tweak(r)?,
         "JOINT" => {
@@ -1845,20 +1877,26 @@ fn stickers(r: &mut Reader) -> Result<()> {
     Ok(())
 }
 
-fn level_settings(r: &mut Reader) -> Result<()> {
-    r.v3()?;
-    r.f32()?;
-    r.v4()?;
-    r.v4()?;
-    r.skip_f32(2)?;
-    r.v4()?;
-    r.skip_f32(2)?;
-    r.v4()?;
-    r.v4()?;
+fn level_settings(r: &mut Reader) -> Result<LevelSettings> {
+    let s = LevelSettings {
+        sun_position: r.v3()?,
+        sun_position_scale: r.f32()?,
+        sun_color: r.v4()?,
+        ambient_color: r.v4()?,
+        sun_multiplier: r.f32()?,
+        exposure: r.f32()?,
+        fog_color: r.v4()?,
+        fog_near: r.f32()?,
+        fog_far: r.f32()?,
+        rim_color: r.v4()?,
+        rim_color2: r.v4()?,
+        presets: 0,
+        backdrop_mesh: None,
+    };
     r.skip_f32(6)?;
     r.f32()?;
     r.skip_f32(3)?;
-    Ok(())
+    Ok(s)
 }
 
 fn camera_tweak(r: &mut Reader) -> Result<()> {

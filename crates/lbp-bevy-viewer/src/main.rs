@@ -3,6 +3,7 @@ mod dual;
 mod gooey_ui;
 use dual::ViewerMaterial;
 mod browser;
+mod lighting;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
     mesh::skinning::{SkinnedMesh, SkinnedMeshInverseBindposes},
@@ -116,6 +117,8 @@ struct Viewer {
     browser: browser::Browser,
     census: CorpusCounts,
     level: LevelMode,
+    /// D121 `--preview-lighting` (docs/d121-preview-lighting.md); default off.
+    lighting: lighting::LightingState,
 }
 impl Viewer {
     fn preview_options(&self) -> lbp_preview::PreviewOptions {
@@ -291,6 +294,7 @@ fn options() -> Result<Viewer, String> {
         browser: browser::Browser::default(),
         census: CorpusCounts::default(),
         level: LevelMode::default(),
+        lighting: lighting::LightingState::default(),
     };
     let mut print_census = false;
     let mut args = std::env::args().skip(1);
@@ -336,6 +340,10 @@ fn options() -> Result<Viewer, String> {
             v.synthetic = true;
             continue;
         }
+        if flag == "--preview-lighting" {
+            v.lighting.enabled = true;
+            continue;
+        }
         if flag == "--qa-hide-ui" {
             v.hide_ui = true;
             continue;
@@ -357,7 +365,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -474,7 +482,15 @@ fn main() {
         .add_systems(Startup, setup)
         .add_systems(
             Update,
-            (place_on_second_monitor, load, animate, camera, capture).chain(),
+            (
+                place_on_second_monitor,
+                load,
+                animate,
+                apply_lighting,
+                camera,
+                capture,
+            )
+                .chain(),
         )
         .add_systems(EguiPrimaryContextPass, panel)
         .run();
@@ -559,6 +575,8 @@ fn load(
 ) {
     if v.requested {
         v.requested = false;
+        v.lighting.light = lighting::PreviewLight::generic();
+        v.lighting.dirty = true;
         clear(
             &mut v,
             &mut commands,
@@ -617,6 +635,7 @@ fn load(
         .ok()
         .map(|done| done.guid.trim().to_ascii_lowercase());
     let mut evidence = browser::PreviewEvidence::default();
+    v.lighting.dirty = true;
     let rendered = (|| -> Result<(), String> {
         let done = result?;
         v.context = Some(done.context);
@@ -738,6 +757,8 @@ struct Prepared {
     fourth_image: Option<(Image, lbp_preview::RelativeSampling)>,
     color: Color,
     alpha_mix: bool,
+    /// D121: generated normals usable for preview lighting.
+    normals_trusted: bool,
 }
 fn prepare(
     preview: &lbp_preview::GroupedMesh,
@@ -815,6 +836,7 @@ fn prepare_buckets(
             }
             Err(e) => return Err(e),
         };
+        let normals_trusted = adapter::mesh_normals_trusted(&mesh);
         let alpha_mix = asset
             .as_ref()
             .and_then(|a| a.texture())
@@ -896,6 +918,7 @@ fn prepare_buckets(
             fourth_image,
             color,
             alpha_mix,
+            normals_trusted,
         });
     }
     if prepared.is_empty() {
@@ -930,6 +953,7 @@ fn upload(
     if let Some((fourth, relative)) = p.fourth_image {
         dual::enable_fourth(&mut surface, images.add(fourth), relative);
     }
+    surface.extension.normals_trusted = p.normals_trusted;
     (meshes.add(p.mesh), materials.add(surface), image)
 }
 /// D113: display plan for a level scene, built without GPU or window. Per scene mesh the
@@ -940,6 +964,8 @@ struct LevelPlan {
     placed: Vec<(usize, Transform)>,
     lines: Vec<String>,
     home: Orbit,
+    /// D121: level-settings preview light (generic when absent or unusable).
+    light: lighting::PreviewLight,
 }
 fn plan_level(scene: &LevelScene) -> Result<LevelPlan, String> {
     let prepared: Vec<_> = scene
@@ -978,12 +1004,29 @@ fn plan_level(scene: &LevelScene) -> Result<LevelPlan, String> {
     let (placed, home, display) = place_items(scene, &buckets)?;
     let mut lines = scene.counts.lines();
     lines.extend(display);
+    let light = level_light(scene, &buckets);
     Ok(LevelPlan {
         prepared,
         placed,
         lines,
         home,
+        light,
     })
+}
+/// D121: preview light from the level's stored settings, in the frame `level_home` uses
+/// (sun direction from the displayed bounds centre; fog distances scaled to display).
+fn level_light(scene: &LevelScene, buckets: &[Result<usize, String>]) -> lighting::PreviewLight {
+    let shown = |i: &level_scene::SceneItem| buckets.get(i.mesh).is_some_and(Result::is_ok);
+    let (Some(settings), Some([lo, hi])) = (&scene.settings, scene.bounds_where(shown)) else {
+        let mut light = lighting::PreviewLight::generic();
+        light
+            .notes
+            .push("no level settings read; generic light".into());
+        return light;
+    };
+    let (lo, hi) = (Vec3::from(lo), Vec3::from(hi));
+    let span = (hi - lo).max_element();
+    lighting::PreviewLight::from_settings(settings, (lo + hi) * 0.5, 1. / span)
 }
 /// Scene normalization and framing. The whole level is centred and scaled to unit size
 /// (largest axis = 1) so the shared orbit camera, clip planes and pan limits of the
@@ -1119,6 +1162,7 @@ fn spawn_level(
     }
     v.level.lines = plan.lines;
     v.level.home = Some(plan.home);
+    v.lighting.light = plan.light;
 }
 /// `--level-report`: builds the same scene and display plan without a window.
 fn level_report(v: &Viewer) -> Result<(), String> {
@@ -1126,6 +1170,7 @@ fn level_report(v: &Viewer) -> Result<(), String> {
     let (level_guid, level_path) = (v.level.guid, v.level.path.clone());
     let placement = v.level.placement;
     let options = v.preview_options();
+    let lighting_on = v.lighting.enabled;
     let lines = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
         .spawn(move || -> Result<Vec<String>, String> {
@@ -1139,6 +1184,17 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             )?;
             let plan = plan_level(&scene)?;
             let mut lines = vec![format!("Level: {identity}")];
+            if lighting_on {
+                // Same per-entity rule as `apply_lighting`, without a GPU.
+                let (mut unlit, mut total) = (0, 0);
+                for (mesh, _) in &plan.placed {
+                    for p in plan.prepared[*mesh].iter().flatten() {
+                        total += 1;
+                        unlit += usize::from(!p.normals_trusted);
+                    }
+                }
+                lines.extend(lighting::summary(&plan.light, unlit, total));
+            }
             lines.extend(plan.lines);
             for m in &scene.meshes {
                 let users = scene
@@ -1288,6 +1344,57 @@ fn animate(
         }
     }
 }
+/// D121: pushes the preview light (or its removal) into every scene material and the
+/// camera fog once per toggle or scene change. Off and never applied: touches nothing,
+/// so default captures are unchanged.
+fn apply_lighting(
+    mut commands: Commands,
+    mut v: ResMut<Viewer>,
+    mut materials: ResMut<Assets<ViewerMaterial>>,
+    cameras: Query<Entity, With<Camera3d>>,
+) {
+    if !v.lighting.dirty || v.job.is_some() {
+        return;
+    }
+    v.lighting.dirty = false;
+    let on = v.lighting.enabled;
+    if !on && !v.lighting.applied {
+        return;
+    }
+    let light = on.then(|| v.lighting.light.clone());
+    let mut unlit = 0usize;
+    for (_, _, handle, _) in &v.scene {
+        let lit = materials
+            .get_mut(handle.id())
+            .is_some_and(|mut m| dual::set_lighting(&mut m, light.as_ref()));
+        unlit += usize::from(!lit);
+    }
+    for camera in &cameras {
+        match light.as_ref().and_then(|l| l.fog) {
+            Some(fog) => {
+                commands.entity(camera).insert(bevy::pbr::DistanceFog {
+                    color: Color::linear_rgb(fog.color.x, fog.color.y, fog.color.z),
+                    falloff: bevy::pbr::FogFalloff::Linear {
+                        start: fog.start,
+                        end: fog.end,
+                    },
+                    ..default()
+                });
+            }
+            None => {
+                commands.entity(camera).remove::<bevy::pbr::DistanceFog>();
+            }
+        }
+    }
+    v.lighting.applied = on;
+    v.lighting.lines = match &light {
+        Some(l) => lighting::summary(l, unlit, v.scene.len()),
+        None => vec!["Lighting: off (unlit)".into()],
+    };
+    for line in &v.lighting.lines {
+        println!("{line}");
+    }
+}
 fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Orbit>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if v.hide_ui {
@@ -1363,12 +1470,22 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
                 });
             }
             if input_changed { v.browser.clear_source(); v.requested = true; }
+            if ui.checkbox(&mut v.lighting.enabled, "Preview lighting (not game lighting)").changed() {
+                v.lighting.dirty = true;
+            }
+            if v.lighting.enabled {
+                for line in &v.lighting.lines { ui.small(line); }
+            }
             v.browser.review_panel(ui);
         }
         egui::ScrollArea::vertical().max_height(260.).show(ui, |ui| { ui.label(&v.status); });
         ui.separator();
         ui.label("Left drag: orbit\nRight / middle drag: pan\nWheel: zoom • R: reset • F: frame");
-        ui.small("Unlit • opaque • sRGB • double-sided\nGenerated diagnostic normals. Animation: positions only, integer frames.\nTop mip only. Original game lighting, alpha and axis conventions unverified.");
+        if v.lighting.enabled {
+            ui.small(format!("{} • opaque • sRGB • double-sided\nGenerated diagnostic normals. Animation: positions only, integer frames.\nTop mip only. Original game lighting, alpha and axis conventions unverified.", v.lighting.light.label()));
+        } else {
+            ui.small("Unlit • opaque • sRGB • double-sided\nGenerated diagnostic normals. Animation: positions only, integer frames.\nTop mip only. Original game lighting, alpha and axis conventions unverified.");
+        }
     });
     if !v.synthetic || !v.census.is_empty() {
         census_window(ctx, &v.census);
@@ -1883,6 +2000,7 @@ mod tests {
             browser: browser::Browser::default(),
             census: CorpusCounts::default(),
             level: LevelMode::default(),
+            lighting: lighting::LightingState::default(),
         };
         let mut entities = vec![entity];
         for _ in 0..3 {

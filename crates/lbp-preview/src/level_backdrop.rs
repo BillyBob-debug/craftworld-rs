@@ -523,6 +523,7 @@ mod tests {
                 }),
                 level_settings: Some(LevelSettings {
                     backdrop_mesh: Some(d(0x190ca)),
+                    ..Default::default()
                 }),
                 ..Default::default()
             },
@@ -588,6 +589,8 @@ mod tests {
             },
             |_| Some([[0.; 3], [1.; 3]]),
             |_| false,
+            |_| Vec::new(),
+            crate::level_scene::PosPlacement::PosOnly,
         );
         assert_eq!(
             (

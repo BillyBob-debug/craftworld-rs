@@ -103,6 +103,42 @@ fn build_mesh(
     )
     .with_inserted_indices(Indices::U32(indices)))
 }
+/// D121: trust of the generated normals for preview lighting. A referenced vertex whose
+/// face normals (nearly) cancel, e.g. a front and back face sharing it, ends with an
+/// arbitrary fallback direction. Returns (weak vertices, referenced vertices).
+pub fn normal_trust(positions: &[[f32; 3]], indices: &[u32]) -> (usize, usize) {
+    let mut sum = vec![Vec3::ZERO; positions.len()];
+    let mut magnitude = vec![0f32; positions.len()];
+    for t in indices.as_chunks::<3>().0 {
+        let at = |i: u32| positions.get(i as usize).copied().map(Vec3::from);
+        let (Some(a), Some(b), Some(c)) = (at(t[0]), at(t[1]), at(t[2])) else {
+            continue;
+        };
+        let n = (b - a).cross(c - a);
+        for &i in t {
+            sum[i as usize] += n;
+            magnitude[i as usize] += n.length();
+        }
+    }
+    let referenced = magnitude.iter().filter(|&&m| m > 0.).count();
+    let weak = sum
+        .iter()
+        .zip(&magnitude)
+        .filter(|(s, &m)| m > 0. && s.length() <= m * 1e-3)
+        .count();
+    (weak, referenced)
+}
+/// `normal_trust` over a built mesh: true when every referenced vertex is well defined.
+pub fn mesh_normals_trusted(mesh: &Mesh) -> bool {
+    use bevy::mesh::VertexAttributeValues;
+    let (Some(VertexAttributeValues::Float32x3(p)), Some(Indices::U32(i))) =
+        (mesh.attribute(Mesh::ATTRIBUTE_POSITION), mesh.indices())
+    else {
+        return false;
+    };
+    let (weak, referenced) = normal_trust(p, i);
+    weak == 0 && referenced > 0
+}
 /// Separate GPU sampling attribute, preserving the primary coordinates and indices.
 pub fn secondary_uv(mesh: &mut Mesh, uv: &[[f32; 2]]) -> Result<(), String> {
     if uv.len() != mesh.count_vertices() || uv.iter().flatten().any(|v| !v.is_finite()) {
@@ -286,6 +322,27 @@ mod group_tests {
 }
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn normal_trust_flags_cancelling_double_sided_vertices() {
+        let quad = [[0., 0., 0.], [1., 0., 0.], [1., 1., 0.], [0., 1., 0.]];
+        // One-sided quad: all four vertices trusted.
+        assert_eq!(super::normal_trust(&quad, &[0, 1, 2, 0, 2, 3]), (0, 4));
+        // Same vertices also used by the reversed (back) triangles: normals cancel.
+        let both = [0, 1, 2, 0, 2, 3, 2, 1, 0, 3, 2, 0];
+        assert_eq!(super::normal_trust(&quad, &both), (4, 4));
+        // A box corner (three perpendicular faces) is trusted.
+        let corner = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+        assert_eq!(
+            super::normal_trust(&corner, &[0, 2, 1, 0, 1, 3, 0, 3, 2]),
+            (0, 4)
+        );
+        // Out-of-range indices are skipped; unreferenced vertices are not counted.
+        assert_eq!(super::normal_trust(&quad, &[0, 1, 9]), (0, 0));
+        let mesh = super::mesh(&quad, &[[0, 1, 2], [0, 2, 3]], None).unwrap();
+        assert!(super::mesh_normals_trusted(&mesh));
+        let mesh = super::mesh(&quad, &[[0, 1, 2], [2, 1, 0]], None).unwrap();
+        assert!(!super::mesh_normals_trusted(&mesh));
+    }
     #[test]
     fn secondary_sampling_preserves_both_arrays_and_index_ownership() {
         let primary = [[0., 0.], [1., 0.], [0., 1.]];
