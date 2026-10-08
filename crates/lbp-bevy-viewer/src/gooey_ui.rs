@@ -687,9 +687,9 @@ mod tests {
 
 /// `--qa-capture NEW_PNG` with `--ui-demo`: screenshot the demo after it settles, then exit.
 #[derive(Resource)]
-struct DemoCapture(Option<std::path::PathBuf>);
+pub(crate) struct DemoCapture(pub(crate) Option<std::path::PathBuf>);
 
-fn demo_capture_path() -> Option<std::path::PathBuf> {
+pub(crate) fn demo_capture_path() -> Option<std::path::PathBuf> {
     let args: Vec<String> = std::env::args().collect();
     let value = args
         .iter()
@@ -705,7 +705,7 @@ fn demo_capture_path() -> Option<std::path::PathBuf> {
     Some(parent.join(path.file_name()?))
 }
 
-fn demo_capture(
+pub(crate) fn demo_capture(
     mut commands: Commands,
     mut capture: ResMut<DemoCapture>,
     time: Res<Time>,
