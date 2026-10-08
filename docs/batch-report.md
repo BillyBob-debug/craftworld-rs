@@ -1,24 +1,24 @@
-# Batch report — 2026-10-08b (Integrator)
+# Batch report — 2026-10-08c (Integrator)
 
 ## Merged
-- D97 `cloud/D97-blend-mask`: BLEND masks (red sRGB-decoded, alpha linear); 9 BLEND
-  locations under the instance color. Parity 0 mismatches on all 50 BLEND locations.
-- D98 `cloud/D98-last-textures`: GCM remap decode and volume slices; all 23,247 texture
-  hashes decode. Volume layout from RPCS3 (GPL-2.0, read only, no code copied) and not
-  confirmable on the noise-like local volume; no Toolkit oracle for these 3 textures.
-- D99 `cloud/D99-next-family`: MULTIPLY trees (16) and off-grid alpha MIX (6). Parity
-  27/0. Merge conflict with D97 resolved (diffuse_parity schema 22).
+- D100 `cloud/D100-grid-graph-bake`: general static graph evaluator on the Repeat grid
+  (36 materials; parity 36/0).
+- D101 `cloud/D101-multiply-rest`: four-leaf trees without shared pairs, COLOR-only
+  trees, CONST leaves (8 materials; parity 8/0).
+- D102 `cloud/D102-sampler-rest`: any-mask matrix rows and animated x COLOR under the
+  animation-base opt-in (4 materials; parity 4/0).
 
-Checks on merged main: fmt, workspace Clippy -D warnings, tests (7 crates), both viewer
-builds, Python OK, parity regressions unchanged, cohorts unchanged.
+Merge conflicts D100 vs D101/D102 resolved by keeping both. Integrator decision: the
+overbright CONST material (tint 4.89) refused by D101 is now evaluated by D100 (baked
+and clamped); D101's test updated to expect that.
 
 ## Failed
 None.
 
 ## Counts
-Route census: unsupported 138 -> 102. Corpus meshes (4,261 GUIDs): viewable 4,257;
-all-diffuse default 3,669 -> 3,683, animation base 3,733 -> 3,747, instance color
-3,902 -> 3,929, both 3,983 -> 4,010. Textures 23,247 of 23,247 decode.
+Route census: unsupported 102 -> 53. Corpus meshes (4,261 GUIDs): viewable 4,257;
+all-diffuse default 3,683 -> 3,695, animation base 3,747 -> 3,762, instance color
+3,929 -> 3,962, both 4,010 -> 4,046. Textures 23,247 of 23,247 decode.
 +0 newly viewable / +0 newly Complete.
 
 ## Backlog

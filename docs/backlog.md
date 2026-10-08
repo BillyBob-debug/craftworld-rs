@@ -1,12 +1,12 @@
-# Backlog (Integrator-owned; refreshed 2026-10-08 after D99 from the 01.33 census)
+# Backlog (Integrator-owned; refreshed 2026-10-08 after D102 from the 01.33 census)
 
-Source: `local-analysis/b99-diffuse-route-shapes-0133.json` (schema 2, local only),
+Source: `local-analysis/b102-diffuse-route-shapes-0133.json` (schema 2, local only),
 the D64 `diffuse_route_census` tool run on 01.33 (disc + update layers). Scope is
 diffuse route selection only: these are material locations with MAP rows, not asset
 counts and not payload compatibility. Counts only; no asset bytes or GUIDs here.
 
 Totals (8,094 materials): texture 6,953; solid 619; unwired black 10; animation-base
-only 121; instance-color only 267; unsupported 102; no MAP row 65.
+only 121; instance-color only 296; unsupported 53; no MAP row 65.
 (After D75: animation-base 60, instance 225, unsupported 258. Before D75: texture 6,828,
 instance 207, unsupported 386.)
 
@@ -16,7 +16,7 @@ animation. Families are exclusive, assigned in this order: any THING_COLOR, any
 BLEND, 2+ textures with an animated sampler, exactly 2 TEX + COLOR under MUL only,
 any MIX, other.
 
-## Ranked unsupported families (102 materials after D99)
+## Ranked unsupported families (53 materials after D102)
 
 Ranked by count and tractability (THING_COLOR is larger but blocked on real
 instance values).
@@ -31,7 +31,7 @@ instance values).
 | 6 | <a id="small"></a>Other | about 37 (D89 took 4 ADD shapes; UV channel raw 2 (4) stays unsupported) | D87 took CONST4 alone, COLOR x COLOR, TEX with CONST/CONST2 UV scale (25). Left: ADD-containing 8, UV channel raw 2 (4), COLOR outside 0..1 (3), animated samplers, deeper products. |
 
 ## Opt-in classes (not unsupported)
-- Instance-color only 267 (+8 D86, +8 D88, +3 D92, +6 D96, +9 D97, +5 D99).
+- Instance-color only 296 (+8 D86, +8 D88, +3 D92, +6 D96, +9 D97, +5 D99, +29 D100-D102).
 - Animation-base only 106 (60 single-sampler + 46 from D78 multi-texture products).
 
 ## Other open items (no census count)
@@ -43,3 +43,9 @@ instance values).
 ## Texture decode (D90)
 - After D98, all 23,247 texture hashes on 01.33 decode (top mip). The volume layout
   (RPCS3 source only) and B8 remap rules are not Toolkit-oracle confirmed.
+
+## Remaining after D102
+53 unsupported material locations; the family rows above predate the D100 evaluator. Main
+reasons: graphs whose texture leaves are off the integer Repeat grid (evaluator refuses),
+UV channel raw 2, FRESNEL, five texture leaves, multi-letter swizzles. Regroup from
+b102-diffuse-route-shapes-0133.json before the next batch.

@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 — Batch: local D100, D101, D102 merged
+
+D100 general static graph evaluator on the Repeat grid. D101 four-leaf trees without
+shared pairs, COLOR-only trees, CONST leaves. D102 matrix masks and animated x COLOR.
+Unsupported 102 -> 53; corpus all-diffuse 3,683 -> 3,695. +0 viewable / +0 Complete.
+
 ## 2026-10-08 — Batch: local D97, D98, D99 merged
 
 D97 BLEND masks (red sRGB, alpha linear; 9 under instance color). D98 remap word and

@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after batch D97-D99, 2026-10-08
+# Current state (overwrite each milestone) — after batch D100-D102, 2026-10-08
 
 ## Product
 Independent LBP2 Asset Explorer (Rust). Bevy viewer (main) and legacy viewer read
@@ -34,18 +34,20 @@ B8 up to 16 Mi pixels and BC1 cube faces decode (D95). Sampler-port constants an
 ThingColor fold under the instance color (D96). BLEND threshold rule general (D94);
 masks red sRGB / alpha linear, two-sample BLEND on the grid (D97). MULTIPLY trees and
 off-grid alpha MIX via Bevy dual path (D99). All texture formats on 01.33 decode (D98).
+General static graph evaluator on the Repeat grid as fallback (D100). Four-leaf trees
+without shared pairs, COLOR-only trees (D101). Matrix masks, animated x COLOR (D102).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).
 - D69 new cohort d68-new-mesh-samples.json (48 post-951 meshes): 48/45/0.
-- Corpus mesh census on 01.33 after D99 (all 4,261 mesh GUIDs): 4,257 viewable, 3,683
-  all-diffuse, 0 Complete (D81 baseline 3,657). Opt-ins: --animation-base 3,747;
-  --instance-rgba 3,929; both 4,010. Files b99-corpus-*.json.
+- Corpus mesh census on 01.33 after D102 (all 4,261 mesh GUIDs): 4,257 viewable, 3,695
+  all-diffuse, 0 Complete (D81 baseline 3,657). Opt-ins: --animation-base 3,762;
+  --instance-rgba 3,962; both 4,046. Files b102-corpus-*.json.
 - Corpus texture census on 01.33 after D98: all 23,247 texture hashes decode (23,477
   GUIDs; top mip, decodability only). b99-texture-census-0133.json.
-- Corpus selection census on 01.33 after D99 (8,094 material locations with MAP rows):
-  6,975 texture, 619 solid, 10 unwired, 121 animation-base-only, 267 instance-only, 102
-  unsupported (after D96: 6,953 / 253 / 138) (after D75: 60 / 225 / 258; before D75: 6,828 texture, 386 unsupported) (01.00: 5,163 / 4,306 / 459 / 7 / 34 / 122 / 235). Not asset counts.
+- Corpus selection census on 01.33 after D102 (8,094 material locations with MAP rows):
+  6,989 texture, 620 solid, 10 unwired, 126 animation-base-only, 296 instance-only, 53
+  unsupported (after D99: 6,975 / 619 / 121 / 267 / 102) (after D75: 60 / 225 / 258; before D75: 6,828 texture, 386 unsupported) (01.00: 5,163 / 4,306 / 459 / 7 / 34 / 122 / 235). Not asset counts.
 - D69: +48 newly viewable in the tested cohort, +0 newly Complete; corpus totals unknown.
 - Batch D72/D71/D73: tests and CI only, +0 viewable / +0 Complete.
 - Batch D77/D76/D75: +0 viewable / +0 Complete; D75 cohort (48 meshes) 48/0/0 -> 48/44/0.
@@ -56,6 +58,7 @@ off-grid alpha MIX via Bevy dual path (D99). All texture formats on 01.33 decode
 - Batch D91-D93: +0 viewable / +0 Complete; textures +242 hashes decode.
 - Batch D94-D96: +0 viewable / +0 Complete; textures +29 hashes decode.
 - Batch D97-D99: +0 viewable / +0 Complete; all-diffuse +14 default; textures +3 (all decode).
+- Batch D100-D102: +0 viewable / +0 Complete; all-diffuse +12 default.
 
 ## Open blockers
 - Glow, reflection and other non-diffuse channels are not rendered.
@@ -65,8 +68,8 @@ off-grid alpha MIX via Bevy dual path (D99). All texture formats on 01.33 decode
   FNTb +8 word meaning unknown; patch.edat not decrypted.
 
 ## Next
-Products under BLEND inputs (37); remaining 102 unsupported materials (docs/backlog.md);
-viewer QA toward Complete (0 so far).
+53 unsupported materials left (off-grid graphs, UV channel raw 2, FRESNEL, five leaves;
+see docs/backlog.md); viewer QA toward Complete (0 so far).
 
 ## Environment
 - Toolchain: `. ./scripts/use-local-rust.ps1` (project-local, windows-gnu).

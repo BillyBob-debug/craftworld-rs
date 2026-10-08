@@ -3352,3 +3352,38 @@ Not tested: Bevy dual alpha-MIX shader visually; BLEND output pixels; volume lay
 real data; legacy viewer for D99.
 Next: products under BLEND inputs (37); remaining 102 unsupported by reason in
 docs/backlog.md; viewer QA toward Complete.
+
+## Batch 2026-10-08c — local D100, D101, D102 merged (2026-10-08)
+
+Local subagents on plan usage. Detail: [d100-grid-graph-bake.md](docs/d100-grid-graph-bake.md),
+[d101-multiply-rest.md](docs/d101-multiply-rest.md), [d102-sampler-rest.md](docs/d102-sampler-rest.md).
+
+- D100: general static graph evaluator (TEX, COLOR/CONST4, CONST within -16..16,
+  MULTIPLY, ADD, MIX, BLEND) baked per texel on the integer Repeat grid; fallback after
+  the fixed routes; ThingColor only under the instance color without other rewrites.
+- D101: four texture leaves without shared pairs (fourth relative to primary/second;
+  Bevy only), COLOR-only trees fold to solids, CONST broadcast / CONST4 fold.
+- D102: subtype-1 matrix rows with any XYZ mask, and one animated texture x static
+  COLOR, under the animation-base opt-in.
+- Route census on 01.33 (material locations, 8,094): texture 6,975 -> 6,989, solid
+  619 -> 620, animation-base-only 121 -> 126, instance-only 267 -> 296, unsupported
+  102 -> 53.
+- Corpus mesh census (4,261 GUIDs; viewable 4,257 every mode): all-diffuse default
+  3,683 -> 3,695, --animation-base 3,747 -> 3,762, --instance-rgba 3,929 -> 3,962,
+  both 4,010 -> 4,046. Complete 0.
+**+0 newly viewable / +0 newly Complete** (all-diffuse +12 default).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests (lbp-preview 68 and 6 other crates), both viewer builds, python OK.
+- diffuse_route_census -> b102-diffuse-route-shapes-0133.json: counts above.
+- diffuse_parity: d100 36/0/9 (default), 36/0/36 (--instance-white); d101 8/0/5, 8/0/8 (--animation-base); d102 3/0/3, 1/0/1; regressions d99, d78, d75, d83, d68, d86, d87, d88, d92, d96, d64, d65, d67, d46 x2 unchanged; d89-0 now 5/0/4 and d97-a 31/0/17 (D100 projections of previously refused rows).
+- compatibility_census: d68-new 48/45/0, D61 48/43/0, D75 48/44/0 (unchanged).
+- corpus_mesh_census -> b102-corpus-{default,anim,inst,both}.json.
+
+Failed: D100 merge conflicted with D101/D102 (instance_textured.rs structure,
+product_tree tests); kept both. D101's overbright-CONST (4.89) refusal is now taken by
+the D100 evaluator (baked, clamped); its test updated. Integrator decision, noted here.
+Not tested: viewer rendering of evaluated graphs and the Bevy fourth-sample path;
+legacy viewer for D101; game pixels.
+Next: 53 unsupported left (mostly off-grid graphs, UV channel raw 2, FRESNEL, five
+leaves); viewer QA toward Complete.
