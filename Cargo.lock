@@ -2847,6 +2847,7 @@ version = "0.1.0"
 dependencies = [
  "flate2",
  "lbp-catalog",
+ "lbp-level",
  "lbp-mesh",
  "lbp-resource",
  "lbp-texture",

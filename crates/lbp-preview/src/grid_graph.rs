@@ -712,8 +712,8 @@ pub(crate) fn steps(program: &GraphProgram, sources: &[Source]) -> Result<Vec<St
 pub(crate) struct LoadContext<'a> {
     pub(crate) source: &'a AttachedSource,
     pub(crate) catalog: &'a Catalog,
-    pub(crate) geometry: &'a lbp_mesh::Geometry,
-    pub(crate) mesh_bytes: &'a [u8],
+    pub(crate) vertices: usize,
+    pub(crate) uv: crate::linked::UvInput<'a>,
     pub(crate) graph: &'a GraphInspection,
     pub(crate) original_graph: &'a GraphMetadata,
     pub(crate) control: &'a LoadControl,
@@ -801,13 +801,8 @@ pub(crate) fn load(
     }
     let additional_texture_slots =
         crate::instance::additional_texture_slots(cx.original_graph, &slots)?;
-    let coordinates = lbp_mesh::decode_uvs(cx.mesh_bytes, || cx.control.check().is_err())
-        .map_err(|e| e.to_string())?;
-    let uv = crate::linked::selected_uv(
-        &coordinates,
-        selection.uv_channel,
-        cx.geometry.positions.len(),
-    )?;
+    let coordinates = cx.uv.decode(cx.control)?;
+    let uv = crate::linked::selected_uv(&coordinates, selection.uv_channel, cx.vertices)?;
     if grid && wrap != crate::TextureWrapping::uniform(true) {
         return Err("Unsupported: graph evaluator grid requires Repeat on every texture".into());
     }
