@@ -11,7 +11,12 @@
 //! (u32 count, 14 bytes each), one compression bool only when revision > 0x272, then glyph
 //! bitmap data to the end. Toolkit itself calls the 0x272 gate approximate; locally one
 //! 01.33 sample (head 0x3d9) is known, so the gate is untested below LBP2 heads.
-//! Glyph data spans are bounds-checked, never inflated (docs/d79-fntb-font.md).
+//! Glyph data spans are bounds-checked by the parser (docs/d79-fntb-font.md).
+//! U2 adds bounded per-glyph decoding (`decode_glyph`, docs/u2-font-glyphs.md):
+//! compressed glyphs are a big-endian u16 size (including itself) then a zlib stream that
+//! inflates to width*height coverage bytes (Toolkit `getGlyphData`, `getGlyph`,
+//! `util/Compressor.java::inflateData`); uncompressed glyphs are two bytes per pixel whose
+//! meaning is UNKNOWN (Toolkit draws them as green and blue), kept raw here.
 use lbp_core::{ByteReader, Error, ErrorKind, Result};
 use serde::Serialize;
 
@@ -298,4 +303,205 @@ fn read_array(
     let bytes = fetch(*position, length)?;
     *position += length as u64;
     Ok(bytes)
+}
+
+/// Pixels of one decoded glyph, row-major, `width * height` entries.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum GlyphPixels {
+    /// Compressed fonts: one coverage byte per pixel (Toolkit draws it as grey).
+    Coverage(Vec<u8>),
+    /// Uncompressed fonts: two raw bytes per pixel, meaning UNKNOWN (PC check).
+    TwoChannel(Vec<[u8; 2]>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GlyphBitmap {
+    pub width: u8,
+    pub height: u8,
+    pub pixels: GlyphPixels,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct GlyphDecodeLimits {
+    /// Total decoded bytes across one `decode_glyphs` call.
+    pub max_total_bytes: usize,
+}
+impl Default for GlyphDecodeLimits {
+    fn default() -> Self {
+        Self {
+            max_total_bytes: 64 << 20,
+        }
+    }
+}
+
+/// Decode one glyph of `font` from the whole resource bytes it was parsed from.
+///
+/// Compressed: the zlib stream must end exactly at its declared size and inflate to exactly
+/// `width * height` bytes; anything else is `Malformed` (Toolkit's Inflater would silently
+/// zero-fill a short stream and ignore extra output). Empty boxes decode to no pixels.
+pub fn decode_glyph(resource: &[u8], font: &FontFace, glyph: &Glyph) -> Result<GlyphBitmap> {
+    if resource.len() as u64 != font.data_start + font.data_length {
+        return Err(Error::malformed(
+            "resource length differs from the parsed font",
+        ));
+    }
+    let data = &resource[font.data_start as usize..];
+    let pixels = usize::from(glyph.box_width) * usize::from(glyph.box_height);
+    let start = glyph.data_offset as usize;
+    let span = |length: usize| {
+        start
+            .checked_add(length)
+            .and_then(|end| data.get(start..end))
+            .ok_or_else(|| Error::malformed("glyph data outside the data region"))
+    };
+    let pixels = if font.compressed == Some(true) {
+        if pixels == 0 {
+            GlyphPixels::Coverage(Vec::new())
+        } else {
+            let prefix = span(2)?;
+            let size = usize::from(u16::from_be_bytes([prefix[0], prefix[1]]));
+            if size < 2 {
+                return Err(Error::malformed("glyph stream size below its own prefix"));
+            }
+            let stream = &span(size)?[2..];
+            GlyphPixels::Coverage(inflate_exact(stream, pixels)?)
+        }
+    } else {
+        let raw = span(pixels * 2)?;
+        GlyphPixels::TwoChannel(raw.as_chunks::<2>().0.to_vec())
+    };
+    Ok(GlyphBitmap {
+        width: glyph.box_width,
+        height: glyph.box_height,
+        pixels,
+    })
+}
+
+fn inflate_exact(stream: &[u8], expected: usize) -> Result<Vec<u8>> {
+    let mut z = flate2::Decompress::new(true);
+    let mut out = vec![0; expected + 1];
+    let status = z
+        .decompress(stream, &mut out, flate2::FlushDecompress::Finish)
+        .map_err(|_| Error::malformed("glyph zlib stream is invalid"))?;
+    if status != flate2::Status::StreamEnd {
+        return Err(Error::malformed("glyph zlib stream did not end"));
+    }
+    if z.total_in() != stream.len() as u64 {
+        return Err(Error::malformed("glyph zlib stream has trailing bytes"));
+    }
+    if z.total_out() != expected as u64 {
+        return Err(Error::malformed(format!(
+            "glyph inflated to {} bytes, expected {expected}",
+            z.total_out()
+        )));
+    }
+    out.truncate(expected);
+    Ok(out)
+}
+
+/// Census of decoding every glyph: counts only.
+#[derive(Debug, Clone, Copy, Default, Serialize, PartialEq, Eq)]
+pub struct GlyphDecodeSummary {
+    pub decoded: usize,
+    pub empty: usize,
+    pub malformed: usize,
+    pub decoded_pixels: u64,
+    /// Highest coverage byte seen (compressed fonts), to help settle the pixel range.
+    pub max_coverage: Option<u8>,
+}
+
+/// Decode every glyph; failures are counted per glyph, not fatal. Stops with `LimitExceeded`
+/// when the decoded bytes would pass `limits.max_total_bytes`.
+pub fn decode_glyphs(
+    resource: &[u8],
+    font: &FontFace,
+    limits: GlyphDecodeLimits,
+) -> Result<(Vec<Option<GlyphBitmap>>, GlyphDecodeSummary)> {
+    let mut summary = GlyphDecodeSummary::default();
+    let mut total = 0usize;
+    let mut out = Vec::with_capacity(font.glyphs.len());
+    let per_pixel = if font.compressed == Some(true) { 1 } else { 2 };
+    for glyph in &font.glyphs {
+        let pixels = usize::from(glyph.box_width) * usize::from(glyph.box_height);
+        total = total
+            .checked_add(pixels * per_pixel)
+            .filter(|t| *t <= limits.max_total_bytes)
+            .ok_or_else(|| Error::limit("glyph decode budget exceeded"))?;
+        match decode_glyph(resource, font, glyph) {
+            Ok(bitmap) => {
+                if pixels == 0 {
+                    summary.empty += 1;
+                } else {
+                    summary.decoded += 1;
+                    summary.decoded_pixels += pixels as u64;
+                }
+                if let GlyphPixels::Coverage(values) = &bitmap.pixels {
+                    if let Some(&max) = values.iter().max() {
+                        summary.max_coverage = summary.max_coverage.max(Some(max));
+                    }
+                }
+                out.push(Some(bitmap));
+            }
+            Err(error) if error.kind == ErrorKind::Malformed => {
+                summary.malformed += 1;
+                out.push(None);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok((out, summary))
+}
+
+/// Placement of one glyph in an atlas, in pixels.
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+pub struct AtlasSlot {
+    pub x: u32,
+    pub y: u32,
+    pub width: u8,
+    pub height: u8,
+}
+
+/// Shelf-packed atlas layout (no pixels, no GPU types): one slot per glyph, in glyph order,
+/// with `padding` empty pixels around each glyph. Rows wrap at `max_width`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct AtlasLayout {
+    pub width: u32,
+    pub height: u32,
+    pub slots: Vec<AtlasSlot>,
+}
+
+pub fn atlas_layout(glyphs: &[Glyph], max_width: u32, padding: u32) -> Result<AtlasLayout> {
+    let (mut x, mut y, mut row, mut width) = (0u32, 0u32, 0u32, 0u32);
+    let mut slots = Vec::with_capacity(glyphs.len());
+    for glyph in glyphs {
+        let w = u32::from(glyph.box_width) + 2 * padding;
+        let h = u32::from(glyph.box_height) + 2 * padding;
+        if w > max_width {
+            return Err(Error::limit("glyph wider than the atlas"));
+        }
+        if x + w > max_width {
+            y = y
+                .checked_add(row)
+                .ok_or_else(|| Error::limit("atlas height overflow"))?;
+            x = 0;
+            row = 0;
+        }
+        slots.push(AtlasSlot {
+            x: x + padding,
+            y: y + padding,
+            width: glyph.box_width,
+            height: glyph.box_height,
+        });
+        x += w;
+        row = row.max(h);
+        width = width.max(x);
+    }
+    let height = y
+        .checked_add(row)
+        .ok_or_else(|| Error::limit("atlas height overflow"))?;
+    Ok(AtlasLayout {
+        width,
+        height,
+        slots,
+    })
 }
