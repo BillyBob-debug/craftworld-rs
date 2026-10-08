@@ -3692,3 +3692,17 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   game at the first-run TV-size screen. Sending keystrokes was denied by the safety
   check (approval came through the coordinator); needs the user's direct OK.
 **+0 newly viewable / +0 newly Complete.**
+
+## D138 — Rs part 3, PR #36; PR #34 still held (2026-10-08)
+
+- script_tests d138 (the game's test script): 47 functions, done 37 (was 24); stops: Native
+  5, Register 2, Type 2, Index 1; checks passed 589 (was 532), failed 11 (was 3, more test
+  code now runs): NeverEvaluated 1, TestMemberInitialisation 4, TestProperties 2,
+  TestFunctionWithSideEffect 2, TestS64 2. Failed S64 checks follow ShiftL__ji and
+  BIT_ANDs64; NeverEvaluated suggests a short-circuit evaluation rule.
+- Checks: fmt; lbp-script-vm tests; workspace Clippy -D warnings.
+- PR #34 at 83652c6: 426 GUIDs, superclass not loaded 0; PodStateMainMenu faults 3 of 15
+  (OnActivateImpl Register 65535 at pc 395, PerFrameUpdate Register 65535 at pc 204, Draw
+  NullObject at pc 153; these pcs are outside the faulting functions' own code ranges, so
+  inside callees). UpdateUI still 48 instructions, translated 0/0; not merged.
+**+0 newly viewable / +0 newly Complete.**

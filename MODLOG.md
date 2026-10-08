@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D138 script tests part 3
+
+The game's test script: 37/47 functions finish, 589 checks pass, 11 fail. Gooey trace
+(#34) still held. +0 / +0.
+
 ## 2026-10-08 — D137 script tests
 
 VM binds 2,970/17,704 native calls; the game's own test script passes 532 checks, fails
