@@ -275,6 +275,9 @@ conversion. The sampled local UI/scratch/minimal textures are **GTF**, not TEX.
 `CONFIRMED_FROM_LOCAL_DATA`: GTF format byte, mip/dimension/cubemap fields at bytes
 4–7, BE width/height/depth at 12/14/16 agree with the community header layout.
 Full swizzle/channel-remap/mip decode is not tested here.
+D91 (`CONFIRMED_FROM_COMMUNITY_CODE`, oracle parity on 20 local samples): uncompressed
+2D 0x85 A8R8G8B8 / 0x81 B8, swizzled or LN (0x20) linear, top mip only; B8 remap
+0xaae4/0xa9ff as opaque gray. Rules and conflicts: [d91-gtf-uncompressed.md](d91-gtf-uncompressed.md).
 
 Best texture oracle: Toolkit RTexture + DDS helpers. External cross-checks:
 [Refresh TexStream](https://github.com/LittleBigRefresh/Refresh/blob/25f03e40416ebe73016b9e9972e0fa7b11a7f0b0/Refresh.Core/Importing/TexStream.cs)

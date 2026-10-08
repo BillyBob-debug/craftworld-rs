@@ -1,4 +1,4 @@
-//! Independent CPU-only GTF and TEX/DDS top-mip reader. No GUI/filesystem/swizzle.
+//! Independent CPU-only GTF and TEX/DDS top-mip reader. No GUI/filesystem. Uncompressed GTF is unswizzled (D91).
 //! Format knowledge: CONFIRMED_FROM_COMMUNITY_CODE, Toolkit
 //! d6a2ef80b5a09999f08f23a803b516096055e5c9 SerializedResource::process,
 //! CellGcmTexture constructor, Compressor::decompressData and RTexture::parseGTF.
@@ -21,6 +21,11 @@
 //! by pinned RTexture::process / DDSReader::read external oracle on one local sample.
 //! Independent mask-derived byte order; no copied pixel/swizzle implementation.
 //! Field rules, conflict, synthetic tests and exact oracle coverage: docs/bgra-preview.md.
+//! D91 uncompressed GTF 0x85 A8R8G8B8, 0x81 B8 and their 0x20 (LN) linear variants:
+//! CONFIRMED_FROM_COMMUNITY_CODE, pinned Toolkit CellGcmEnumForGtf (values, LN/UN mask,
+//! bytes per texel), DDS.convertSwizzleGtf (swizzle order, big-endian texels),
+//! DDS.getDDSHeader/DDSReader.readL8 (B8 as opaque gray). Independent implementation of
+//! written findings; rules, conflicts and oracle coverage: docs/d91-gtf-uncompressed.md.
 use serde::Serialize;
 use std::fmt;
 pub const MAX_INPUT: usize = 16 * 1024 * 1024;
@@ -54,14 +59,23 @@ pub enum PixelFormat {
     BC1,
     BC3,
     BGRA8,
+    /// GTF 0x85: big-endian A,R,G,B bytes per texel.
+    A8R8G8B8,
+    /// GTF 0x81: one byte per texel, decoded as opaque gray (Toolkit L8 convention).
+    B8,
 }
 impl PixelFormat {
+    /// Bytes per 4x4 block (BC) or per texel (uncompressed).
     fn bytes(self) -> usize {
         match self {
             Self::BC1 => 8,
             Self::BC3 => 16,
-            Self::BGRA8 => 4,
+            Self::BGRA8 | Self::A8R8G8B8 => 4,
+            Self::B8 => 1,
         }
+    }
+    fn is_block(self) -> bool {
+        matches!(self, Self::BC1 | Self::BC3)
     }
 }
 impl fmt::Display for PixelFormat {
@@ -70,6 +84,8 @@ impl fmt::Display for PixelFormat {
             Self::BC1 => "BC1",
             Self::BC3 => "BC3",
             Self::BGRA8 => "BGRA8",
+            Self::A8R8G8B8 => "A8R8G8B8",
+            Self::B8 => "B8",
         })
     }
 }
@@ -133,14 +149,23 @@ pub fn inspect(b: &[u8]) -> Result<Header, Error> {
     if b.len() < 32 {
         return Err(Error::Invalid("truncated GTF header"));
     }
-    if !matches!(b[4], 0x86 | 0x88) {
-        return Err(Error::Unsupported("pixel format or layout flags"));
-    }
+    // Raw format byte = base format | 0x20 (LN, linear rows) | 0x40 (UN). BC stays
+    // LN-free as before; LN is accepted only for the uncompressed formats.
+    let linear = b[4] & 0x20 != 0;
+    let pixel_format = match b[4] {
+        0x86 => PixelFormat::BC1,
+        0x88 => PixelFormat::BC3,
+        0x85 | 0xa5 => PixelFormat::A8R8G8B8,
+        0x81 | 0xa1 => PixelFormat::B8,
+        _ => return Err(Error::Unsupported("pixel format or layout flags")),
+    };
     if b[6] != 2 || b[7] != 0 || be16(b, 16) != 1 {
         return Err(Error::Unsupported("cube/volume/dimension"));
     }
-    if be32(b, 8) != 0xaae4 || be32(b, 20) != 0 || be32(b, 24) != 0 || b[18] != 0 || b[19] & !1 != 0
-    {
+    // 0xa9ff (Toolkit REMAP_BBBB) is the B8 gray remap; other remaps are refused.
+    let remap = be32(b, 8);
+    let remap_ok = remap == 0xaae4 || (pixel_format == PixelFormat::B8 && remap == 0xa9ff);
+    if !remap_ok || be32(b, 24) != 0 || b[18] != 0 || b[19] & !1 != 0 {
         return Err(Error::Unsupported("remap/pitch/offset/location/flags"));
     }
     let (width, height) = (be16(b, 12), be16(b, 14));
@@ -154,12 +179,21 @@ pub fn inspect(b: &[u8]) -> Result<Header, Error> {
     {
         return Err(Error::Budget);
     }
+    let pitch = be32(b, 20) as usize;
+    if linear {
+        let row = width
+            .checked_mul(pixel_format.bytes())
+            .ok_or(Error::Budget)?;
+        if pitch < row {
+            return Err(Error::Invalid("GTF linear pitch shorter than row"));
+        }
+    } else if pitch != 0 {
+        return Err(Error::Unsupported("remap/pitch/offset/location/flags"));
+    } else if !pixel_format.is_block() && !(width.is_power_of_two() && height.is_power_of_two()) {
+        return Err(Error::Unsupported("non-power-of-two swizzled GTF"));
+    }
     Ok(Header {
-        pixel_format: if b[4] == 0x86 {
-            PixelFormat::BC1
-        } else {
-            PixelFormat::BC3
-        },
+        pixel_format,
         width: width as u32,
         height: height as u32,
         mips: b[5] as u32,
@@ -338,6 +372,46 @@ fn bgra_pitch(header: &Header) -> Result<usize, Error> {
     };
     Ok(pitch)
 }
+#[derive(Clone, Copy)]
+struct PlainLayout {
+    /// Top-mip byte count read from the expanded payload.
+    size: usize,
+    /// Row pitch for LN linear layout; None means swizzled.
+    pitch: Option<usize>,
+}
+/// Top-mip extent of an uncompressed GTF. Header fields were bounded by `inspect`.
+fn gtf_plain_layout(b: &[u8], header: &Header) -> Result<PlainLayout, Error> {
+    let (w, h) = (header.width as usize, header.height as usize);
+    let bpp = header.pixel_format.bytes();
+    let row = w.checked_mul(bpp).ok_or(Error::Budget)?;
+    if header.format_raw.unwrap_or(0) & 0x20 != 0 {
+        let pitch = usize::try_from(be32(b, 20)).map_err(|_| Error::Budget)?;
+        // The last row needs only its texels, not a full pitch.
+        let size = pitch
+            .checked_mul(h - 1)
+            .and_then(|n| n.checked_add(row))
+            .ok_or(Error::Budget)?;
+        Ok(PlainLayout {
+            size,
+            pitch: Some(pitch),
+        })
+    } else {
+        let size = row.checked_mul(h).ok_or(Error::Budget)?;
+        Ok(PlainLayout { size, pitch: None })
+    }
+}
+/// Texel index of (x, y) in a power-of-two swizzled surface: the low d = log2(min(w, h))
+/// bits of x and y interleave (x on even, y on odd bit positions); the remaining high
+/// bits of the longer axis follow above bit 2d. Callers guarantee x < w, y < h, both POT.
+fn swizzle_index(x: usize, y: usize, w: usize, h: usize) -> usize {
+    let d = w.min(h).trailing_zeros();
+    let mut m = 0;
+    for i in 0..d {
+        m |= (((x >> i) & 1) << (2 * i)) | (((y >> i) & 1) << (2 * i + 1));
+    }
+    let high = if w > h { x >> d } else { y >> d };
+    m | (high << (2 * d))
+}
 fn rgb565(c: u16) -> [u8; 4] {
     let (r, g, b) = ((c >> 11) as u8, ((c >> 5) & 63) as u8, (c & 31) as u8);
     // CPU oracle convention: nearest normalized 8-bit endpoints, floor interpolation.
@@ -450,7 +524,15 @@ pub fn decode_checked(b: &[u8], cancel: impl Fn() -> bool) -> Result<Texture, Er
     } else {
         None
     };
-    let size = if let Some(pitch) = pitch {
+    // Uncompressed GTF: Some(row pitch) for LN linear rows, None for swizzled.
+    let gtf_plain = if start != 4 && !header.pixel_format.is_block() {
+        Some(gtf_plain_layout(b, &header)?)
+    } else {
+        None
+    };
+    let size = if let Some(layout) = gtf_plain {
+        Some(layout.size)
+    } else if let Some(pitch) = pitch {
         pitch.checked_mul(h)
     } else {
         bx.checked_mul(by)
@@ -472,7 +554,26 @@ pub fn decode_checked(b: &[u8], cancel: impl Fn() -> bool) -> Result<Texture, Er
         .and_then(|n| n.checked_mul(4))
         .ok_or(Error::Budget)?;
     let mut rgba = vec![0; rgba_size];
-    if let Some(pitch) = pitch {
+    if let Some(layout) = gtf_plain {
+        let bpp = header.pixel_format.bytes();
+        let top = &data[offset..end];
+        for y in 0..h {
+            checked(&cancel)?;
+            for x in 0..w {
+                let p = match layout.pitch {
+                    Some(pitch) => y * pitch + x * bpp,
+                    None => swizzle_index(x, y, w, h) * bpp,
+                };
+                let t = &top[p..p + bpp];
+                let color = if bpp == 1 {
+                    [t[0], t[0], t[0], 255]
+                } else {
+                    [t[1], t[2], t[3], t[0]]
+                };
+                rgba[(y * w + x) * 4..(y * w + x + 1) * 4].copy_from_slice(&color);
+            }
+        }
+    } else if let Some(pitch) = pitch {
         for y in 0..h {
             checked(&cancel)?;
             let row = &data[offset + y * pitch..offset + y * pitch + w * 4];
