@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D145 script VM arrays
+
+All 47 of the game's test functions run; 512/513 checks pass. S9 waits for My Moon to
+unlock. +0 / +0.
+
 ## 2026-10-08 — D143, D144 X1 measured; s64/m44 VM fixes
 
 RPCS3: the game updates at 30 Hz (one tick per 2 vblanks). Script VM: 479/480 test checks

@@ -3781,3 +3781,14 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   did not end under keyboard play. Asked the user.
 - Checks: fmt; tests lbp-level, lbp-script-vm, lbp-ui-script; workspace Clippy.
 **+0 newly viewable / +0 newly Complete.**
+
+## D145 — VM array insert clamp and typed defaults (PR #44); S9 status (2026-10-08)
+
+- script_tests d147: all 47 test functions finish; Test* checks 512 passed, 1 failed
+  (TestLocals 417, a block local with no initialising instruction).
+- S9: Sackboy position found at guest 0xe2b83c (x) / 0xe2b840 (y) (RPCS3 guest base
+  0x300000000; read-only ReadProcessMemory). One provisional story-level walk sample
+  (s9-walk-right-rookie-0133-run1.csv, Rookie Test start) recorded but not fitted.
+  My Moon is locked for the new profile (Pod menu stays on Story); waiting for the user.
+- Checks: fmt; lbp-script-vm, lbp-ui-script tests; workspace Clippy -D warnings.
+**+0 newly viewable / +0 newly Complete.**
