@@ -4,7 +4,7 @@
 //! Layout is a browser, not the game's planet: badges are listed in file order, and
 //! `Slot.location` is shown as numbers (planet placement is not rendered).
 //! Usage: `--slot-browser --snapshot SNAPSHOT --game-dir DIR [--slot-browser-report]
-//! [--qa-capture local-analysis/NEW.png]`.
+//! [--slot-browser-slots] [--qa-capture local-analysis/NEW.png]`.
 use crate::gooey_ui::{run_gooey, GooeyImage};
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_gooey::{Align, Builder, FrameInput, ImageRef, Layout, PanelStyle, TextStyle, UiTree, Uid};
@@ -261,6 +261,7 @@ struct Args {
     snapshot: PathBuf,
     game: PathBuf,
     report: bool,
+    list_slots: bool,
 }
 
 fn args() -> Result<Args, String> {
@@ -275,6 +276,7 @@ fn args() -> Result<Args, String> {
         snapshot: value("--snapshot").ok_or("--slot-browser requires --snapshot")?,
         game: value("--game-dir").ok_or("--slot-browser requires --game-dir")?,
         report: all.iter().any(|a| a == "--slot-browser-report"),
+        list_slots: all.iter().any(|a| a == "--slot-browser-slots"),
     })
 }
 
@@ -307,6 +309,19 @@ pub fn run_slot_browser() -> Result<(), String> {
     }
     for (reason, n) in failures {
         println!("icon failures {reason}: {n}");
+    }
+    if a.list_slots {
+        // One line per slot (D149): list order, id, root level, group, name.
+        for s in &story.slots {
+            println!(
+                "slot list {} {} root {} group {} {}",
+                s.list,
+                s.id.number,
+                s.root.map_or("none".to_owned(), |k| k.label()),
+                s.group.map_or("none".to_owned(), |g| g.number.to_string()),
+                slot_label(s)
+            );
+        }
     }
     if a.report {
         return Ok(());
