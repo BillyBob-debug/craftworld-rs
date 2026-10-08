@@ -1,7 +1,7 @@
-//! Rt on authored synthetic data (no game bytes): a three-Thing level and a one-function
-//! script class. docs/level-scripts.md.
+//! Rt on authored synthetic data (no game bytes): a three-Thing level and a small script
+//! class with a superclass. docs/level-scripts.md.
 use lbp_level::parts::{Pos, ScriptField, ScriptPart, ScriptValue, World as WorldPart};
-use lbp_level::script::{FunctionDef, MemberRef, Script, Span, TypeRef};
+use lbp_level::script::{FieldDef, FunctionDef, MemberRef, Script, Span, TypeRef};
 use lbp_level::serial::Descriptor;
 use lbp_level::thing::ThingRecord;
 use lbp_runtime::{instances, LevelWorld, Outcome, Runner};
@@ -9,6 +9,7 @@ use lbp_script_vm::natives::{Bindings, World};
 use lbp_script_vm::{MemberKind, Value, Vm};
 
 const GUID: u32 = 0x2d06;
+const BASE: u32 = 0x2d07;
 
 fn i(op: u8, ty: u8, a: u16, b: u16, c: u16) -> u64 {
     u64::from(op)
@@ -27,16 +28,56 @@ fn desc(guid: u32) -> Descriptor {
     }
 }
 
-/// `Lamp.Tick`: `count += 1; Yield(); return count;` on the Thing in register 0.
-fn lamp() -> Script {
-    let ty = |machine_type, type_name| TypeRef {
+fn ty(machine_type: u8, type_name: u32) -> TypeRef {
+    TypeRef {
         machine_type,
         builtin_type: 0,
         dimension_count: 0,
         array_base_machine_type: 0,
         script: None,
         type_name,
+    }
+}
+
+fn function(modifiers: u32, name: u32, begin: u32, end: u32) -> FunctionDef {
+    FunctionDef {
+        modifiers,
+        type_ref: 0,
+        name,
+        arguments: Span { begin: 0, end: 0 },
+        bytecode: Span { begin, end },
+        line_numbers: Span { begin: 0, end: 0 },
+        locals: Span { begin: 0, end: 0 },
+        stack_size: 16,
+    }
+}
+
+/// `Base`: fields `tweaking` (bool, never stored) and `count`, and a native `Mode__`.
+fn base() -> Script {
+    let field = |type_ref, name| FieldDef {
+        modifiers: 0,
+        type_ref,
+        name,
     };
+    Script {
+        class_name: "Base".into(),
+        super_class: None,
+        type_refs: vec![ty(1, 0), ty(3, 0)],
+        field_refs: vec![],
+        function_refs: vec![],
+        field_defs: vec![field(0, 1), field(1, 2)],
+        function_defs: vec![function(2, 3, 0, 0)],
+        bytecode: vec![],
+        strings_a: ["Base", "tweaking", "count", "Mode__"]
+            .map(String::from)
+            .to_vec(),
+        ..lamp()
+    }
+}
+
+/// `Lamp : Base`. `Tick`: `count += 1; Yield(); return count;` on the Thing in register
+/// 0. `Ask`: calls the inherited native `Mode__` through Lamp's own function reference.
+fn lamp() -> Script {
     let code = vec![
         i(0x95, 3, 4, 0, 0),                   // r4 = thing(r0).count
         u64::from(0x03u8) | 8 << 16 | 1 << 32, // r8 = 1
@@ -44,43 +85,41 @@ fn lamp() -> Script {
         i(0x97, 3, 4, 0, 0),                   // thing(r0).count = r4
         i(0xa4, 0, 0, 0, 0),                   // CALL System.Yield
         i(0xa5, 3, 0, 4, 0),                   // RETURN r4
+        i(0xa4, 0, 0, 1, 0),                   // CALL Lamp.Mode__ (declared on Base)
+        i(0xa5, 0, 0, 0, 0),                   // RETURN
     ];
     Script {
         up_to_date_script: None,
         class_name: "Lamp".into(),
-        super_class: None,
+        super_class: Some(desc(BASE)),
         modifiers: 0,
         type_refs: vec![ty(10, 0), ty(11, 1)],
         field_refs: vec![MemberRef {
             type_ref: 0,
             name: 2,
         }],
-        function_refs: vec![MemberRef {
-            type_ref: 1,
-            name: 3,
-        }],
+        function_refs: vec![
+            MemberRef {
+                type_ref: 1,
+                name: 3,
+            },
+            MemberRef {
+                type_ref: 0,
+                name: 5,
+            },
+        ],
         field_defs: vec![],
         property_defs: vec![],
-        function_defs: vec![FunctionDef {
-            modifiers: 0,
-            type_ref: 0,
-            name: 4,
-            arguments: Span { begin: 0, end: 0 },
-            bytecode: Span {
-                begin: 0,
-                end: code.len() as u32,
-            },
-            line_numbers: Span { begin: 0, end: 0 },
-            locals: Span { begin: 0, end: 0 },
-            stack_size: 16,
-        }],
+        function_defs: vec![function(0, 4, 0, 6), function(0, 6, 6, 8)],
         shared_arguments: vec![],
         bytecode: code,
         line_numbers: vec![],
         locals: vec![],
-        strings_a: ["Lamp", "System", "count", "Yield__", "Tick"]
-            .map(String::from)
-            .to_vec(),
+        strings_a: [
+            "Lamp", "System", "count", "Yield__", "Tick", "Mode__", "Ask",
+        ]
+        .map(String::from)
+        .to_vec(),
         strings_w: vec![],
         constants_s64: Some(vec![]),
         constants_f32: vec![],
@@ -198,4 +237,59 @@ fn runner_starts_a_thing_script_and_resumes_it_next_tick() {
         runner.start(&mut vm, &mut host, unloaded, "Tick", &mut budget),
         Outcome::NoClass
     );
+}
+
+#[test]
+fn class_defaults_inherited_natives_and_parts() {
+    let mut vm = Vm::default();
+    vm.load(base(), Some(BASE));
+    vm.load(lamp(), Some(GUID));
+    let mut things = level();
+    things[1].parts.push("SPRITE_LIGHT");
+    let mut world = LevelWorld::from_things(&things);
+    let me = Value::Thing(Some(1));
+    assert!(world
+        .get_member(MemberKind::Thing, &me, "Lamp", "tweaking")
+        .is_err());
+    world.add_class_defaults(&vm);
+    // A superclass field the instance never stores exists at its default; stored wins.
+    let get = |w: &mut LevelWorld, f| w.get_member(MemberKind::Thing, &me, "Lamp", f);
+    assert_eq!(get(&mut world, "tweaking"), Ok(Value::Bool(false)));
+    assert_eq!(get(&mut world, "count"), Ok(Value::Int(41)));
+    // `thing.SpriteLight`: a part handle whose ref_ptr members keep what scripts write;
+    // null for a part the Thing lacks; an error for a name that is not a part.
+    let light = world
+        .get_member(MemberKind::Native, &me, "Thing", "SpriteLight")
+        .unwrap();
+    assert_eq!(light, Value::Raw(1));
+    world
+        .set_member(
+            MemberKind::RefPtr,
+            &light,
+            "PSpriteLight",
+            "FarDist",
+            Value::Float(2.5),
+        )
+        .unwrap();
+    assert_eq!(
+        world.get_member(MemberKind::RefPtr, &light, "PSpriteLight", "FarDist"),
+        Ok(Value::Float(2.5))
+    );
+    let other = Value::Thing(Some(2));
+    assert_eq!(
+        world.get_member(MemberKind::Native, &other, "Thing", "SpriteLight"),
+        Ok(Value::Raw(0))
+    );
+    assert!(world
+        .get_member(MemberKind::Native, &me, "Thing", "Colour")
+        .is_err());
+    assert_eq!(world.num_players(), Ok(1));
+    assert_eq!(world.play_or_edit_mode(), Ok(0));
+    // A native inherited through Lamp's reference reaches the host as Base.Mode__.
+    let mut host = Bindings::new(world);
+    let inst = instances(&vm, &host.world)[0];
+    let mut budget = 1000;
+    let o = Runner::default().start(&mut vm, &mut host, inst, "Ask", &mut budget);
+    assert!(matches!(o, Outcome::Fault(_)));
+    assert_eq!(host.unbound.keys().collect::<Vec<_>>(), ["Base.Mode__"]);
 }

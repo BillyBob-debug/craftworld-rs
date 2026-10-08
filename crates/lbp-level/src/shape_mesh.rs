@@ -155,6 +155,84 @@ impl std::fmt::Display for ShapeReject {
 
 impl std::error::Error for ShapeReject {}
 
+/// D153: what stands in for a SHAPE Thing without GENERATED_MESH (D108 T4: such a shape
+/// is never drawn itself). Census keys only; nothing here changes what is drawn.
+/// Parent tree = the Things sharing the same top `parent` ancestor (CONFIRMED_FROM_LOCAL_DATA
+/// on 01.33 levels, docs/d153-level-shapes.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ColliderRole {
+    /// The same Thing has RENDER_MESH: the shape is that mesh's collision hull.
+    OwnRenderMesh,
+    /// Another Thing in the same parent tree has RENDER_MESH (e.g. a mesh object's extra
+    /// collision pieces parented to the mesh Thing).
+    RenderMeshTree,
+    /// No RENDER_MESH anywhere in the parent tree: an invisible collider (level boundary
+    /// walls, joint colliders).
+    NoMesh,
+}
+
+impl ColliderRole {
+    pub fn key(self) -> &'static str {
+        match self {
+            Self::OwnRenderMesh => "no_generated_mesh: collision hull of own RENDER_MESH",
+            Self::RenderMeshTree => "no_generated_mesh: collider in a RENDER_MESH parent tree",
+            Self::NoMesh => "no_generated_mesh: invisible collider, no mesh in parent tree",
+        }
+    }
+}
+
+/// Parent-chain depth limit for [`ColliderRoles`] (untrusted references may cycle).
+pub const MAX_PARENT_DEPTH: usize = 256;
+
+/// D153: per-level lookup for [`ColliderRole`]. `things[i]` must be Thing index `i`
+/// (parse order, as `lbp_level::read` returns them); out-of-range parents end the chain.
+#[derive(Debug, Clone, Default)]
+pub struct ColliderRoles {
+    roots: Vec<usize>,
+    mesh_roots: std::collections::HashSet<usize>,
+}
+
+impl ColliderRoles {
+    pub fn new(things: &[ThingRecord]) -> Self {
+        let roots: Vec<usize> = (0..things.len())
+            .map(|mut i| {
+                for _ in 0..MAX_PARENT_DEPTH {
+                    match things[i].parent {
+                        Some(p) if p < things.len() && p != i => i = p,
+                        _ => break,
+                    }
+                }
+                i
+            })
+            .collect();
+        let mesh_roots = things
+            .iter()
+            .zip(&roots)
+            .filter(|(t, _)| t.data.render_mesh.is_some())
+            .map(|(_, &r)| r)
+            .collect();
+        Self { roots, mesh_roots }
+    }
+
+    /// Role of Thing `index` (meaningful for SHAPE Things without GENERATED_MESH).
+    pub fn role(&self, things: &[ThingRecord], index: usize) -> ColliderRole {
+        if things
+            .get(index)
+            .is_some_and(|t| t.data.render_mesh.is_some())
+        {
+            ColliderRole::OwnRenderMesh
+        } else if self
+            .roots
+            .get(index)
+            .is_some_and(|r| self.mesh_roots.contains(r))
+        {
+            ColliderRole::RenderMeshTree
+        } else {
+            ColliderRole::NoMesh
+        }
+    }
+}
+
 /// Generated geometry in **world space** (the matrix is already applied, winding corrected
 /// for mirrored transforms, normals by the inverse transpose). Pass [`IDENTITY`] to get
 /// local-space geometry. Triangles are counter-clockwise seen from outside.

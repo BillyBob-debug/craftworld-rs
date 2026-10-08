@@ -82,6 +82,23 @@ pub trait World {
     fn num_players(&mut self) -> Result<i32, String> {
         Err(not_available("players"))
     }
+    /// `Game.EPlayOrEditMode`: 0 play, 1 edit (INFERRED from script use, see
+    /// docs/level-scripts.md "Part 2").
+    fn play_or_edit_mode(&mut self) -> Result<i32, String> {
+        Err(not_available("the play/edit mode"))
+    }
+    /// File handle of the level's dialogue list (s32, builtin 9 like the scripts'
+    /// `DialogueListFile` field); 0 = none loaded.
+    fn dialogue_list(&mut self) -> Result<i32, String> {
+        Err(not_available("dialogue lists"))
+    }
+    /// The colour a shape shows in the editor, as a colour vector.
+    fn shape_editor_colour(&mut self, _thing: u32) -> Result<[f32; 4], String> {
+        Err(not_available("shape colours"))
+    }
+    fn set_shape_editor_colour(&mut self, _thing: u32, _colour: [f32; 4]) -> Result<(), String> {
+        Err(not_available("shape colours"))
+    }
     /// Outcome of a `Test.Check*` / `Test.Fail` native in the game's own test scripts.
     fn test_check(&mut self, _passed: bool, _message: &str, _line: i32) {}
     /// Uniform in [0, 1); only `NonDeterministic*` natives use it.
@@ -516,6 +533,9 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     ("PartList", "HasPSpriteLight__Q5Thing", |w, c| {
         Ok(Value::Bool(w.has_part(subject(c)?, "PSpriteLight")?))
     }),
+    ("PartList", "HasPRenderMesh__Q5Thing", |w, c| {
+        Ok(Value::Bool(w.has_part(subject(c)?, "PRenderMesh")?))
+    }),
     // ---- audio, resources, game ----
     ("Audio", "PlaySound__Q5ThingQ7StringA", |w, c| {
         let t = thing(param(c, 0)?)?;
@@ -535,6 +555,19 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     }),
     ("Game", "GetNumPlayers__", |w, _| {
         Ok(Value::Int(w.num_players()?))
+    }),
+    ("Game", "GetPlayOrEditMode__", |w, _| {
+        Ok(Value::Int(w.play_or_edit_mode()?))
+    }),
+    ("Audio", "GetDialogueList__", |w, _| {
+        Ok(Value::Int(w.dialogue_list()?))
+    }),
+    ("Thing", "GetShapeEditorColour__Q5Thing", |w, c| {
+        Ok(Value::Vec4(w.shape_editor_colour(subject(c)?)?))
+    }),
+    ("Thing", "SetShapeEditorColour__Q5Thingr", |w, c| {
+        w.set_shape_editor_colour(subject(c)?, vec4(param(c, 1)?)?)?;
+        Ok(Value::Void)
     }),
     // ---- the game's own test scripts ----
     ("Test", "Check__bQ7StringAi", |w, c| {

@@ -1108,7 +1108,12 @@ pub fn add_shapes_with<T>(
     let mut groups: BTreeMap<Option<u32>, Vec<(usize, MaterialPart)>> = BTreeMap::new();
     let bevel_options = BevelOptions::default();
     let mut vertices = 0usize;
-    for t in things.iter().filter(|t| t.data.shape.is_some()) {
+    let roles = shape_mesh::ColliderRoles::new(things);
+    for (position, t) in things
+        .iter()
+        .enumerate()
+        .filter(|(_, t)| t.data.shape.is_some())
+    {
         let c = &mut scene.counts;
         c.shapes_total += 1;
         if c.shapes_extruded >= MAX_LEVEL_SHAPES {
@@ -1153,7 +1158,12 @@ pub fn add_shapes_with<T>(
                 }
             }
             Err(r) if r.is_selection() => {
-                *c.shapes_not_selected.entry(r.reason().into()).or_default() += 1;
+                // D153: split no_generated_mesh by what stands in for the collider.
+                let key = match r {
+                    shape_mesh::ShapeReject::NoGeneratedMesh => roles.role(things, position).key(),
+                    _ => r.reason(),
+                };
+                *c.shapes_not_selected.entry(key.into()).or_default() += 1;
             }
             Err(r) => *c.shapes_rejected.entry(r.reason().into()).or_default() += 1,
         }
@@ -2316,6 +2326,46 @@ mod tests {
     }
 
     #[test]
+    fn colliders_without_generated_mesh_split_by_parent_tree() {
+        // D153: 0 = mesh root; 1 = shape with its own RENDER_MESH; 2 = collider parented to
+        // 0; 3 = root collider; 4/5 = colliders in a parent cycle (bounded walk).
+        let collider = |index: usize, parent: Option<usize>| {
+            let mut t = shape_thing(index, Some(7), true, 0.);
+            t.data.generated_mesh = None;
+            t.parent = parent;
+            t
+        };
+        let mut own = collider(1, None);
+        own.data.render_mesh = thing(1, Some(2), None).data.render_mesh;
+        let things = vec![
+            thing(0, Some(1), Some(identity_at(0.))),
+            own,
+            collider(2, Some(0)),
+            collider(3, None),
+            collider(4, Some(5)),
+            collider(5, Some(4)),
+        ];
+        let mut scene = LevelScene::<ShapeBatch>::default();
+        add_shapes(
+            &mut scene,
+            &things,
+            |b| (b, Ok(())),
+            |b| points_bounds(&b.positions),
+        );
+        let n = &scene.counts.shapes_not_selected;
+        assert_eq!(n["no_generated_mesh: collision hull of own RENDER_MESH"], 1);
+        assert_eq!(
+            n["no_generated_mesh: collider in a RENDER_MESH parent tree"],
+            1
+        );
+        assert_eq!(
+            n["no_generated_mesh: invisible collider, no mesh in parent tree"],
+            3
+        );
+        assert_eq!(scene.counts.shapes_extruded, 0);
+    }
+
+    #[test]
     fn shapes_merge_per_material_and_count_outcomes() {
         let mut collider = shape_thing(4, Some(7), true, 0.);
         collider.data.generated_mesh = None;
@@ -2350,7 +2400,10 @@ mod tests {
         );
         assert_eq!(c.shape_batches, 2);
         assert_eq!(c.shapes_not_selected["edit_only"], 1);
-        assert_eq!(c.shapes_not_selected["no_generated_mesh"], 1);
+        assert_eq!(
+            c.shapes_not_selected["no_generated_mesh: invisible collider, no mesh in parent tree"],
+            1
+        );
         assert_eq!(c.shapes_rejected["loop_sum_mismatch"], 1);
         assert_eq!(c.shapes_material_fallback["Unresolved: GUID"], 1);
         // Material 7 first (BTreeMap order): two shapes merged, indices rebased.
