@@ -3731,3 +3731,16 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
 - Checks: fmt; tests lbp-ui-script, lbp-script-vm; workspace Clippy -D warnings; workspace
   build. No new third-party crates.
 **+0 newly viewable / +0 newly Complete.**
+
+## D140 — U12b script menu in the viewer, PR #39 (2026-10-08)
+
+- `--ui-script CLASS` draws a UI script's frame tree; `--ui-script-report` prints it. HUD
+  screen queries answered (XRes 1280, YRes 720, edge crop 0, aspect 16:9).
+- PodStateMainMenu: 449 instructions (NullObject at UpdateUI+888 after layout), 68 native
+  calls, translated 5/5; outer Sizing 2400 x 1250 (was NaN). Capture
+  d141b-u12b-mainmenu.png (non-primary monitor): Story, Community, Recent Activity, Store,
+  Me as buttons in a narrow placeholder column (frame property meanings unknown).
+- PodStateStoriesMenu: 208 instructions, returned; translated 1/1; Sizing 2400 x 1250.
+- Checks: fmt; tests lbp-ui-script, lbp-bevy-viewer; workspace Clippy -D warnings; viewer
+  builds. PR #38 (VM) held: 804 passed / 53 failed vs D139 826 / 27 (LCb rule change).
+**+0 newly viewable / +0 newly Complete.**

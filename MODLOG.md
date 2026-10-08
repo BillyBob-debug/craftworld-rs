@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D140 script menu in the viewer
+
+The viewer draws the main menu from the game's own script (five English buttons;
+placeholder layout). +0 / +0.
+
 ## 2026-10-08 — D136 Gooey trace
 
 The game's main-menu script now runs headless and lays out its real English buttons
