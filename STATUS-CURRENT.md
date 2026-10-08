@@ -45,7 +45,8 @@ tutorial_23 renders with its backdrop (D119), inverse-bind/joint placement (D120
 --preview-lighting from level settings (D121), --shape-bevels (D122, inferred).
 Runtime: skin/morphs (D115), animation keys (D116), --play-animation GPU/CPU skinning
 (D118), lbp-gooey UI + --ui-demo (D117, no per-frame rebuild since D124), slot/pin/
-palette readers (D123; 15/16 complete, 1 excluded test file).
+palette readers (D123; 15/16 complete, 1 excluded test file). RScript reader (D126; 0
+scripts readable on 01.33, likely in encrypted patch.edat). Runtime scope per AGENTS.md (D125).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).
@@ -81,6 +82,8 @@ palette readers (D123; 15/16 complete, 1 excluded test file).
   FNTb +8 word meaning unknown; patch.edat not decrypted.
 
 ## Next
+RPCS3 measurements (docs/rpcs3-measurement.md) once the owner OKs the downloads; script
+bytes for G10 (patch.edat).
 Level visual QA against the game; joint skinning; bevel/UV calibration; Rookie Test and
 more story levels on screen; Toolkit spot-check for U4 slot lists (not done).
 

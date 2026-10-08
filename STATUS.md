@@ -3546,3 +3546,17 @@ Next: level visual QA vs game; joint skinning; bevel/UV calibration; more levels
   201v0 looks the same as D117.
 - Checks: fmt, tests and Clippy -D warnings for lbp-level, lbp-gooey, lbp-bevy-viewer.
 **+0 newly viewable / +0 newly Complete.**
+
+## D125, D126 — runtime decisions doc, RScript reader (2026-10-08)
+
+- D125 (PR #24, docs only): AGENTS.md scope amendment (gameplay runtime crates, RScript
+  interpreter, RPCS3 measurement approved by the owner 2026-10-08), runtime plan Rp-Rt,
+  docs/rpcs3-measurement.md. RPCS3 setup waits for the owner's direct OK to download
+  and run RPCS3 and the PS3 firmware.
+- D126 (U10, PR #25): `lbp_level::script` RScript reader + disassembly listing; synthetic
+  tests pass. script_census on 01.33 -> d126-script-census-0133.json: 0 scripts. No
+  compiled script bytes are present in the selected dirs (U0: 427 .ff map rows, likely
+  inside the encrypted patch.edat). Gate checks and the Toolkit spot-check could not run;
+  G10 (native-call census) is blocked on script bytes.
+- Checks: fmt, tests and Clippy -D warnings for lbp-level.
+**+0 newly viewable / +0 newly Complete.**

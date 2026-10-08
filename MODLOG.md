@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D125, D126
+
+Runtime decisions doc merged (AGENTS scope amendment, RPCS3 plan). RScript reader merged;
+0 scripts readable on 01.33 (bytes likely in encrypted patch.edat), G10 blocked.
+
 ## 2026-10-08 — D124 U4/U6 follow-ups
 
 testrnp.slt is an expected text-form exclusion (U4 census 15 complete + 1 excluded);
