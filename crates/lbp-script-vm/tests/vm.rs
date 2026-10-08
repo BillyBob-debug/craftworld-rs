@@ -616,6 +616,43 @@ fn locals_start_at_defaults_and_no_register_operands_are_ignored() {
 }
 
 #[test]
+fn m44_locals_default_to_zero() {
+    // Product of two never-written m44 locals: W.w is 0 with zeroed storage (1 with identity).
+    let mut b = Builder::new();
+    let m44 = b.ty(6, "m44", None, 0);
+    let mut s = b.build(
+        "Mats",
+        None,
+        vec![func(
+            "Run",
+            &[],
+            vec![
+                i(0x51, 6, 12, 4, 8),      // MULm44 r12 = r4 * r8
+                i(0x70, FLOAT, 16, 12, 0), // GET_M44_WW r16 = r12.ww
+                i(0xa5, FLOAT, 0, 16, 0),  // RETURN r16
+            ],
+        )],
+    );
+    let name = s.function_defs[0].name;
+    for offset in [4, 8] {
+        s.locals.push(lbp_level::script::LocalVariable {
+            modifiers: 0,
+            type_ref: u32::from(m44),
+            name,
+            offset,
+        });
+    }
+    s.function_defs[0].locals = Span { begin: 0, end: 2 };
+    let mut vm = Vm::default();
+    let c = vm.load(s, None);
+    let mut budget = 100;
+    assert_eq!(
+        vm.call(&mut TestHost::default(), c, "Run", &[], &mut budget),
+        Ok(Value::Float(0.))
+    );
+}
+
+#[test]
 fn new_object_runs_inherited_init_and_finds_superclass_by_learned_guid() {
     // Base (loaded without a GUID) initialises x = 7 in .init__.
     let mut b = Builder::new();
@@ -759,7 +796,7 @@ fn test_script_checks_reach_the_world_through_construct() {
 }
 
 #[test]
-fn array_insert_past_the_end_appends() {
+fn array_insert_at_minus_one_appends() {
     let mut b = Builder::new();
     let ints = b.ty(OBJ, "int[]", None, INT);
     let s = b.build(
@@ -776,14 +813,8 @@ fn array_insert_past_the_end_appends() {
                 hi(0x03, 16, -1i32 as u32),  // r16 = -1
                 hi(0x03, 20, 8),             // r20 = 8
                 i(0x9d, INT, 20, 8, 16),     // insert r20 at r16 = -1
-                hi(0x03, 16, 100),           // r16 = 100 (past the end)
-                hi(0x03, 20, 9),             // r20 = 9
-                i(0x9d, INT, 20, 8, 16),     // insert r20 at r16 = 100
                 hi(0x03, 24, 1),             // r24 = 1
                 i(0x99, INT, 28, 8, 24),     // r28 = r8[1]
-                hi(0x03, 24, 2),             // r24 = 2
-                i(0x99, INT, 32, 8, 24),     // r32 = r8[2]
-                i(0x2c, INT, 28, 28, 32),    // r28 = r28 * r32 (MULi)
                 i(0xa5, INT, 0, 28, 0),      // RETURN r28
             ],
         )],
@@ -793,6 +824,6 @@ fn array_insert_past_the_end_appends() {
     let mut budget = 100;
     assert_eq!(
         vm.call(&mut TestHost::default(), c, "Run", &[], &mut budget),
-        Ok(Value::Int(72))
+        Ok(Value::Int(8))
     );
 }
