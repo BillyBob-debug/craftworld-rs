@@ -1149,27 +1149,10 @@ pub fn select_diffuse_with_animation_base(
                 animated: true,
                 base: Default::default(),
             };
-            let selection = select_products(graph, &mut leaves)?;
-            // D78 scope: products of two or more texture samples only.
-            match (selection.animation_base, selection.second_sample) {
-                (Some(_), Some(_)) => Ok(selection),
-                _ => Err(
-                    "Unsupported: animation base product needs 2+ textures and an animated sampler"
-                        .into(),
-                ),
-            }
+            // D78/D92 products of 2+ samples; D102 one animated sample × COLOR.
+            crate::animation_base::product_scope(select_products(graph, &mut leaves)?)
         }),
     }
-}
-/// D88: the same D78 product search, for `instance_textured` to filter.
-pub(crate) fn select_animated_products(graph: &GraphMetadata) -> Result<DiffuseSelection, String> {
-    select_products(
-        graph,
-        &mut Leaves {
-            animated: true,
-            base: Default::default(),
-        },
-    )
 }
 fn binding<'a>(
     g: &'a GraphInspection,
@@ -2508,9 +2491,13 @@ mod tests {
         graph.boxes[2].animations[0].component_value_count = 8;
         assert!(select_diffuse_with_animation_base(&graph, true).is_ok());
 
-        // One animated texture × COLOR is not a 2+ texture product (out of D78 scope).
+        // D102: one animated texture × static COLOR, the single-sample tint route.
         graph.boxes[1] = node(3, 0);
-        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        assert!(select_diffuse(&graph).is_err());
+        let single = select_diffuse_with_animation_base(&graph, true).unwrap();
+        assert_eq!((single.sample_index, single.color_index), (2, Some(1)));
+        assert!(single.animation_base.is_some() && single.second_sample.is_none());
+        assert!(crate::animation_base::single_tinted_leaf(&single));
         graph.boxes[1] = node(1, 0);
         // D75 shape (T1 × T2) × COLOR with the animated leaf keeps its tint.
         graph.boxes.extend([node(3, 0), node(10, 0)]);
