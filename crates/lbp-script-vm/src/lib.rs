@@ -440,6 +440,27 @@ impl Vm {
         self.find(class, function).is_some()
     }
 
+    /// Starts `function` with registers staged directly (`(register, value)` pairs), for
+    /// hosts that place the receiver themselves. Registers past the stack size fault.
+    pub fn start_registers(
+        &mut self,
+        host: &mut dyn Host,
+        class: ClassId,
+        function: &str,
+        registers: &[(u16, Value)],
+        budget: &mut u64,
+    ) -> Result<Step, Fault> {
+        let (c, f) = self
+            .find(class, function)
+            .ok_or_else(|| Fault::MissingFunction {
+                class: self.class_name(class).to_owned(),
+                function: function.to_owned(),
+            })?;
+        let staged = registers.iter().cloned().collect();
+        let frame = self.frame(c, f, staged, None)?;
+        self.run(host, vec![frame], budget)
+    }
+
     fn frame(
         &self,
         class: ClassId,
@@ -891,6 +912,13 @@ impl Vm {
                             let v = host
                                 .call_native(&owner, &function, &values)
                                 .map_err(Fault::Native)?;
+                            // A host that returns nothing for a typed call (stubs) gets the
+                            // default of the instruction's return machine type.
+                            let v = if v == Value::Void && ty != 0 {
+                                Value::default_for(ty)
+                            } else {
+                                v
+                            };
                             if let Some(d) = dest {
                                 let fr = stack.last_mut().expect("frame");
                                 *fr.regs
@@ -1151,6 +1179,13 @@ fn get_builtin(op: u8, base: &Value) -> Option<Value> {
 
 fn set_builtin(op: u8, base: Value, src: Value) -> Option<Value> {
     use Value::*;
+    // A register never written reads as zeroed storage (INFERRED: v4/m44 locals are built
+    // component by component; the PC U12 trace faulted on SET_V4_X of a fresh register).
+    let base = match (op, base) {
+        (0x79..=0x7c, Void) => Vec4([0.; 4]),
+        (0x7d..=0x94, Void) => Mat44([0.; 16]),
+        (_, b) => b,
+    };
     Some(match (op, base, src) {
         (0x79..=0x7c, Vec4(mut v), Float(f)) => {
             v[usize::from(op - 0x79)] = f;
