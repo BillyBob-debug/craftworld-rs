@@ -843,6 +843,14 @@ fn plan_level(scene: &LevelScene) -> Result<LevelPlan, String> {
                     &mut evidence,
                     &mut details,
                 ),
+                // D119 backdrop batch (mesh space; the item matrix places it).
+                level_scene::ScenePayload::Backdrop { batch, material } => prepare_buckets(
+                    &batch.positions,
+                    vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
+                    false,
+                    &mut evidence,
+                    &mut details,
+                ),
             }
         })
         .collect();
@@ -894,14 +902,18 @@ fn place_items<T>(
     buckets: &[Result<usize, String>],
 ) -> Result<Placement, String> {
     let shown = |i: &level_scene::SceneItem| buckets.get(i.mesh).is_some_and(Result::is_ok);
+    // D119: frame the level itself; the backdrop (items carrying the backdrop Thing) is
+    // drawn but only frames the view when nothing else is shown.
+    let backdrop = |i: &level_scene::SceneItem| Some(i.thing) == scene.counts.backdrop.thing;
     let [lo, hi] = scene
-        .bounds_where(shown)
+        .bounds_where(|i| shown(i) && !backdrop(i))
+        .or_else(|| scene.bounds_where(shown))
         .ok_or("Unavailable: no displayable level items")?;
     let (normalize, home) = level_home(Vec3::from(lo), Vec3::from(hi))?;
     let mut placed = Vec::new();
     let mut entities = 0usize;
     let mut sheared = 0usize;
-    let (mut model_things, mut shape_things) = (0usize, 0usize);
+    let (mut model_things, mut shape_things, mut backdrop_items) = (0usize, 0usize, 0usize);
     let mut skipped = std::collections::BTreeMap::<String, usize>::new();
     for item in &scene.items {
         let things = item.shapes.max(1);
@@ -916,7 +928,9 @@ fn place_items<T>(
                 continue;
             }
         };
-        if item.shapes == 0 {
+        if backdrop(item) {
+            backdrop_items += 1;
+        } else if item.shapes == 0 {
             model_things += 1;
         } else {
             shape_things += item.shapes;
@@ -930,7 +944,7 @@ fn place_items<T>(
         placed.push((item.mesh, transform));
     }
     let mut lines = vec![
-        format!("Drawn in viewer: {model_things} RENDER_MESH Things, {shape_things} shape Things ({entities} draw entities)"),
+        format!("Drawn in viewer: {model_things} RENDER_MESH Things, {shape_things} shape Things, {backdrop_items} backdrop items ({entities} draw entities)"),
     ];
     for (reason, n) in &skipped {
         lines.push(format!("  display-skipped {n} Things: {reason}"));
@@ -942,6 +956,14 @@ fn place_items<T>(
         "Bounds (level units): ({:.1}, {:.1}, {:.1}) .. ({:.1}, {:.1}, {:.1})",
         lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]
     ));
+    if backdrop_items > 0 {
+        if let Some([a, b]) = scene.bounds_where(shown) {
+            lines.push(format!(
+                "Bounds with backdrop (level units): ({:.1}, {:.1}, {:.1}) .. ({:.1}, {:.1}, {:.1})",
+                a[0], a[1], a[2], b[0], b[1], b[2]
+            ));
+        }
+    }
     Ok((placed, home, lines))
 }
 fn spawn_level(
@@ -1492,7 +1514,7 @@ mod tests {
         assert_eq!((home.yaw, home.pitch, home.target), (0., 0., Vec3::ZERO));
         assert!(home.distance > 0.15 && home.distance < 2.);
         assert!(lines[0].starts_with(
-            "Drawn in viewer: 2 RENDER_MESH Things, 0 shape Things (4 draw entities)"
+            "Drawn in viewer: 2 RENDER_MESH Things, 0 shape Things, 0 backdrop items (4 draw entities)"
         ));
         assert!(lines
             .iter()

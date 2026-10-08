@@ -54,6 +54,12 @@ pub enum MeshSource {
     /// Merged world-space shape extrusions sharing one gfx material GUID (None = no
     /// GUID); `batch` numbers the chunks of that material.
     Shapes { material: Option<u32>, batch: usize },
+    /// D119: static backdrop mesh primitives (mesh GUID) merged per gfx material GUID.
+    Backdrop {
+        mesh: Option<u32>,
+        material: Option<u32>,
+        batch: usize,
+    },
 }
 
 impl MeshSource {
@@ -63,6 +69,15 @@ impl MeshSource {
             Self::Sha1(h) => format!("sha1 {h}"),
             Self::Shapes { material, batch } => format!(
                 "shapes gfx {} batch {batch}",
+                material.map_or("none".into(), |g| format!("{g:08x}"))
+            ),
+            Self::Backdrop {
+                mesh,
+                material,
+                batch,
+            } => format!(
+                "backdrop {} gfx {} batch {batch}",
+                mesh.map_or("none".into(), |g| format!("{g:08x}")),
                 material.map_or("none".into(), |g| format!("{g:08x}"))
             ),
         }
@@ -132,6 +147,8 @@ pub struct SceneCounts {
     pub decorations_not_drawn: usize,
     /// Reader stop (None = whole level read).
     pub reader_stop: Option<String>,
+    /// D119 backdrop (static mesh + plan Things).
+    pub backdrop: crate::level_backdrop::BackdropCounts,
 }
 
 impl SceneCounts {
@@ -185,6 +202,7 @@ impl SceneCounts {
             "Not drawn: {} decorations (DECORATIONS entries)",
             self.decorations_not_drawn
         ));
+        out.extend(self.backdrop.lines());
         out.push(match &self.reader_stop {
             None => "Level reader: complete".into(),
             Some(s) => format!("Level reader stopped: {s}"),
@@ -490,6 +508,11 @@ pub enum ScenePayload {
         batch: ShapeBatch,
         material: Result<std::sync::Arc<MaterialAsset>, String>,
     },
+    /// D119: static backdrop mesh batch (mesh space, placed by the item matrix).
+    Backdrop {
+        batch: crate::level_backdrop::BackdropBatch,
+        material: Result<std::sync::Arc<MaterialAsset>, String>,
+    },
 }
 
 /// Resolves a level by GUID or by MAP path (exact, or a `/`-suffix of the stored path,
@@ -543,9 +566,19 @@ fn read_all(
     key: &LocationKey,
     control: &LoadControl,
 ) -> Result<Vec<u8>, String> {
+    read_resource(source, key, control, lbp_level::level::MAX_INPUT)
+}
+
+/// Reads a whole stored resource in pages, refusing stored sizes above `max`.
+pub fn read_resource(
+    source: &AttachedSource,
+    key: &LocationKey,
+    control: &LoadControl,
+    max: usize,
+) -> Result<Vec<u8>, String> {
     let size = usize::try_from(key.size).map_err(|_| "size overflow")?;
-    if size > lbp_level::level::MAX_INPUT {
-        return Err("Unsupported: stored level exceeds the level input budget".into());
+    if size > max {
+        return Err("Unsupported: stored resource exceeds the input budget".into());
     }
     let mut bytes = Vec::with_capacity(size);
     while bytes.len() < size {
@@ -571,6 +604,7 @@ fn payload_bounds(p: &ScenePayload) -> Option<[[f32; 3]; 2]> {
     match p {
         ScenePayload::Model(g) => grouped_bounds(g),
         ScenePayload::Shapes { batch, .. } => points_bounds(&batch.positions),
+        ScenePayload::Backdrop { batch, .. } => points_bounds(&batch.positions),
     }
 }
 
@@ -647,7 +681,9 @@ pub fn load_level_scene(
             let key = match src {
                 MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
                 MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
-                MeshSource::Shapes { .. } => return Err("Invalid: shape source".into()),
+                MeshSource::Shapes { .. } | MeshSource::Backdrop { .. } => {
+                    return Err("Invalid: shape source".into())
+                }
             };
             let mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
             charge(retained(&mesh))?;
@@ -685,9 +721,158 @@ pub fn load_level_scene(
         payload_bounds,
     );
     control.check()?;
+    load_backdrop(
+        &mut scene,
+        &report.things,
+        source,
+        catalog,
+        control,
+        options,
+        &mut charge,
+    )?;
+    control.check()?;
     source.check_stable()?;
     scene.counts.reader_stop = report.stop.as_ref().map(|s| format!("{s:?}"));
     Ok(scene)
+}
+
+/// D119: draws the backdrop static mesh and the backdrop plan's RENDER_MESH Things.
+/// Route failures are counted in `counts.backdrop.errors`; only cancellation propagates.
+fn load_backdrop(
+    scene: &mut LevelScene<ScenePayload>,
+    things: &[ThingRecord],
+    source: &AttachedSource,
+    catalog: &Catalog,
+    control: &LoadControl,
+    options: PreviewOptions,
+    charge: &mut dyn FnMut(usize) -> Result<(), String>,
+) -> Result<(), String> {
+    use crate::level_backdrop as bd;
+    let refs = bd::backdrop_refs(things);
+    let mut counts = bd::BackdropCounts::default();
+    let Some(thing) = refs.thing else {
+        counts.source = Some("none (PWorld backdrop Thing is null)".into());
+        scene.counts.backdrop = counts;
+        return Ok(());
+    };
+    let world = refs.world.unwrap_or(bd::IDENTITY);
+    counts.thing = Some(thing);
+    counts.source = Some(format!(
+        "Thing {thing}{}; static mesh {}; plan {}",
+        if refs.world.is_none() {
+            " (no POS, identity)"
+        } else {
+            ""
+        },
+        refs.mesh.as_ref().map_or("none".into(), MeshSource::label),
+        refs.plan.map_or("none".into(), |g| format!("{g:08x}"))
+    ));
+    if let Some(mesh_source) = &refs.mesh {
+        control.check()?;
+        let loaded = (|| {
+            let key = match mesh_source {
+                MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
+                MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
+                _ => return Err("Invalid: backdrop mesh source".to_string()),
+            };
+            let bytes = read_resource(source, &key, control, lbp_mesh::static_mesh::MAX_INPUT)?;
+            lbp_mesh::static_mesh::read(&bytes, || control.check().is_err())
+                .map_err(|e| e.to_string())
+        })();
+        control.check()?;
+        match loaded {
+            Ok(mesh) => {
+                let guid = match mesh_source {
+                    MeshSource::Guid(g) => Some(*g),
+                    _ => None,
+                };
+                bd::add_backdrop_mesh(
+                    scene,
+                    &mut counts,
+                    guid,
+                    &mesh,
+                    world,
+                    thing,
+                    |batch| {
+                        let material = (|| {
+                            control.check()?;
+                            let d = batch
+                                .material
+                                .as_ref()
+                                .ok_or("Unsupported: backdrop primitive without gfx material")?;
+                            let hash = d
+                                .sha1
+                                .map(|h| h.iter().map(|b| format!("{b:02x}")).collect::<String>());
+                            let key = resolve(catalog, d.guid, hash.as_deref())?;
+                            let asset = crate::linked::load_material(
+                                source,
+                                catalog,
+                                key,
+                                batch.positions.len(),
+                                crate::linked::UvInput::Static {
+                                    uv0: &batch.uv0,
+                                    uv1: &batch.uv1,
+                                },
+                                control,
+                                options,
+                            )?;
+                            charge(asset.retained_bytes())?;
+                            Ok(std::sync::Arc::new(asset))
+                        })();
+                        let selected = material.as_ref().map(|_| ()).map_err(Clone::clone);
+                        (ScenePayload::Backdrop { batch, material }, selected)
+                    },
+                    payload_bounds,
+                );
+            }
+            Err(e) => counts
+                .errors
+                .push(format!("static mesh {}: {e}", mesh_source.label())),
+        }
+    }
+    if let Some(plan) = refs.plan {
+        control.check()?;
+        let report = (|| {
+            let key = resolve(catalog, Some(plan), None)?;
+            let bytes = read_resource(source, &key, control, lbp_level::plan::MAX_INPUT)?;
+            lbp_level::read_plan(&bytes, lbp_level::Limits::default(), &|| {
+                control.check().is_err()
+            })
+            .map_err(|e| format!("plan wrapper: {e}"))
+        })();
+        control.check()?;
+        match report {
+            Ok(r) if r.stop.is_none() => bd::add_backdrop_plan(
+                scene,
+                &mut counts,
+                &r.things,
+                world,
+                thing,
+                |src| {
+                    control.check()?;
+                    let key = match src {
+                        MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
+                        MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
+                        _ => return Err("Invalid: plan mesh source".into()),
+                    };
+                    let mesh =
+                        load_mesh_groups_with_options(source, catalog, &key, control, options)?;
+                    charge(retained(&mesh))?;
+                    Ok(ScenePayload::Model(Box::new(mesh)))
+                },
+                payload_bounds,
+                |p| matches!(p, ScenePayload::Model(m) if grouped_neutral(m)),
+            ),
+            Ok(r) => counts.errors.push(format!(
+                "plan {plan:08x} not read: {:?} ({} Things before the stop)",
+                r.stop,
+                r.things.len()
+            )),
+            Err(e) => counts.errors.push(format!("plan {plan:08x}: {e}")),
+        }
+    }
+    scene.counts.backdrop = counts;
+    Ok(())
 }
 
 #[cfg(test)]

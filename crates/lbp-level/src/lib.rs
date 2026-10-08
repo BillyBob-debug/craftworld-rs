@@ -8,11 +8,13 @@
 //! implementation from specification notes; no community reader code copied.
 pub mod level;
 pub mod parts;
+pub mod plan;
 pub mod serial;
 pub mod shape_mesh;
 pub mod thing;
 
 pub use level::{read, read_payload, LevelReport};
+pub use plan::{read_plan, read_plan_payload, PlanReport};
 pub use serial::{Limits, Revision, Stop};
 pub use shape_mesh::{extrude, extrude_thing, ShapeMesh, ShapeReject};
 
