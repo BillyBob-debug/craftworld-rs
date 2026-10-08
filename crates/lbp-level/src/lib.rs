@@ -3,8 +3,9 @@
 //!
 //! Layers (docs/level-research.md items): `serial` = L3 serializer core, `thing` = L4
 //! Thing header and part flags, `parts` = L5/L6 part readers and the PWorld tail, `level` =
-//! RLevel entry (Lw), `shape_mesh` = SHAPE extrusion v1 (Lx, D114, renderer-independent),
-//! `bevel` = RBevel reader (Lv, D122) used by the opt-in bevelled extrusion (Ly, D122).
+//! RLevel entry (Lw), `slots` = U4 slot/pin/palette/pack readers, `shape_mesh` = SHAPE
+//! extrusion v1 (Lx, D114, renderer-independent), `bevel` = RBevel reader (Lv, D122) used
+//! by the opt-in bevelled extrusion (Ly, D122).
 //! Rules, evidence labels and limits: docs/d107-level-reader.md. Independent
 //! implementation from specification notes; no community reader code copied.
 pub mod bevel;
@@ -13,6 +14,7 @@ pub mod parts;
 pub mod plan;
 pub mod serial;
 pub mod shape_mesh;
+pub mod slots;
 pub mod thing;
 
 pub use level::{read, read_payload, LevelReport};
