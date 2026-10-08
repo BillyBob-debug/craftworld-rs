@@ -206,6 +206,11 @@ fn complete_geometry_tail_traversal_and_primitive_ranges() {
         let g = lbp_mesh::decode_geometry(&b, || false).unwrap();
         assert_eq!(g.triangles, [[0, 1, 2]]);
         assert_eq!(g.metadata.bone_count, 1);
+        assert_eq!(g.skeleton.bones.len(), 1);
+        assert_eq!(
+            g.skeleton.bones[0].skin_pose_mask,
+            if modern { 0 } else { u16::MAX }
+        );
         assert_eq!(g.metadata.unparsed_after_geometry, 4);
         assert_eq!(g.metadata.primitives[0].region, 7);
         for n in prefix_end..b.len() - 8 {

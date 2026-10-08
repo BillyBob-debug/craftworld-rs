@@ -213,4 +213,6 @@ fn prefix(
 }
 
 mod geometry;
+mod skeleton;
 pub use geometry::{decode_geometry, Geometry, GeometryMetadata, Primitive};
+pub use skeleton::{anim_hash, Bone, ShapeInfo, ShapeVertex, Skeleton, SkeletonCheck, MAX_BONES};

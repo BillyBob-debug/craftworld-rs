@@ -596,6 +596,7 @@ mod tests {
                 positions: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
                 triangles: vec![[0, 1, 2]],
                 primitive_triangles: std::iter::once(0..1).collect(),
+                skeleton: Default::default(),
             }),
             ..Default::default()
         }
