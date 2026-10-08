@@ -796,6 +796,40 @@ fn test_script_checks_reach_the_world_through_construct() {
 }
 
 #[test]
+fn array_resize_after_clear_fills_with_the_element_default() {
+    let mut b = Builder::new();
+    let ints = b.ty(OBJ, "int[]", None, INT);
+    let s = b.build(
+        "Arrays",
+        None,
+        vec![func(
+            "Run",
+            &[],
+            vec![
+                hi(0x03, 4, 0),              // r4 = 0 (size)
+                i(0x9c, 0, 8, 4, ints),      // r8 = new int[0]
+                hi(0x03, 12, 5),             // r12 = 5
+                i(0x9e, INT, 12, 8, 0xffff), // append r12
+                i(0xa1, INT, 0, 8, 0),       // clear r8
+                hi(0x03, 16, 3),             // r16 = 3
+                i(0xb6, INT, 0, 8, 16),      // resize r8 to 3
+                hi(0x03, 20, 2),             // r20 = 2
+                i(0x99, INT, 24, 8, 20),     // r24 = r8[2]
+                i(0x3b, 1, 28, 24, 4),       // r28 = r24 == r4 (EQi)
+                i(0xa5, 1, 0, 28, 0),        // RETURN r28
+            ],
+        )],
+    );
+    let mut vm = Vm::default();
+    let c = vm.load(s, None);
+    let mut budget = 100;
+    assert_eq!(
+        vm.call(&mut TestHost::default(), c, "Run", &[], &mut budget),
+        Ok(Value::Bool(true))
+    );
+}
+
+#[test]
 fn array_insert_clamps_the_index() {
     let mut b = Builder::new();
     let ints = b.ty(OBJ, "int[]", None, INT);

@@ -836,14 +836,15 @@ impl Vm {
                         .ok_or(Fault::Index {
                             pc,
                             what: "element",
-                        })?
+                        })
+                        .map(|v| typed(v, ty))?
                     };
                     set!(r16(16), v);
                 }
                 Class::SetElement => {
                     let o = get!(r16(32));
                     let index = get!(r16(48));
-                    let src = get!(r16(16));
+                    let src = typed(get!(r16(16)), ty);
                     let Value::Object(Some(id)) = o else {
                         return Err(if o == Value::Object(None) {
                             Fault::NullObject { pc }
@@ -893,7 +894,7 @@ impl Vm {
                             let n = idx(&index)
                                 .filter(|&n| n <= MAX_ARRAY_LEN)
                                 .ok_or(Fault::Heap)?;
-                            let fill = a.first().map_or(Value::Void, zero_like);
+                            let fill = typed(a.first().map_or(Value::Void, zero_like), ty);
                             a.resize(n, fill);
                         }
                         0xb7 => {} // ARRAY_RESERVE: capacity hint only
@@ -1184,6 +1185,17 @@ fn array_ref<'a>(
         },
         Value::Object(None) => Err(Some(Fault::NullObject { pc })),
         _ => Err(None),
+    }
+}
+
+/// Array elements are zeroed storage of the instruction's machine type (INFERRED: the
+/// array instructions carry the element type, e.g. `GET_ELEMENT t=3` on an int array; the
+/// D146 TestArray run read a Void element back after an `EQi`). A Void element, value
+/// written or resize fill becomes that type's default.
+fn typed(v: Value, ty: u8) -> Value {
+    match v {
+        Value::Void => Value::default_for(ty),
+        v => v,
     }
 }
 
