@@ -664,8 +664,8 @@ mod tests {
         let (derived, p) = project_instance_color(&original, color()).unwrap();
         let p = p.unwrap();
         assert!(p.folded_root.is_none() && p.folded_operand.is_none());
-        // The plain animation-base selector is unchanged for a static COLOR tint.
-        assert!(crate::select_diffuse_with_animation_base(&derived, true).is_err());
+        // D102: the plain animation-base selector also takes one animated sample × COLOR.
+        assert!(crate::select_diffuse_with_animation_base(&derived, true).is_ok());
         assert!(crate::select_instance_diffuse(&derived, &p, false).is_err());
         let s = crate::select_instance_diffuse(&derived, &p, true).unwrap();
         assert_eq!(s.tint, color());
@@ -677,7 +677,9 @@ mod tests {
         let mut plain = original.clone();
         plain.boxes[2] = node(3);
         assert!(project_instance_color(&plain, color()).unwrap().1.is_none());
-        assert!(crate::select_diffuse_with_animation_base(&plain, true).is_err());
+        let s = crate::select_diffuse_with_animation_base(&plain, true).unwrap();
+        assert_eq!((s.sample_index, s.color_index), (3, Some(2)));
+        assert!(crate::select_diffuse(&plain).is_err());
         // Rejected: animated MULTIPLY; static sampler stays on the existing route.
         let mut animated_root = original.clone();
         animate(&mut animated_root, 1);
@@ -775,7 +777,7 @@ mod tests {
         animate(&mut moving, 5);
         let (d, q) = project_instance_color(&moving, color()).unwrap();
         let q = q.unwrap();
-        assert!(crate::select_diffuse_with_animation_base(&d, true).is_err());
+        assert!(crate::select_diffuse_with_animation_base(&d, true).is_ok());
         let s = crate::select_instance_diffuse(&d, &q, true).unwrap();
         assert_eq!(s.color_index, Some(2));
         assert!(s.animation_base.is_some());

@@ -43,6 +43,39 @@ impl AnimatedLeaves {
     }
 }
 
+/// Exactly one animated texture leaf × one COLOR under the root MULTIPLY: no further
+/// leaf, nested product or MIX/BLEND/ADD/tree/sampler-scale state. D88 accepts this
+/// shape with an instance tint; D102 also with a plain static COLOR.
+pub(crate) fn single_tinted_leaf(s: &crate::DiffuseSelection) -> bool {
+    s.animation_base.is_some()
+        && s.animation_base_more == [None; 3]
+        && s.multiply_index.is_some()
+        && s.color_index.is_some()
+        && s.second_sample.is_none()
+        && s.third_sample.is_none()
+        && s.fourth_sample.is_none()
+        && s.inner_multiply_index.is_none()
+        && s.deep_multiply_index.is_none()
+        && s.blend.is_none()
+        && s.blend_mask.is_none()
+        && s.texture_blend.is_none()
+        && s.alpha_mix.is_none()
+        && s.texture_alpha_mix.is_none()
+        && s.texture_add.is_none()
+        && s.product_tree.is_none()
+        && s.sampler_scale.is_none()
+}
+
+/// Scope of the animation-base product search: D78/D92 products of two or more
+/// texture samples, and D102 one animated texture × static COLOR.
+pub(crate) fn product_scope(s: crate::DiffuseSelection) -> Result<crate::DiffuseSelection, String> {
+    if s.animation_base.is_some() && (s.second_sample.is_some() || single_tinted_leaf(&s)) {
+        Ok(s)
+    } else {
+        Err("Unsupported: animation base product needs 2+ textures and an animated sampler".into())
+    }
+}
+
 pub(crate) fn select(
     graph: &lbp_resource::material::GraphMetadata,
 ) -> Result<crate::DiffuseSelection, String> {
@@ -127,8 +160,10 @@ pub(crate) fn sampler(
         let name = a.name_hex.as_bytes();
         let mask = a.components_raw;
         let lanes = mask.count_ones() as usize;
+        // D102 (docs/d102-sampler-rest.md): a matrix row reads the whole base `.xyz`
+        // whichever of its lanes are keyed, so any nonempty XYZ subset is accepted.
         let valid_mask = if sample.subtype_raw == 1 {
-            mask == 7
+            (1..=7).contains(&mask)
         } else {
             (1..=15).contains(&mask)
         };
@@ -436,6 +471,72 @@ mod tests {
         let mut moving_root = g.clone();
         scale_offset(&mut moving_root, 3, "643100", [1., 1., 0., 0.]);
         assert!(select(&moving_root, true).is_err());
+    }
+
+    #[test]
+    fn d102_partial_row_masks_and_single_animated_tint() {
+        // Direct subtype-1 sampler whose rows key only Z (mask 4): base rows used whole.
+        let mut direct = graph(&[0, 1], vec![wire(1, 0, 0)]);
+        matrix(&mut direct, 1, ["623100", "633100"]);
+        for a in &mut direct.boxes[1].animations {
+            (
+                a.components_raw,
+                a.component_value_count,
+                a.derived_key_count,
+            ) = (4, 5, 5);
+        }
+        assert!(crate::select_diffuse(&direct).is_err());
+        let s = select(&direct, true).unwrap();
+        let rows = s.animation_base.unwrap().row_bits;
+        assert_eq!(
+            s.uv_transform.bits(),
+            [rows[0][0], rows[0][1], rows[0][2], rows[1][0], rows[1][1], rows[1][2]]
+        );
+        verify_global(&direct, &mut s.clone(), &globals(&direct)).unwrap();
+        // Masks outside XYZ, or an empty mask, stay refused for matrix rows.
+        for bad in [0u8, 8, 0x0c, 0x87] {
+            let mut g = direct.clone();
+            g.boxes[1].animations[1].components_raw = bad;
+            assert!(select(&g, true).is_err(), "mask {bad}");
+        }
+        // One animated sample × static COLOR (either port order) under the opt-in.
+        for (tex_port, color_port) in [(0, 1), (1, 0)] {
+            let mut tinted = graph(
+                &[0, 1, 3, 10],
+                vec![wire(1, 3, tex_port), wire(2, 3, color_port), wire(3, 0, 0)],
+            );
+            scale_offset(&mut tinted, 1, "613100", [2., 2., 0.5, 0.]);
+            assert!(crate::select_diffuse(&tinted).is_err());
+            assert!(select(&tinted, false).is_err());
+            let s = select(&tinted, true).unwrap();
+            assert_eq!((s.sample_index, s.color_index), (1, Some(2)));
+            assert_eq!(s.multiply_index, Some(3));
+            assert_eq!(s.tint.values(), [0.5, 1., 0.25, 1.]);
+            assert!(super::single_tinted_leaf(&s) && s.second_sample.is_none());
+            // The rejections of the per-leaf rule are unchanged.
+            let mut wired = tinted.clone();
+            wired.wires.push(wire(2, 1, 1));
+            assert!(select(&wired, true).is_err());
+            let mut uv2 = tinted.clone();
+            uv2.boxes[1].parameters_raw[4] = 2;
+            assert!(select(&uv2, true).is_err());
+            let mut moving_root = tinted.clone();
+            scale_offset(&mut moving_root, 3, "643100", [1., 1., 0., 0.]);
+            assert!(select(&moving_root, true).is_err());
+        }
+        // Animated sample × COLOR × COLOR is a D99 product tree, not this route.
+        let mut chain = graph(
+            &[0, 1, 3, 10, 3, 10],
+            vec![
+                wire(1, 3, 0),
+                wire(2, 3, 1),
+                wire(3, 5, 0),
+                wire(4, 5, 1),
+                wire(5, 0, 0),
+            ],
+        );
+        scale_offset(&mut chain, 1, "613100", [2., 2., 0.5, 0.]);
+        assert!(!select(&chain, true).is_ok_and(|s| super::single_tinted_leaf(&s)));
     }
 
     #[test]
