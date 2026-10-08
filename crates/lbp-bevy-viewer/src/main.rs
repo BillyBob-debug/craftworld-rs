@@ -33,7 +33,7 @@ struct Completed {
     guid: String,
     level: Option<Result<LevelLoaded, String>>,
 }
-type LevelScene = level_scene::LevelScene<lbp_preview::GroupedMesh>;
+type LevelScene = level_scene::LevelScene<level_scene::ScenePayload>;
 struct LevelLoaded {
     scene: LevelScene,
     identity: String,
@@ -132,61 +132,65 @@ impl Viewer {
         let spawned = std::thread::Builder::new()
             .stack_size(level_scene::LEVEL_STACK_BYTES)
             .spawn(move || {
-            let run = || {
-                let (catalog, source) = match cached {
-                    Some(context) => context,
-                    None => {
-                        let catalog =
-                            Arc::new(lbp_catalog::load(&PathBuf::from(&paths.0), &worker)?);
-                        let source = Arc::new(AttachedSource::attach(
-                            &PathBuf::from(&paths.1),
+                let run = || {
+                    let (catalog, source) = match cached {
+                        Some(context) => context,
+                        None => {
+                            let catalog =
+                                Arc::new(lbp_catalog::load(&PathBuf::from(&paths.0), &worker)?);
+                            let source = Arc::new(AttachedSource::attach(
+                                &PathBuf::from(&paths.1),
+                                &catalog,
+                                &worker,
+                            )?);
+                            (catalog, source)
+                        }
+                    };
+                    // Attachment succeeds independently of a particular preview failure.
+                    // The catalog remains browsable even when the initial GUID is unsupported.
+                    let mut identity = String::new();
+                    let preview = (|| {
+                        if guid.trim().is_empty() {
+                            return Ok(None);
+                        }
+                        let number = u32::from_str_radix(guid.trim(), 16)
+                            .map_err(|_| "GUID must be eight hexadecimal digits")?;
+                        if guid.trim().len() != 8 {
+                            return Err("GUID must be eight hexadecimal digits".into());
+                        }
+                        let key = lbp_preview::resolve(&catalog, Some(number), None)?;
+                        identity = catalog.by_guid[&format!("{number:08x}")]
+                            .iter()
+                            .map(|&i| catalog.snapshot.resources[i].map_row.path.as_str())
+                            .collect::<Vec<_>>()
+                            .join(" | ");
+                        lbp_preview::load_mesh_groups_with_options(
+                            &source, &catalog, &key, &worker, options,
+                        )
+                        .map(Some)
+                    })();
+                    let level = level_target.map(|(level_guid, level_path)| {
+                        let (key, identity) = level_scene::resolve_level(
                             &catalog,
-                            &worker,
-                        )?);
-                        (catalog, source)
-                    }
+                            level_guid,
+                            level_path.as_deref(),
+                        )?;
+                        let scene = level_scene::load_level_scene(
+                            &source, &catalog, &key, &worker, options,
+                        )?;
+                        Ok(LevelLoaded { scene, identity })
+                    });
+                    worker.check()?;
+                    Ok(Completed {
+                        context: (catalog, source),
+                        preview,
+                        identity,
+                        guid,
+                        level,
+                    })
                 };
-                // Attachment succeeds independently of a particular preview failure.
-                // The catalog remains browsable even when the initial GUID is unsupported.
-                let mut identity = String::new();
-                let preview = (|| {
-                    if guid.trim().is_empty() {
-                        return Ok(None);
-                    }
-                    let number = u32::from_str_radix(guid.trim(), 16)
-                        .map_err(|_| "GUID must be eight hexadecimal digits")?;
-                    if guid.trim().len() != 8 {
-                        return Err("GUID must be eight hexadecimal digits".into());
-                    }
-                    let key = lbp_preview::resolve(&catalog, Some(number), None)?;
-                    identity = catalog.by_guid[&format!("{number:08x}")]
-                        .iter()
-                        .map(|&i| catalog.snapshot.resources[i].map_row.path.as_str())
-                        .collect::<Vec<_>>()
-                        .join(" | ");
-                    lbp_preview::load_mesh_groups_with_options(
-                        &source, &catalog, &key, &worker, options,
-                    )
-                    .map(Some)
-                })();
-                let level = level_target.map(|(level_guid, level_path)| {
-                    let (key, identity) =
-                        level_scene::resolve_level(&catalog, level_guid, level_path.as_deref())?;
-                    let scene =
-                        level_scene::load_level_scene(&source, &catalog, &key, &worker, options)?;
-                    Ok(LevelLoaded { scene, identity })
-                });
-                worker.check()?;
-                Ok(Completed {
-                    context: (catalog, source),
-                    preview,
-                    identity,
-                    guid,
-                    level,
-                })
-            };
-            let _ = tx.send(run());
-        });
+                let _ = tx.send(run());
+            });
         if let Err(e) = spawned {
             self.status = format!("Load failed: worker thread: {e}");
             return;
@@ -651,6 +655,16 @@ fn prepare(
             range.len()
         ));
     }
+    prepare_buckets(&g.positions, buckets, normalize, evidence, details)
+}
+/// Material buckets over one position array (model mesh or merged shape batch).
+fn prepare_buckets(
+    positions: &[[f32; 3]],
+    buckets: Vec<adapter::Bucket<lbp_preview::MaterialAsset>>,
+    normalize: bool,
+    evidence: &mut browser::PreviewEvidence,
+    details: &mut Vec<String>,
+) -> Result<Vec<Prepared>, String> {
     // Prepare all adapters before allocating GPU assets. Shared full-mesh bounds
     // keep different groups aligned; supported groups share one draw per binding.
     let mut prepared = Vec::new();
@@ -664,7 +678,7 @@ fn prepare(
             adapter::mesh_local
         };
         let mut mesh = match build(
-            &g.positions,
+            positions,
             &triangles,
             asset.as_ref().and_then(|a| a.sampling_uv()),
         ) {
@@ -809,7 +823,19 @@ fn plan_level(scene: &LevelScene) -> Result<LevelPlan, String> {
         .map(|m| {
             let mut evidence = browser::PreviewEvidence::default();
             let mut details = Vec::new();
-            prepare(&m.payload, false, &mut evidence, &mut details)
+            match &m.payload {
+                level_scene::ScenePayload::Model(g) => {
+                    prepare(g, false, &mut evidence, &mut details)
+                }
+                // World-space batch; a material that did not select draws neutral grey.
+                level_scene::ScenePayload::Shapes { batch, material } => prepare_buckets(
+                    &batch.positions,
+                    vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
+                    false,
+                    &mut evidence,
+                    &mut details,
+                ),
+            }
         })
         .collect();
     let buckets: Vec<Result<usize, String>> = prepared
@@ -836,7 +862,8 @@ fn level_home(lo: Vec3, hi: Vec3) -> Result<(Mat4, Orbit), String> {
     if !span.is_finite() || span <= 0. {
         return Err("Unavailable: zero-size or nonfinite level bounds".into());
     }
-    let normalize = Mat4::from_scale(Vec3::splat(1. / span)) * Mat4::from_translation(-(lo + hi) * 0.5);
+    let normalize =
+        Mat4::from_scale(Vec3::splat(1. / span)) * Mat4::from_translation(-(lo + hi) * 0.5);
     let unit = size / span;
     let tan = (PerspectiveProjection::default().fov * 0.5).tan();
     let aspect = 1280. / 800.;
@@ -866,19 +893,26 @@ fn place_items<T>(
     let mut placed = Vec::new();
     let mut entities = 0usize;
     let mut sheared = 0usize;
+    let (mut model_things, mut shape_things) = (0usize, 0usize);
     let mut skipped = std::collections::BTreeMap::<String, usize>::new();
     for item in &scene.items {
+        let things = item.shapes.max(1);
         let count = match buckets.get(item.mesh) {
             Some(Ok(n)) => *n,
             Some(Err(e)) => {
-                *skipped.entry(e.clone()).or_default() += 1;
+                *skipped.entry(e.clone()).or_default() += things;
                 continue;
             }
             None => {
-                *skipped.entry("Invalid: mesh index".into()).or_default() += 1;
+                *skipped.entry("Invalid: mesh index".into()).or_default() += things;
                 continue;
             }
         };
+        if item.shapes == 0 {
+            model_things += 1;
+        } else {
+            shape_things += item.shapes;
+        }
         let matrix = normalize * Mat4::from_cols_array(&item.world);
         let transform = Transform::from_matrix(matrix);
         if !transform.to_matrix().abs_diff_eq(matrix, 1e-4) {
@@ -887,12 +921,11 @@ fn place_items<T>(
         entities += count;
         placed.push((item.mesh, transform));
     }
-    let mut lines = vec![format!(
-        "Drawn in viewer: {} Things ({entities} draw entities)",
-        placed.len()
-    )];
+    let mut lines = vec![
+        format!("Drawn in viewer: {model_things} RENDER_MESH Things, {shape_things} shape Things ({entities} draw entities)"),
+    ];
     for (reason, n) in &skipped {
-        lines.push(format!("  display-skipped {n}: {reason}"));
+        lines.push(format!("  display-skipped {n} Things: {reason}"));
     }
     lines.push(format!(
         "Shear dropped by TRS transform: {sheared} Things (placement approximate)"
@@ -958,11 +991,19 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             let mut lines = vec![format!("Level: {identity}")];
             lines.extend(plan.lines);
             for m in &scene.meshes {
-                let users = scene.items.iter().filter(|i| std::ptr::eq(&scene.meshes[i.mesh], m)).count();
+                let users = scene
+                    .items
+                    .iter()
+                    .filter(|i| std::ptr::eq(&scene.meshes[i.mesh], m))
+                    .count();
                 lines.push(format!(
                     "  mesh {}: {users} instances{}",
                     m.source.label(),
-                    if m.neutral_groups { ", neutral groups" } else { "" }
+                    if m.neutral_groups {
+                        ", neutral groups"
+                    } else {
+                        ""
+                    }
                 ));
             }
             Ok(lines)
@@ -1067,7 +1108,8 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
                 if v.level.lines.is_empty() {
                     ui.small("Loading or failed; see status.");
                 }
-                ui.small("Static bind pose at each Thing's POS matrix. SHAPE / GENERATED_MESH, decorations, bones and animation not drawn.");
+                ui.small("Models: static bind pose at each Thing's POS matrix; bones, animation and decorations not applied.");
+                ui.small(format!("Shapes: {}.", level_scene::SHAPE_PREVIEW_LABEL));
             });
     }
     Ok(())
@@ -1398,6 +1440,53 @@ mod tests {
             app.world().get::<Window>(window).unwrap().position,
             bevy::window::WindowPosition::At(IVec2::new(20, 30))
         );
+    }
+    #[test]
+    fn level_placement_normalizes_frames_side_on_and_counts_display_skips() {
+        let mut scene = level_scene::LevelScene::<u8>::default();
+        for (source, bounds) in [
+            (
+                level_scene::MeshSource::Guid(1),
+                Some([[-1., -1., -1.], [1., 1., 1.]]),
+            ),
+            (level_scene::MeshSource::Guid(2), Some([[0.; 3], [1.; 3]])),
+        ] {
+            scene.meshes.push(level_scene::SceneMesh {
+                source,
+                payload: 0,
+                bounds,
+                neutral_groups: false,
+            });
+        }
+        let at = |x: f32| Mat4::from_translation(Vec3::new(x, 0., 0.)).to_cols_array();
+        for (mesh, x, shapes) in [(0, 0., 0), (0, 98., 0), (1, 500., 3)] {
+            scene
+                .push_item(level_scene::SceneItem {
+                    mesh,
+                    world: at(x),
+                    thing: 0,
+                    uid: None,
+                    shapes,
+                })
+                .unwrap();
+        }
+        let (placed, home, lines) =
+            place_items(&scene, &[Ok(2), Err("Unavailable: test".into())]).unwrap();
+        assert_eq!(placed.len(), 2);
+        // Displayed bounds x -1..99 -> unit span centred at the origin.
+        let a = placed[0].1.translation;
+        let b = placed[1].1.translation;
+        assert!((a.x + 0.49).abs() < 1e-5 && (b.x - 0.49).abs() < 1e-5);
+        assert!((placed[0].1.scale - Vec3::splat(0.01)).length() < 1e-6);
+        assert_eq!((home.yaw, home.pitch, home.target), (0., 0., Vec3::ZERO));
+        assert!(home.distance > 0.15 && home.distance < 2.);
+        assert!(lines[0].starts_with(
+            "Drawn in viewer: 2 RENDER_MESH Things, 0 shape Things (4 draw entities)"
+        ));
+        assert!(lines
+            .iter()
+            .any(|l| l == "  display-skipped 3 Things: Unavailable: test"));
+        assert!(level_home(Vec3::ZERO, Vec3::ZERO).is_err());
     }
     #[test]
     fn dropping_replaced_job_cancels_and_disconnects_stale_result() {

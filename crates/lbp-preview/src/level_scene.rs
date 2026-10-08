@@ -7,21 +7,26 @@
 //! counted by reason. Placement is the Thing's own POS world matrix (static bind pose):
 //! bones, animation, decorations, stickers and material overrides are not applied.
 //!
-//! SHAPE / GENERATED_MESH Things are counted but not drawn yet. A later shape extrusion
-//! module adds its meshes as further `SceneMesh` entries with `MeshSource::Shape` and
-//! pushes items the same way (`LevelScene::push_item`); the renderer consumes only
-//! `meshes` + `items` and never needs to know where a mesh came from.
+//! SHAPE Things with a visible GENERATED_MESH are extruded by D114
+//! (`lbp_level::shape_mesh`, world-space geometry, preview approximation) and added by
+//! `add_shapes`: shapes sharing one gfx material are merged into world-space batches
+//! (`MeshSource::Shapes`, identity item matrix) so each material loads once per batch
+//! through the same diffuse route as model meshes, with the generated UV0 as input.
+//! The renderer consumes only `meshes` + `items`.
 //!
 //! No GUI or GPU types. The level reader recurses natively: call `load_level_scene` on
 //! a thread with at least `LEVEL_STACK_BYTES` of stack.
-use crate::{load_mesh_groups_with_options, resolve, GroupedMesh, PreviewOptions};
+use crate::{load_mesh_groups_with_options, resolve, GroupedMesh, MaterialAsset, PreviewOptions};
 use lbp_catalog::{
     attachment::{AttachedSource, LocationKey},
     Catalog, LoadControl,
 };
+use lbp_level::shape_mesh::{self, ShapeMesh};
 use lbp_level::thing::ThingRecord;
 use std::collections::{BTreeMap, HashMap};
 
+/// D114 shape label, re-exported so renderers need not depend on `lbp-level`.
+pub const SHAPE_PREVIEW_LABEL: &str = shape_mesh::PREVIEW_LABEL;
 /// Worker stack for `load_level_scene` (the D107 examples use the same size).
 pub const LEVEL_STACK_BYTES: usize = 512 * 1024 * 1024;
 /// Distinct mesh references loaded per level.
@@ -31,6 +36,12 @@ pub const MAX_LEVEL_ITEMS: usize = 100_000;
 /// Aggregate retained material bytes over all loaded meshes of one level. Each mesh keeps
 /// its own D66 limits (64 material loads, 640 MiB); this caps the sum.
 pub const MAX_LEVEL_RETAINED_BYTES: usize = 1536 * 1024 * 1024;
+/// Shape Things extruded per level and output vertices over all shapes.
+pub const MAX_LEVEL_SHAPES: usize = 50_000;
+pub const MAX_LEVEL_SHAPE_VERTICES: usize = 8_000_000;
+/// Per shape batch: the display adapter's per-mesh limits (positions / triangles).
+pub const MAX_BATCH_VERTICES: usize = 100_000;
+pub const MAX_BATCH_TRIANGLES: usize = 50_000;
 const PAGE: usize = 4096;
 
 /// Where a scene mesh comes from. Shapes (D114) will add a variant here.
@@ -40,6 +51,9 @@ pub enum MeshSource {
     Guid(u32),
     /// Model mesh named only by SHA-1 (lowercase hex).
     Sha1(String),
+    /// Merged world-space shape extrusions sharing one gfx material GUID (None = no
+    /// GUID); `batch` numbers the chunks of that material.
+    Shapes { material: Option<u32>, batch: usize },
 }
 
 impl MeshSource {
@@ -47,6 +61,10 @@ impl MeshSource {
         match self {
             Self::Guid(g) => format!("{g:08x}"),
             Self::Sha1(h) => format!("sha1 {h}"),
+            Self::Shapes { material, batch } => format!(
+                "shapes gfx {} batch {batch}",
+                material.map_or("none".into(), |g| format!("{g:08x}"))
+            ),
         }
     }
 }
@@ -70,6 +88,19 @@ pub struct SceneItem {
     /// Thing index in reader (tag) order and its UID.
     pub thing: usize,
     pub uid: Option<i32>,
+    /// Shape Things merged into this item (0 for a model item).
+    pub shapes: usize,
+}
+
+/// Merged world-space shape geometry for one gfx material (D114 extrusions).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ShapeBatch {
+    pub material: Option<u32>,
+    pub positions: Vec<[f32; 3]>,
+    pub uv0: Vec<[f32; 2]>,
+    pub triangles: Vec<[u32; 3]>,
+    /// Thing indices of the merged shapes.
+    pub things: Vec<usize>,
 }
 
 /// Counting units: Things (tag-table entries), items (= drawn Things), distinct mesh
@@ -80,15 +111,24 @@ pub struct SceneCounts {
     pub with_render_mesh: usize,
     pub drawn: usize,
     pub skipped: BTreeMap<String, usize>,
-    /// Drawn Things whose POS names a bone owner (placed by own POS; approximation).
+    /// Drawn Things whose POS names another Thing as bone owner (placed by own POS).
     pub drawn_bone_attached: usize,
     /// Drawn Things whose mesh has neutral (unsupported material) groups.
     pub drawn_with_neutral_groups: usize,
     pub meshes_loaded: usize,
     pub meshes_failed: usize,
-    /// Things with SHAPE / GENERATED_MESH (not drawn in D113) and DECORATIONS entries.
-    pub shapes_not_drawn: usize,
-    pub generated_meshes_not_drawn: usize,
+    /// Shape Things (SHAPE part present) and their extrusion outcomes.
+    pub shapes_total: usize,
+    pub shapes_extruded: usize,
+    pub shapes_placed: usize,
+    /// Selection outcomes (no GENERATED_MESH, edit-only, no POS): not drawn by design.
+    pub shapes_not_selected: BTreeMap<String, usize>,
+    /// Geometry rejections from the extrusion (by stable reason key) and budgets.
+    pub shapes_rejected: BTreeMap<String, usize>,
+    /// Placed shapes whose gfx material did not select (flat neutral colour), by reason.
+    pub shapes_material_fallback: BTreeMap<String, usize>,
+    pub shape_batches: usize,
+    /// DECORATIONS entries (not drawn).
     pub decorations_not_drawn: usize,
     /// Reader stop (None = whole level read).
     pub reader_stop: Option<String>,
@@ -104,10 +144,7 @@ impl SceneCounts {
             format!("Things total: {} (tag-table Things)", self.things_total),
             format!("Things with RENDER_MESH: {}", self.with_render_mesh),
             format!("Placed (scene items): {} Things", self.drawn),
-            format!(
-                "Skipped: {} Things with RENDER_MESH",
-                self.skipped_total()
-            ),
+            format!("Skipped: {} Things with RENDER_MESH", self.skipped_total()),
         ];
         for (reason, n) in &self.skipped {
             out.push(format!("  skipped {n}: {reason}"));
@@ -125,8 +162,28 @@ impl SceneCounts {
             self.drawn_bone_attached
         ));
         out.push(format!(
-            "Not drawn yet: {} SHAPE Things, {} GENERATED_MESH Things, {} decorations",
-            self.shapes_not_drawn, self.generated_meshes_not_drawn, self.decorations_not_drawn
+            "Shapes: {} SHAPE Things; {} extruded; {} placed in {} material batches",
+            self.shapes_total, self.shapes_extruded, self.shapes_placed, self.shape_batches
+        ));
+        for (reason, n) in &self.shapes_not_selected {
+            out.push(format!("  shape not selected {n}: {reason}"));
+        }
+        for (reason, n) in &self.shapes_rejected {
+            out.push(format!("  shape rejected {n}: {reason}"));
+        }
+        let fallback: usize = self.shapes_material_fallback.values().sum();
+        out.push(format!(
+            "Shapes with flat fallback colour (gfx material not selected): {fallback} Things"
+        ));
+        for (reason, n) in &self.shapes_material_fallback {
+            out.push(format!("  fallback {n}: {reason}"));
+        }
+        if self.shapes_placed > 0 {
+            out.push(format!("Shapes are a {}", shape_mesh::PREVIEW_LABEL));
+        }
+        out.push(format!(
+            "Not drawn: {} decorations (DECORATIONS entries)",
+            self.decorations_not_drawn
         ));
         out.push(match &self.reader_stop {
             None => "Level reader: complete".into(),
@@ -216,7 +273,7 @@ pub fn world_matrix_check(m: &[f32; 16]) -> Result<(), String> {
     let a = m.map(f64::from);
     let det = a[0] * (a[5] * a[10] - a[9] * a[6]) - a[4] * (a[1] * a[10] - a[9] * a[2])
         + a[8] * (a[1] * a[6] - a[5] * a[2]);
-    if !(det.abs() > 1e-12) {
+    if det.is_nan() || det.abs() <= 1e-12 {
         return Err("non-invertible world matrix".into());
     }
     Ok(())
@@ -237,8 +294,6 @@ pub fn build_scene<T>(
     let skip = |c: &mut SceneCounts, reason: String| *c.skipped.entry(reason).or_default() += 1;
     for t in things {
         let c = &mut scene.counts;
-        c.shapes_not_drawn += usize::from(t.data.shape.is_some());
-        c.generated_meshes_not_drawn += usize::from(t.data.generated_mesh.is_some());
         c.decorations_not_drawn += t.data.decorations.len();
         let Some(rm) = &t.data.render_mesh else {
             continue;
@@ -307,16 +362,134 @@ pub fn build_scene<T>(
             continue;
         }
         c.drawn += 1;
-        c.drawn_bone_attached += usize::from(pos.bone_of.is_some());
+        c.drawn_bone_attached += usize::from(pos.bone_of.is_some_and(|b| b != t.index));
         c.drawn_with_neutral_groups += usize::from(scene.meshes[mesh].neutral_groups);
         scene.items.push(SceneItem {
             mesh,
             world: pos.world,
             thing: t.index,
             uid: t.uid,
+            shapes: 0,
         });
     }
     scene
+}
+
+/// Extrudes every SHAPE Thing (D114 selection rules) and adds the results as merged
+/// world-space batches per gfx material, in material-GUID order then Thing order.
+/// `wrap` turns a batch into the payload and reports whether its material selected.
+pub fn add_shapes<T>(
+    scene: &mut LevelScene<T>,
+    things: &[ThingRecord],
+    mut wrap: impl FnMut(ShapeBatch) -> (T, Result<(), String>),
+    local_bounds: impl Fn(&T) -> Option<[[f32; 3]; 2]>,
+) {
+    let mut groups: BTreeMap<Option<u32>, Vec<(usize, ShapeMesh)>> = BTreeMap::new();
+    let mut vertices = 0usize;
+    for t in things.iter().filter(|t| t.data.shape.is_some()) {
+        let c = &mut scene.counts;
+        c.shapes_total += 1;
+        if c.shapes_extruded >= MAX_LEVEL_SHAPES {
+            *c.shapes_rejected
+                .entry("level_shape_budget".into())
+                .or_default() += 1;
+            continue;
+        }
+        match shape_mesh::extrude_thing(t) {
+            Ok(m) => {
+                if vertices + m.positions.len() > MAX_LEVEL_SHAPE_VERTICES
+                    || m.positions.len() > MAX_BATCH_VERTICES
+                    || m.triangle_count() > MAX_BATCH_TRIANGLES
+                {
+                    *c.shapes_rejected
+                        .entry("level_shape_vertex_budget".into())
+                        .or_default() += 1;
+                    continue;
+                }
+                vertices += m.positions.len();
+                c.shapes_extruded += 1;
+                groups
+                    .entry(m.material_guid())
+                    .or_default()
+                    .push((t.index, m));
+            }
+            Err(r) if r.is_selection() => {
+                *c.shapes_not_selected.entry(r.reason().into()).or_default() += 1;
+            }
+            Err(r) => *c.shapes_rejected.entry(r.reason().into()).or_default() += 1,
+        }
+    }
+    for (material, shapes) in groups {
+        let mut batches = vec![ShapeBatch {
+            material,
+            ..Default::default()
+        }];
+        for (thing, m) in shapes {
+            let current = batches.last_mut().expect("one batch");
+            if current.positions.len() + m.positions.len() > MAX_BATCH_VERTICES
+                || current.triangles.len() + m.triangle_count() > MAX_BATCH_TRIANGLES
+            {
+                batches.push(ShapeBatch {
+                    material,
+                    ..Default::default()
+                });
+            }
+            let b = batches.last_mut().expect("one batch");
+            let base = b.positions.len() as u32;
+            b.positions.extend_from_slice(&m.positions);
+            b.uv0.extend_from_slice(&m.uv0);
+            b.triangles.extend(
+                m.indices
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .map(|t| t.map(|i| i + base)),
+            );
+            b.things.push(thing);
+        }
+        for (batch_index, batch) in batches.into_iter().enumerate() {
+            let n = batch.things.len();
+            let first = batch.things.first().copied().unwrap_or_default();
+            let (payload, selected) = wrap(batch);
+            let c = &mut scene.counts;
+            if let Err(e) = &selected {
+                *c.shapes_material_fallback.entry(e.clone()).or_default() += n;
+            }
+            if scene.items.len() >= MAX_LEVEL_ITEMS {
+                *c.shapes_rejected
+                    .entry("level_item_budget".into())
+                    .or_default() += n;
+                continue;
+            }
+            c.shapes_placed += n;
+            c.shape_batches += 1;
+            scene.meshes.push(SceneMesh {
+                source: MeshSource::Shapes {
+                    material,
+                    batch: batch_index,
+                },
+                bounds: local_bounds(&payload),
+                neutral_groups: selected.is_err(),
+                payload,
+            });
+            scene.items.push(SceneItem {
+                mesh: scene.meshes.len() - 1,
+                world: shape_mesh::IDENTITY,
+                thing: first,
+                uid: None,
+                shapes: n,
+            });
+        }
+    }
+}
+
+/// Real-data payload: a model mesh or a merged shape batch with its material outcome.
+pub enum ScenePayload {
+    Model(Box<GroupedMesh>),
+    Shapes {
+        batch: ShapeBatch,
+        material: Result<std::sync::Arc<MaterialAsset>, String>,
+    },
 }
 
 /// Resolves a level by GUID or by MAP path (exact, or a `/`-suffix of the stored path,
@@ -376,8 +549,12 @@ fn read_all(
     }
     let mut bytes = Vec::with_capacity(size);
     while bytes.len() < size {
-        let page =
-            source.read_hex_checked(key, bytes.len() as u64, (size - bytes.len()).min(PAGE), control)?;
+        let page = source.read_hex_checked(
+            key,
+            bytes.len() as u64,
+            (size - bytes.len()).min(PAGE),
+            control,
+        )?;
         if page.bytes.is_empty() {
             return Err("Invalid: truncated level read".into());
         }
@@ -387,9 +564,20 @@ fn read_all(
 }
 
 fn grouped_bounds(g: &GroupedMesh) -> Option<[[f32; 3]; 2]> {
+    points_bounds(&g.geometry.positions)
+}
+
+fn payload_bounds(p: &ScenePayload) -> Option<[[f32; 3]; 2]> {
+    match p {
+        ScenePayload::Model(g) => grouped_bounds(g),
+        ScenePayload::Shapes { batch, .. } => points_bounds(&batch.positions),
+    }
+}
+
+fn points_bounds(points: &[[f32; 3]]) -> Option<[[f32; 3]; 2]> {
     let mut lo = [f32::INFINITY; 3];
     let mut hi = [f32::NEG_INFINITY; 3];
-    for p in &g.geometry.positions {
+    for p in points {
         if p.iter().any(|v| !v.is_finite()) {
             return None;
         }
@@ -428,7 +616,7 @@ pub fn load_level_scene(
     level: &LocationKey,
     control: &LoadControl,
     options: PreviewOptions,
-) -> Result<LevelScene<GroupedMesh>, String> {
+) -> Result<LevelScene<ScenePayload>, String> {
     let bytes = read_all(source, level, control)?;
     // Default depth bound (256) fits the 512 MiB stack; deepest local level is 162.
     let limits = lbp_level::Limits::default();
@@ -445,6 +633,13 @@ pub fn load_level_scene(
         ));
     }
     let mut retained_total = 0usize;
+    let mut charge = |bytes: usize| -> Result<(), String> {
+        retained_total = retained_total
+            .checked_add(bytes)
+            .filter(|&t| t <= MAX_LEVEL_RETAINED_BYTES)
+            .ok_or("Unsupported: level material memory budget (1536 MiB retained)")?;
+        Ok(())
+    };
     let mut scene = build_scene(
         &report.things,
         |src| {
@@ -452,16 +647,42 @@ pub fn load_level_scene(
             let key = match src {
                 MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
                 MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
+                MeshSource::Shapes { .. } => return Err("Invalid: shape source".into()),
             };
             let mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
-            retained_total = retained_total
-                .checked_add(retained(&mesh))
-                .filter(|&t| t <= MAX_LEVEL_RETAINED_BYTES)
-                .ok_or("Unsupported: level material memory budget (1536 MiB retained)")?;
-            Ok(mesh)
+            charge(retained(&mesh))?;
+            Ok(ScenePayload::Model(Box::new(mesh)))
         },
-        grouped_bounds,
-        grouped_neutral,
+        payload_bounds,
+        |p| matches!(p, ScenePayload::Model(m) if grouped_neutral(m)),
+    );
+    control.check()?;
+    add_shapes(
+        &mut scene,
+        &report.things,
+        |batch| {
+            let material = (|| {
+                control.check()?;
+                let guid = batch
+                    .material
+                    .ok_or("Unsupported: GENERATED_MESH without gfx material GUID")?;
+                let key = resolve(catalog, Some(guid), None)?;
+                let asset = crate::linked::load_material(
+                    source,
+                    catalog,
+                    key,
+                    batch.positions.len(),
+                    crate::linked::UvInput::Generated(&batch.uv0),
+                    control,
+                    options,
+                )?;
+                charge(asset.retained_bytes())?;
+                Ok(std::sync::Arc::new(asset))
+            })();
+            let selected = material.as_ref().map(|_| ()).map_err(Clone::clone);
+            (ScenePayload::Shapes { batch, material }, selected)
+        },
+        payload_bounds,
     );
     control.check()?;
     source.check_stable()?;
@@ -472,7 +693,7 @@ pub fn load_level_scene(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lbp_level::parts::{PartData, Pos, RenderMesh};
+    use lbp_level::parts::{GeneratedMesh, PartData, Pos, RenderMesh, Shape, ShapeColor};
     use lbp_level::serial::Descriptor;
 
     fn identity_at(x: f32) -> [f32; 16] {
@@ -524,8 +745,10 @@ mod tests {
         nan[13] = f32::NAN;
         let mut flat = identity_at(0.);
         flat[10] = 0.;
-        let mut plain = ThingRecord::default();
-        plain.index = 7;
+        let plain = ThingRecord {
+            index: 7,
+            ..Default::default()
+        };
         let things = vec![
             thing(0, Some(0x10), Some(identity_at(0.))),
             thing(1, Some(0x10), Some(identity_at(10.))),
@@ -567,7 +790,10 @@ mod tests {
         assert_eq!(c.skipped_total(), 6);
         assert_eq!(c.skipped["mesh unavailable: Unresolved: GUID"], 2);
         assert_eq!(c.skipped["RENDER_MESH without mesh reference"], 1);
-        assert_eq!(c.skipped["no POS (joint/bone placement not implemented)"], 1);
+        assert_eq!(
+            c.skipped["no POS (joint/bone placement not implemented)"],
+            1
+        );
         assert_eq!(c.skipped["non-finite world matrix"], 1);
         assert_eq!(c.skipped["non-invertible world matrix"], 1);
         assert_eq!(scene.meshes.len(), 2);
@@ -575,11 +801,11 @@ mod tests {
             scene.items.iter().map(|i| i.mesh).collect::<Vec<_>>(),
             vec![0, 0, 1]
         );
-        assert_eq!(
-            scene.bounds(),
-            Some([[-6., -1., -1.], [11., 1., 1.]])
-        );
-        assert!(c.lines().iter().any(|l| l == "Placed (scene items): 3 Things"));
+        assert_eq!(scene.bounds(), Some([[-6., -1., -1.], [11., 1., 1.]]));
+        assert!(c
+            .lines()
+            .iter()
+            .any(|l| l == "Placed (scene items): 3 Things"));
     }
 
     #[test]
@@ -596,7 +822,8 @@ mod tests {
                 mesh: 0,
                 world: identity_at(0.),
                 thing: 0,
-                uid: None
+                uid: None,
+                shapes: 0,
             })
             .is_err());
         scene.meshes.push(SceneMesh {
@@ -611,6 +838,7 @@ mod tests {
                 world: identity_at(2.),
                 thing: 0,
                 uid: None,
+                shapes: 0,
             })
             .unwrap();
         assert_eq!(scene.bounds(), None);
@@ -618,6 +846,111 @@ mod tests {
         let mut mirror = identity_at(0.);
         mirror[0] = -1.;
         assert!(world_matrix_check(&mirror).is_ok());
-        assert_eq!(transform_point(&identity_at(2.), [1., 2., 3.]), [3., 2., 3.]);
+        assert_eq!(
+            transform_point(&identity_at(2.), [1., 2., 3.]),
+            [3., 2., 3.]
+        );
+    }
+
+    fn shape_thing(index: usize, gfx: Option<u32>, visible: bool, x: f32) -> ThingRecord {
+        let square = [[0., 0.], [100., 0.], [100., 100.], [0., 100.]];
+        let d = |g| Descriptor {
+            flags: Some(0),
+            kind_byte: 2,
+            guid: Some(g),
+            sha1: None,
+        };
+        ThingRecord {
+            index,
+            data: PartData {
+                pos: Some(Pos {
+                    bone_of: None,
+                    anim_hash: 0,
+                    world: identity_at(x),
+                }),
+                shape: Some(Shape {
+                    vertex_count: 4,
+                    requires_z: false,
+                    vertices: square.iter().map(|p: &[f32; 2]| [p[0], p[1], 0.]).collect(),
+                    loops: vec![4],
+                    material: None,
+                    old_material: None,
+                    thickness: 10.,
+                    mass_depth: 1.,
+                    color: ShapeColor::Packed(0xffff_ffff),
+                    brightness: 0.,
+                    bevel_size: 0.,
+                    com: None,
+                    behavior: 0,
+                    flags: 0,
+                    contacts: 0,
+                }),
+                generated_mesh: Some(GeneratedMesh {
+                    gfx_material: gfx.map(d),
+                    bevel: None,
+                    uv_offset: [0.; 4],
+                    plan_guid: None,
+                    play_mode_visible: visible,
+                }),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn shapes_merge_per_material_and_count_outcomes() {
+        let mut collider = shape_thing(4, Some(7), true, 0.);
+        collider.data.generated_mesh = None;
+        let mut bad = shape_thing(5, Some(7), true, 0.);
+        bad.data.shape.as_mut().unwrap().loops = vec![3];
+        let things = vec![
+            shape_thing(0, Some(7), true, 0.),
+            shape_thing(1, Some(9), true, 500.),
+            shape_thing(2, Some(7), true, 1000.),
+            shape_thing(3, Some(7), false, 0.),
+            collider,
+            bad,
+        ];
+        let mut scene = LevelScene::<ShapeBatch>::default();
+        add_shapes(
+            &mut scene,
+            &things,
+            |b| {
+                let ok = if b.material == Some(9) {
+                    Err("Unresolved: GUID".to_string())
+                } else {
+                    Ok(())
+                };
+                (b, ok)
+            },
+            |b| points_bounds(&b.positions),
+        );
+        let c = &scene.counts;
+        assert_eq!(
+            (c.shapes_total, c.shapes_extruded, c.shapes_placed),
+            (6, 3, 3)
+        );
+        assert_eq!(c.shape_batches, 2);
+        assert_eq!(c.shapes_not_selected["edit_only"], 1);
+        assert_eq!(c.shapes_not_selected["no_generated_mesh"], 1);
+        assert_eq!(c.shapes_rejected["loop_sum_mismatch"], 1);
+        assert_eq!(c.shapes_material_fallback["Unresolved: GUID"], 1);
+        // Material 7 first (BTreeMap order): two shapes merged, indices rebased.
+        let b = &scene.meshes[0].payload;
+        assert_eq!(b.things, vec![0, 2]);
+        let half = b.positions.len() / 2;
+        assert!(b.triangles[b.triangles.len() / 2..]
+            .iter()
+            .flatten()
+            .all(|&i| i as usize >= half));
+        assert_eq!(scene.items[0].shapes, 2);
+        assert!(scene.meshes[1].neutral_groups);
+        let [lo, hi] = scene.bounds().unwrap();
+        assert_eq!((lo[0], hi[0]), (0., 1100.));
+        assert!(c
+            .lines()
+            .iter()
+            .any(|l| l.contains(shape_mesh::PREVIEW_LABEL)));
     }
 }
