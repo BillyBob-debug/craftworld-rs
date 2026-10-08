@@ -170,6 +170,21 @@ fn setup(
         MOON,
         Color::srgb(0.62, 0.62, 0.60),
     );
+    let note = (!hide).then_some(
+        "Placeholder globe, moon, Polaroid and background; pill positions from the \
+         RPCS3 reference. Up/Down move, Enter prints the choice.",
+    );
+    spawn_overlay(&mut commands, &menu.menu, |f| f, note);
+}
+
+/// The pills and Polaroid as UI nodes at frame fractions (`remap` maps the 16:9 reference
+/// fractions to the window), plus an optional fidelity note.
+fn spawn_overlay(
+    commands: &mut Commands,
+    menu: &PodMenu,
+    remap: impl Fn([f32; 2]) -> [f32; 2],
+    note: Option<&str>,
+) {
     let root = commands
         .spawn(Node {
             width: Val::Percent(100.),
@@ -183,13 +198,13 @@ fn setup(
         top: Val::Percent(f[1] * 100.),
         ..default()
     };
-    for (i, pill) in menu.menu.pills.iter().enumerate() {
+    for (i, pill) in menu.pills.iter().enumerate() {
         let node = commands
             .spawn((
                 Node {
                     padding: UiRect::axes(Val::Px(18.), Val::Px(6.)),
                     border_radius: BorderRadius::all(Val::Px(999.)),
-                    ..centred(pill.centre)
+                    ..centred(remap(pill.centre))
                 },
                 UiTransform::from_translation(Val2::percent(-50., -50.)),
                 BackgroundColor(Color::WHITE),
@@ -203,14 +218,14 @@ fn setup(
             .id();
         commands.entity(root).add_child(node);
     }
-    if let Some(f) = menu.menu.polaroid {
+    if let Some(f) = menu.polaroid {
         let card = commands
             .spawn((
                 Node {
                     width: Val::Vh(10.),
                     height: Val::Vh(12.),
                     padding: UiRect::new(Val::Vh(0.8), Val::Vh(0.8), Val::Vh(0.8), Val::Vh(2.5)),
-                    ..centred(f)
+                    ..centred(remap(f))
                 },
                 UiTransform::from_translation(Val2::percent(-50., -50.)),
                 BackgroundColor(Color::srgb(0.96, 0.95, 0.90)),
@@ -226,7 +241,7 @@ fn setup(
             .id();
         commands.entity(root).add_child(card);
     }
-    if !hide {
+    if let Some(note) = note {
         let note = commands
             .spawn((
                 Node {
@@ -235,10 +250,7 @@ fn setup(
                     bottom: Val::Px(10.),
                     ..default()
                 },
-                Text::new(
-                    "Placeholder globe, moon, Polaroid and background; pill positions from the \
-                     RPCS3 reference. Up/Down move, Enter prints the choice.",
-                ),
+                Text::new(note),
                 TextFont::from_font_size(14.),
                 TextColor(Color::srgba(1., 1., 1., 0.8)),
             ))
@@ -286,9 +298,84 @@ fn paint(
     }
 }
 
+/// P2: the level camera that shows the globe where the RPCS3 reference has it (centre
+/// GLOBE.0 of a 16:9 frame, radius GLOBE.1 of the height), looking -Z with no tilt, for a
+/// vertical field of view `fov`. `centre` and `radius` are the globe's in display units;
+/// returns the camera position (the orbit target is straight ahead of it at the globe's
+/// depth). Only the projected centre and radius are matched; the game's camera itself is
+/// script-driven and UNKNOWN (PlanetsWorld.UpdatePodCamera).
+pub fn pod_camera(centre: Vec3, radius: f32, fov: f32) -> Vec3 {
+    let t = (fov / 2.).tan();
+    let distance = radius / (2. * GLOBE.1 * t);
+    // Globe offset from the frame centre in heights (x scaled from width to height).
+    let dx = (GLOBE.0[0] - 0.5) * ASPECT;
+    let dy = 0.5 - GLOBE.0[1];
+    Vec3::new(
+        centre.x - dx * 2. * distance * t,
+        centre.y - dy * 2. * distance * t,
+        centre.z + distance,
+    )
+}
+
+/// Maps a 16:9 reference frame fraction into a window of `aspect`, keeping offsets from
+/// the centre in heights (a 16:10 window shows a little more above and below).
+pub fn reference_to_window(f: [f32; 2], aspect: f32) -> [f32; 2] {
+    [0.5 + (f[0] - 0.5) * ASPECT / aspect, f[1]]
+}
+
+/// `--pod-menu CLASS` with a level (`--level-guid`/`--level-path`): the pills over the
+/// level view in the main viewer instead of the standalone placeholder scene. Pair with
+/// `--pod-camera N` (the globe's Thing) so the globe sits where the pills expect it.
+pub fn install_overlay(app: &mut App) -> Result<(), String> {
+    let all: Vec<String> = std::env::args().collect();
+    let value = |flag: &str| {
+        all.iter()
+            .position(|a| a == flag)
+            .and_then(|i| all.get(i + 1))
+            .cloned()
+    };
+    let Some(class) = value("--pod-menu") else {
+        return Ok(());
+    };
+    let snapshot = value("--snapshot").ok_or("--pod-menu requires --snapshot")?;
+    let game = value("--game-dir").ok_or("--pod-menu requires --game-dir")?;
+    let function = value("--ui-script-function").unwrap_or_else(|| DEFAULT_FUNCTION.into());
+    let (report, _) = run_script(snapshot.as_ref(), game.as_ref(), &class, &function)?;
+    let menu = layout(&report.tree);
+    println!("Pod menu overlay: {} pills", menu.pills.len());
+    app.insert_resource(Menu { menu, focused: 0 })
+        .add_systems(Startup, |mut commands: Commands, menu: Res<Menu>| {
+            spawn_overlay(
+                &mut commands,
+                &menu.menu,
+                |f| reference_to_window(f, 1280. / 800.),
+                None,
+            )
+        })
+        .add_systems(Update, (keys, paint).chain());
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p2_pod_camera_projects_the_globe_to_its_reference_place() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let (centre, radius) = (Vec3::new(-0.3, 0.2, 0.1), 0.25);
+        let eye = pod_camera(centre, radius, fov);
+        let view = Mat4::from_translation(-eye);
+        let projection = Mat4::perspective_rh(fov, ASPECT, 0.01, 100.);
+        let clip = projection.project_point3(view.transform_point3(centre));
+        let at = [(clip.x + 1.) / 2., (1. - clip.y) / 2.];
+        assert!((at[0] - GLOBE.0[0]).abs() < 1e-4 && (at[1] - GLOBE.0[1]).abs() < 1e-4);
+        let edge = projection.project_point3(view.transform_point3(centre + Vec3::Y * radius));
+        assert!((((edge.y - clip.y) / 2.) - GLOBE.1).abs() < 1e-4);
+        assert_eq!(reference_to_window([0.5, 0.3], 1.6), [0.5, 0.3]);
+        // A narrower window keeps offsets in heights, so they grow as width fractions.
+        assert!(reference_to_window([0.35, 0.4], 1.6)[0] < 0.35);
+    }
 
     #[test]
     fn p1b_frame_points_project_back_to_their_fractions() {
