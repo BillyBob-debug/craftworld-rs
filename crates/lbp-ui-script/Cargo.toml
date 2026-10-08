@@ -5,6 +5,9 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
+lbp-catalog.workspace = true
+lbp-gooey.workspace = true
+lbp-preview.workspace = true
 lbp-level.workspace = true
 lbp-resource.workspace = true
 lbp-script-vm.workspace = true
@@ -12,5 +15,3 @@ serde.workspace = true
 
 [dev-dependencies]
 serde_json.workspace = true
-lbp-catalog.workspace = true
-lbp-preview.workspace = true

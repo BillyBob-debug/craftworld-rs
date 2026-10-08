@@ -16,8 +16,13 @@
 //!   calls are kept as generic widgets.
 //! - `LAMS.Translate` takes a LAMS key and returns its string from the supplied tables
 //!   (U1), else `#xxxxxxxx`.
+//! - `Get*Width` / `Get*Height` (e.g. `GetPuterWidth`) return the host's screen size
+//!   (default 1280 x 720; the real values are UNKNOWN).
 //! - Everything else returns nothing; the VM then substitutes the default of the call's
 //!   return type. Member reads return `Void` and writes are dropped (counted).
+pub mod load;
+pub mod tree;
+
 use lbp_level::script::Script;
 use lbp_script_vm::{ClassId, Fault, Host, MemberKind, Step, Value, Vm};
 use serde::Serialize;
@@ -89,6 +94,8 @@ pub struct GooeyHost<'a> {
     pub trace: Vec<TraceCall>,
     pub counts: HostCounts,
     pub output: Vec<String>,
+    /// Width and height returned by `Get*Width` / `Get*Height` natives.
+    pub screen: [f32; 2],
     stack: Vec<Frame>,
     nodes: usize,
 }
@@ -124,6 +131,7 @@ impl<'a> GooeyHost<'a> {
             trace: Vec::new(),
             counts: HostCounts::default(),
             output: Vec::new(),
+            screen: [1280., 720.],
             stack: vec![Frame {
                 start: "root".into(),
                 ..Default::default()
@@ -253,6 +261,12 @@ impl Host for GooeyHost<'_> {
                         format!("#{key:08x}").into()
                     }
                 }))
+            }
+            (_, base) if base.starts_with("Get") && base.ends_with("Width") => {
+                Ok(Value::Float(self.screen[0]))
+            }
+            (_, base) if base.starts_with("Get") && base.ends_with("Height") => {
+                Ok(Value::Float(self.screen[1]))
             }
             _ => Ok(Value::Void),
         }
