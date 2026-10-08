@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D143, D144 X1 measured; s64/m44 VM fixes
+
+RPCS3: the game updates at 30 Hz (one tick per 2 vblanks). Script VM: 479/480 test checks
+pass. S9 waits on getting past the Introduction level. +0 / +0.
+
 ## 2026-10-08 — D142 test counting; s64 constants are zigzag
 
 Test* functions: 476 checks pass, 4 fail. The script s64 constant table is zigzag-encoded

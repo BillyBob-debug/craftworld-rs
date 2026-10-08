@@ -3767,3 +3767,17 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   0x1111..11 & 0xff00ff00ff00ff00 = 0x1100110011001100. Reader fix pending (U10).
 - AGENTS.md: dated standing permission to drive RPCS3 for measurements.
 **+0 newly viewable / +0 newly Complete.**
+
+## D143, D144 — X1 doc (PR #43); zigzag s64 + m44 zero defaults (PR #42) (2026-10-08)
+
+- X1 (RPCS3, game 01.33, offline, full speed): 30 game ticks per second, one tick per 2
+  vblanks (599/598/599 vs 1,197 over 20 s; x1-tick-counters-0133-run1.csv).
+  CONFIRMED_FROM_LOCAL_DATA (emulated). D143 records it in docs/rpcs3-measurement.md.
+- D144: script_tests d145 Test* totals 479 passed, 1 failed (TestLocals 417); TestS64 and
+  TestMatrix44 pass; TestArray stops at +17 (Index). Evidence: TestArray lines 873-875 fit
+  "insert index clamped to [0, length]" (-1 -> front, 100 -> end). TestLocals 417 reads a
+  block local (`int a;` emits no code) after the previous iteration set it to 1.
+- S9 blocked: the new profile must finish the Introduction level; its last room (desk/TV)
+  did not end under keyboard play. Asked the user.
+- Checks: fmt; tests lbp-level, lbp-script-vm, lbp-ui-script; workspace Clippy.
+**+0 newly viewable / +0 newly Complete.**
