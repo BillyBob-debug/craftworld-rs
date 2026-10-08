@@ -290,6 +290,7 @@ pub fn run_popit() -> Result<(), String> {
         Box::new(move |input| popit_screen(input, &mut state)),
         Vec::new(),
         Some(loader),
+        None,
     );
     Ok(())
 }

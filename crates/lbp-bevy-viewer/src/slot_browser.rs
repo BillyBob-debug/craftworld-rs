@@ -328,6 +328,7 @@ pub fn run_slot_browser() -> Result<(), String> {
         Box::new(move |input| browser_screen(input, &mut state)),
         images,
         None,
+        None,
     );
     Ok(())
 }

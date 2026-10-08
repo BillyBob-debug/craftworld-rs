@@ -5,7 +5,7 @@ edition.workspace = true
 publish.workspace = true
 
 [dependencies]
-bevy = { version = "=0.19.1", default-features = false, features = ["std", "bevy_log", "async_executor", "bevy_asset", "bevy_color", "bevy_core_pipeline", "bevy_image", "bevy_mesh", "bevy_camera", "bevy_light", "bevy_shader", "bevy_pbr", "bevy_render", "bevy_window", "bevy_winit", "multi_threaded", "tonemapping_luts", "png", "bevy_ui", "bevy_ui_render", "bevy_text", "default_font"] }
+bevy = { version = "=0.19.1", default-features = false, features = ["std", "bevy_log", "async_executor", "bevy_asset", "bevy_color", "bevy_core_pipeline", "bevy_image", "bevy_mesh", "bevy_camera", "bevy_light", "bevy_shader", "bevy_pbr", "bevy_render", "bevy_window", "bevy_winit", "multi_threaded", "tonemapping_luts", "png", "bevy_ui", "bevy_ui_render", "bevy_text", "default_font", "system_font_discovery"] }
 bevy_egui = { version = "=0.42.0", default-features = false, features = ["render", "default_fonts"] }
 lbp-catalog.workspace = true
 lbp-mesh.workspace = true
