@@ -3718,3 +3718,16 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   TestBool's || / && short-circuit branches; the D138 MULm44 and INCi stops are gone.
 - Checks: fmt; lbp-script-vm tests; workspace Clippy -D warnings.
 **+0 newly viewable / +0 newly Complete.**
+
+## D136 — U11/U12 headless Gooey trace, PR #34 (2026-10-08)
+
+- New crate lbp-ui-script (headless Gooey host) and example ui_trace (catalog input:
+  d133 snapshot + roots incl. the decrypted patch.edat overlay; English tables d109).
+- PodStateMainMenu (d136d): 426 GUIDs, superclass not loaded 0; 15 functions, 3 faulted
+  (NullObject in callees: PartyManagement.GatherFriendData+2, PodComputerState.
+  SetupFrameMatrix+3, UpdateUI+888). UpdateUI runs 449 instructions, 68 native calls,
+  translated 5/5; its outline draws the main menu: Story, Community, Recent Activity,
+  Store, Me buttons and nested frames. Step 3 of docs/u12-gooey-trace.md passes.
+- Checks: fmt; tests lbp-ui-script, lbp-script-vm; workspace Clippy -D warnings; workspace
+  build. No new third-party crates.
+**+0 newly viewable / +0 newly Complete.**

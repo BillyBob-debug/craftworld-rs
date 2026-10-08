@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D136 Gooey trace
+
+The game's main-menu script now runs headless and lays out its real English buttons
+(Story, Community, Recent Activity, Store, Me). +0 / +0.
+
 ## 2026-10-08 — D139 VM operand fixes
 
 The game's test script: 44/47 functions finish, 826 checks pass, 27 fail. +0 / +0.
