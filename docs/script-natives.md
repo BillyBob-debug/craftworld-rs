@@ -19,7 +19,7 @@ used or is committed.
 - Example `native_coverage SCRIPT-DIR NEW-JSON`: the share of native call sites that have
   a binding, over all scripts and over gameplay scripts.
 
-## Bound natives (41 including Yield)
+## Bound natives (52 including Yield)
 
 | Group | Natives | Needs from `World` |
 |---|---|---|
@@ -30,6 +30,7 @@ used or is committed.
 | Switch inputs | `IsSwitchTriggered__i`, `GetSwitchActivationBinary/Analogue/Player__i` | switch input per port |
 | PartList | `HasPJoint/PSwitch/PTrigger/PShape/PSpriteLight__Q5Thing` | parts |
 | Other | `Audio.PlaySound__Q5ThingQ7StringA`, `Resource.LoadTextureByFilename__g`, `Resource.LoadPlanByFilename__g`, `Game.GetNumPlayers__`, `System.Yield__` (in the VM) | audio, resources, players |
+| Test (part 2) | `Check`, `CheckFalse`, `Fail`, `CheckEqual` on `i b j f p q r`, `CheckSimilar__fff`, each ending `Q7StringAi` | records each check |
 
 Coverage against the G10 export, computed from its tables (unit: call instruction):
 
@@ -37,7 +38,20 @@ Coverage against the G10 export, computed from its tables (unit: call instructio
 - **All-scripts top 200:** 2,981 of 11,999 calls are bound. Gooey (menu layout)
   dominates that list and is UI work, not Rs.
 
-The PC run of `native_coverage` gives the exact totals over all native calls.
+PC run after merge (D135, part 1, unit: call instruction, 426/426 scripts read):
+23,747 calls, of which 6,043 go script to script. Of the 17,704 native calls, 2,347 are bound.
+The 255 gameplay scripts make 2,472 native calls, and 690 of those are bound. There were 0
+unparsed names. Unknown codes: `j` ×32 and `[` ×2. The top unbound gameplay natives were
+the `Test.*` checks (about 530 calls), Yield (66, not counted as bound then), and
+`DirectControlCombined.UpdateControlSeatOutput` (22).
+
+Part 2 changes from that run:
+- `j` is decoded as a 64-bit integer (INFERRED from `ShiftL__ji` and `MakeAgeString__j`).
+- `[` marks an array of the next code (`DoInit__[Q12TweakSetting`).
+- Yield counts as bound.
+- Test scripts get their own bucket, out of gameplay.
+- The `Test.*` natives are bound, so the game's own test scripts can check the VM
+  (`script_tests` below).
 
 ## Evidence
 
@@ -56,6 +70,8 @@ INFERRED (each is a place real scripts or RPCS3 can disagree):
 | Angles | Radians | RPCS3 |
 | `atan2(a, b)` | C order: `atan2(y, x)` | RPCS3 |
 | `normalize3` | xyz scaled to length 1, w kept; zero vector faults | Script behaviour |
+| `j` code | 64-bit integer; the Itanium C++ reading (unsigned 32-bit) is the alternative | Listings: machine type of the argument (s64 = 12) |
+| `Test.*` natives | The last two parameters are message and line. `CheckEqual` on vectors compares the type's components (2, 3 or 4). `CheckSimilar(a, b, eps)` is `\|a - b\| <= eps`. A failed check is recorded and the script continues | The test scripts' own expectations |
 | Switch natives | Separate fields: triggered, binary, analogue, player | Logic runtime (G-checks) |
 | GUID values | Carried as s32 or pointer-sized values | Listings (`LC` before the call) |
 
@@ -76,6 +92,10 @@ Cloud (Linux):
   - Yield over three ticks through `start`/`resume`, and `YieldInCall` from `call`;
   - `Math.floor` run through `Bindings`, and an unbound Gooey call counted.
 
+Part 2 (cloud): fmt and clippy clean; `cargo test -q -p lbp-script-vm` gives 5 unit + 7 VM
+tests. New coverage: `j` and `[` codes, and `Test.*` results (vector component counts,
+tolerance, a mixed-type fault).
+
 Not tested: any real script (they are on the PC only). No `World` implementation over a
 real level exists yet.
 
@@ -85,6 +105,10 @@ real level exists yet.
    on the D133 script directory. Report the totals line, the unknown signature codes and
    the top unbound gameplay natives.
 2. If unknown codes appear, list each code with an example mangled name (names only).
+3. `cargo run -q -p lbp-script-vm --example script_tests -- <script dir> local-analysis/<new>.json`.
+   It runs every no-argument function of each test script and reports the outcome
+   counts and checks passed/failed. Report the summary line. For failed checks, report
+   the first few class/function/line rows: each one is a VM or binding rule to look at.
 
 Counts: +0 newly viewable, +0 newly Complete (no asset change).
 

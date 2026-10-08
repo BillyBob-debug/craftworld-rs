@@ -4,7 +4,7 @@
 //! INFERRED (docs/script-natives.md) from the 01.33 native-call census names; Toolkit
 //! d6a2ef80 reads these names but does not decode them. `Q<len><name>` is a class or enum
 //! by name. The vector letters `p`/`q`/`r` follow the order of Toolkit's BuiltinType
-//! V2/V3/V4 (all four floats natively). Unrecognised codes are kept as
+//! V2/V3/V4 (all four floats natively); `[` marks an array. Unrecognised codes are kept as
 //! [`Param::Unknown`] so the census can count them.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -12,6 +12,8 @@ pub enum Param {
     Bool,
     Char,
     Int,
+    /// `j`: 64-bit integer (INFERRED from `ShiftL__ji`, `MakeAgeString__j`).
+    Long,
     Float,
     V2,
     V3,
@@ -20,6 +22,8 @@ pub enum Param {
     Guid,
     /// `Q<len><name>`: script class, engine class or enum (`Gooey.EGooeyTextStyle`).
     Named(String),
+    /// `[` before an element code: array of that element.
+    Array(Box<Param>),
     Unknown(char),
 }
 
@@ -29,46 +33,52 @@ pub struct Signature<'a> {
     pub params: Vec<Param>,
 }
 
-/// Longest class name accepted in a `Q` code.
+/// Longest class name accepted in a `Q` code; deepest array nesting.
 const MAX_NAME: usize = 256;
+const MAX_ARRAY_DEPTH: usize = 8;
 
-/// Splits a mangled name; `None` when there is no `__` or a `Q` length is malformed.
+/// Splits a mangled name; `None` when there is no `__` or a code is malformed.
 pub fn parse(mangled: &str) -> Option<Signature<'_>> {
     // Skip the first byte so a leading "__" is part of the name.
     let split = mangled.get(1..)?.find("__")? + 1;
     let name = &mangled[..split];
     let codes = &mangled[split + 2..];
     let mut params = Vec::new();
-    let mut chars = codes.char_indices();
-    while let Some((at, c)) = chars.next() {
-        params.push(match c {
-            'b' => Param::Bool,
-            'c' => Param::Char,
-            'i' => Param::Int,
-            'f' => Param::Float,
-            'p' => Param::V2,
-            'q' => Param::V3,
-            'r' => Param::V4,
-            'm' => Param::M44,
-            'g' => Param::Guid,
-            'Q' => {
-                let rest = &codes[at + 1..];
-                let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
-                let len: usize = rest.get(..digits)?.parse().ok()?;
-                if len == 0 || len > MAX_NAME {
-                    return None;
-                }
-                let named = rest.get(digits..digits + len)?;
-                // Advance past the digits and the name.
-                for _ in 0..digits + named.chars().count() {
-                    chars.next();
-                }
-                Param::Named(named.to_owned())
-            }
-            other => Param::Unknown(other),
-        });
+    let mut at = 0;
+    while at < codes.len() {
+        params.push(one(codes, &mut at, 0)?);
     }
     Some(Signature { name, params })
+}
+
+fn one(codes: &str, at: &mut usize, depth: usize) -> Option<Param> {
+    let c = codes.get(*at..)?.chars().next()?;
+    *at += c.len_utf8();
+    Some(match c {
+        'b' => Param::Bool,
+        'c' => Param::Char,
+        'i' => Param::Int,
+        'j' => Param::Long,
+        'f' => Param::Float,
+        'p' => Param::V2,
+        'q' => Param::V3,
+        'r' => Param::V4,
+        'm' => Param::M44,
+        'g' => Param::Guid,
+        '[' if depth < MAX_ARRAY_DEPTH => Param::Array(Box::new(one(codes, at, depth + 1)?)),
+        'Q' => {
+            let rest = &codes[*at..];
+            let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+            let len: usize = rest.get(..digits)?.parse().ok()?;
+            if len == 0 || len > MAX_NAME {
+                return None;
+            }
+            let named = rest.get(digits..digits + len)?;
+            *at += digits + len;
+            Param::Named(named.to_owned())
+        }
+        other => Param::Unknown(other),
+    })
 }
 
 #[cfg(test)]
@@ -93,6 +103,18 @@ mod tests {
             "Messaging_NewMessage"
         );
         assert_eq!(parse("X__z").unwrap().params, vec![Param::Unknown('z')]);
+        assert_eq!(
+            parse("ShiftL__ji").unwrap().params,
+            vec![Param::Long, Param::Int]
+        );
+        assert_eq!(
+            parse("DoInit__[Q12TweakSettingi").unwrap().params,
+            vec![
+                Param::Array(Box::new(Param::Named("TweakSetting".into()))),
+                Param::Int
+            ]
+        );
+        assert_eq!(parse("Bad__["), None);
         assert_eq!(parse("NoSeparator"), None);
         assert_eq!(parse("Bad__Q9Thing"), None);
         assert_eq!(parse("Bad__Q"), None);
