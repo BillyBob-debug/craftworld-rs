@@ -3706,3 +3706,15 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   NullObject at pc 153; these pcs are outside the faulting functions' own code ranges, so
   inside callees). UpdateUI still 48 instructions, translated 0/0; not merged.
 **+0 newly viewable / +0 newly Complete.**
+
+## D139 — VM no-register operand, default locals, fault site (PR #37) (2026-10-08)
+
+- script_tests d139 (the game's test script): 47 functions, 44 done (was 37), 3 Index stops
+  (TestArray +14 element, reached also via main__; TestConstructorChaining +4 object
+  field). Checks passed 826 (was 589), failed 27 (16 distinct lines; main__ repeats 11).
+- Evidence (masked listings, sent to the Sackboy thread): failing member/property checks
+  read fields that only the class's .init__ sets (fresh test instances skip .init__);
+  ShiftL__ji is script code (s64 add loop), not a native; NeverEvaluated is reached from
+  TestBool's || / && short-circuit branches; the D138 MULm44 and INCi stops are gone.
+- Checks: fmt; lbp-script-vm tests; workspace Clippy -D warnings.
+**+0 newly viewable / +0 newly Complete.**

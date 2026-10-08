@@ -1,5 +1,9 @@
 # Development log
 
+## 2026-10-08 — D139 VM operand fixes
+
+The game's test script: 44/47 functions finish, 826 checks pass, 27 fail. +0 / +0.
+
 ## 2026-10-08 — D138 script tests part 3
 
 The game's test script: 37/47 functions finish, 589 checks pass, 11 fail. Gooey trace
