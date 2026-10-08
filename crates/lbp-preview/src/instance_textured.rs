@@ -12,6 +12,10 @@ pub fn select_instance_diffuse(
     projection: &crate::InstanceProjection,
     animation_base: bool,
 ) -> Result<crate::DiffuseSelection, String> {
+    // D105 (docs/d105-instance-graphs.md): plain substitution, evaluator only.
+    if projection.evaluated {
+        return crate::select_evaluated(derived);
+    }
     // D96 (docs/d96-thing-sampler-ports.md): folded sampler ports only with direct
     // samplers; the nested-tint rewrite has no oracle parity for a folded leaf.
     if !projection.sampler_port_folds.is_empty() && projection.folded_sampler.is_some() {

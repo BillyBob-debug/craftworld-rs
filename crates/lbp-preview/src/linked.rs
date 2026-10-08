@@ -1345,7 +1345,9 @@ pub(crate) fn load_primitive(
         .map_err(|e| e.to_string())?;
     let original_graph = graph.graph.clone();
     let instance_projection = if let Some(color) = options.instance_color {
-        let (derived, projection) = crate::project_instance_color(&graph.graph, color)?;
+        // D105: falls back to the plain substitution for the graph evaluator.
+        let (derived, projection) =
+            crate::project_instance_graph(&graph.graph, color, options.animation_base)?;
         graph.graph = derived;
         projection
     } else {

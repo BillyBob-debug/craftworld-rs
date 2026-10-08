@@ -142,12 +142,17 @@ fn run() -> Result<(), String> {
         let mut instance_tint: Option<(usize, [u32; 4])> = None;
         // D96: derived samplers whose port inputs were folded into scale/offset.
         let mut folded_ports: Vec<usize> = vec![];
+        let mut instance_evaluated = false;
         if instance_white {
             let white = lbp_preview::DiffuseTint {
                 bits: [1f32.to_bits(); 4],
             };
-            if let Ok((derived, Some(p))) = lbp_preview::project_instance_color(&graph.graph, white)
+            // D105: the loader's projection; `evaluated` = plain ThingColor substitution
+            // for the graph evaluator, compared node for node in graph_equal below.
+            if let Ok((derived, Some(p))) =
+                lbp_preview::project_instance_graph(&graph.graph, white, animation_base)
             {
+                instance_evaluated = p.evaluated;
                 if let Some(root) = p.folded_root {
                     let selected = lbp_preview::select_solid_diffuse(&derived)
                         .ok()
@@ -374,7 +379,11 @@ fn run() -> Result<(), String> {
                             let white = lbp_preview::DiffuseTint {
                                 bits: [1f32.to_bits(); 4],
                             };
-                            match lbp_preview::project_instance_color(&graph.graph, white)? {
+                            match lbp_preview::project_instance_graph(
+                                &graph.graph,
+                                white,
+                                animation_base,
+                            )? {
                                 (derived, Some(_)) => derived,
                                 (original, None) => original,
                             }
@@ -895,10 +904,10 @@ fn run() -> Result<(), String> {
                 Err(e) => json!({"status":"unsupported","reason":e}),
             }
         };
-        rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection,"instance_white_expected":instance_expected,"instance_folded_samplers":folded_ports}));
+        rows.push(json!({"sha1":sha,"route_equal":equal,"wraps_equal":wraps_equal,"wrap_s_raw":graph.material.prefix.wrap_s_raw,"wrap_t_raw":graph.material.prefix.wrap_t_raw,"route":route,"projection":projection,"instance_white_expected":instance_expected,"instance_folded_samplers":folded_ports,"instance_evaluated_plain":instance_evaluated}));
     }
     source.check_stable()?;
-    let report = json!({"schema_version":23,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
+    let report = json!({"schema_version":24,"animation_base_enabled":animation_base,"instance_white_enabled":instance_white,"scope":"diffuse_route_oracle_and_projection_census","compared":samples.len(),"mismatches":mismatches,"projected":projected,"unsupported":samples.len()-projected,"archived_bytes_read":bytes_read,"samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
