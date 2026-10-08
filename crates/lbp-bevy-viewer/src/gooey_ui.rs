@@ -7,6 +7,8 @@
 //! mouse hover focuses and click activates. Gamepad input is not wired (bevy_gilrs is not
 //! enabled). Text uses Bevy's default font until game fonts (U2 atlas) are hooked up.
 //! The demo content is authored and synthetic: no game data, not a copy of game screens.
+//! Other screens (U7 `--slot-browser`) plug in through [`run_gooey`]; game images reach the
+//! adapter as decoded RGBA keyed by [`ImageRef`].
 use bevy::prelude::*;
 use lbp_gooey::{
     navigate, settle_focus, Align, Builder, Direction, FrameInput, ImageRef, Layout, PanelStyle,
@@ -16,6 +18,23 @@ use std::collections::HashMap;
 
 #[derive(Component, Clone, Copy)]
 struct GooeyId(Uid);
+
+/// The active screen: builds this frame's tree from the input.
+pub type ScreenFn = Box<dyn FnMut(FrameInput) -> UiTree + Send + Sync>;
+
+#[derive(Resource)]
+struct GooeyScreen(ScreenFn);
+
+/// Decoded game image for an [`ImageRef`] (RGBA8, sRGB).
+pub struct GooeyImage {
+    pub image: ImageRef,
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+#[derive(Resource, Default)]
+struct GooeyImages(HashMap<ImageRef, Handle<Image>>);
 
 #[derive(Resource, Default)]
 struct GooeyHost {
@@ -28,7 +47,7 @@ struct GooeyHost {
 }
 
 /// Authored demo state (synthetic, Popit-like tabs and an item grid).
-#[derive(Resource, Default)]
+#[derive(Default)]
 struct DemoState {
     tab: usize,
     picked: Option<String>,
@@ -113,11 +132,21 @@ fn demo_screen(input: FrameInput, state: &mut DemoState) -> UiTree {
 }
 
 pub fn run_ui_demo() {
+    let mut state = DemoState::default();
+    run_gooey(
+        "UI layer demo",
+        Box::new(move |input| demo_screen(input, &mut state)),
+        Vec::new(),
+    );
+}
+
+/// Runs a gooey screen in its own window (second monitor, `--qa-capture` aware).
+pub fn run_gooey(title: &str, screen: ScreenFn, mut images: Vec<GooeyImage>) {
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.045)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
-                title: "LBP2 Asset Explorer - UI layer demo".into(),
+                title: format!("LBP2 Asset Explorer - {title}"),
                 resolution: (1280, 800).into(),
                 visible: false,
                 ..default()
@@ -125,11 +154,21 @@ pub fn run_ui_demo() {
             ..default()
         }))
         .init_resource::<GooeyHost>()
-        .init_resource::<DemoState>()
+        .insert_resource(GooeyScreen(screen))
         .insert_resource(DemoCapture(demo_capture_path()))
-        .add_systems(Startup, |mut commands: Commands| {
-            commands.spawn(Camera2d);
-        })
+        .add_systems(
+            Startup,
+            move |mut commands: Commands, mut assets: ResMut<Assets<Image>>| {
+                commands.spawn(Camera2d);
+                let mut handles = HashMap::new();
+                for i in images.drain(..) {
+                    if let Some(image) = gpu_image(i.width, i.height, i.rgba) {
+                        handles.insert(i.image, assets.add(image));
+                    }
+                }
+                commands.insert_resource(GooeyImages(handles));
+            },
+        )
         .add_systems(
             Update,
             (
@@ -196,12 +235,42 @@ fn gooey_input(
     }
 }
 
-fn gooey_rebuild(mut commands: Commands, mut host: ResMut<GooeyHost>, mut demo: ResMut<DemoState>) {
+/// RGBA8 sRGB image within the viewer's GPU budget (the adapter's 4096 side cap).
+fn gpu_image(width: u32, height: u32, rgba: Vec<u8>) -> Option<Image> {
+    use bevy::asset::RenderAssetUsages;
+    use bevy::render::render_resource::{Extent3d, TextureDimension, TextureFormat};
+    let pixels = u64::from(width).checked_mul(u64::from(height))?;
+    if width == 0 || height == 0 || width > 4096 || height > 4096 || pixels * 4 != rgba.len() as u64
+    {
+        return None;
+    }
+    Some(Image::new(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        rgba,
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    ))
+}
+
+fn gooey_rebuild(
+    mut commands: Commands,
+    mut host: ResMut<GooeyHost>,
+    mut screen: ResMut<GooeyScreen>,
+    images: Option<Res<GooeyImages>>,
+) {
+    let Some(images) = images else {
+        return;
+    };
     let input = FrameInput {
         focused: host.focused,
         activated: host.activated.take(),
     };
-    let tree = demo_screen(input, &mut demo);
+    let tree = (screen.0)(input);
     host.focused = settle_focus(&tree, host.focused);
     if tree == host.tree && host.root.is_some() {
         return;
@@ -214,7 +283,7 @@ fn gooey_rebuild(mut commands: Commands, mut host: ResMut<GooeyHost>, mut demo: 
     }
     host.buttons.clear();
     let mut buttons = HashMap::new();
-    let root = spawn_node(&mut commands, &tree, 0, &mut buttons);
+    let root = spawn_node(&mut commands, &tree, 0, &mut buttons, &images);
     commands.entity(root).insert(Node {
         width: Val::Percent(100.),
         height: Val::Percent(100.),
@@ -236,6 +305,17 @@ fn font(style: TextStyle) -> TextFont {
     })
 }
 
+/// Draws `image`: a loaded game image, else a swatch / neutral grey placeholder.
+fn image_bundle(images: &GooeyImages, image: ImageRef) -> (BackgroundColor, Option<ImageNode>) {
+    match images.0.get(&image) {
+        Some(handle) => (
+            BackgroundColor(Color::NONE),
+            Some(ImageNode::new(handle.clone())),
+        ),
+        None => (BackgroundColor(swatch_color(image)), None),
+    }
+}
+
 fn swatch_color(image: ImageRef) -> Color {
     match image {
         ImageRef::Swatch([r, g, b, a]) => Color::srgba_u8(r, g, b, a),
@@ -249,6 +329,7 @@ fn spawn_node(
     tree: &UiTree,
     index: usize,
     buttons: &mut HashMap<Uid, Entity>,
+    images: &GooeyImages,
 ) -> Entity {
     let node = &tree.nodes[index];
     let entity = match &node.widget {
@@ -332,6 +413,7 @@ fn spawn_node(
                 ))
                 .id();
             if let Some(image) = image {
+                let (background, picture) = image_bundle(images, *image);
                 let swatch = commands
                     .spawn((
                         Node {
@@ -340,9 +422,12 @@ fn spawn_node(
                             border_radius: BorderRadius::all(Val::Px(4.)),
                             ..default()
                         },
-                        BackgroundColor(swatch_color(*image)),
+                        background,
                     ))
                     .id();
+                if let Some(picture) = picture {
+                    commands.entity(swatch).insert(picture);
+                }
                 commands.entity(button).add_child(swatch);
             }
             let text = commands
@@ -362,17 +447,24 @@ fn spawn_node(
             image,
             width,
             height,
-        } => commands
-            .spawn((
-                Node {
-                    width: Val::Px(*width),
-                    height: Val::Px(*height),
-                    ..default()
-                },
-                BackgroundColor(swatch_color(*image)),
-                GooeyId(node.uid),
-            ))
-            .id(),
+        } => {
+            let (background, picture) = image_bundle(images, *image);
+            let entity = commands
+                .spawn((
+                    Node {
+                        width: Val::Px(*width),
+                        height: Val::Px(*height),
+                        ..default()
+                    },
+                    background,
+                    GooeyId(node.uid),
+                ))
+                .id();
+            if let Some(picture) = picture {
+                commands.entity(entity).insert(picture);
+            }
+            entity
+        }
         Widget::Spacer { width, height } => commands
             .spawn((
                 Node {
@@ -385,7 +477,7 @@ fn spawn_node(
             .id(),
     };
     for &child in &node.children {
-        let child = spawn_node(commands, tree, child, buttons);
+        let child = spawn_node(commands, tree, child, buttons, images);
         commands.entity(entity).add_child(child);
     }
     entity

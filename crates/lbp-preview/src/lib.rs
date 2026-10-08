@@ -23,6 +23,7 @@ pub use offgrid::OffGrid;
 pub mod census;
 pub mod level_backdrop;
 pub mod level_scene;
+pub mod story;
 pub use blend::DiffuseBlend;
 pub use border_domain::{BorderDomain, INTERIOR_MARGIN};
 mod matrix;

@@ -56,7 +56,7 @@ pub enum PanelStyle {
 }
 
 /// What an image widget shows; the host resolves it (game texture, or a placeholder).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ImageRef {
     /// Texture by catalog GUID.
     Guid(u32),
