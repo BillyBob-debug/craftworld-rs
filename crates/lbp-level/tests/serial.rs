@@ -26,7 +26,13 @@ fn integers_fixed_and_uleb() {
     assert_eq!(r.remaining(), 0);
 
     let mut w = W::new(1);
-    w.u32(u32::MAX).s32(-1).s32(1).s32(i32::MIN).s32(i32::MAX).u64(u64::MAX).u32(0);
+    w.u32(u32::MAX)
+        .s32(-1)
+        .s32(1)
+        .s32(i32::MIN)
+        .s32(i32::MAX)
+        .u64(u64::MAX)
+        .u32(0);
     let mut r = reader(&w.b, 1);
     assert_eq!(r.u32().unwrap(), u32::MAX);
     assert_eq!(r.s32().unwrap(), -1);
@@ -43,7 +49,9 @@ fn uleb_overflow_and_truncation_are_invalid() {
     // 33rd bit set in the fifth byte.
     assert!(invalid(reader(&[0xff, 0xff, 0xff, 0xff, 0x10], 1).u32()));
     // Overlong (six bytes) for a 32-bit value.
-    assert!(invalid(reader(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x00], 1).u32()));
+    assert!(invalid(
+        reader(&[0x80, 0x80, 0x80, 0x80, 0x80, 0x00], 1).u32()
+    ));
     // 65th bit.
     let mut b = vec![0xff; 9];
     b.push(0x02);
@@ -88,7 +96,10 @@ fn int_vectors_planar_and_plain() {
     let mut r = reader(&[2, 2, 0x01, 0x02, 0x10, 0x20], 7);
     assert_eq!(r.int_vector().unwrap(), [0x1001, 0x2002]);
     // Width above 4 is refused, count beyond remaining bytes is invalid.
-    assert!(matches!(reader(&[1, 5, 0, 0, 0, 0, 0], 7).int_vector(), Err(Stop::Unsupported { .. })));
+    assert!(matches!(
+        reader(&[1, 5, 0, 0, 0, 0, 0], 7).int_vector(),
+        Err(Stop::Unsupported { .. })
+    ));
     assert!(invalid(reader(&[3, 2, 0, 0], 7).int_vector()));
     assert!(invalid(reader(&[0, 0, 0, 9, 0, 0, 0, 1], 0).int_vector()));
 }
@@ -118,7 +129,10 @@ fn resource_descriptors() {
     let d = r.resource(false).unwrap().unwrap();
     assert_eq!((d.flags, d.guid, d.sha1), (Some(0), Some(0x1234), None));
     let d = r.resource(false).unwrap().unwrap();
-    assert_eq!((d.flags, d.guid, d.sha1), (Some(5), Some(9), Some([0xab; 20])));
+    assert_eq!(
+        (d.flags, d.guid, d.sha1),
+        (Some(5), Some(9), Some([0xab; 20]))
+    );
     let d = r.resource(true).unwrap().unwrap();
     assert_eq!((d.flags, d.kind_byte, d.guid), (None, 1, None));
     assert_eq!(r.remaining(), 0);
@@ -136,7 +150,10 @@ fn reference_tags_null_new_seen_and_conflicts() {
     let mut r = reader(&b, 1);
     assert_eq!(r.tag("Thing", |_| Ok(Obj::Thing(0))).unwrap(), Tag::Null);
     assert_eq!(r.tag("Thing", |_| Ok(Obj::Thing(0))).unwrap(), Tag::New(5));
-    assert_eq!(r.tag("Thing", |_| unreachable!()).unwrap(), Tag::Seen(Obj::Thing(0)));
+    assert_eq!(
+        r.tag("Thing", |_| unreachable!()).unwrap(),
+        Tag::Seen(Obj::Thing(0))
+    );
     assert!(invalid(r.tag("SHAPE", |_| unreachable!())));
     let limits = Limits {
         max_tags: 1,
@@ -145,7 +162,10 @@ fn reference_tags_null_new_seen_and_conflicts() {
     let b = [1u8, 2];
     let mut r = Reader::new(&b, rev(0x3f8, 1), limits, &none);
     r.tag("Thing", |_| Ok(Obj::Thing(0))).unwrap();
-    assert!(matches!(r.tag("Thing", |_| Ok(Obj::Thing(1))), Err(Stop::Budget { .. })));
+    assert!(matches!(
+        r.tag("Thing", |_| Ok(Obj::Thing(1))),
+        Err(Stop::Budget { .. })
+    ));
 }
 
 #[test]

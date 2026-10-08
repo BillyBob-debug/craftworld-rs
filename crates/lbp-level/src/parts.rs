@@ -1,63 +1,230 @@
-//! L5 part readers (subset). Each reader follows the field order of the named Toolkit
+//! L5+ part readers. Each reader follows the field order of the named Toolkit
 //! class at d6a2ef80b5a09999f08f23a803b516096055e5c9 (`structs/things/parts/P*.java`
-//! serialize), CONFIRMED_FROM_COMMUNITY_CODE, specialised to the LBP2 band
-//! 0x341 <= head <= 0x3f8 with subVersion 0 and no Vita/DOUBLE11 branch fields.
-//! Only gates that are open in that band are listed; any other part stops the walk with
+//! and the component structs they call, serialize methods), CONFIRMED_FROM_COMMUNITY_CODE,
+//! specialised to the LBP2 band 0x341 <= head <= 0x3f8 with subVersion 0 and no
+//! Vita/DOUBLE11 branch fields. Only gates that can differ inside that band are written
+//! as conditions; any part not listed in `SUPPORTED` stops the walk with
 //! `Stop::UnsupportedPart` because parts carry no length prefix.
 //!
-//! - BODY (PBody): posVel v3, angVel f32, frozen i32, editingPlayer reference(Thing).
-//! - POS (PPos): thingOfWhichIAmABone reference(Thing), animHash i32, worldPosition m44
-//!   (localPosition only below 0x341, so it is absent here).
-//! - RENDER_MESH (PRenderMesh): mesh resource, boneThings thingarray, anim resource,
-//!   animPos f32, animSpeed f32, animLoop bool, loopStart f32, loopEnd f32, editorColor
-//!   i32 (> 0x31a), castShadows i8, RTTEnable bool, visibilityFlags i8 (>= 0x2e3),
-//!   poppetRenderScale f32, then parentDistanceFront/Side f32 only below 0x34d.
-//! - SHAPE (PShape): Polygon (i32 vertex count, bool requiresZ, v3 or v2 per vertex,
-//!   loops intvector), material resource, oldMaterial resource, thickness f32, massDepth
-//!   f32, color (v4 up to 0x389, else i32), brightness f32, bevelSize f32, COM m44
-//!   (>= 0x38e), behavior i32, colorOff (v4 below 0x38a, else i32), brightnessOff f32,
-//!   lethalType (s32 up to 0x345, else u16), soundEnumOverride i32, playerNumberColor
-//!   (i32 up to 0x367, else i8), flags (i8 up to 0x345, else i16), ContactCache (array of
-//!   {reference(PShape), i8} then bool contactsSorted, bool cacheDirtyButRecomputed),
-//!   stickiness/grabbability/grabFilter i8 (>= 0x3bd), colorOpacity/colorOffOpacity i8
-//!   (>= 0x3c1), canCollect bool (>= 0x3e2).
-//! - GENERATED_MESH (PGeneratedMesh): gfxMaterial resource, bevel resource, uvOffset v4,
-//!   planGUID guid, play-mode visibility bool, textureAnimationSpeed/Off f32 (>= 0x305).
-//! - GROUP (PGroup): creator NetworkPlayerID (16+1+3+8+8 raw bytes at >= 0x234), plan
-//!   resource descriptor (no flags word), emitter reference(Thing), lifetime i32,
-//!   aliveFrames i32, flags u8.
-//! - REF (PRef): plan resource descriptor (no flags word), oldLifetime i32,
-//!   oldAliveFrames i32.
-//! - EFFECTOR (PEffector): posVel v3, angVel f32, viscosity f32, density f32, gravity v3,
-//!   pushBack bool, swimmable bool, viscosityCheap f32, modScale f32.
+//! Field lists (v = head & 0xffff; "ref" = reference, "res" = resource with flags word,
+//! "desc" = resource without flags word):
+//! - BODY (PBody): posVel v3, angVel f32, frozen i32, editingPlayer ref Thing.
+//! - POS (PPos): thingOfWhichIAmABone ref Thing, animHash i32, worldPosition m44
+//!   (localPosition is only serialized below 0x341).
+//! - RENDER_MESH (PRenderMesh): mesh res, boneThings thingarray, anim res, animPos,
+//!   animSpeed f32, animLoop bool, loopStart, loopEnd f32, editorColor i32, castShadows i8,
+//!   RTTEnable bool, visibilityFlags i8, poppetRenderScale f32, parentDistanceFront/Side
+//!   f32 only below 0x34d.
+//! - SHAPE (PShape + Polygon + ContactCache/Contact): i32 vertex count, bool requiresZ, v3
+//!   or v2 per vertex, loops intvector; material res, oldMaterial res, thickness, massDepth
+//!   f32, color (v4 up to 0x389, else i32), brightness, bevelSize f32, COM m44 (>= 0x38e),
+//!   behavior i32, colorOff (v4 below 0x38a, else i32), brightnessOff f32, lethalType
+//!   (s32 up to 0x345, else u16), soundEnumOverride i32, playerNumberColor (i32 up to
+//!   0x367, else i8), flags (i8 up to 0x345, else i16), contacts array of {ref PShape,
+//!   i8}, contactsSorted bool, cacheDirtyButRecomputed bool, stickiness/grabbability/
+//!   grabFilter i8 (>= 0x3bd), colorOpacity/colorOffOpacity i8 (>= 0x3c1), canCollect bool
+//!   (>= 0x3e2).
+//! - GENERATED_MESH (PGeneratedMesh): gfxMaterial res, bevel res, uvOffset v4, planGUID
+//!   guid, play-mode visibility bool, textureAnimationSpeed/Off f32.
+//! - GROUP (PGroup): creator NetworkPlayerID (36 raw bytes at >= 0x234), plan desc,
+//!   emitter ref Thing, lifetime i32, aliveFrames i32, flags u8.
+//! - REF (PRef): plan desc, oldLifetime i32, oldAliveFrames i32.
+//! - EFFECTOR (PEffector): posVel v3, angVel, viscosity, density f32, gravity v3, pushBack
+//!   bool, swimmable bool, viscosityCheap, modScale f32.
 //! - SCRIPT_NAME (PScriptName): s32 length then raw bytes.
-//! - SPRITE_LIGHT (PSpriteLight): color v4, colorOff v4, multiplier f32, multiplierOff
-//!   f32, glowRadius/farDist/sourceSize f32, falloffTexture resource, lookAt
-//!   reference(Thing), spotlight bool, (enableFogShadows, enableFog bool below 0x337),
-//!   fogAmount f32, onSpeed/offSpeed/flickerProb/flickerAmount f32, behavior i32.
-//! - WORLD (PWorld): things arraylist(reference Thing), maxVel f32, maxAVel f32, frame
-//!   s32, simFrame s32, frameLevelStarted i32 (>= 0x377), thingUIDCounter i32; the rest
-//!   (EditorSelection array onward) is not implemented and stops explicitly.
+//! - SPRITE_LIGHT (PSpriteLight): color v4, colorOff v4, multiplier, multiplierOff,
+//!   glowRadius, farDist, sourceSize f32, falloffTexture res, lookAt ref Thing, spotlight
+//!   bool, (enableFogShadows, enableFog bool below 0x337), fogAmount, onSpeed, offSpeed,
+//!   flickerProb, flickerAmount f32, behavior i32.
+//! - TRIGGER (PTrigger): triggerType i8, inThings thingarray, radiusMultiplier f32,
+//!   allZLayers bool, hysteresisMultiplier f32, enabled bool, zOffset f32.
+//! - STICKERS (PStickers): decals array(Decal), i32 count of costume decal arrays each
+//!   array(Decal), paintControl array of 4 bytes (v <= 0x3ba), eyetoyData array(EyetoyData).
+//!   Decal: texture res, u, v, xvecu, xvecv, yvecu, yvecv f32, color i16, type i8,
+//!   metadataIndex i16, numMetadata i16 (v <= 0x3ba), placedBy i16, playModeFrame i32,
+//!   scorchMark bool, plan desc (>= 0x34c; a guid below). EyetoyData: frame res, alphaMask
+//!   res, colorCorrection m44, ColorCorrection 6 f32, outline res (> 0x39f).
+//! - DECORATIONS (PDecorations): array(Decoration): renderMesh ref PRenderMesh, offset m44,
+//!   parentBone i32, parentTriVert i32, baryU, baryV, angle f32, onCostumePiece s32,
+//!   earthDecoration s32, scale f32, placedBy i16, reversed bool, playModeFrame i32,
+//!   planGUID guid.
+//! - LEVEL_SETTINGS (PLevelSettings extends LevelSettings): LevelSettings fields (sun
+//!   position v3, scale f32, sun/ambient colour v4, multiplier, exposure f32, fog colour v4,
+//!   fogNear, fogFar f32, rim colour v4, rim colour 2 v4, then 6 f32 baked/DOF values, dofFar
+//!   f32, 3 zEffect f32; two extra f32 only for 0x324 < v < 0x331, below this band), then
+//!   presets arraylist(LevelSettings), backdropAmbience str, backdropMesh res.
+//! - CAMERA_TWEAK (PCameraTweak): (pitchAngle v3, targetBox v4 below 0x37e), triggerBox v4,
+//!   (zoomDistance f32 below 0x37e), positionFactor f32, photoBoothTimerLength i32,
+//!   cameraType s32, disableZoomMode, requireAll, motionControllerZone bool, behavior i32,
+//!   (u8 below 0x37e), cutSceneTransitionType i8, cutSceneHoldTime i32, cutSceneSkippable
+//!   bool, cutSceneTimeSinceUsed i8, cutSceneTransitionTime i32, (bool below 0x35a),
+//!   cutSceneColour i32 (> 0x359), cutSceneMovieMode bool, DOF, fog, FOV, shake f32,
+//!   fadeAudio, oldStyleCameraZone bool, trackPlayer bool (> 0x369), sendsSignalOnCancelled
+//!   bool (> 0x395), wasActiveLastFrame bool (> 0x396), nodes array(CameraNode: v4, v3, f32,
+//!   bool) (> 0x37d).
+//! - JOINT (PJoint): a, b ref Thing, aContact, bContact v3, length, angle, offsetTime f32,
+//!   invertAngle bool, settings res, boneIdx intarray, boneLengths v4, type i32, strength
+//!   f32, stiff bool, slideDir v3, animationPattern i32, ten f32 (range, time, phase, speed,
+//!   pause, a/b angle offsets, modStartFrames, modDeltaFrames, modScale), renderScale f32,
+//!   jointSoundEnum i32, tweakTargetMax/MinLength f32, currentlyEditing bool,
+//!   hideInPlayMode bool, behaviour i32.
+//! - CHECKPOINT (PCheckpoint): activeFlags bool (subVersion <= 0x101), activationFrame i32,
+//!   spawnsLeft s32, maxSpawnsLeft s32, instanceInfiniteSpawns bool, spawningList
+//!   thingarray, spawningDelay i32, lifeMultiplier i32, teamFilter i32.
+//! - PHYSICS_TWEAK (PPhysicsTweak): tweakGravity, tweakBuoyancy f32, tweakDampening,
+//!   input, middleVel v3, velRange, accelStrength, decelStrength f32, localSpace bool,
+//!   configuration i32, (ref Thing below 0x327), hideInPlayMode bool, colorIndex i32, name
+//!   wstr, teamFilter u8, behavior i32, allowInOut, allowUpDown bool, minRange, maxRange
+//!   f32, followKey bool, angleRange f32 (> 0x381), flee bool, maximumMass f32, canPush bool,
+//!   zBehavior s32, lastKnownActivation f32, waitingToMove bool (> 0x36a); RecordingPlayer
+//!   when configuration == 0xd and v > 0x3b8 (recording res, playHead f32, (u8 below
+//!   0x3c4), type i8, dir i8, prevDesiredPosition v3, prevDesiredPosSet bool,
+//!   startOrientation m44, speed f32, pathIsAbsolute bool (> 0x3c4)); attractor block when
+//!   configuration == 0xe and v > 0x3e3 (f32, i32, f32, f32, i32, f32, f32, 4 u8).
+//! - SWITCH_KEY (PSwitchKey): colorIndex s32, name wstr, hideInPlayMode bool (v < 0x3ed)
+//!   or a u8 flag byte (v >= 0x3ed).
+//! - GAMEPLAY_DATA (PGameplayData): fluffCost s32, eggLink ref EggLink, keyLink ref SlotID,
+//!   gameplayType i32. EggLink: plan res, shareable bool, hasPainting bool (> 0x3e0),
+//!   painting desc when set. SlotID: slotType i32, slotNumber u32.
+//! - SWITCH (PSwitch + SwitchOutput/SwitchSignal/SwitchTarget): inverted bool, radius
+//!   f32, minRadius f32 (>= 0x382), colorIndex s32, name wstr, crappyOldLbp1Switch bool
+//!   (>= 0x38f), behaviorOld s32, outputs array of ref SwitchOutput {SwitchSignal
+//!   (activation f32, ternary s32, player i32), targets array {ref Thing, port i32},
+//!   userDefinedName wstr}, stickerPlan desc (v < 0x398), hideInPlayMode bool, type s32,
+//!   referenceThing ref Thing, manualActivation SwitchSignal, stickerPlan desc when
+//!   v >= 0x398 and type == STICKER (5), platformVisualFactor f32 (v < 0x368),
+//!   activationHoldTime s32, requireAll bool, angleRange f32, includeTouching s32,
+//!   stickerPlan desc when v >= 0x398, type == MICROCHIP (36) and includeTouching == 1,
+//!   bulletsRequired s32, bulletsDetected s32, bulletPlayerNumber i32 (v < 0x398),
+//!   bulletRefreshTime i32, resetWhenFull bool, logicType i32 (v < 0x398), updateFrame
+//!   i32 (v < 0x369), inputList thingarray, includeRigidConnectors bool, timerCount f32,
+//!   teamFilter i32, behavior i32, six random* i32, (randomPhaseOn u8, randomPhaseTime
+//!   s32 below 0x3ad), retardedOldJoint bool, keySensorMode i32, userDefinedColour i32 +
+//!   wiresVisible bool (> 0x34c), bulletTypes i8 (> 0x34f), detectUnspawnedPlayers bool
+//!   (> 0x390), playSwitchAudio bool
+//!   (> 0x3a4), playerMode i8 (> 0x3ec), DATA_SAMPLER (65) block when v > 0x3ee
+//!   (labelIndex i32, NetworkOnlineID 20 bytes, labelName wstr, floatarray, bytearray).
+//! - SCRIPT (PScript -> ScriptInstance): script res, bool hasLayout, ref InstanceLayout
+//!   {arraylist FieldLayoutDetails, instanceSize i32}, reflectDivergent bool, then one
+//!   value per layout field in order, skipping fields with the DIVERGENT modifier (bit
+//!   12) unless reflectDivergent: BOOL bool, CHAR i16, S32 i32, F32 f32, V4 v4, M44 m44,
+//!   OBJECT_REF ScriptObjectUID, SAFE_PTR ref Thing; other machine types stop.
+//!   FieldLayoutDetails: name str, then for v >= 0x3d9 modifiers i16, machineType u8,
+//!   fishType u8, dimensionCount i8, arrayBaseMachineType u8; below 0x3d9 modifiers i32,
+//!   machineType i32, fishType i32, dimensionCount i8, arrayBaseMachineType i32; then
+//!   instanceOffset i32. ScriptObjectUID: type i32 (0 null), tag i32 in the shared
+//!   reference table (0 null, seen = back-reference), then by type: ARRAY_BOOL i32 count +
+//!   bools, ARRAY_S32 intvector, ARRAY_F32 floatarray, ARRAY_VECTOR4 vectorarray,
+//!   ARRAY_SAFE_PTR thingarray, ARRAY_OBJECT_REF array of ScriptObjectUID, RESOURCE (i32
+//!   type, res when nonzero), INSTANCE ScriptInstance, STRINGW wstr, STRINGA str,
+//!   AUDIOHANDLE nothing; other types stop.
+//! - MATERIAL_TWEAK (PMaterialTweak): hideInPlayMode bool, restitution f32, frictionScale
+//!   f32, grabbability i8, grabFilter i8 (> 0x3bc), stickiness i8, noAutoDestruct bool,
+//!   disablePhysicsAudio bool, hasShadow bool (> 0x3ec); (two u8 below 0x343).
+//! - MATERIAL_OVERRIDE (PMaterialOverride, v >= 0x360 only): array(RegionOverride: region
+//!   i32, materialPlan desc, material res, uvScale v3), mesh res. Below 0x360 stops.
+//! - SWITCH_INPUT (PSwitchInput): dataSource ref Thing, updateType i32, lethalType i32,
+//!   includeRigidConnectors bool, lethalActivationFrame i32, lethalInverted bool,
+//!   hideInPlayMode bool, disableLethalAudio bool (> 0x38f), ref NpcBehavior (a new
+//!   non-null body stops: not implemented), sackbotObjectColorIndex s32, behavior i32,
+//!   effectDestroy i32, playerMode i8 (> 0x3ec).
+//! - MICROCHIP (PMicrochip + CompactComponent): circuitBoardThing ref Thing,
+//!   hideInPlayMode bool, wiresVisible bool, lastTouched s32, offset v4, then (>= 0x34d)
+//!   name wstr, components array {ref Thing, x, y, angle, scaleX, scaleY f32, flipped
+//!   bool}, circuitBoardSizeX/Y f32.
+//! - ENEMY (PEnemy): partType s32, radius f32, snapVertex i32, centerOffset v3, animThing
+//!   ref Thing, animSpeed f32, sourcePlayerNumber i32, newWalkConstraintMass bool,
+//!   smokeColor i32, smokeBrightness f32 (>= 0x39a).
+//! - EMITTER (PEmitter + EmittedObjectSource): posVel v3 (v < 0x368), angVel f32,
+//!   frequency, phase, lifetime i32, recycleEmittedObjects bool, plan res, maxEmitted i32,
+//!   maxEmittedAtOnce i32, speedScaleStartFrame, speedScaleDeltaFrames f32, speedScale
+//!   SwitchSignal, worldRotationForEditorEmitters f32 (>= 0x38e), emitScale, linearVel
+//!   f32, currentEmitted i32, emitFlip bool, parentRelativeOffset v4, parentRelative
+//!   Rotation, worldZ, zOffset, emitFrontZ, emitBackZ f32, hideInPlayMode bool, behavior
+//!   i32, effectCreate/Destroy (i8 pair >= 0x38d, else i32 pair), ignoreParentsVelocity
+//!   bool, ref EmittedObjectSource {thingarray, plan res}, editorEmitter bool (>= 0x361),
+//!   isLimboFlippedForGunEmitter bool (>= 0x38d), zOffset f32 (>= 0x3ae).
+//! - AUDIO_WORLD (PAudioWorld): soundName str, initialVolume, initialPitch,
+//!   initialParam1, maxFalloff, impactTolerance f32, playMode i32, paramAffectVol/Pitch/
+//!   Param bool, isLocal bool, hideInPlayMode bool, behavior i32, soundNames guid and
+//!   meshColor i32 (>= 0x380).
+//! - SEQUENCER (PSequencer): tempo, swing, echoFeedback, echoTime, echoMix f32,
+//!   reverbSettings i32 (> 0x370), loop bool (> 0x36e), startPoint f32, numChannels i32,
+//!   six volume f32, playHead f32 + isPlaying bool (> 0x369), musicSequencer bool
+//!   (> 0x36c), behavior i32 (> 0x371), triggerPlayer i32 + previewThing ref Thing
+//!   (> 0x3a0).
+//! - WORLD (PWorld): things arraylist(ref Thing), maxVel, maxAVel f32, frame s32, simFrame
+//!   s32, frameLevelStarted i32 (>= 0x377), thingUIDCounter i32, then the tail read by
+//!   `world_tail`: selections array of ref EditorSelection {name str, thingarray},
+//!   backdrop and backdropNew ref Thing, backdropTimer f32, lbp2NightDaySwapped s32
+//!   (>= 0x3a3), isPaused bool, lighting/colourCorrection/fog/fogTint/darkness f32,
+//!   complete/collect/ace rewards arrays of EggLink, areRewardsShareable bool,
+//!   scoreboardLevelLinkSlot SlotID (>= 0x35e), complete/collect/ace unlocks arrays of
+//!   KeyLink (SlotID), deathCount i32 (< 0x36e), maxNumPlayers s32, dissolvingThings and
+//!   oldDissolvingThings thingarray, isTutorialLevel bool (< 0x345), everSpawned bool,
+//!   spawnFailureCount s32, target/from GlobalSettings (5 f32 each), blend factor f32,
+//!   hasLevelLightingBeenSetup bool, globalSettingsThingUID s32, CameraSettings 4 f32
+//!   (>= 0x370), water level/wave/gravity triples (9 f32), floatarray, two intarrays,
+//!   waterTint f32 + v4 + f32, murkiness and bits triples (6 f32), drain-sound bools
+//!   (>= 0x34e), currWavePos f32, gameMode i32, nextSackbotPlayerNumber s32,
+//!   CutsceneCameraManager (state i32, ref Thing, s32, s32, f32, eight legacy fields below
+//!   0x36e, bool from 0x3a0), GlobalAudioSettings (reverb s32, f32 below 0x347, 4 f32,
+//!   2 f32 from 0x342, 4 f32 from 0x347), backdropPlan and backdropNewPlan desc, subLevel bool
+//!   (>= 0x352), scoreLocked bool (>= 0x38a), debugTimeInLevel s32 (>= 0x38b),
+//!   useEvenNewerCheckpointCode bool (>= 0x3ac), moveCursors array of MoveCursor
+//!   (>= 0x3bd), min/max players u8 + moveRecommended bool (>= 0x3d0),
+//!   fixInvalidInOutMoverContacts bool (>= 0x3dd), continueMusic bool (>= 0x3f1).
 use crate::serial::{Descriptor, Reader, Result, Tag};
 use crate::thing::{thing_array, thing_ref, Things};
 use serde::Serialize;
 
 const SUPPORTED: &[&str] = &[
     "BODY",
+    "JOINT",
     "WORLD",
     "RENDER_MESH",
     "POS",
+    "TRIGGER",
     "GENERATED_MESH",
+    "LEVEL_SETTINGS",
     "SPRITE_LIGHT",
     "SCRIPT_NAME",
+    "CHECKPOINT",
+    "STICKERS",
+    "DECORATIONS",
     "SHAPE",
     "EFFECTOR",
     "REF",
+    "CAMERA_TWEAK",
+    "SWITCH_KEY",
+    "GAMEPLAY_DATA",
     "GROUP",
+    "PHYSICS_TWEAK",
+    "SWITCH",
+    "SCRIPT",
+    "MATERIAL_TWEAK",
+    "MATERIAL_OVERRIDE",
+    "SWITCH_INPUT",
+    "MICROCHIP",
+    "ENEMY",
+    "EMITTER",
+    "AUDIO_WORLD",
+    "SEQUENCER",
+    "CREATURE",
+    "CONTROLINATOR",
+    "COSTUME",
+    "TAG_SYNCHRONIZER",
+    "NPC",
+    "WORMHOLE",
+    "INSTRUMENT",
 ];
 
 pub fn supported(name: &str) -> bool {
     SUPPORTED.contains(&name)
+}
+
+pub fn supported_parts() -> &'static [&'static str] {
+    SUPPORTED
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
@@ -74,8 +241,13 @@ pub struct PartData {
     pub group: Option<Group>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub plan_ref: Option<Descriptor>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub decorations: Vec<Decoration>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub world: Option<World>,
+    /// PScriptName (raw byte count, name length up to the first NUL).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script_name: Option<(usize, usize)>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -144,33 +316,59 @@ pub struct Group {
 }
 
 #[derive(Debug, Clone, Serialize)]
+pub struct Decoration {
+    /// Render mesh of the decoration when its reference body was read here (None for a
+    /// null or back-reference).
+    pub render_mesh: Option<RenderMesh>,
+    pub offset: [f32; 16],
+    pub plan_guid: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
 pub struct World {
     pub things: Vec<Option<usize>>,
     pub thing_uid_counter: Option<i32>,
 }
 
 /// `reference(P*)` for a present part of Thing `me`.
-pub fn part_ref(r: &mut Reader, things: &mut Things, me: usize, name: &'static str) -> Result<&'static str> {
+pub fn part_ref(
+    r: &mut Reader,
+    things: &mut Things,
+    me: usize,
+    name: &'static str,
+) -> Result<&'static str> {
+    let idx = r.other_count(name);
     let tag = r.tag(name, |r| Ok(r.next_other(name)))?;
     match tag {
         Tag::Null => Ok("null"),
-        Tag::Seen(_) => Ok("shared"),
+        Tag::Seen(o) => {
+            if let crate::serial::Obj::Other(_, i) = o {
+                let d = &mut things.list[me].data;
+                match name {
+                    "SHAPE" => d.shape = things.shapes.get(&i).cloned(),
+                    "RENDER_MESH" => d.render_mesh = things.render_meshes.get(&i).cloned(),
+                    _ => {}
+                }
+            }
+            Ok("shared")
+        }
         Tag::New(_) => {
             r.enter()?;
-            part_body(r, things, Some(me), name)?;
+            part_body(r, things, me, name, idx)?;
             r.leave();
             Ok("parsed")
         }
     }
 }
 
-fn part_body(r: &mut Reader, things: &mut Things, me: Option<usize>, name: &'static str) -> Result<()> {
+fn part_body(
+    r: &mut Reader,
+    things: &mut Things,
+    me: usize,
+    name: &'static str,
+    idx: usize,
+) -> Result<()> {
     let v = r.rev.version();
-    let store = |things: &mut Things, f: &dyn Fn(&mut PartData)| {
-        if let Some(i) = me {
-            f(&mut things.list[i].data);
-        }
-    };
     match name {
         "BODY" => {
             r.v3()?;
@@ -182,48 +380,21 @@ fn part_body(r: &mut Reader, things: &mut Things, me: Option<usize>, name: &'sta
             let bone_of = thing_ref(r, things)?;
             let anim_hash = r.i32()?;
             let world = r.m44()?;
-            let p = Pos {
+            things.list[me].data.pos = Some(Pos {
                 bone_of,
                 anim_hash,
                 world,
-            };
-            store(things, &|d| d.pos = Some(p.clone()));
+            });
         }
         "RENDER_MESH" => {
-            let mesh = r.resource(false)?;
-            let bone_things = thing_array(r, things)?;
-            let anim = r.resource(false)?;
-            let anim_pos = r.f32()?;
-            let anim_speed = r.f32()?;
-            let anim_loop = r.bool()?;
-            r.f32()?;
-            r.f32()?;
-            let editor_color = r.u32()?;
-            let cast_shadows = r.i8()?;
-            r.bool()?;
-            let visibility_flags = r.i8()?;
-            let poppet_render_scale = r.f32()?;
-            if v < 0x34d {
-                r.f32()?;
-                r.f32()?;
-            }
-            let m = RenderMesh {
-                mesh,
-                bone_things,
-                anim,
-                anim_pos,
-                anim_speed,
-                anim_loop,
-                editor_color,
-                cast_shadows,
-                visibility_flags,
-                poppet_render_scale,
-            };
-            store(things, &|d| d.render_mesh = Some(m.clone()));
+            let m = render_mesh(r, things)?;
+            things.render_meshes.insert(idx, m.clone());
+            things.list[me].data.render_mesh = Some(m);
         }
         "SHAPE" => {
             let s = shape(r, things)?;
-            store(things, &|d| d.shape = Some(s.clone()));
+            things.shapes.insert(idx, s.clone());
+            things.list[me].data.shape = Some(s);
         }
         "GENERATED_MESH" => {
             let g = GeneratedMesh {
@@ -233,9 +404,8 @@ fn part_body(r: &mut Reader, things: &mut Things, me: Option<usize>, name: &'sta
                 plan_guid: r.guid()?,
                 play_mode_visible: r.bool()?,
             };
-            r.f32()?;
-            r.f32()?;
-            store(things, &|d| d.generated_mesh = Some(g.clone()));
+            r.skip_f32(2)?;
+            things.list[me].data.generated_mesh = Some(g);
         }
         "GROUP" => {
             r.bytes(36)?;
@@ -244,39 +414,37 @@ fn part_body(r: &mut Reader, things: &mut Things, me: Option<usize>, name: &'sta
             r.i32()?;
             r.i32()?;
             let flags = r.u8()?;
-            let g = Group { plan, emitter, flags };
-            store(things, &|d| d.group = Some(g.clone()));
+            things.list[me].data.group = Some(Group {
+                plan,
+                emitter,
+                flags,
+            });
         }
         "REF" => {
             let plan = r.resource(true)?;
             r.i32()?;
             r.i32()?;
-            store(things, &|d| d.plan_ref = plan);
+            things.list[me].data.plan_ref = plan;
         }
         "EFFECTOR" => {
             r.v3()?;
-            r.f32()?;
-            r.f32()?;
-            r.f32()?;
+            r.skip_f32(3)?;
             r.v3()?;
             r.bool()?;
             r.bool()?;
-            r.f32()?;
-            r.f32()?;
+            r.skip_f32(2)?;
         }
         "SCRIPT_NAME" => {
             let n = r.s32()?;
             let n = usize::try_from(n).or_else(|_| r.invalid("negative script name length"))?;
-            r.bytes(n)?;
+            let b = r.bytes(n)?;
+            let name_len = b.iter().position(|&c| c == 0).unwrap_or(n);
+            things.list[me].data.script_name = Some((n, name_len));
         }
         "SPRITE_LIGHT" => {
             r.v4()?;
             r.v4()?;
-            r.f32()?;
-            r.f32()?;
-            r.f32()?; // glowRadius
-            r.f32()?; // farDist
-            r.f32()?; // sourceSize
+            r.skip_f32(5)?;
             r.resource(false)?;
             thing_ref(r, things)?;
             r.bool()?;
@@ -284,30 +452,1392 @@ fn part_body(r: &mut Reader, things: &mut Things, me: Option<usize>, name: &'sta
                 r.bool()?;
                 r.bool()?;
             }
-            for _ in 0..5 {
-                r.f32()?;
+            r.skip_f32(5)?;
+            r.i32()?;
+        }
+        "TRIGGER" => {
+            r.i8()?;
+            thing_array(r, things)?;
+            r.f32()?;
+            r.bool()?;
+            r.f32()?;
+            r.bool()?;
+            r.f32()?;
+        }
+        "STICKERS" => stickers(r)?,
+        "DECORATIONS" => {
+            let n = r.count(4)?;
+            let mut out = Vec::with_capacity(n.min(4096));
+            for _ in 0..n {
+                out.push(decoration(r, things)?);
+            }
+            things.list[me].data.decorations = out;
+        }
+        "LEVEL_SETTINGS" => {
+            level_settings(r)?;
+            let n = r.count(4)?;
+            for _ in 0..n {
+                level_settings(r)?;
+            }
+            r.str8()?;
+            r.resource(false)?;
+        }
+        "CAMERA_TWEAK" => camera_tweak(r)?,
+        "JOINT" => {
+            thing_ref(r, things)?;
+            thing_ref(r, things)?;
+            r.v3()?;
+            r.v3()?;
+            r.skip_f32(3)?;
+            r.bool()?;
+            r.resource(false)?;
+            r.int_array()?;
+            r.v4()?;
+            r.i32()?;
+            r.f32()?;
+            r.bool()?;
+            r.v3()?;
+            r.i32()?;
+            r.skip_f32(10)?;
+            r.f32()?;
+            r.i32()?;
+            r.skip_f32(2)?;
+            r.bool()?;
+            r.bool()?;
+            r.i32()?;
+        }
+        "CHECKPOINT" => {
+            r.bool()?;
+            r.i32()?;
+            r.s32()?;
+            r.s32()?;
+            r.bool()?;
+            thing_array(r, things)?;
+            r.i32()?;
+            r.i32()?;
+            r.i32()?;
+        }
+        "PHYSICS_TWEAK" => physics_tweak(r, things)?,
+        "SWITCH_KEY" => {
+            r.s32()?;
+            r.wstr()?;
+            r.u8()?;
+        }
+        "GAMEPLAY_DATA" => {
+            r.s32()?;
+            let tag = r.tag("EggLink", |r| Ok(r.next_other("EggLink")))?;
+            if let Tag::New(_) = tag {
+                r.resource(false)?;
+                r.bool()?;
+                if v > 0x3e0 && r.bool()? {
+                    r.resource(true)?;
+                }
+            }
+            let tag = r.tag("SlotID", |r| Ok(r.next_other("SlotID")))?;
+            if let Tag::New(_) = tag {
+                r.u32()?;
+                r.u32()?;
             }
             r.i32()?;
+        }
+        "MICROCHIP" => {
+            thing_ref(r, things)?;
+            r.bool()?;
+            r.bool()?;
+            r.s32()?;
+            r.v4()?;
+            if v >= 0x34d {
+                r.wstr()?;
+                let n = r.count(1)?;
+                for _ in 0..n {
+                    thing_ref(r, things)?;
+                    r.skip_f32(5)?;
+                    r.bool()?;
+                }
+                r.skip_f32(2)?;
+            }
+        }
+        "ENEMY" => {
+            r.s32()?;
+            r.f32()?;
+            r.i32()?;
+            r.v3()?;
+            thing_ref(r, things)?;
+            r.f32()?;
+            r.i32()?;
+            r.bool()?;
+            r.i32()?;
+            if v >= 0x39a {
+                r.f32()?;
+            }
+        }
+        "EMITTER" => emitter(r, things)?,
+        "AUDIO_WORLD" => {
+            r.str8()?;
+            r.skip_f32(5)?;
+            r.i32()?;
+            r.bytes(5)?;
+            r.i32()?;
+            if v >= 0x380 {
+                r.guid()?;
+                r.i32()?;
+            }
+        }
+        "SEQUENCER" => {
+            r.skip_f32(5)?;
+            if v > 0x370 {
+                r.i32()?;
+            }
+            if v > 0x36e {
+                r.bool()?;
+            }
+            r.f32()?;
+            r.i32()?;
+            r.skip_f32(6)?;
+            if v > 0x369 {
+                r.f32()?;
+                r.bool()?;
+            }
+            if v > 0x36c {
+                r.bool()?;
+            }
+            if v > 0x371 {
+                r.i32()?;
+            }
+            if v > 0x3a0 {
+                r.i32()?;
+                thing_ref(r, things)?;
+            }
+        }
+        "SWITCH" => switch(r, things)?,
+        "SCRIPT" => script_instance(r, things)?,
+        "MATERIAL_TWEAK" => {
+            r.bool()?;
+            r.skip_f32(2)?;
+            if v < 0x343 {
+                r.bytes(2)?;
+            }
+            if v > 0x342 {
+                r.i8()?;
+            }
+            if v > 0x3bc {
+                r.i8()?;
+            }
+            if v > 0x342 {
+                r.i8()?;
+            }
+            r.bool()?;
+            if v > 0x356 {
+                r.bool()?;
+            }
+            if v > 0x3ec {
+                r.bool()?;
+            }
+        }
+        "NPC" => {
+            r.bool()?;
+            r.v3()?;
+            r.v3()?;
+            r.v3()?;
+            r.s32()?;
+            r.i32()?;
+            let n = r.count(1)?;
+            r.bytes(n)?;
+            r.int_vector()?;
+            r.i32()?;
+            r.i32()?;
+            r.int_vector()?;
+            npc_behavior_ref(r, things)?;
+            r.i32()?;
+            thing_ref(r, things)?;
+            thing_ref(r, things)?;
+            if v < 0x36e {
+                for _ in 0..3 {
+                    r.i32()?;
+                }
+            }
+            r.v3()?;
+            if v < 0x36e {
+                r.v3()?;
+            }
+            r.s32()?;
+            r.i32()?;
+            r.wstr()?;
+            if v > 0x353 {
+                if v == 0x354 || v == 0x355 {
+                    r.skip_f32(2)?;
+                } else {
+                    r.i32()?;
+                    r.i32()?;
+                }
+                r.i32()?;
+            }
+            if v > 0x391 {
+                r.i8()?;
+            }
+        }
+        "WORMHOLE" => {
+            r.s32()?;
+            r.s32()?;
+            r.bytes(4)?;
+            r.i32()?;
+            r.i32()?;
+        }
+        "INSTRUMENT" => {
+            r.resource(false)?;
+            if v >= 0x35b {
+                r.wstr()?;
+            }
+            for _ in 0..4 {
+                r.i32()?;
+            }
+            r.skip_f32(4)?;
+            if v >= 0x389 {
+                r.bytes(8)?;
+            }
+            let n = r.count(4)?;
+            r.bytes(n * 4)?;
+            if v >= 0x379 {
+                r.resource(false)?;
+            }
+        }
+        "CREATURE" => creature(r, things)?,
+        "CONTROLINATOR" => {
+            for _ in 0..4 {
+                thing_ref(r, things)?;
+            }
+            r.i32()?;
+            r.f32()?;
+            r.bool()?;
+            r.i32()?;
+            r.bytes(3)?;
+            thing_ref(r, things)?;
+            if v > 0x3ec {
+                r.i8()?;
+            }
+        }
+        "COSTUME" => {
+            r.resource(false)?;
+            r.resource(false)?;
+            r.resource(true)?;
+            r.int_vector()?;
+            primitives(r)?;
+            let pieces = if v >= 0x2c5 { 2 } else { 1 };
+            for _ in 0..pieces {
+                let n = r.count(1)?;
+                for _ in 0..n {
+                    r.resource(false)?;
+                    r.i32()?;
+                    let m = r.count(1)?;
+                    for _ in 0..m {
+                        r.i32()?;
+                    }
+                    primitives(r)?;
+                    r.resource(true)?;
+                }
+            }
+        }
+        "TAG_SYNCHRONIZER" => {
+            r.s32()?;
+            r.s32()?;
+            r.wstr()?;
+            r.skip_f32(4)?;
+            r.bool()?;
+            r.bool()?;
+        }
+        "MATERIAL_OVERRIDE" if v < 0x360 => {
+            primitives(r)?;
+            let n = r.count(1)?;
+            for _ in 0..n {
+                r.resource(true)?;
+            }
+            let n = r.count(4)?;
+            r.bytes(n.checked_mul(12).ok_or(crate::serial::Stop::Budget {
+                what: "uv scales",
+                offset: r.pos(),
+            })?)?;
+            r.resource(false)?;
+        }
+        "MATERIAL_OVERRIDE" => {
+            let n = r.count(4)?;
+            for _ in 0..n {
+                r.i32()?;
+                r.resource(true)?;
+                r.resource(false)?;
+                r.v3()?;
+            }
+            r.resource(false)?;
+        }
+        "SWITCH_INPUT" => {
+            thing_ref(r, things)?;
+            r.i32()?;
+            r.i32()?;
+            r.bool()?;
+            r.i32()?;
+            r.bool()?;
+            r.bool()?;
+            if v > 0x38f {
+                r.bool()?;
+            }
+            npc_behavior_ref(r, things)?;
+            r.s32()?;
+            r.i32()?;
+            r.i32()?;
+            if v > 0x3ec {
+                r.i8()?;
+            }
         }
         "WORLD" => {
             let list = thing_array(r, things)?;
             things.world_array_done = Some(list.len());
-            r.f32()?;
-            r.f32()?;
+            r.skip_f32(2)?;
             r.s32()?;
             r.s32()?;
             if v >= 0x377 {
                 r.i32()?;
             }
             let uid = r.i32()?;
-            let w = World {
+            things.list[me].data.world = Some(World {
                 things: list,
                 thing_uid_counter: Some(uid),
-            };
-            store(things, &|d| d.world = Some(w.clone()));
-            return r.unsupported("PWorld tail from selections (EditorSelection) onward");
+            });
+            world_tail(r, things)?;
         }
         _ => return r.unsupported(format!("part reader {name}")),
+    }
+    Ok(())
+}
+
+/// RLevel tutorialInventory element (InventoryItem + InventoryItemDetails). Band rules:
+/// plan desc; details (head > 0x37c: dateAdded s64, SlotID, highlightSound guid, colour
+/// i32, type i32, subType i32, titleKey u32, descriptionKey u32, ref CreationHistory
+/// {i32 count, 20-byte fixed strings}, icon desc, ref UserCreatedDetails {wstr, wstr},
+/// ref InventoryItemPhotoData, ref EyetoyData, location/category/primary i16, ref
+/// NetworkPlayerID (36 bytes), toolType i8, flags i8; head <= 0x37c: fixed BE32
+/// highlightSound, slotType, slotNumber, location, category, primary, lastUsed, numUses,
+/// pad, fixed BE64 dateAdded, fixed BE32 fluffCost, colour, type, subType, toolType,
+/// NetworkPlayerID, allowEmit/shareable/copyright bool, flags i8, titleKey u32,
+/// descriptionKey u32, UserCreatedDetails struct, CreationHistory struct (i32 count +
+/// wstr each), icon desc, ref photo data, ref EyetoyData, u8 (> 0x358)); then fixed BE32
+/// UID, (two fixed BE32 tutorial values below 0x36c), fixed BE32 flags, fixed BE32
+/// userCategoryIndex (>= 0x34a). Toolkit: structs/profile/InventoryItem.java,
+/// structs/inventory/InventoryItemDetails.java, CreationHistory, UserCreatedDetails,
+/// InventoryItemPhotoData, PhotoMetadata, PhotoUser, EyetoyData.
+pub(crate) fn inventory_item(r: &mut Reader) -> Result<()> {
+    let v = r.rev.version();
+    r.resource(true)?;
+    if v > 0x37c {
+        r.u64()?;
+        r.u32()?;
+        r.u32()?;
+        r.guid()?;
+        for _ in 0..5 {
+            r.u32()?;
+        }
+        if let Tag::New(_) = r.tag("CreationHistory", |r| Ok(r.next_other("CreationHistory")))? {
+            let n = r.count(20)?;
+            r.bytes(n * 20)?;
+        }
+        r.resource(true)?;
+        if let Tag::New(_) = r.tag("UserCreatedDetails", |r| {
+            Ok(r.next_other("UserCreatedDetails"))
+        })? {
+            r.wstr()?;
+            r.wstr()?;
+        }
+        photo_data_ref(r)?;
+        eyetoy_ref(r)?;
+        r.bytes(6)?;
+        if let Tag::New(_) = r.tag("NetworkPlayerID", |r| Ok(r.next_other("NetworkPlayerID")))? {
+            r.bytes(36)?;
+        }
+        r.bytes(2)?;
+    } else {
+        for _ in 0..8 {
+            r.fixed_u32()?;
+        }
+        r.fixed_u32()?;
+        r.fixed_u64()?;
+        for _ in 0..5 {
+            r.fixed_u32()?;
+        }
+        r.bytes(36)?;
+        r.bytes(3)?;
+        r.i8()?;
+        r.u32()?;
+        r.u32()?;
+        r.wstr()?;
+        r.wstr()?;
+        let n = r.count(1)?;
+        for _ in 0..n {
+            r.wstr()?;
+        }
+        r.resource(true)?;
+        photo_data_ref(r)?;
+        eyetoy_ref(r)?;
+        if v > 0x358 {
+            r.u8()?;
+        }
+    }
+    r.fixed_u32()?;
+    if v < 0x36c {
+        r.fixed_u32()?;
+        r.fixed_u32()?;
+    }
+    r.fixed_u32()?;
+    if v >= 0x34a {
+        r.fixed_u32()?;
+    }
+    Ok(())
+}
+
+fn photo_data_ref(r: &mut Reader) -> Result<()> {
+    if let Tag::New(_) = r.tag("InventoryItemPhotoData", |r| {
+        Ok(r.next_other("InventoryItemPhotoData"))
+    })? {
+        r.resource(true)?;
+        r.resource(true)?;
+        r.resource(true)?;
+        r.u32()?;
+        r.u32()?;
+        r.wstr()?;
+        r.sha1()?;
+        r.u64()?;
+        let n = r.count(1)?;
+        for _ in 0..n {
+            r.bytes(20)?;
+            r.wstr()?;
+            r.v4()?;
+        }
+        if r.rev.version() > 0x3c7 {
+            r.resource(true)?;
+        }
+    }
+    Ok(())
+}
+
+fn eyetoy_ref(r: &mut Reader) -> Result<()> {
+    if let Tag::New(_) = r.tag("EyetoyData", |r| Ok(r.next_other("EyetoyData")))? {
+        r.resource(false)?;
+        r.resource(false)?;
+        r.m44()?;
+        r.skip_f32(6)?;
+        if r.rev.version() > 0x39f {
+            r.resource(false)?;
+        }
+    }
+    Ok(())
+}
+
+/// EggLink struct: plan res, shareable bool, hasPainting bool (> 0x3e0), painting desc.
+fn egg_link(r: &mut Reader) -> Result<()> {
+    r.resource(false)?;
+    r.bool()?;
+    if r.rev.version() > 0x3e0 && r.bool()? {
+        r.resource(true)?;
+    }
+    Ok(())
+}
+
+/// PWorld fields after thingUIDCounter (see module notes, WORLD tail).
+fn world_tail(r: &mut Reader, things: &mut Things) -> Result<()> {
+    let v = r.rev.version();
+    let n = r.count(1)?;
+    for _ in 0..n {
+        let tag = r.tag("EditorSelection", |r| Ok(r.next_other("EditorSelection")))?;
+        if let Tag::New(_) = tag {
+            r.enter()?;
+            r.str8()?;
+            thing_array(r, things)?;
+            r.leave();
+        }
+    }
+    thing_ref(r, things)?;
+    thing_ref(r, things)?;
+    r.f32()?;
+    if v >= 0x3a3 {
+        r.s32()?;
+    }
+    r.bool()?;
+    r.skip_f32(5)?;
+    for _ in 0..3 {
+        let n = r.count(2)?;
+        for _ in 0..n {
+            egg_link(r)?;
+        }
+    }
+    r.bool()?;
+    if v >= 0x35e {
+        r.u32()?;
+        r.u32()?;
+    }
+    for _ in 0..3 {
+        let n = r.count(2)?;
+        for _ in 0..n {
+            r.u32()?;
+            r.u32()?;
+        }
+    }
+    if v < 0x36e {
+        r.i32()?;
+    }
+    r.s32()?;
+    thing_array(r, things)?;
+    thing_array(r, things)?;
+    if v < 0x345 {
+        r.bool()?;
+    }
+    r.bool()?;
+    r.s32()?;
+    r.skip_f32(10)?;
+    r.f32()?;
+    r.bool()?;
+    r.s32()?;
+    if v >= 0x370 {
+        r.skip_f32(4)?;
+    }
+    r.skip_f32(9)?;
+    let n = r.count(4)?;
+    r.bytes(n * 4)?;
+    r.int_array()?;
+    r.int_array()?;
+    r.f32()?;
+    r.v4()?;
+    r.f32()?;
+    r.skip_f32(6)?;
+    if v >= 0x34e {
+        r.bool()?;
+        r.bool()?;
+    }
+    r.f32()?;
+    r.i32()?;
+    r.s32()?;
+    // CutsceneCameraManager
+    r.i32()?;
+    thing_ref(r, things)?;
+    r.s32()?;
+    r.s32()?;
+    r.f32()?;
+    if v < 0x36e {
+        r.bool()?;
+        r.v3()?;
+        r.f32()?;
+        r.v3()?;
+        r.bool()?;
+        r.v3()?;
+        r.f32()?;
+        r.v3()?;
+    }
+    if v >= 0x3a0 {
+        r.bool()?;
+    }
+    // GlobalAudioSettings
+    r.s32()?;
+    if v < 0x347 {
+        r.f32()?;
+    }
+    r.skip_f32(4)?;
+    if v >= 0x342 {
+        r.skip_f32(2)?;
+    }
+    if v >= 0x347 {
+        r.skip_f32(4)?;
+    }
+    r.resource(true)?;
+    r.resource(true)?;
+    if v >= 0x352 {
+        r.bool()?;
+    }
+    if v >= 0x38a {
+        r.bool()?;
+    }
+    if v >= 0x38b {
+        r.s32()?;
+    }
+    if v >= 0x3ac {
+        r.bool()?;
+    }
+    if v >= 0x3bd {
+        let n = r.count(1)?;
+        for _ in 0..n {
+            if v > 0x3c1 {
+                r.i32()?;
+            }
+            thing_ref(r, things)?;
+            thing_ref(r, things)?;
+            r.v4()?;
+            r.f32()?;
+            if v < 0x3c2 {
+                r.v4()?;
+                r.v4()?;
+            }
+            r.v4()?;
+            if v > 0x3c1 {
+                r.v4()?;
+                r.v4()?;
+                r.v4()?;
+                r.v4()?;
+                r.skip_f32(2)?;
+            }
+            r.bool()?;
+            r.bool()?;
+            if v < 0x3c2 {
+                r.v4()?;
+            }
+            r.f32()?;
+        }
+    }
+    if v >= 0x3d0 {
+        r.u8()?;
+        r.u8()?;
+        r.bool()?;
+    }
+    if v >= 0x3dd {
+        r.bool()?;
+    }
+    if v >= 0x3f1 {
+        r.bool()?;
+    }
+    Ok(())
+}
+
+/// reference(NpcBehavior) with its inline body (and the ActingData/InputRecording it
+/// references).
+fn npc_behavior_ref(r: &mut Reader, things: &mut Things) -> Result<()> {
+    let v = r.rev.version();
+    let tag = r.tag("NpcBehavior", |r| Ok(r.next_other("NpcBehavior")))?;
+    if !matches!(tag, Tag::New(_)) {
+        return Ok(());
+    }
+    r.enter()?;
+    thing_ref(r, things)?;
+    thing_ref(r, things)?;
+    r.s32()?;
+    r.i32()?;
+    r.f32()?;
+    r.s32()?;
+    r.wstr()?;
+    r.s32()?;
+    r.wstr()?;
+    r.s32()?;
+    let tag = r.tag("ActingData", |r| Ok(r.next_other("ActingData")))?;
+    if let Tag::New(_) = tag {
+        r.enter()?;
+        r.i32()?;
+        thing_ref(r, things)?;
+        // InputRecording
+        let n = r.count(1)?;
+        r.bytes(n)?;
+        r.int_vector()?;
+        r.int_vector()?;
+        r.m44()?;
+        let n = r.count(2)?;
+        for _ in 0..n {
+            r.m44()?;
+        }
+        r.v3()?;
+        let n = r.count(12)?;
+        r.bytes(n * 12)?;
+        if v > 0x3c4 {
+            r.bool()?;
+        }
+        thing_ref(r, things)?;
+        r.i32()?;
+        r.s32()?;
+        r.resource(false)?;
+        r.leave();
+    }
+    r.f32()?;
+    r.i32()?;
+    r.v3()?;
+    r.v3()?;
+    r.bool()?;
+    r.v3()?;
+    for _ in 0..8 {
+        r.s32()?;
+    }
+    r.s32()?;
+    if v > 0x371 {
+        r.bytes(2)?;
+    }
+    if v > 0x375 {
+        r.bool()?;
+    }
+    r.leave();
+    Ok(())
+}
+
+/// array(Primitive): material res, textureAlternatives res, minVert, maxVert,
+/// firstIndex, numIndices, region i32.
+fn primitives(r: &mut Reader) -> Result<()> {
+    let n = r.count(7)?;
+    for _ in 0..n {
+        r.resource(false)?;
+        r.resource(false)?;
+        for _ in 0..5 {
+            r.i32()?;
+        }
+    }
+    Ok(())
+}
+
+fn creature(r: &mut Reader, things: &mut Things) -> Result<()> {
+    let v = r.rev.version();
+    r.resource(false)?;
+    r.s32()?;
+    r.f32()?;
+    r.v3()?;
+    thing_ref(r, things)?;
+    thing_ref(r, things)?;
+    r.i32()?;
+    r.i32()?;
+    r.skip_f32(3)?;
+    r.i32()?;
+    r.s32()?;
+    r.s32()?;
+    r.v3()?;
+    r.i32()?;
+    r.f32()?;
+    r.i32()?;
+    if v >= 0x354 {
+        r.int_vector()?;
+        r.int_vector()?;
+    }
+    r.bool()?;
+    thing_array(r, things)?;
+    thing_array(r, things)?;
+    thing_ref(r, things)?;
+    thing_ref(r, things)?;
+    r.i32()?;
+    r.i32()?;
+    r.bool()?;
+    for _ in 0..3 {
+        thing_array(r, things)?;
+    }
+    r.bool()?;
+    r.m44()?;
+    r.f32()?;
+    r.v3()?;
+    r.v3()?;
+    r.f32()?;
+    r.v3()?;
+    thing_ref(r, things)?;
+    r.i32()?;
+    r.i32()?;
+    r.i32()?;
+    thing_ref(r, things)?;
+    if v >= 0x3a2 {
+        thing_ref(r, things)?;
+    }
+    r.i32()?;
+    r.i32()?;
+    r.f32()?;
+    r.bool()?;
+    r.i32()?;
+    r.f32()?;
+    r.v3()?;
+    r.f32()?;
+    thing_ref(r, things)?;
+    thing_ref(r, things)?;
+    r.i32()?;
+    r.i32()?;
+    r.skip_f32(2)?;
+    r.bool()?;
+    r.bool()?;
+    r.resource(false)?;
+    thing_ref(r, things)?;
+    thing_ref(r, things)?;
+    r.f32()?;
+    thing_ref(r, things)?;
+    r.s32()?;
+    r.v3()?;
+    let n = r.count(12)?;
+    r.bytes(n * 12)?;
+    r.s32()?;
+    r.bool()?;
+    thing_ref(r, things)?;
+    r.i32()?;
+    r.i32()?;
+    r.bool()?;
+    if v >= 0x3f0 {
+        r.i8()?;
+    }
+    if v >= 0x35a {
+        r.i32()?;
+    }
+    if v >= 0x373 {
+        r.i32()?;
+    }
+    if v >= 0x3c0 {
+        let tag = r.tag("WhipSim", |r| Ok(r.next_other("WhipSim")))?;
+        if let Tag::New(_) = tag {
+            r.enter()?;
+            thing_ref(r, things)?;
+            r.m44()?;
+            r.v3()?;
+            r.v3()?;
+            r.i32()?;
+            r.i8()?;
+            thing_ref(r, things)?;
+            r.v3()?;
+            r.v3()?;
+            r.skip_f32(2)?;
+            r.bool()?;
+            r.f32()?;
+            r.leave();
+        }
+    }
+    Ok(())
+}
+
+fn emitter(r: &mut Reader, things: &mut Things) -> Result<()> {
+    let v = r.rev.version();
+    if v < 0x368 {
+        r.v3()?;
+    }
+    r.f32()?;
+    r.i32()?;
+    r.i32()?;
+    r.i32()?;
+    r.bool()?;
+    r.resource(false)?;
+    r.i32()?;
+    r.i32()?;
+    r.skip_f32(2)?;
+    switch_signal(r)?;
+    if v >= 0x38e {
+        r.f32()?;
+    }
+    r.skip_f32(2)?;
+    r.i32()?;
+    r.bool()?;
+    r.v4()?;
+    r.skip_f32(5)?;
+    r.bool()?;
+    r.i32()?;
+    if v >= 0x38d {
+        r.i8()?;
+        r.i8()?;
+    } else {
+        r.i32()?;
+        r.i32()?;
+    }
+    r.bool()?;
+    let tag = r.tag("EmittedObjectSource", |r| {
+        Ok(r.next_other("EmittedObjectSource"))
+    })?;
+    if let Tag::New(_) = tag {
+        r.enter()?;
+        thing_array(r, things)?;
+        r.resource(false)?;
+        r.leave();
+    }
+    if v >= 0x361 {
+        r.bool()?;
+    }
+    if v >= 0x38d {
+        r.bool()?;
+    }
+    if v >= 0x3ae {
+        r.f32()?;
+    }
+    Ok(())
+}
+
+fn switch_signal(r: &mut Reader) -> Result<()> {
+    r.f32()?;
+    r.s32()?;
+    r.i32()?;
+    Ok(())
+}
+
+fn switch(r: &mut Reader, things: &mut Things) -> Result<()> {
+    let v = r.rev.version();
+    r.bool()?;
+    r.f32()?;
+    if v >= 0x382 {
+        r.f32()?;
+    }
+    r.s32()?;
+    r.wstr()?;
+    if v >= 0x38f {
+        r.bool()?;
+    }
+    r.s32()?;
+    let outputs = r.count(1)?;
+    for _ in 0..outputs {
+        let tag = r.tag("SwitchOutput", |r| Ok(r.next_other("SwitchOutput")))?;
+        if let Tag::New(_) = tag {
+            r.enter()?;
+            switch_signal(r)?;
+            let n = r.count(1)?;
+            for _ in 0..n {
+                thing_ref(r, things)?;
+                r.i32()?;
+            }
+            if v >= 0x34d {
+                r.wstr()?;
+            }
+            r.leave();
+        }
+    }
+    if v < 0x398 {
+        r.resource(true)?;
+    }
+    r.bool()?;
+    let kind = r.s32()?;
+    thing_ref(r, things)?;
+    switch_signal(r)?;
+    if v >= 0x398 && kind == 5 {
+        r.resource(true)?;
+    }
+    if v < 0x368 {
+        r.f32()?;
+    }
+    r.s32()?;
+    r.bool()?;
+    r.f32()?;
+    let include_touching = r.s32()?;
+    if v >= 0x398 && kind == 36 && include_touching == 1 {
+        r.resource(true)?;
+    }
+    r.s32()?;
+    r.s32()?;
+    if v < 0x398 {
+        r.i32()?;
+    }
+    r.i32()?;
+    r.bool()?;
+    if v < 0x398 {
+        r.i32()?;
+    }
+    if v < 0x369 {
+        r.i32()?;
+    }
+    thing_array(r, things)?;
+    r.bool()?;
+    r.f32()?;
+    r.i32()?;
+    r.i32()?;
+    for _ in 0..6 {
+        r.i32()?;
+    }
+    if v < 0x3ad {
+        r.u8()?;
+        r.s32()?;
+    }
+    r.bool()?;
+    r.i32()?;
+    if v > 0x34c {
+        r.i32()?;
+        r.bool()?;
+    }
+    if v > 0x34f {
+        r.i8()?;
+    }
+    if v > 0x390 {
+        r.bool()?;
+    }
+    if v > 0x3a4 {
+        r.bool()?;
+    }
+    if v > 0x3ec {
+        r.i8()?;
+    }
+    if v > 0x3ee && kind == 65 {
+        r.i32()?;
+        r.bytes(20)?;
+        r.wstr()?;
+        let n = r.count(4)?;
+        r.bytes(n * 4)?;
+        let n = r.count(1)?;
+        r.bytes(n)?;
+    }
+    Ok(())
+}
+
+const DIVERGENT: u32 = 1 << 12;
+
+fn instance_layout(r: &mut Reader, things: &mut Things) -> Result<()> {
+    let v = r.rev.version();
+    let n = r.count(4)?;
+    let mut fields = Vec::with_capacity(n.min(4096));
+    for _ in 0..n {
+        r.str8()?;
+        let (modifiers, machine) = if v >= 0x3d9 {
+            let m = u32::from(r.u16()?);
+            let t = r.u8()?;
+            r.u8()?;
+            r.i8()?;
+            r.u8()?;
+            (m, u32::from(t))
+        } else {
+            let m = r.u32()?;
+            let t = r.u32()?;
+            r.u32()?;
+            r.i8()?;
+            r.u32()?;
+            (m, t)
+        };
+        r.i32()?;
+        let machine = u8::try_from(machine).unwrap_or(u8::MAX);
+        fields.push((machine, modifiers & DIVERGENT != 0));
+    }
+    r.i32()?;
+    things.layouts.push(fields);
+    Ok(())
+}
+
+fn script_instance(r: &mut Reader, things: &mut Things) -> Result<()> {
+    r.resource(false)?;
+    if !r.bool()? {
+        return Ok(());
+    }
+    let tag = r.tag("InstanceLayout", |r| Ok(r.next_other("InstanceLayout")))?;
+    let layout = match tag {
+        Tag::Null => return r.invalid("script instance without a layout"),
+        Tag::Seen(crate::serial::Obj::Other(_, i)) => i,
+        Tag::Seen(_) => return r.invalid("layout tag is not a layout"),
+        Tag::New(_) => {
+            let id = things.layouts.len();
+            r.enter()?;
+            instance_layout(r, things)?;
+            r.leave();
+            id
+        }
+    };
+    let divergent = r.bool()?;
+    let Some(fields) = things.layouts.get(layout).cloned() else {
+        return r.invalid("instance layout still being read");
+    };
+    for (machine, is_divergent) in fields {
+        if is_divergent && !divergent {
+            continue;
+        }
+        match machine {
+            1 => {
+                r.bool()?;
+            }
+            2 => {
+                r.i16()?;
+            }
+            3 => {
+                r.i32()?;
+            }
+            4 => {
+                r.f32()?;
+            }
+            5 => {
+                r.v4()?;
+            }
+            6 => {
+                r.m44()?;
+            }
+            0xa => {
+                thing_ref(r, things)?;
+            }
+            0xb => script_object(r, things)?,
+            other => return r.unsupported(format!("script field machine type {other}")),
+        }
+    }
+    Ok(())
+}
+
+fn script_object(r: &mut Reader, things: &mut Things) -> Result<()> {
+    let kind = r.u32()?;
+    if kind == 0 {
+        return Ok(());
+    }
+    let tag = r.tag("ScriptObject", |r| Ok(r.next_other("ScriptObject")))?;
+    if !matches!(tag, Tag::New(_)) {
+        return Ok(());
+    }
+    r.enter()?;
+    match kind {
+        1 => {
+            let n = r.count(1)?;
+            r.bytes(n)?;
+        }
+        3 => {
+            r.int_vector()?;
+        }
+        4 => {
+            let n = r.count(4)?;
+            r.bytes(n * 4)?;
+        }
+        5 => {
+            let n = r.count(16)?;
+            r.bytes(n * 16)?;
+        }
+        10 => {
+            thing_array(r, things)?;
+        }
+        11 => {
+            let n = r.count(1)?;
+            for _ in 0..n {
+                script_object(r, things)?;
+            }
+        }
+        12 => {
+            if r.u32()? != 0 {
+                r.resource(false)?;
+            }
+        }
+        13 => script_instance(r, things)?,
+        14 => {
+            r.wstr()?;
+        }
+        15 => {}
+        16 => {
+            r.str8()?;
+        }
+        other => return r.unsupported(format!("script object type {other}")),
+    }
+    r.leave();
+    Ok(())
+}
+
+fn render_mesh(r: &mut Reader, things: &mut Things) -> Result<RenderMesh> {
+    let v = r.rev.version();
+    let mesh = r.resource(false)?;
+    let bone_things = thing_array(r, things)?;
+    let anim = r.resource(false)?;
+    let anim_pos = r.f32()?;
+    let anim_speed = r.f32()?;
+    let anim_loop = r.bool()?;
+    r.skip_f32(2)?;
+    let editor_color = r.u32()?;
+    let cast_shadows = r.i8()?;
+    r.bool()?;
+    let visibility_flags = r.i8()?;
+    let poppet_render_scale = r.f32()?;
+    if v < 0x34d {
+        r.skip_f32(2)?;
+    }
+    Ok(RenderMesh {
+        mesh,
+        bone_things,
+        anim,
+        anim_pos,
+        anim_speed,
+        anim_loop,
+        editor_color,
+        cast_shadows,
+        visibility_flags,
+        poppet_render_scale,
+    })
+}
+
+fn decoration(r: &mut Reader, things: &mut Things) -> Result<Decoration> {
+    let idx = r.other_count("RENDER_MESH");
+    let tag = r.tag("RENDER_MESH", |r| Ok(r.next_other("RENDER_MESH")))?;
+    let render_mesh = match tag {
+        Tag::New(_) => {
+            r.enter()?;
+            let m = render_mesh(r, things)?;
+            r.leave();
+            things.render_meshes.insert(idx, m.clone());
+            Some(m)
+        }
+        Tag::Seen(crate::serial::Obj::Other(_, i)) => things.render_meshes.get(&i).cloned(),
+        _ => None,
+    };
+    let offset = r.m44()?;
+    r.i32()?;
+    r.i32()?;
+    r.skip_f32(3)?;
+    r.s32()?;
+    r.s32()?;
+    r.f32()?;
+    r.i16()?;
+    r.bool()?;
+    r.i32()?;
+    let plan_guid = r.guid()?;
+    Ok(Decoration {
+        render_mesh,
+        offset,
+        plan_guid,
+    })
+}
+
+fn decal(r: &mut Reader) -> Result<()> {
+    let v = r.rev.version();
+    r.resource(false)?;
+    r.skip_f32(6)?;
+    r.i16()?;
+    r.i8()?;
+    r.i16()?;
+    if v <= 0x3ba {
+        r.i16()?;
+    }
+    r.i16()?;
+    r.i32()?;
+    r.bool()?;
+    if v >= 0x34c {
+        r.resource(true)?;
+    } else {
+        r.guid()?;
+    }
+    Ok(())
+}
+
+fn stickers(r: &mut Reader) -> Result<()> {
+    let v = r.rev.version();
+    let n = r.count(1)?;
+    for _ in 0..n {
+        decal(r)?;
+    }
+    let costumes = r.count(1)?;
+    for _ in 0..costumes {
+        let n = r.count(1)?;
+        for _ in 0..n {
+            decal(r)?;
+        }
+    }
+    if v <= 0x3ba {
+        let n = r.count(4)?;
+        r.bytes(n * 4)?;
+    }
+    let n = r.count(1)?;
+    for _ in 0..n {
+        r.resource(false)?;
+        r.resource(false)?;
+        r.m44()?;
+        r.skip_f32(6)?;
+        if v > 0x39f {
+            r.resource(false)?;
+        }
+    }
+    Ok(())
+}
+
+fn level_settings(r: &mut Reader) -> Result<()> {
+    r.v3()?;
+    r.f32()?;
+    r.v4()?;
+    r.v4()?;
+    r.skip_f32(2)?;
+    r.v4()?;
+    r.skip_f32(2)?;
+    r.v4()?;
+    r.v4()?;
+    r.skip_f32(6)?;
+    r.f32()?;
+    r.skip_f32(3)?;
+    Ok(())
+}
+
+fn camera_tweak(r: &mut Reader) -> Result<()> {
+    let v = r.rev.version();
+    if v < 0x37e {
+        r.v3()?;
+        r.v4()?;
+    }
+    r.v4()?;
+    if v < 0x37e {
+        r.f32()?;
+    }
+    r.f32()?;
+    r.i32()?;
+    r.s32()?;
+    r.bool()?;
+    r.bool()?;
+    r.bool()?;
+    r.i32()?;
+    if v < 0x37e {
+        r.u8()?;
+    }
+    r.i8()?;
+    r.i32()?;
+    r.bool()?;
+    r.i8()?;
+    r.i32()?;
+    if v < 0x35a {
+        r.bool()?;
+    }
+    if v > 0x359 {
+        r.i32()?;
+    }
+    r.bool()?;
+    r.skip_f32(4)?;
+    r.bool()?;
+    r.bool()?;
+    if v > 0x369 {
+        r.bool()?;
+    }
+    if v > 0x395 {
+        r.bool()?;
+    }
+    if v > 0x396 {
+        r.bool()?;
+    }
+    if v > 0x37d {
+        let n = r.count(33)?;
+        for _ in 0..n {
+            r.v4()?;
+            r.v3()?;
+            r.f32()?;
+            r.bool()?;
+        }
+    }
+    Ok(())
+}
+
+fn physics_tweak(r: &mut Reader, things: &mut Things) -> Result<()> {
+    let v = r.rev.version();
+    r.skip_f32(2)?;
+    r.v3()?;
+    r.v3()?;
+    r.v3()?;
+    r.skip_f32(3)?;
+    r.bool()?;
+    let configuration = r.u32()?;
+    if v < 0x327 {
+        thing_ref(r, things)?;
+    }
+    r.bool()?;
+    r.i32()?;
+    r.wstr()?;
+    r.u8()?;
+    r.i32()?;
+    r.bool()?;
+    r.bool()?;
+    r.skip_f32(2)?;
+    r.bool()?;
+    if v > 0x381 {
+        r.f32()?;
+    }
+    r.bool()?;
+    if v > 0x36a {
+        r.f32()?;
+        r.bool()?;
+        r.s32()?;
+        r.f32()?;
+        r.bool()?;
+    }
+    if v > 0x3b8 && configuration == 0xd {
+        r.resource(false)?;
+        r.f32()?;
+        if v < 0x3c4 {
+            r.u8()?;
+        }
+        r.i8()?;
+        r.i8()?;
+        r.v3()?;
+        r.bool()?;
+        r.m44()?;
+        r.f32()?;
+        if v > 0x3c4 {
+            r.bool()?;
+        }
+    }
+    if configuration == 0xe && v > 0x3e3 {
+        r.f32()?;
+        r.i32()?;
+        r.skip_f32(2)?;
+        r.i32()?;
+        r.skip_f32(2)?;
+        r.bytes(4)?;
     }
     Ok(())
 }
@@ -361,16 +1891,23 @@ fn shape(r: &mut Reader, things: &mut Things) -> Result<Shape> {
     } else {
         r.i8()?;
     }
-    let flags = if v <= 0x345 { i16::from(r.i8()?) } else { r.i16()? };
+    let flags = if v <= 0x345 {
+        i16::from(r.i8()?)
+    } else {
+        r.i16()?
+    };
     // ContactCache: array(Contact) of {reference(PShape), i8 flags}, then two bools.
     let contacts = r.count(2)?;
     for _ in 0..contacts {
+        let idx = r.other_count("SHAPE");
         let tag = r.tag("SHAPE", |r| Ok(r.next_other("SHAPE")))?;
         if let Tag::New(_) = tag {
-            // A shape reached only through a contact: read inline, not owned by a Thing.
+            // First reached through a contact: read inline here; a Thing that names the
+            // same tag later shares this body.
             r.enter()?;
-            part_body(r, things, None, "SHAPE")?;
+            let s = shape(r, things)?;
             r.leave();
+            things.shapes.insert(idx, s);
         }
         r.i8()?;
     }

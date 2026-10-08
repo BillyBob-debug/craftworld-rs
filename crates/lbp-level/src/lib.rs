@@ -1,8 +1,9 @@
 //! D107: bounded, UI-independent RLevel/Thing reader for the LBP2 band
-//! (0x341 <= head <= 0x3f8, branch 0 or LEERDAMMER, subVersion 0).
+//! (0x341 <= head <= 0x3f8, branch 0, subVersion 0).
 //!
 //! Layers (docs/level-research.md items): `serial` = L3 serializer core, `thing` = L4
-//! Thing header and part flags, `parts` = L5 subset, `level` = RLevel entry.
+//! Thing header and part flags, `parts` = L5/L6 part readers and the PWorld tail, `level` =
+//! RLevel entry (Lw).
 //! Rules, evidence labels and limits: docs/d107-level-reader.md. Independent
 //! implementation from specification notes; no community reader code copied.
 pub mod level;

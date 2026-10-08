@@ -48,7 +48,10 @@ pub const FLAG_MATRICES: u8 = 4;
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Stop {
     /// Format variant or part this reader does not implement.
-    Unsupported { what: String, offset: usize },
+    Unsupported {
+        what: String,
+        offset: usize,
+    },
     /// A present Thing part with no reader here. `parts_revision` is the Thing's value.
     UnsupportedPart {
         part: &'static str,
@@ -57,9 +60,15 @@ pub enum Stop {
         offset: usize,
     },
     /// Bytes contradict the implemented rules (truncation, bad marker, overflow).
-    Invalid { what: String, offset: usize },
+    Invalid {
+        what: String,
+        offset: usize,
+    },
     /// A depth, tag, Thing or allocation budget was exceeded.
-    Budget { what: &'static str, offset: usize },
+    Budget {
+        what: &'static str,
+        offset: usize,
+    },
     Cancelled,
 }
 
@@ -72,7 +81,9 @@ impl Stop {
                 head,
                 parts_revision,
                 ..
-            } => format!("unsupported part {part} (head 0x{head:x}, partsRevision 0x{parts_revision:x})"),
+            } => format!(
+                "unsupported part {part} (head 0x{head:x}, partsRevision 0x{parts_revision:x})"
+            ),
             Stop::Invalid { what, .. } => format!("invalid: {what}"),
             Stop::Budget { what, .. } => format!("budget: {what}"),
             Stop::Cancelled => "cancelled".into(),
@@ -84,7 +95,10 @@ pub type Result<T> = std::result::Result<T, Stop>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
-    /// Maximum nesting of inline reference bodies (Thing -> part -> Thing ...).
+    /// Maximum nesting of inline reference bodies (Thing -> part -> Thing ...). The reader
+    /// recurses natively, so the calling thread's stack must fit this bound: the default
+    /// 256 needs a large stack (the D107 examples run on a 512 MiB worker thread; the
+    /// deepest local level reaches 162).
     pub max_depth: usize,
     pub max_tags: usize,
     pub max_things: usize,
@@ -95,7 +109,7 @@ pub struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            max_depth: 96,
+            max_depth: 256,
             max_tags: 2_000_000,
             max_things: 500_000,
             max_array: 4_000_000,
@@ -129,7 +143,10 @@ pub struct Descriptor {
     pub sha1: Option<[u8; 20]>,
 }
 
-fn hex_opt<S: serde::Serializer>(v: &Option<[u8; 20]>, s: S) -> std::result::Result<S::Ok, S::Error> {
+fn hex_opt<S: serde::Serializer>(
+    v: &Option<[u8; 20]>,
+    s: S,
+) -> std::result::Result<S::Ok, S::Error> {
     match v {
         Some(h) => s.serialize_str(&hex(h)),
         None => s.serialize_none(),
@@ -171,7 +188,12 @@ pub struct Reader<'a> {
 }
 
 impl<'a> Reader<'a> {
-    pub fn new(data: &'a [u8], rev: Revision, limits: Limits, cancel: &'a dyn Fn() -> bool) -> Self {
+    pub fn new(
+        data: &'a [u8],
+        rev: Revision,
+        limits: Limits,
+        cancel: &'a dyn Fn() -> bool,
+    ) -> Self {
         Self {
             data,
             pos: 0,
@@ -261,7 +283,9 @@ impl<'a> Reader<'a> {
         loop {
             let b = self.u8()?;
             let chunk = u64::from(b & 0x7f);
-            if shift >= max_bits || (shift > 0 && max_bits - shift < 7 && chunk >> (max_bits - shift) != 0) {
+            if shift >= max_bits
+                || (shift > 0 && max_bits - shift < 7 && chunk >> (max_bits - shift) != 0)
+            {
                 return self.invalid("uleb overflow");
             }
             result |= chunk << shift;
@@ -301,6 +325,15 @@ impl<'a> Reader<'a> {
             let b = self.bytes(8)?;
             Ok(u64::from_be_bytes(b.try_into().unwrap()))
         }
+    }
+    /// Toolkit `i32(value, force32 = true)`: always fixed BE32.
+    pub fn fixed_u32(&mut self) -> Result<u32> {
+        self.be32()
+    }
+    /// Toolkit `s64(value, force64 = true)`: always fixed BE64.
+    pub fn fixed_u64(&mut self) -> Result<u64> {
+        let b = self.bytes(8)?;
+        Ok(u64::from_be_bytes(b.try_into().unwrap()))
     }
     pub fn f32(&mut self) -> Result<f32> {
         Ok(f32::from_bits(self.be32()?))
@@ -350,15 +383,41 @@ impl<'a> Reader<'a> {
             _ => self.invalid("array count exceeds remaining bytes"),
         }
     }
+    /// Skips `n` big-endian f32 values.
+    pub fn skip_f32(&mut self, n: usize) -> Result<()> {
+        self.bytes(n * 4).map(|_| ())
+    }
+    /// Toolkit `str()`: s32 byte length then bytes. Returns the length.
+    pub fn str8(&mut self) -> Result<usize> {
+        let n = self.s32()?;
+        let n = usize::try_from(n).or_else(|_| self.invalid("negative string length"))?;
+        self.bytes(n)?;
+        Ok(n)
+    }
+    /// Toolkit `wstr()`: s32 UTF-16 unit count then 2 bytes per unit. Returns the count.
+    pub fn wstr(&mut self) -> Result<usize> {
+        let n = self.s32()?;
+        let n = usize::try_from(n).or_else(|_| self.invalid("negative string length"))?;
+        let b = n.checked_mul(2).ok_or(Stop::Budget {
+            what: "string length",
+            offset: self.pos,
+        })?;
+        self.bytes(b)?;
+        Ok(n)
+    }
+    /// Toolkit `intarray` (unsigned): i32 count then one i32 per element.
+    pub fn int_array(&mut self) -> Result<Vec<u32>> {
+        let n = self.count(1)?;
+        let mut v = Vec::with_capacity(n);
+        for _ in 0..n {
+            v.push(self.u32()?);
+        }
+        Ok(v)
+    }
     /// Toolkit `intvector` (signed = false).
     pub fn int_vector(&mut self) -> Result<Vec<u32>> {
         if self.rev.compression & FLAG_VECTORS == 0 {
-            let n = self.count(1)?;
-            let mut v = Vec::with_capacity(n);
-            for _ in 0..n {
-                v.push(self.u32()?);
-            }
-            return Ok(v);
+            return self.int_array();
         }
         let n = self.count(0)?;
         if n == 0 {
@@ -395,8 +454,16 @@ impl<'a> Reader<'a> {
         if kind_byte == 0 {
             return Ok(None);
         }
-        let guid = if kind_byte & 2 != 0 { Some(self.u32()?) } else { None };
-        let sha1 = if kind_byte & 1 != 0 { Some(self.sha1()?) } else { None };
+        let guid = if kind_byte & 2 != 0 {
+            Some(self.u32()?)
+        } else {
+            None
+        };
+        let sha1 = if kind_byte & 1 != 0 {
+            Some(self.sha1()?)
+        } else {
+            None
+        };
         Ok(Some(Descriptor {
             flags,
             kind_byte,
@@ -405,7 +472,11 @@ impl<'a> Reader<'a> {
         }))
     }
     /// Reads a reference tag. A `New` tag is registered as `obj` before returning.
-    pub fn tag(&mut self, class: &'static str, new_obj: impl FnOnce(&mut Self) -> Result<Obj>) -> Result<Tag> {
+    pub fn tag(
+        &mut self,
+        class: &'static str,
+        new_obj: impl FnOnce(&mut Self) -> Result<Obj>,
+    ) -> Result<Tag> {
         let t = self.u32()?;
         if t == 0 {
             return Ok(Tag::Null);

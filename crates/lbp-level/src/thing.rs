@@ -3,7 +3,7 @@
 //! Specification notes (independent wording), ennuo/toolkit
 //! d6a2ef80b5a09999f08f23a803b516096055e5c9, CONFIRMED_FROM_COMMUNITY_CODE:
 //! - `structs/things/Thing.java` serialize, read order for head >= 0x341 on branch 0
-//!   (LEERDAMMER 0x4c44 only adds gates that are already open at these heads):
+//!   (other branches are refused before any Thing is read):
 //!   u8 test marker 0xAA (head >= 0x2a1) -> UID i32 -> parent reference(Thing) ->
 //!   groupHead reference(Thing) -> oldEmitter reference(Thing) (head >= 0x1c7) ->
 //!   createdBy i16, changedBy i16 (head >= 0x214) -> planGUID guid (head >= 0x254) ->
@@ -171,6 +171,12 @@ pub struct Things {
     pub list: Vec<ThingRecord>,
     /// Length of the PWorld `things` array once every element has been read.
     pub world_array_done: Option<usize>,
+    /// InstanceLayout bodies by per-class sequence number: (machine type, divergent).
+    pub layouts: Vec<Vec<(u8, bool)>>,
+    /// PShape / PRenderMesh bodies by per-class sequence number, so a later
+    /// back-reference (Thing part, ContactCache, Decoration) resolves to the same data.
+    pub shapes: std::collections::HashMap<usize, parts::Shape>,
+    pub render_meshes: std::collections::HashMap<usize, parts::RenderMesh>,
 }
 
 fn thing_index(t: Tag) -> Option<usize> {

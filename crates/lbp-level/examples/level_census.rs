@@ -9,7 +9,7 @@ use lbp_catalog::{
     LoadControl,
 };
 use lbp_level::{Limits, Stop};
-use serde_json::{json, Value};
+use serde_json::json;
 use std::{
     collections::{BTreeMap, BTreeSet},
     fs::OpenOptions,
@@ -21,14 +21,23 @@ const PAGE: usize = 4096;
 const MAX_LEVELS: usize = 10_000;
 const MAX_TOTAL_BYTES: u64 = 2 * 1024 * 1024 * 1024;
 
-fn read_all(source: &AttachedSource, key: &LocationKey, control: &LoadControl) -> Result<Vec<u8>, String> {
+fn read_all(
+    source: &AttachedSource,
+    key: &LocationKey,
+    control: &LoadControl,
+) -> Result<Vec<u8>, String> {
     let size = usize::try_from(key.size).map_err(|_| "size overflow")?;
     if size > lbp_level::level::MAX_INPUT {
         return Err("archived size exceeds level input budget".into());
     }
     let mut bytes = Vec::with_capacity(size);
     while bytes.len() < size {
-        let page = source.read_hex_checked(key, bytes.len() as u64, (size - bytes.len()).min(PAGE), control)?;
+        let page = source.read_hex_checked(
+            key,
+            bytes.len() as u64,
+            (size - bytes.len()).min(PAGE),
+            control,
+        )?;
         if page.bytes.is_empty() {
             return Err("truncated source read".into());
         }
@@ -37,9 +46,15 @@ fn read_all(source: &AttachedSource, key: &LocationKey, control: &LoadControl) -
     Ok(bytes)
 }
 
-pub fn status(stop: &Option<Stop>, walked: bool, things: usize) -> &'static str {
+fn status(
+    stop: &Option<Stop>,
+    walked: bool,
+    things: usize,
+    trailing: Option<usize>,
+) -> &'static str {
     match stop {
-        None => "complete",
+        None if trailing == Some(0) => "complete",
+        None => "complete_with_trailing_bytes",
         Some(_) if walked => "world_things_walked",
         Some(_) if things == 0 => "out_of_band",
         Some(_) => "stopped_in_things",
@@ -62,7 +77,9 @@ fn run() -> Result<(), String> {
         return Err("usage: level_census SNAPSHOT GAME-DIR NEW-JSON".into());
     }
     let output = Path::new(&args[3]);
-    let allowed = Path::new("local-analysis").canonicalize().map_err(|e| e.to_string())?;
+    let allowed = Path::new("local-analysis")
+        .canonicalize()
+        .map_err(|e| e.to_string())?;
     if output.exists()
         || !output
             .parent()
@@ -96,8 +113,15 @@ fn run() -> Result<(), String> {
     let mut part_things = BTreeMap::<&str, usize>::new();
     let mut part_levels = BTreeMap::<&str, usize>::new();
     let mut heads = BTreeMap::<String, usize>::new();
-    let (mut things_started, mut things_complete, mut with_pos, mut with_mesh, mut with_shape) = (0, 0, 0, 0, 0);
+    let (mut things_started, mut things_complete, mut with_pos, mut with_mesh, mut with_shape) =
+        (0, 0, 0, 0, 0);
     let mut max_depth = 0;
+    let (mut uid_unique_levels, mut uid_within_counter_levels) = (0, 0);
+    // The worker thread has a 512 MiB stack, so a deeper bound than the library default fits.
+    let limits = Limits {
+        max_depth: 4096,
+        ..Limits::default()
+    };
     for (sha, guids) in &by_hash {
         control.check()?;
         let mut row = json!({"sha1": sha, "guids": guids.len()});
@@ -125,7 +149,7 @@ fn run() -> Result<(), String> {
                 continue;
             }
         };
-        let report = match lbp_level::read(&bytes, Limits::default(), &|| control.check().is_err()) {
+        let report = match lbp_level::read(&bytes, limits, &|| control.check().is_err()) {
             Ok(r) => r,
             Err(e) => {
                 row["status"] = json!("wrapper_error");
@@ -137,7 +161,12 @@ fn run() -> Result<(), String> {
         };
         let rev = report.revision;
         *heads.entry(format!("0x{:x}", rev.head)).or_default() += 1;
-        let st = status(&report.stop, report.world_things_walked.is_some(), report.things.len());
+        let st = status(
+            &report.stop,
+            report.world_things_walked.is_some(),
+            report.things.len(),
+            report.trailing_bytes,
+        );
         *statuses.entry(st).or_default() += 1;
         let mut hist = BTreeMap::<&str, usize>::new();
         for t in &report.things {
@@ -150,9 +179,21 @@ fn run() -> Result<(), String> {
             *part_levels.entry(p).or_default() += 1;
         }
         let complete = report.things.iter().filter(|t| t.complete).count();
-        let pos = report.things.iter().filter(|t| t.data.pos.is_some()).count();
-        let mesh = report.things.iter().filter(|t| t.data.render_mesh.is_some()).count();
-        let shape = report.things.iter().filter(|t| t.data.shape.is_some()).count();
+        let pos = report
+            .things
+            .iter()
+            .filter(|t| t.data.pos.is_some())
+            .count();
+        let mesh = report
+            .things
+            .iter()
+            .filter(|t| t.data.render_mesh.is_some())
+            .count();
+        let shape = report
+            .things
+            .iter()
+            .filter(|t| t.data.shape.is_some())
+            .count();
         things_started += report.things.len();
         things_complete += complete;
         with_pos += pos;
@@ -161,9 +202,17 @@ fn run() -> Result<(), String> {
         max_depth = max_depth.max(report.max_depth);
         if let Some(s) = &report.stop {
             *stops.entry(stop_key(s)).or_default() += 1;
-            if let Stop::UnsupportedPart { part, parts_revision, .. } = s {
+            if let Stop::UnsupportedPart {
+                part,
+                parts_revision,
+                ..
+            } = s
+            {
                 *first_part_stops
-                    .entry(format!("{part} @ head 0x{:x} partsRevision 0x{parts_revision:x}", rev.head))
+                    .entry(format!(
+                        "{part} @ head 0x{:x} partsRevision 0x{parts_revision:x}",
+                        rev.head
+                    ))
                     .or_default() += 1;
             }
         }
@@ -185,6 +234,26 @@ fn run() -> Result<(), String> {
         row["detached_shapes"] = json!(report.detached_shapes);
         row["max_depth"] = json!(report.max_depth);
         row["tags"] = json!(report.tags);
+        row["trailing_bytes"] = json!(report.trailing_bytes);
+        // Internal consistency (not oracle parity): UIDs unique, and none above the
+        // world's thingUIDCounter.
+        let uids: Vec<i32> = report.things.iter().filter_map(|t| t.uid).collect();
+        let unique: BTreeSet<i32> = uids.iter().copied().collect();
+        let counter = report
+            .things
+            .first()
+            .and_then(|t| t.data.world.as_ref())
+            .and_then(|w| w.thing_uid_counter);
+        let max_uid = uids.iter().copied().max();
+        row["uids_unique"] = json!(unique.len() == uids.len());
+        row["max_uid"] = json!(max_uid);
+        row["thing_uid_counter"] = json!(counter);
+        if unique.len() == uids.len() {
+            uid_unique_levels += 1;
+        }
+        if counter.zip(max_uid).is_some_and(|(c, m)| m <= c) {
+            uid_within_counter_levels += 1;
+        }
         row["part_histogram"] = json!(hist);
         rows.push(row);
     }
@@ -203,7 +272,9 @@ fn run() -> Result<(), String> {
         "head_counts": heads,
         "things_started": things_started, "things_complete": things_complete,
         "things_with_pos": with_pos, "things_with_render_mesh": with_mesh, "things_with_shape": with_shape,
-        "max_depth": max_depth,
+        "max_depth": max_depth, "depth_limit": limits.max_depth,
+        "levels_with_unique_uids": uid_unique_levels,
+        "levels_with_max_uid_within_counter": uid_within_counter_levels,
         "part_thing_counts": part_things, "part_level_counts": part_levels,
         "archived_bytes_read": total_bytes,
         "rows": rows,
@@ -217,6 +288,7 @@ fn run() -> Result<(), String> {
     file.write_all(b"\n").map_err(|e| e.to_string())?;
     println!("levels {}; status {:?}", by_hash.len(), statuses);
     println!("things started {things_started}, complete {things_complete}, pos {with_pos}, render_mesh {with_mesh}, shape {with_shape}, max depth {max_depth}");
+    println!("levels with unique UIDs {uid_unique_levels}, max UID within counter {uid_within_counter_levels}");
     for (k, n) in top.iter().take(12) {
         println!("  stop {n:>4}  {k}");
     }

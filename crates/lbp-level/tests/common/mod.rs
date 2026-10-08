@@ -10,7 +10,10 @@ pub struct W {
 
 impl W {
     pub fn new(flags: u8) -> Self {
-        Self { b: Vec::new(), flags }
+        Self {
+            b: Vec::new(),
+            flags,
+        }
     }
     pub fn u8(&mut self, v: u8) -> &mut Self {
         self.b.push(v);
@@ -60,8 +63,12 @@ impl W {
     }
     pub fn m44(&mut self, m: [f32; 16]) -> &mut Self {
         if self.flags & 4 != 0 {
-            let id = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.];
-            let mask: u16 = (0..16).filter(|&i| m[i] != id[i]).fold(0, |a, i| a | 1 << i);
+            let id = [
+                1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+            ];
+            let mask: u16 = (0..16)
+                .filter(|&i| m[i] != id[i])
+                .fold(0, |a, i| a | 1 << i);
             self.raw(&mask.to_be_bytes());
             for (i, v) in m.iter().enumerate() {
                 if mask & (1 << i) != 0 {
@@ -106,9 +113,26 @@ impl W {
     }
     /// Thing header from marker through part flags.
     #[allow(clippy::too_many_arguments)]
-    pub fn thing_header(&mut self, uid: i32, parent: u32, group: u32, emitter: u32, parts_revision: i32, part_flags: u64) -> &mut Self {
-        self.u8(0xaa).u32(uid as u32).u32(parent).u32(group).u32(emitter);
-        self.i16(-1).i16(-1).u32(0).u8(0).s32(parts_revision).u64(part_flags)
+    pub fn thing_header(
+        &mut self,
+        uid: i32,
+        parent: u32,
+        group: u32,
+        emitter: u32,
+        parts_revision: i32,
+        part_flags: u64,
+    ) -> &mut Self {
+        self.u8(0xaa)
+            .u32(uid as u32)
+            .u32(parent)
+            .u32(group)
+            .u32(emitter);
+        self.i16(-1)
+            .i16(-1)
+            .u32(0)
+            .u8(0)
+            .s32(parts_revision)
+            .u64(part_flags)
     }
 }
 
