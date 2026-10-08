@@ -3802,3 +3802,17 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   d146-u12c-mainmenu.png (non-primary monitor).
 - Checks: fmt; tests lbp-ui-script, lbp-script-vm, lbp-bevy-viewer; workspace Clippy; builds.
 **+0 newly viewable / +0 newly Complete.**
+
+## D150 — Rt part 1: lbp-runtime LevelWorld and Runner (PR #45) (2026-10-08)
+
+- level_scripts --all (d150): 426 scripts; 378 levels (20 not read); 13,547 scripted
+  things, all resolved (49 classes); fields matched 153,972, missing in class 312;
+  unconverted values 15,879. Top classes: PostItNote 3,079, Launcher 2,875,
+  Trigger_Speech_Bubble 1,469, TriggerGlobalSettings 1,180, ScoreTweak 1,106.
+- Rookie Test, --entry=OnCreate__ --entry=Update__ --ticks=30: OnCreate done 170, fault 42,
+  no function 9; Update fault 22, no function 199. First faults: players not provided,
+  Thing.SpriteLight member, unbound Audio.GetDialogueList__, Score_Board.
+  GetShapeEditorColour__, Game.GetPlayOrEditMode__, Trigger_Speech_Bubble.IsTweaking missing.
+- Level census d150 byte-identical to b108. Integrator fix: clippy as_chunks in serial.rs.
+- Checks: fmt; tests lbp-level, lbp-runtime, lbp-script-vm; workspace Clippy -D warnings.
+**+0 newly viewable / +0 newly Complete.**
