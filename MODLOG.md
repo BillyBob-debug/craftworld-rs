@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D131 inventory browser
+
+--popit browser merged: 12,161 items on 27 pages, 9,971/9,971 distinct icons decode.
++0 viewable / +0 Complete.
+
 ## 2026-10-08 — D129, D130, RPCS3 setup
 
 Item details: all 225 stopped plans now read (12,161/12,245; 84 Vita excluded). Story slot

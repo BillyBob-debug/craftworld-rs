@@ -3605,3 +3605,15 @@ The two U5 checks skipped at merge, run afterwards (outputs local-analysis/d127v
   game-data/a1-disc fails: "Failed to mount disc directory" (also with /dev_bdvd mapped
   in vfs.yml: "Failed to use custom BDVD directory"). Blocked; see Next.
 **+0 newly viewable / +0 newly Complete.**
+
+## D131 — U8 inventory browser, PR #30 (2026-10-08)
+
+- `--popit` browser over disc plans. `--popit-report --popit-decode-icons` on 01.33 (unit
+  distinct content hash): items 12,161/12,245 (84 DOUBLE11 not read), 27 type pages;
+  titles translated 9,785 (path fallback 2,315); icons resolved 10,662/10,705; icons
+  decoded 9,971/9,971 distinct; placement keys translated 8,884/11,557 (inferred).
+- Capture d131-popit-browser-0133.png (non-primary monitor): type tabs, names and icons
+  show. One glyph gap: "DC Comics" title shows a box for a missing character (font).
+- Checks: fmt; tests lbp-level, lbp-preview, lbp-bevy-viewer; workspace Clippy -D
+  warnings; viewer build.
+**+0 newly viewable / +0 newly Complete.**
