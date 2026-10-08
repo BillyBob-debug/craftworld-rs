@@ -38,6 +38,7 @@ Since 2026-10-08 the user has approved gameplay runtime work (physics, logic, sc
 - For Rust changes, use `cargo fmt --check`, relevant tests, and Clippy when a toolchain is available. Do not claim compilation if it is unavailable.
 - Record failed experiments and blockers in `STATUS.md`; do not repeat an unchanged approach without new evidence.
 - Update `STATUS.md` and `MODLOG.md` after meaningful work; update architecture/formats when knowledge changes.
+- 2026-10-08: the user gave standing permission to drive RPCS3 (keystrokes into the RPCS3 game window, offline choices, memory reads on localhost) for measurements, and to edit .md files without asking.
 - Research dates use the user's America/Chicago calendar. Repository commit timestamps may remain explicitly UTC.
 
 The local AI modding guides inform this workflow; their example AGENTS templates are adapted to this user's explicit scope, not copied as unrelated universal rules.

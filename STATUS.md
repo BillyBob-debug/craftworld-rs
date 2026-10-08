@@ -3755,3 +3755,15 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   TestMatrix44 662, TestS64 1551 and 1562 (s64 shift loop, s64 AND).
 - Checks: fmt; lbp-script-vm, lbp-ui-script tests; workspace Clippy -D warnings.
 **+0 newly viewable / +0 newly Complete.**
+
+## D142 — script_tests counts Test* functions only (PR #40) (2026-10-08)
+
+- d143: Test* totals 476 passed, 4 failed (TestLocals 417, TestMatrix44 662, TestS64 1551,
+  1562); main__ repeats and NeverEvaluated no longer counted. Checks: fmt; lbp-script-vm
+  tests and Clippy.
+- Finding (CONFIRMED_FROM_LOCAL_DATA, consistent on all 13 entries): the RScript s64
+  constant table is zigzag-encoded. Decoding ((n>>1) ^ -(n&1)) turns the TestS64 failures
+  into passes by hand: 1551 expects i64::MIN = ShiftL(1, 63); 1562 expects
+  0x1111..11 & 0xff00ff00ff00ff00 = 0x1100110011001100. Reader fix pending (U10).
+- AGENTS.md: dated standing permission to drive RPCS3 for measurements.
+**+0 newly viewable / +0 newly Complete.**

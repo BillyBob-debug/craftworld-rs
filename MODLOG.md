@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D142 test counting; s64 constants are zigzag
+
+Test* functions: 476 checks pass, 4 fail. The script s64 constant table is zigzag-encoded
+(explains the TestS64 failures). +0 / +0.
+
 ## 2026-10-08 — D141 script VM objects
 
 The game's own test script: 850 checks pass, 7 fail (was 826/27). +0 / +0.
