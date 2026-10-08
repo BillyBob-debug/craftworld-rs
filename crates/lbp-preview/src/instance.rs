@@ -23,6 +23,8 @@ pub struct InstanceProjection {
     /// D88: constant ThingColor MULTIPLY/MIX operand of a texture product root, folded
     /// into a derived COLOR so the existing texture × COLOR routes can tint with it.
     pub folded_operand: Option<usize>,
+    /// D96: samplers whose static port 0/1/2 inputs were folded into their scale/offset.
+    pub sampler_port_folds: Vec<crate::SamplerPortFold>,
 }
 
 /// Bound and validate the selected diffuse ancestry before deriving a graph.
@@ -89,6 +91,7 @@ pub fn project_instance_color(
         folded_root: None,
         swizzled_color_edges: vec![],
         folded_operand: None,
+        sampler_port_folds: vec![],
     };
     for (index, node) in graph
         .boxes
@@ -112,6 +115,11 @@ pub fn project_instance_color(
         derived.boxes[index].type_raw = 3;
         derived.boxes[index].parameters_raw[..4].copy_from_slice(&color.bits);
     }
+    // D96: without a ThingColor in the diffuse ancestry the opt-in has nothing to
+    // project; the original graph and the default selectors decide (e.g. D87 scale).
+    if projection.color_nodes.is_empty() {
+        return Ok((graph.clone(), None));
+    }
     for (index, node) in graph
         .boxes
         .iter()
@@ -124,6 +132,22 @@ pub fn project_instance_color(
             .filter(|w| w.box_to as usize == index)
             .collect();
         if inputs.is_empty() {
+            continue;
+        }
+        let alpha_subtract = inputs.len() == 1
+            && node.subtype_raw == 0
+            && inputs[0].port_to_raw == 2
+            && inputs[0].port_from_raw == 0
+            && inputs[0].swizzle_raw == [b'a', 0, 0, 0, 0]
+            && projection
+                .color_nodes
+                .contains(&(inputs[0].box_from as usize));
+        if !alpha_subtract {
+            // D96 (docs/d96-thing-sampler-ports.md): other static port inputs fold into
+            // the derived sampler's scale/offset, or name the unsupported input.
+            let fold = crate::instance_sampler::fold_sampler_ports(&mut derived, index)
+                .map_err(|e| format!("{e} (supplied instance sampler port)"))?;
+            projection.sampler_port_folds.extend(fold);
             continue;
         }
         if inputs.len() != 1
@@ -425,11 +449,22 @@ mod tests {
         assert!(subtract_alpha(&mut uv, 1, Some(&p), || true).is_err());
         assert!(subtract_alpha(&mut vec![[0.; 2]; 100_001], 1, Some(&p), || false).is_err());
         assert!(subtract_alpha(&mut [[f32::NAN, 0.]], 1, Some(&p), || false).is_err());
+        // D96: other static ThingColor port inputs fold into the derived sampler.
         original.wires[3].swizzle_raw = [b'r', 0, 0, 0, 0];
-        assert!(project_instance_color(&original, color()).is_err());
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        let p = p.unwrap();
+        assert!(p.alpha_subtract_samplers.is_empty());
+        assert_eq!(p.sampler_port_folds.len(), 1);
+        assert_eq!(uv_params(&derived, 1), [1., 1., -0.2, -0.2]);
         original.wires[3].swizzle_raw = [b'a', 0, 0, 0, 0];
         original.wires.push(edge(2, 1, 0));
-        assert!(project_instance_color(&original, color()).is_err());
+        let (derived, _) = project_instance_color(&original, color()).unwrap();
+        assert_eq!(uv_params(&derived, 1), [1., 1., 0.2 - 0.25, 0.4 - 0.25]);
+        // A non-constant input (another sampler) stays unsupported.
+        original.boxes.push(node(1));
+        original.wires.push(edge(4, 1, 1));
+        let err = project_instance_color(&original, color()).unwrap_err();
+        assert!(err.contains("box type 1 "), "{err}");
     }
     #[test]
     fn fixed_nested_instance_tint_reduces_to_two_samplers_without_cycles() {
@@ -759,5 +794,136 @@ mod tests {
         bright.boxes[3].parameters_raw[0] = 8f32.to_bits();
         let err = project_instance_color(&bright, color()).unwrap_err();
         assert!(err.contains("folded supplied instance color"), "{err}");
+    }
+    fn uv_params(g: &GraphMetadata, i: usize) -> [f32; 4] {
+        std::array::from_fn(|k| f32::from_bits(g.boxes[i].parameters_raw[k]))
+    }
+    fn constant(g: &mut GraphMetadata, kind: u32, values: &[f32]) -> i32 {
+        let mut n = node(kind);
+        for (k, v) in values.iter().enumerate() {
+            n.parameters_raw[k] = v.to_bits();
+        }
+        g.boxes.push(n);
+        g.box_count = g.boxes.len();
+        g.boxes.len() as i32 - 1
+    }
+    #[test]
+    fn d96_thing_times_const_scaled_sampler_folds_scale_under_supplied_color_only() {
+        // OUTPUT, MULTIPLY(THING port 0, TEX port 1), CONST on TEX port 1.
+        let mut original = graph(
+            &[0, 10, 1, 2],
+            vec![edge(1, 0, 0), edge(3, 1, 0), edge(2, 1, 1)],
+        );
+        original.boxes[2].parameters_raw[..4].copy_from_slice(&[1., 2., 0.5, 0.].map(f32::to_bits));
+        let c = constant(&mut original, 4, &[4.]);
+        original.wires.push(edge(c, 2, 1));
+        let before = serde_json::to_value(&original).unwrap();
+        assert!(crate::select_diffuse(&original).is_err());
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        let p = p.unwrap();
+        assert_eq!(serde_json::to_value(&original).unwrap(), before);
+        assert_eq!(uv_params(&derived, 2), [4., 8., 2., 0.]);
+        let fold = &p.sampler_port_folds[0];
+        assert_eq!(fold.sample_index, 2);
+        assert_eq!(fold.port_bits[1], Some([4f32.to_bits(); 2]));
+        assert_eq!(fold.port_bits[0], None);
+        let s = crate::select_instance_diffuse(&derived, &p, false).unwrap();
+        assert_eq!((s.sample_index, s.tint), (2, color()));
+        assert_eq!(
+            s.uv_transform.bits(),
+            vec![4., 8., 2., 0.]
+                .into_iter()
+                .map(f32::to_bits)
+                .collect::<Vec<_>>()
+        );
+        // Zero scale, a FRESNEL input and an animated sampler stay unsupported.
+        let mut zero = original.clone();
+        zero.boxes[c as usize].parameters_raw[0] = 0;
+        assert!(project_instance_color(&zero, color())
+            .unwrap_err()
+            .contains("zero"));
+        let mut fresnel = original.clone();
+        fresnel.boxes[c as usize].type_raw = 18;
+        let err = project_instance_color(&fresnel, color()).unwrap_err();
+        assert!(err.contains("box type 18"), "{err}");
+        let mut moving = original.clone();
+        animate(&mut moving, 2);
+        let err = project_instance_color(&moving, color()).unwrap_err();
+        assert!(err.contains("static subtype-0"), "{err}");
+        // Without a ThingColor the opt-in leaves the graph to the default (D87) route.
+        let mut plain = original.clone();
+        plain.wires.retain(|w| w.box_from != 3);
+        plain.boxes[1].type_raw = 3;
+        let (same, none) = project_instance_color(&plain, color()).unwrap();
+        assert!(none.is_none());
+        assert_eq!(
+            serde_json::to_value(&same).unwrap(),
+            serde_json::to_value(&plain).unwrap()
+        );
+    }
+    #[test]
+    fn d96_thing_offsets_fold_into_both_product_samplers() {
+        // MULTIPLY(TEX a, TEX b); ThingColor unswizzled on port 2 of both samplers.
+        let original = graph(
+            &[0, 10, 1, 2, 1],
+            vec![
+                edge(1, 0, 0),
+                edge(2, 1, 1),
+                edge(4, 1, 0),
+                edge(3, 2, 2),
+                edge(3, 4, 2),
+            ],
+        );
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        let p = p.unwrap();
+        assert_eq!(p.sampler_port_folds.len(), 2);
+        assert_eq!(uv_params(&derived, 2), [1., 1., -0.2, -0.4]);
+        assert_eq!(uv_params(&derived, 4), [1., 1., -0.2, -0.4]);
+        let s = crate::select_instance_diffuse(&derived, &p, false).unwrap();
+        assert!(s.second_sample.is_some());
+    }
+    #[test]
+    fn d96_constant_expressions_of_thing_alpha_fold_into_the_offset() {
+        // TEX(port 2 = CONST × THING.a) × THING.
+        let mut original = graph(
+            &[0, 10, 1, 10, 2],
+            vec![edge(1, 0, 0), edge(2, 1, 0), edge(4, 1, 1), edge(3, 2, 2)],
+        );
+        let k = constant(&mut original, 4, &[2.]);
+        original.wires.push(edge(k, 3, 0));
+        original.wires.push(swizzled(edge(4, 3, 1), b'a'));
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        assert_eq!(uv_params(&derived, 2), [1., 1., -0.5, -0.5]);
+        let s = crate::select_instance_diffuse(&derived, &p.unwrap(), false).unwrap();
+        assert_eq!(s.tint, color());
+        // MAKE_FLOAT2(CONST × THING.a, CONST) on port 2.
+        let mut two = original.clone();
+        two.wires.retain(|w| !(w.box_from == 3 && w.box_to == 2));
+        let m = constant(&mut two, 13, &[0., 0.]);
+        let c = constant(&mut two, 4, &[0.75]);
+        two.wires
+            .extend([edge(3, m, 0), edge(c, m, 1), edge(m, 2, 2)]);
+        let (derived, _) = project_instance_color(&two, color()).unwrap();
+        assert_eq!(uv_params(&derived, 2), [1., 1., -0.5, -0.75]);
+        // A vector input to MAKE_FLOAT2 is reduced by Toolkit; not folded.
+        let mut vector = two.clone();
+        vector.wires.push(edge(4, m, 1));
+        vector.wires.retain(|w| !(w.box_from == c && w.box_to == m));
+        let err = project_instance_color(&vector, color()).unwrap_err();
+        assert!(err.contains("scalar inputs"), "{err}");
+        // MIX(CONST4, CONST4, THING.a) on port 2: (r - l) × a + l, first two lanes.
+        let mut mix = original.clone();
+        mix.wires.retain(|w| !(w.box_from == 3 && w.box_to == 2));
+        let x = constant(&mut mix, 12, &[0.]);
+        let l = constant(&mut mix, 7, &[0., 1., 0., 0.]);
+        let r = constant(&mut mix, 7, &[1., 0., 0., 0.]);
+        mix.wires.extend([
+            edge(l, x, 0),
+            edge(r, x, 1),
+            swizzled(edge(4, x, 2), b'a'),
+            edge(x, 2, 2),
+        ]);
+        let (derived, _) = project_instance_color(&mix, color()).unwrap();
+        assert_eq!(uv_params(&derived, 2), [1., 1., -0.25, -0.75]);
     }
 }

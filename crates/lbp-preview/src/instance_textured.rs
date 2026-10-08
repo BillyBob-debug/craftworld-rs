@@ -11,6 +11,11 @@ pub fn select_instance_diffuse(
     projection: &crate::InstanceProjection,
     animation_base: bool,
 ) -> Result<crate::DiffuseSelection, String> {
+    // D96 (docs/d96-thing-sampler-ports.md): folded sampler ports only with direct
+    // samplers; the nested-tint rewrite has no oracle parity for a folded leaf.
+    if !projection.sampler_port_folds.is_empty() && projection.folded_sampler.is_some() {
+        return Err("Unsupported: folded sampler port inputs under a nested instance tint".into());
+    }
     let error = match crate::select_diffuse_with_animation_base(derived, animation_base) {
         // D92 (docs/d92-multi-animated.md): two or more animated leaves under a
         // supplied color only as a direct ThingColor tint; not with a folded nested
