@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-08 — Batch: local D97, D98, D99 merged
+
+D97 BLEND masks (red sRGB, alpha linear; 9 under instance color). D98 remap word and
+volume slices: all 23,247 textures decode. D99 MULTIPLY trees and off-grid alpha MIX.
+Unsupported 138 -> 102; corpus all-diffuse 3,669 -> 3,683. +0 viewable / +0 Complete.
+
 ## 2026-10-08 — Batch: local D94, D95, D96 merged
 
 D94 general BLEND threshold rule (mask colour space still unknown; 0 changes). D95

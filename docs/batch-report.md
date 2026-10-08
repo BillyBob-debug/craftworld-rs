@@ -1,13 +1,13 @@
-# Batch report — 2026-10-08a (Integrator)
+# Batch report — 2026-10-08b (Integrator)
 
 ## Merged
-- D94 `cloud/D94-blend-more`: general BLEND threshold rule; RGB mask colour space still
-  unknown, so 0 materials change class. Its shader byte dumps were moved into ignored
-  local-analysis/d94-blend-shader-blobs/ (they had been left in a scratch folder).
-- D95 `cloud/D95-texture-rest`: B8 up to 16 Mi pixels, BC1 cube faces (layered API).
-  Textures 23,215 -> 23,244 of 23,247. Texture parity 7/0.
-- D96 `cloud/D96-thing-sampler-ports`: sampler-port folds under the instance color
-  (6 materials). Parity 6/0.
+- D97 `cloud/D97-blend-mask`: BLEND masks (red sRGB-decoded, alpha linear); 9 BLEND
+  locations under the instance color. Parity 0 mismatches on all 50 BLEND locations.
+- D98 `cloud/D98-last-textures`: GCM remap decode and volume slices; all 23,247 texture
+  hashes decode. Volume layout from RPCS3 (GPL-2.0, read only, no code copied) and not
+  confirmable on the noise-like local volume; no Toolkit oracle for these 3 textures.
+- D99 `cloud/D99-next-family`: MULTIPLY trees (16) and off-grid alpha MIX (6). Parity
+  27/0. Merge conflict with D97 resolved (diffuse_parity schema 22).
 
 Checks on merged main: fmt, workspace Clippy -D warnings, tests (7 crates), both viewer
 builds, Python OK, parity regressions unchanged, cohorts unchanged.
@@ -16,9 +16,10 @@ builds, Python OK, parity regressions unchanged, cohorts unchanged.
 None.
 
 ## Counts
-Route census: unsupported 144 -> 138. Corpus meshes (4,261 GUIDs): viewable 4,257;
-all-diffuse default 3,669, animation base 3,733, instance color 3,899 -> 3,902, both
-3,980 -> 3,983. Textures 23,244 of 23,247 decode. +0 newly viewable / +0 newly Complete.
+Route census: unsupported 138 -> 102. Corpus meshes (4,261 GUIDs): viewable 4,257;
+all-diffuse default 3,669 -> 3,683, animation base 3,733 -> 3,747, instance color
+3,902 -> 3,929, both 3,983 -> 4,010. Textures 23,247 of 23,247 decode.
++0 newly viewable / +0 newly Complete.
 
 ## Backlog
 Refreshed; see docs/backlog.md.

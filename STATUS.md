@@ -3314,3 +3314,41 @@ Not tested: viewers on large B8 or cube textures; cube faces 1-5 and patch-only 
 vs oracle; real instance colors.
 Next: BLEND mask colour space (needs evidence); remaining THING_COLOR (MIX on non-grid,
 FRESNEL/ADD); UV channel raw 2; viewer Complete QA.
+
+## Batch 2026-10-08b — local D97, D98, D99 merged (2026-10-08)
+
+Local subagents on plan usage. Detail: [d97-blend-mask.md](docs/d97-blend-mask.md),
+[d98-last-textures.md](docs/d98-last-textures.md), [d99-product-trees.md](docs/d99-product-trees.md).
+
+- D97: BLEND red masks sampled sRGB-decoded, alpha masks linear (STRONG_INFERENCE from
+  Toolkit cwlib-gl GlTexture/MaterialBaker, MIT, plus local noSRGB-marker statistics).
+  Two-sample BLEND on the Repeat grid. 9 THING_COLOR BLEND locations under the instance
+  color; 41 still refused (products under inputs 37, three samples 3, off-grid 1). No
+  executable investigation. Raw probes in local-analysis/d97-research/.
+- D98: GCM remap word decoded (0x02ff = alpha-only mask; sources PSL1GHT and Toolkit,
+  MIT; RPCS3 GPL-2.0 read only, nothing copied). Volume slices as one swizzled 3D block
+  (RPCS3 only; noise-like data could not confirm); slice 0 via the layered API.
+- D99: static MULTIPLY trees of texture/COLOR leaves (16) and two-texture alpha MIX
+  off the integer grid via the Bevy dual path (6); legacy viewer still refuses dual.
+- Texture census on 01.33: 23,244 -> 23,247 of 23,247 hashes decode (all 23,477 GUIDs).
+- Route census (material locations, 8,094): texture 6,953 -> 6,975, instance-only
+  253 -> 267, unsupported 138 -> 102.
+- Corpus mesh census (4,261 GUIDs; viewable 4,257 every mode): all-diffuse default
+  3,669 -> 3,683, --animation-base 3,733 -> 3,747, --instance-rgba 3,902 -> 3,929,
+  both 3,983 -> 4,010. Complete 0.
+**+0 newly viewable / +0 newly Complete** (all-diffuse +14 default; textures +3).
+
+Commands (after `. ./scripts/use-local-rust.ps1`; outputs in local-analysis/):
+- fmt check, workspace Clippy -D warnings, tests (lbp-preview 61 and 6 other crates), both viewer builds, python OK.
+- diffuse_route_census -> b99-diffuse-route-shapes-0133.json; corpus_texture_census -> b99-texture-census-0133.json.
+- diffuse_parity: d99 27/0/22 (default), 27/0/27 (--instance-white); d97 sets 0 mismatches (merged-a --instance-white 31/0/9); regressions d78, d75, d68, d86, d87, d89, d88, d92, d96, d64, d65, d67, d46 x2 unchanged; d83-alpha2 now 8/0/8 (was 2; D99 off-grid MIX, expected).
+- compatibility_census: d68-new 48/45/0, D61 48/43/0, D75 48/44/0 (unchanged).
+- corpus_mesh_census -> b99-corpus-{default,anim,inst,both}.json; viewer --print-census reads them (+14 vs b96).
+
+Failed: D99 merge conflicted with D97 in linked.rs (source label, grid check) and
+diffuse_parity (report fields); kept both, diffuse_parity schema 22. First resolution
+attempt cut the wrong boundaries; redone from restored markers before compiling.
+Not tested: Bevy dual alpha-MIX shader visually; BLEND output pixels; volume layout on
+real data; legacy viewer for D99.
+Next: products under BLEND inputs (37); remaining 102 unsupported by reason in
+docs/backlog.md; viewer QA toward Complete.
