@@ -31,6 +31,7 @@
 !/scripts/PlanInventoryOracle.java
 !/scripts/LevelOracle.java
 !/scripts/TranslationOracle.java
+!/scripts/BevelOracle.java
 !/crates/
 !/crates/**/
 !/crates/**/Cargo.toml

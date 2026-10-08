@@ -44,6 +44,8 @@ struct LevelMode {
     guid: Option<u32>,
     path: Option<String>,
     report: bool,
+    /// D122 `--shape-bevels`: bevelled shape extrusion (inferred, unverified). Default off.
+    shape_bevels: bool,
     lines: Vec<String>,
     home: Option<Orbit>,
 }
@@ -126,6 +128,9 @@ impl Viewer {
             .level
             .active()
             .then(|| (self.level.guid, self.level.path.clone()));
+        let scene_options = level_scene::LevelSceneOptions {
+            shape_bevels: self.level.shape_bevels,
+        };
         let options = self.preview_options();
         let control = LoadControl::default();
         let worker = control.clone();
@@ -177,8 +182,13 @@ impl Viewer {
                             level_guid,
                             level_path.as_deref(),
                         )?;
-                        let scene = level_scene::load_level_scene(
-                            &source, &catalog, &key, &worker, options,
+                        let scene = level_scene::load_level_scene_with_options(
+                            &source,
+                            &catalog,
+                            &key,
+                            &worker,
+                            options,
+                            scene_options,
                         )?;
                         Ok(LevelLoaded { scene, identity })
                     });
@@ -296,6 +306,10 @@ fn options() -> Result<Viewer, String> {
             v.level.report = true;
             continue;
         }
+        if flag == "--shape-bevels" {
+            v.level.shape_bevels = true;
+            continue;
+        }
         if flag == "--print-census" {
             print_census = true;
             continue;
@@ -309,7 +323,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-report: with a level, print scene counts and exit (no window)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-report: with a level, print scene counts and exit (no window)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -370,6 +384,9 @@ fn options() -> Result<Viewer, String> {
     }
     if v.level.report && !v.level.active() {
         return Err("--level-report requires --level-guid or --level-path".into());
+    }
+    if v.level.shape_bevels && !v.level.active() {
+        return Err("--shape-bevels requires --level-guid or --level-path".into());
     }
     if !v.synthetic && (v.snapshot.is_empty() || v.game.is_empty()) {
         return Err(
@@ -904,7 +921,14 @@ fn place_items<T>(
     let (mut model_things, mut shape_things) = (0usize, 0usize);
     let mut skipped = std::collections::BTreeMap::<String, usize>::new();
     for item in &scene.items {
-        let things = item.shapes.max(1);
+        // D122: a bevelled shape split over several material batches is counted in its
+        // first batch only, so later batches can carry 0 Things.
+        let is_shape = item.shapes > 0
+            || scene
+                .meshes
+                .get(item.mesh)
+                .is_some_and(|m| matches!(m.source, level_scene::MeshSource::Shapes { .. }));
+        let things = if is_shape { item.shapes } else { 1 };
         let count = match buckets.get(item.mesh) {
             Some(Ok(n)) => *n,
             Some(Err(e)) => {
@@ -916,10 +940,10 @@ fn place_items<T>(
                 continue;
             }
         };
-        if item.shapes == 0 {
-            model_things += 1;
-        } else {
+        if is_shape {
             shape_things += item.shapes;
+        } else {
+            model_things += 1;
         }
         let matrix = normalize * Mat4::from_cols_array(&item.world);
         let transform = Transform::from_matrix(matrix);
@@ -986,6 +1010,9 @@ fn level_report(v: &Viewer) -> Result<(), String> {
     let (snapshot, game) = (PathBuf::from(&v.snapshot), PathBuf::from(&v.game));
     let (level_guid, level_path) = (v.level.guid, v.level.path.clone());
     let options = v.preview_options();
+    let scene_options = level_scene::LevelSceneOptions {
+        shape_bevels: v.level.shape_bevels,
+    };
     let lines = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
         .spawn(move || -> Result<Vec<String>, String> {
@@ -994,7 +1021,14 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             let source = AttachedSource::attach(&game, &catalog, &control)?;
             let (key, identity) =
                 level_scene::resolve_level(&catalog, level_guid, level_path.as_deref())?;
-            let scene = level_scene::load_level_scene(&source, &catalog, &key, &control, options)?;
+            let scene = level_scene::load_level_scene_with_options(
+                &source,
+                &catalog,
+                &key,
+                &control,
+                options,
+                scene_options,
+            )?;
             let plan = plan_level(&scene)?;
             let mut lines = vec![format!("Level: {identity}")];
             lines.extend(plan.lines);
@@ -1121,6 +1155,9 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
                 }
                 ui.small("Models: static bind pose at each Thing's POS matrix; bones, animation and decorations not applied.");
                 ui.small(format!("Shapes: {}.", level_scene::SHAPE_PREVIEW_LABEL));
+                if v.level.shape_bevels {
+                    ui.small(format!("Shape bevels on: {}.", level_scene::SHAPE_BEVEL_LABEL));
+                }
             });
     }
     Ok(())

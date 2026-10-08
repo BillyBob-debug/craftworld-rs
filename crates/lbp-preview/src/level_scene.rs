@@ -14,6 +14,11 @@
 //! through the same diffuse route as model meshes, with the generated UV0 as input.
 //! The renderer consumes only `meshes` + `items`.
 //!
+//! D122 (opt-in, `LevelSceneOptions::shape_bevels`, default off): shapes are extruded with
+//! their RBevel profile (`lbp_level::shape_mesh::extrude_thing_bevelled`; bevel geometry
+//! inferred, unverified) and each shape is split by bevel-slot material before batching.
+//! With the option off the scene is built exactly as in D114.
+//!
 //! No GUI or GPU types. The level reader recurses natively: call `load_level_scene` on
 //! a thread with at least `LEVEL_STACK_BYTES` of stack.
 use crate::{load_mesh_groups_with_options, resolve, GroupedMesh, MaterialAsset, PreviewOptions};
@@ -21,12 +26,28 @@ use lbp_catalog::{
     attachment::{AttachedSource, LocationKey},
     Catalog, LoadControl,
 };
-use lbp_level::shape_mesh::{self, ShapeMesh};
+use lbp_level::bevel::Bevel;
+use lbp_level::serial::Descriptor;
+use lbp_level::shape_mesh::{self, BevelOptions, MaterialPart};
 use lbp_level::thing::ThingRecord;
 use std::collections::{BTreeMap, HashMap};
 
 /// D114 shape label, re-exported so renderers need not depend on `lbp-level`.
 pub const SHAPE_PREVIEW_LABEL: &str = shape_mesh::PREVIEW_LABEL;
+/// D122 bevelled-shape label (shown when `shape_bevels` is on).
+pub const SHAPE_BEVEL_LABEL: &str = shape_mesh::BEVEL_LABEL;
+/// Distinct bevel resources loaded per level.
+pub const MAX_LEVEL_BEVELS: usize = 1024;
+
+/// Level-scene options beyond the material preview options.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LevelSceneOptions {
+    /// D122: extrude shapes with their bevel profile (inferred, unverified). Default off.
+    pub shape_bevels: bool,
+}
+
+/// Parsed bevels by descriptor identity (GUID, SHA-1).
+pub type BevelTable = HashMap<(Option<u32>, Option<[u8; 20]>), Bevel>;
 /// Worker stack for `load_level_scene` (the D107 examples use the same size).
 pub const LEVEL_STACK_BYTES: usize = 512 * 1024 * 1024;
 /// Distinct mesh references loaded per level.
@@ -128,6 +149,11 @@ pub struct SceneCounts {
     /// Placed shapes whose gfx material did not select (flat neutral colour), by reason.
     pub shapes_material_fallback: BTreeMap<String, usize>,
     pub shape_batches: usize,
+    /// D122 (shape_bevels on): bevel outcome per extruded shape (`BevelOutcome::key`, with
+    /// the fallback reason) and distinct bevel resources loaded / failed.
+    pub shape_bevel_outcomes: BTreeMap<String, usize>,
+    pub bevels_loaded: usize,
+    pub bevels_failed: usize,
     /// DECORATIONS entries (not drawn).
     pub decorations_not_drawn: usize,
     /// Reader stop (None = whole level read).
@@ -179,7 +205,25 @@ impl SceneCounts {
             out.push(format!("  fallback {n}: {reason}"));
         }
         if self.shapes_placed > 0 {
-            out.push(format!("Shapes are a {}", shape_mesh::PREVIEW_LABEL));
+            if self.shape_bevel_outcomes.is_empty() {
+                out.push(format!("Shapes are a {}", shape_mesh::PREVIEW_LABEL));
+            } else {
+                out.push(format!(
+                    "Shapes without an applied bevel are a {}",
+                    shape_mesh::PREVIEW_LABEL
+                ));
+            }
+        }
+        if !self.shape_bevel_outcomes.is_empty() || self.bevels_loaded + self.bevels_failed > 0 {
+            out.push(format!(
+                "Shape bevels (opt-in): {} bevel resources loaded, {} failed; {}",
+                self.bevels_loaded,
+                self.bevels_failed,
+                shape_mesh::BEVEL_LABEL
+            ));
+            for (k, n) in &self.shape_bevel_outcomes {
+                out.push(format!("  shape bevel {n}: {k}"));
+            }
         }
         out.push(format!(
             "Not drawn: {} decorations (DECORATIONS entries)",
@@ -381,10 +425,24 @@ pub fn build_scene<T>(
 pub fn add_shapes<T>(
     scene: &mut LevelScene<T>,
     things: &[ThingRecord],
+    wrap: impl FnMut(ShapeBatch) -> (T, Result<(), String>),
+    local_bounds: impl Fn(&T) -> Option<[[f32; 3]; 2]>,
+) {
+    add_shapes_with(scene, things, None, wrap, local_bounds)
+}
+
+/// [`add_shapes`] with optional bevels (D122): `Some(table)` extrudes every shape with the
+/// bevel its GENERATED_MESH names (looked up in `table`; missing = straight walls) and
+/// splits it by bevel-slot material; `None` is the D114 straight extrusion.
+pub fn add_shapes_with<T>(
+    scene: &mut LevelScene<T>,
+    things: &[ThingRecord],
+    bevels: Option<&BevelTable>,
     mut wrap: impl FnMut(ShapeBatch) -> (T, Result<(), String>),
     local_bounds: impl Fn(&T) -> Option<[[f32; 3]; 2]>,
 ) {
-    let mut groups: BTreeMap<Option<u32>, Vec<(usize, ShapeMesh)>> = BTreeMap::new();
+    let mut groups: BTreeMap<Option<u32>, Vec<(usize, MaterialPart)>> = BTreeMap::new();
+    let bevel_options = BevelOptions::default();
     let mut vertices = 0usize;
     for t in things.iter().filter(|t| t.data.shape.is_some()) {
         let c = &mut scene.counts;
@@ -395,7 +453,15 @@ pub fn add_shapes<T>(
                 .or_default() += 1;
             continue;
         }
-        match shape_mesh::extrude_thing(t) {
+        let extruded = match bevels {
+            None => shape_mesh::extrude_thing(t),
+            Some(table) => shape_mesh::extrude_thing_bevelled(
+                t,
+                |d: &Descriptor| table.get(&(d.guid, d.sha1)),
+                &bevel_options,
+            ),
+        };
+        match extruded {
             Ok(m) => {
                 if vertices + m.positions.len() > MAX_LEVEL_SHAPE_VERTICES
                     || m.positions.len() > MAX_BATCH_VERTICES
@@ -408,10 +474,19 @@ pub fn add_shapes<T>(
                 }
                 vertices += m.positions.len();
                 c.shapes_extruded += 1;
-                groups
-                    .entry(m.material_guid())
-                    .or_default()
-                    .push((t.index, m));
+                if bevels.is_some() {
+                    let key = match m.bevel {
+                        shape_mesh::BevelOutcome::Fallback(r) => format!("bevel_fallback: {r}"),
+                        o => o.key().to_string(),
+                    };
+                    *c.shape_bevel_outcomes.entry(key).or_default() += 1;
+                }
+                for part in m.material_parts() {
+                    groups
+                        .entry(part.material_guid())
+                        .or_default()
+                        .push((t.index, part));
+                }
             }
             Err(r) if r.is_selection() => {
                 *c.shapes_not_selected.entry(r.reason().into()).or_default() += 1;
@@ -419,6 +494,7 @@ pub fn add_shapes<T>(
             Err(r) => *c.shapes_rejected.entry(r.reason().into()).or_default() += 1,
         }
     }
+    let mut placed = std::collections::HashSet::new();
     for (material, shapes) in groups {
         let mut batches = vec![ShapeBatch {
             material,
@@ -450,6 +526,7 @@ pub fn add_shapes<T>(
         for (batch_index, batch) in batches.into_iter().enumerate() {
             let n = batch.things.len();
             let first = batch.things.first().copied().unwrap_or_default();
+            let things_in = batch.things.clone();
             let (payload, selected) = wrap(batch);
             let c = &mut scene.counts;
             if let Err(e) = &selected {
@@ -461,7 +538,10 @@ pub fn add_shapes<T>(
                     .or_default() += n;
                 continue;
             }
-            c.shapes_placed += n;
+            // A bevelled shape can span several material batches (D122): count each Thing
+            // once, in the first batch that holds it (equals n without bevels).
+            let newly = things_in.iter().filter(|&&t| placed.insert(t)).count();
+            c.shapes_placed += newly;
             c.shape_batches += 1;
             scene.meshes.push(SceneMesh {
                 source: MeshSource::Shapes {
@@ -477,7 +557,7 @@ pub fn add_shapes<T>(
                 world: shape_mesh::IDENTITY,
                 thing: first,
                 uid: None,
-                shapes: n,
+                shapes: newly,
             });
         }
     }
@@ -617,6 +697,70 @@ pub fn load_level_scene(
     control: &LoadControl,
     options: PreviewOptions,
 ) -> Result<LevelScene<ScenePayload>, String> {
+    load_level_scene_with_options(
+        source,
+        catalog,
+        level,
+        control,
+        options,
+        LevelSceneOptions::default(),
+    )
+}
+
+/// Loads (once each) every bevel the level's GENERATED_MESH parts name (D122).
+fn load_bevels(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    things: &[ThingRecord],
+    control: &LoadControl,
+    counts: &mut SceneCounts,
+) -> Result<BevelTable, String> {
+    let mut wanted = std::collections::BTreeSet::new();
+    for t in things {
+        if let Some(d) = t.data.generated_mesh.as_ref().and_then(|g| g.bevel) {
+            wanted.insert((d.guid, d.sha1));
+        }
+    }
+    let mut table = BevelTable::new();
+    for (i, (guid, sha1)) in wanted.into_iter().enumerate() {
+        control.check()?;
+        if i >= MAX_LEVEL_BEVELS {
+            counts.bevels_failed += 1;
+            continue;
+        }
+        let loaded = (|| {
+            let hash = sha1.map(|h| lbp_level::serial::hex(&h));
+            let key = match (guid, &hash) {
+                (Some(g), _) => resolve(catalog, Some(g), None)?,
+                (None, Some(h)) => resolve(catalog, None, Some(h))?,
+                _ => return Err("no identifier".to_string()),
+            };
+            if key.size > lbp_level::bevel::MAX_INPUT as u64 {
+                return Err("bevel input budget".into());
+            }
+            let bytes = read_all(source, &key, control)?;
+            lbp_level::bevel::read(&bytes, &|| control.check().is_err()).map_err(|e| e.to_string())
+        })();
+        match loaded {
+            Ok(b) => {
+                counts.bevels_loaded += 1;
+                table.insert((guid, sha1), b);
+            }
+            Err(_) => counts.bevels_failed += 1,
+        }
+    }
+    Ok(table)
+}
+
+/// [`load_level_scene`] with level-scene options (D122 `shape_bevels`).
+pub fn load_level_scene_with_options(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    level: &LocationKey,
+    control: &LoadControl,
+    options: PreviewOptions,
+    scene_options: LevelSceneOptions,
+) -> Result<LevelScene<ScenePayload>, String> {
     let bytes = read_all(source, level, control)?;
     // Default depth bound (256) fits the 512 MiB stack; deepest local level is 162.
     let limits = lbp_level::Limits::default();
@@ -657,9 +801,21 @@ pub fn load_level_scene(
         |p| matches!(p, ScenePayload::Model(m) if grouped_neutral(m)),
     );
     control.check()?;
-    add_shapes(
+    let bevels = if scene_options.shape_bevels {
+        Some(load_bevels(
+            source,
+            catalog,
+            &report.things,
+            control,
+            &mut scene.counts,
+        )?)
+    } else {
+        None
+    };
+    add_shapes_with(
         &mut scene,
         &report.things,
+        bevels.as_ref(),
         |batch| {
             let material = (|| {
                 control.check()?;
@@ -952,5 +1108,87 @@ mod tests {
             .lines()
             .iter()
             .any(|l| l.contains(shape_mesh::PREVIEW_LABEL)));
+    }
+
+    #[test]
+    fn bevelled_shapes_split_by_slot_material_and_count_once() {
+        use lbp_level::bevel::BevelVertex;
+        let d = |g| Descriptor {
+            flags: Some(0),
+            kind_byte: 2,
+            guid: Some(g),
+            sha1: None,
+        };
+        let v = |y, z, slot| BevelVertex {
+            y,
+            z,
+            rigidity: 1.,
+            smooth_with_previous: 1,
+            gmat_slot: slot,
+            mapping_mode_raw: 1,
+        };
+        let bevel = Bevel {
+            revision: lbp_level::Revision {
+                head: 0x3f8,
+                branch_id: 0,
+                branch_revision: 0,
+                compression: 7,
+            },
+            materials: [None, Some(d(11)), None, None],
+            uv_scales: [1.; 4],
+            auto_smooth_cutoff_angle: 45.,
+            vertices: vec![v(0., -1., 1), v(0., 0.5, 1), v(-0.5, 1., 0)],
+            include_backface: false,
+            smooth_with_front: true,
+            relax_strength: 0.,
+            sub_div_radius: 0.3,
+            fixed_bevel_size: 10.,
+            spongy: false,
+            soft_physics_settings: None,
+            texture_repeats: 1.,
+            consumed_bytes: 0,
+            trailing_bytes: 0,
+        };
+        let mut a = shape_thing(0, Some(7), true, 0.);
+        a.data.generated_mesh.as_mut().unwrap().bevel = Some(d(5));
+        let mut missing = shape_thing(1, Some(7), true, 500.);
+        missing.data.generated_mesh.as_mut().unwrap().bevel = Some(d(6));
+        let plain = shape_thing(2, Some(7), true, 1000.);
+        let mut table = BevelTable::new();
+        table.insert((Some(5), None), bevel);
+        let things = vec![a, missing, plain];
+        let run = |bevels: Option<&BevelTable>| {
+            let mut scene = LevelScene::<ShapeBatch>::default();
+            add_shapes_with(
+                &mut scene,
+                &things,
+                bevels,
+                |b| (b, Ok(())),
+                |b| points_bounds(&b.positions),
+            );
+            scene
+        };
+        let scene = run(Some(&table));
+        let c = &scene.counts;
+        assert_eq!((c.shapes_extruded, c.shapes_placed), (3, 3));
+        assert_eq!(c.shape_bevel_outcomes["bevelled"], 1);
+        assert_eq!(c.shape_bevel_outcomes["bevel_unavailable"], 1);
+        assert_eq!(c.shape_bevel_outcomes["no_bevel"], 1);
+        // Material 7 (front cap + both straight shapes) and slot-1 material 11 (sides, back).
+        assert_eq!(c.shape_batches, 2);
+        assert_eq!(scene.meshes[0].payload.things, vec![0, 1, 2]);
+        assert_eq!(scene.meshes[1].payload.material, Some(11));
+        assert_eq!(scene.meshes[1].payload.things, vec![0]);
+        assert_eq!(scene.items.iter().map(|i| i.shapes).sum::<usize>(), 3);
+        assert!(c.lines().iter().any(|l| l.contains(SHAPE_BEVEL_LABEL)));
+        // Option off: the D114 scene, no bevel lines.
+        let plain_scene = run(None);
+        assert_eq!(plain_scene.counts.shape_batches, 1);
+        assert!(plain_scene.counts.shape_bevel_outcomes.is_empty());
+        assert!(!plain_scene
+            .counts
+            .lines()
+            .iter()
+            .any(|l| l.contains(SHAPE_BEVEL_LABEL)));
     }
 }
