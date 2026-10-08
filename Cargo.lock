@@ -3263,6 +3263,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "lbp-ui-script"
+version = "0.1.0"
+dependencies = [
+ "lbp-catalog",
+ "lbp-level",
+ "lbp-preview",
+ "lbp-resource",
+ "lbp-script-vm",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lbp-viewer"
 version = "0.1.0"
 dependencies = [
