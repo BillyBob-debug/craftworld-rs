@@ -444,6 +444,13 @@ impl Vm {
 
     /// Creates an instance of a loaded class with default field values.
     pub fn instantiate(&mut self, class: ClassId) -> Result<ObjectId, Fault> {
+        let fields = self.field_defaults(class)?;
+        self.alloc(HeapObject::Instance { class, fields })
+    }
+
+    /// Every field of a class and its superclasses at the default of its machine type (the
+    /// nearest declaration wins). A scripted Thing's members start from these too.
+    pub fn field_defaults(&self, class: ClassId) -> Result<BTreeMap<String, Value>, Fault> {
         let mut fields = BTreeMap::new();
         let mut at = Some(class);
         let mut depth = 0;
@@ -466,7 +473,7 @@ impl Vm {
                 return Err(Fault::MissingClass("superclass cycle".into()));
             }
         }
-        self.alloc(HeapObject::Instance { class, fields })
+        Ok(fields)
     }
 
     fn alloc(&mut self, o: HeapObject) -> Result<ObjectId, Fault> {
@@ -556,6 +563,23 @@ impl Vm {
                     return Some((c, i));
                 }
                 return None;
+            }
+            at = self.super_class(c);
+        }
+        None
+    }
+
+    /// The class in `class`'s superclass chain that declares `name` as a native (no
+    /// bytecode, modifier bit 1). A call through a subclass's function reference names the
+    /// subclass (`Score_Board.GetShapeEditorColour__Q5Thing`), while the declaration is on
+    /// `Thing`.
+    fn native_owner(&self, class: ClassId, name: &str) -> Option<ClassId> {
+        let mut at = Some(class);
+        for _ in 0..MAX_CALL_DEPTH {
+            let c = at?;
+            let lc = &self.classes[c.0 as usize];
+            if let Some(&i) = lc.functions.get(name) {
+                return (lc.script.function_defs[i].modifiers & 2 != 0).then_some(c);
             }
             at = self.super_class(c);
         }
@@ -1165,6 +1189,11 @@ impl Vm {
                         }
                         None => {
                             let values: Vec<Value> = args.into_values().collect();
+                            // A native inherited through a subclass reference reaches the
+                            // host under the class that declares it (Rt part 2).
+                            let owner = owner_class
+                                .and_then(|c| self.native_owner(c, &function))
+                                .map_or(owner, |c| self.classes[c.0 as usize].name.clone());
                             let v = host
                                 .call_native(&owner, &function, &values)
                                 .map_err(Fault::Native)?;
