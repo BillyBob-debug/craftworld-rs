@@ -206,20 +206,29 @@ pub trait Host {
     fn write(&mut self, _text: &str) {}
 }
 
+/// `LCb` constant position: Toolkit's bit 63 (default), any high-word bit (D140: broke
+/// TestLogical), or bit 32 (the low bit of the high word, where `LCi` keeps its value).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LcbRule {
+    Bit63,
+    AnyHighBit,
+    Bit32,
+}
+
 /// Uncertain execution rules (docs/script-vm.md). Defaults are the current best guess.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Rules {
     /// Branch target = `pc + offset` (true) or `pc + 1 + offset` (false).
     pub branch_from_current: bool,
-    /// `LCb` is true when any high-word bit is set (true) or only bit 63 (false, Toolkit).
-    pub lcb_any_high_bit: bool,
+    /// Which bits of an `LCb` instruction hold the constant.
+    pub lcb: LcbRule,
 }
 
 impl Default for Rules {
     fn default() -> Self {
         Self {
             branch_from_current: true,
-            lcb_any_high_bit: true,
+            lcb: LcbRule::Bit63,
         }
     }
 }
@@ -672,10 +681,10 @@ impl Vm {
                     let v = match op {
                         // Toolkit reads bit 63; D138 showed `true` constants reading false,
                         // so any set bit in the high word counts (INFERRED).
-                        0x01 => Value::Bool(if self.rules.lcb_any_high_bit {
-                            hi32 != 0
-                        } else {
-                            bits >> 63 != 0
+                        0x01 => Value::Bool(match self.rules.lcb {
+                            LcbRule::Bit63 => bits >> 63 != 0,
+                            LcbRule::AnyHighBit => hi32 != 0,
+                            LcbRule::Bit32 => hi32 & 1 != 0,
                         }),
                         0x02 => Value::Char(r16(48)),
                         0x03 => Value::Int(hi32 as i32),

@@ -13,7 +13,7 @@
 use lbp_level::script::{self, class, Class, Script};
 use lbp_level::Limits;
 use lbp_script_vm::natives::{Bindings, World};
-use lbp_script_vm::{ClassId, Fault, ObjectId, Rules, Step, Value, Vm};
+use lbp_script_vm::{ClassId, Fault, LcbRule, ObjectId, Rules, Step, Value, Vm};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -119,10 +119,17 @@ fn fault_kind(f: &Fault) -> String {
 fn run() -> Result<(), String> {
     let all: Vec<_> = std::env::args().collect();
     let no_init = all.iter().any(|a| a == "--no-init");
-    let lcb_bit63 = all.iter().any(|a| a == "--lcb-bit63");
+    let lcb = match all.iter().find_map(|a| a.strip_prefix("--lcb=")) {
+        None | Some("bit63") => LcbRule::Bit63,
+        Some("any") => LcbRule::AnyHighBit,
+        Some("bit32") => LcbRule::Bit32,
+        Some(other) => return Err(format!("unknown --lcb={other}")),
+    };
     let args: Vec<_> = all.iter().filter(|a| !a.starts_with("--")).collect();
     if args.len() != 3 {
-        return Err("usage: script_tests [--no-init] [--lcb-bit63] SCRIPT-DIR NEW-JSON".into());
+        return Err(
+            "usage: script_tests [--no-init] [--lcb=bit63|any|bit32] SCRIPT-DIR NEW-JSON".into(),
+        );
     }
     let output = Path::new(&args[2]);
     if !output.starts_with("local-analysis") {
@@ -142,7 +149,7 @@ fn run() -> Result<(), String> {
     }
     // Load every script so test scripts can call into the others.
     let mut vm = Vm::new(Rules {
-        lcb_any_high_bit: !lcb_bit63,
+        lcb,
         ..Rules::default()
     });
     let mut tests = Vec::new();
@@ -246,7 +253,7 @@ fn run() -> Result<(), String> {
         "outcomes": outcomes,
         "checks_passed": passed,
         "checks_failed": failed,
-        "options": {"no_init": no_init, "lcb_bit63": lcb_bit63},
+        "options": {"no_init": no_init, "lcb": format!("{lcb:?}")},
         "test_class_chains": tests
             .iter()
             .map(|(id, _)| vm.super_chain(*id))

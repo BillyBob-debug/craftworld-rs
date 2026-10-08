@@ -46,7 +46,7 @@ INFERRED (no executable or Toolkit statement; each is a place a real script can 
 | Strings | `LCsa`/`LCsw` produce string values (MachineType has no string type) | Listings |
 | No register | Operand `0xffff` = no register: reads give Void, writes are dropped, a typed `CALL` with that dest discards its result | D138 listings (`B` source, discarded `CALL` results); Register 65535 faults in the test script and the Gooey trace |
 | Locals | Declared locals (the function's local-variable rows) start at their type's default; other registers start Void | D138 test script: `CheckEqual` got Void in TestLocals and the vector tests |
-| `LCb` | True when any bit of the high word is set (Toolkit reads bit 63; `Rules::lcb_any_high_bit` switches) | D139 TestBool: `true \|\| NeverEvaluated()` called NeverEvaluated, so `true` read as false |
+| `LCb` | Bit 63 (Toolkit), switchable by `Rules::lcb` (`Bit63`, `AnyHighBit`, `Bit32`) | Bit 63 calls NeverEvaluated in TestBool (D139); any high bit breaks 20 TestLogical checks (D140); bit 32 untested. PC compares with `script_tests --lcb=` |
 | Construction | `NEW_OBJECT` allocates the class's and its superclasses' fields, then runs `.init__` (found through the superclass chain) with `this` in its single argument row, else register 0. `.ctor__` is called by the script itself | D139 listings: `.init__` calls the superclass `.init__` and sets the members, `.ctor__` only chains; checks read members only `.init__` sets |
 | Superclass by GUID | Falls back to the class name that any loaded script's type references give that GUID | Scripts loaded from a directory have no GUID; Test's superclass is named only by GUID |
 | `ARRAY_INSERT` at -1 | Inserts at the end | D140 TestArray inserts at -1 after appends; its checks settle it |
@@ -54,8 +54,7 @@ INFERRED (no executable or Toolkit statement; each is a place a real script can 
 UNKNOWN: native function semantics (they live in the executable). Each one gets a host
 binding from recorded findings, in call-count order (items Rr/Rs).
 
-`script_tests` takes `--no-init` (instances without `.init__`) and `--lcb-bit63` (Toolkit's
-`LCb` rule) so one PC run can compare the inferred rules. Test checks are counted from
+`script_tests` takes `--no-init` (instances without `.init__`) and `--lcb=bit63|any|bit32` so one PC run can compare the inferred rules. Test checks are counted from
 the script framework's own counters (`TestBase` `.get.NumSucceeded__` / `.get.NumFailed__`;
 `Check*` are TestBase script methods, not natives, D140) plus any `Test.*` native calls,
 and `WRITE` lines (failed-check details) are kept per function. Its JSON also records each

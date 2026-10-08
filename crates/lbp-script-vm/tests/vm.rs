@@ -2,7 +2,7 @@
 use lbp_level::script::{FieldDef, FunctionDef, MemberRef, Script, Span, TypeOffset, TypeRef};
 use lbp_level::serial::Descriptor;
 use lbp_script_vm::natives::{Bindings, World};
-use lbp_script_vm::{check::check, Fault, Host, MemberKind, Rules, Step, Value, Vm};
+use lbp_script_vm::{check::check, Fault, Host, LcbRule, MemberKind, Rules, Step, Value, Vm};
 use std::collections::BTreeMap;
 
 /// `op | ty << 8 | a << 16 | b << 32 | c << 48` (Toolkit field positions).
@@ -727,9 +727,13 @@ fn test_script_checks_reach_the_world_through_construct() {
             ),
         ],
     );
-    for (any_bit, expect) in [(true, true), (false, false)] {
+    for (lcb, expect) in [
+        (LcbRule::AnyHighBit, true),
+        (LcbRule::Bit32, true),
+        (LcbRule::Bit63, false),
+    ] {
         let mut vm = Vm::new(Rules {
-            lcb_any_high_bit: any_bit,
+            lcb,
             ..Rules::default()
         });
         vm.load(base.clone(), None);
