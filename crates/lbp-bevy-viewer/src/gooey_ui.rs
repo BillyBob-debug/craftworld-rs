@@ -36,6 +36,18 @@ pub struct GooeyImage {
 #[derive(Resource, Default)]
 struct GooeyImages(HashMap<ImageRef, Handle<Image>>);
 
+/// Loads a game image the first time a screen shows it (None: not loadable, not retried).
+pub type ImageLoader = Box<dyn FnMut(ImageRef) -> Option<GooeyImage> + Send + Sync>;
+
+/// Images loaded per frame, so a page of icons appears over a few frames.
+const LOADS_PER_FRAME: usize = 8;
+
+#[derive(Resource)]
+struct GooeyLoader {
+    load: Option<ImageLoader>,
+    failed: std::collections::HashSet<ImageRef>,
+}
+
 #[derive(Resource, Default)]
 struct GooeyHost {
     focused: Option<Uid>,
@@ -137,11 +149,18 @@ pub fn run_ui_demo() {
         "UI layer demo",
         Box::new(move |input| demo_screen(input, &mut state)),
         Vec::new(),
+        None,
     );
 }
 
-/// Runs a gooey screen in its own window (second monitor, `--qa-capture` aware).
-pub fn run_gooey(title: &str, screen: ScreenFn, mut images: Vec<GooeyImage>) {
+/// Runs a gooey screen in its own window (second monitor, `--qa-capture` aware). `images`
+/// are uploaded at start; `loader` (optional) supplies images the tree shows later.
+pub fn run_gooey(
+    title: &str,
+    screen: ScreenFn,
+    mut images: Vec<GooeyImage>,
+    loader: Option<ImageLoader>,
+) {
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.045)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -155,6 +174,10 @@ pub fn run_gooey(title: &str, screen: ScreenFn, mut images: Vec<GooeyImage>) {
         }))
         .init_resource::<GooeyHost>()
         .insert_resource(GooeyScreen(screen))
+        .insert_resource(GooeyLoader {
+            load: loader,
+            failed: Default::default(),
+        })
         .insert_resource(DemoCapture(demo_capture_path()))
         .add_systems(
             Startup,
@@ -235,6 +258,44 @@ fn gooey_input(
     }
 }
 
+/// Loads up to `LOADS_PER_FRAME` game images the tree shows and nothing holds yet.
+fn load_missing(
+    tree: &UiTree,
+    images: &mut GooeyImages,
+    loader: &mut GooeyLoader,
+    assets: &mut Assets<Image>,
+) -> bool {
+    let GooeyLoader { load, failed } = loader;
+    let Some(load) = load else {
+        return false;
+    };
+    let wanted: Vec<ImageRef> = tree
+        .nodes
+        .iter()
+        .filter_map(|n| match &n.widget {
+            Widget::Button { image, .. } => *image,
+            Widget::Image { image, .. } => Some(*image),
+            _ => None,
+        })
+        .filter(|i| !matches!(i, ImageRef::Swatch(_)))
+        .filter(|i| !images.0.contains_key(i) && !failed.contains(i))
+        .take(LOADS_PER_FRAME)
+        .collect();
+    let mut loaded = false;
+    for image in wanted {
+        match load(image).and_then(|i| gpu_image(i.width, i.height, i.rgba)) {
+            Some(gpu) => {
+                images.0.insert(image, assets.add(gpu));
+                loaded = true;
+            }
+            None => {
+                failed.insert(image);
+            }
+        }
+    }
+    loaded
+}
+
 /// RGBA8 sRGB image within the viewer's GPU budget (the adapter's 4096 side cap).
 fn gpu_image(width: u32, height: u32, rgba: Vec<u8>) -> Option<Image> {
     use bevy::asset::RenderAssetUsages;
@@ -261,9 +322,11 @@ fn gooey_rebuild(
     mut commands: Commands,
     mut host: ResMut<GooeyHost>,
     mut screen: ResMut<GooeyScreen>,
-    images: Option<Res<GooeyImages>>,
+    images: Option<ResMut<GooeyImages>>,
+    mut loader: ResMut<GooeyLoader>,
+    mut assets: ResMut<Assets<Image>>,
 ) {
-    let Some(images) = images else {
+    let Some(mut images) = images else {
         return;
     };
     let input = FrameInput {
@@ -272,7 +335,8 @@ fn gooey_rebuild(
     };
     let tree = (screen.0)(input);
     host.focused = settle_focus(&tree, host.focused);
-    if tree == host.tree && host.root.is_some() {
+    let loaded = load_missing(&tree, &mut images, &mut loader, &mut assets);
+    if tree == host.tree && host.root.is_some() && !loaded {
         return;
     }
     if !tree.duplicate_ids.is_empty() {
