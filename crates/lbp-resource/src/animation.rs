@@ -1,4 +1,4 @@
-//! Independent CPU ANMb scalar/count prefix, no keyframe/locator decoding.
+//! Independent CPU ANMb scalar/count prefix; keyframes and locators are in `keys`.
 //! CONFIRMED_FROM_COMMUNITY_CODE: Toolkit d6a2ef80b5a09999f08f23a803b516096055e5c9
 //! RAnimation::serialize modern branch, MemoryInputStream::i16/u8/u16/i32/v4.
 //! https://github.com/ennuo/toolkit/blob/d6a2ef80b5a09999f08f23a803b516096055e5c9/lib/cwlib/src/main/java/cwlib/resources/RAnimation.java
@@ -10,9 +10,11 @@
 //! Source URLs, build applicability, limits and tests: docs/animation-prefix.md.
 use crate::binary::{check_cancel, Error};
 use serde::Serialize;
+mod keys;
+pub use keys::{decode, AnimBoneEntry, Animation, Locator, Pose};
 pub const MAX_INPUT: usize = 2 * 1024 * 1024;
 pub const MAX_EXPANDED: usize = 16 * 1024 * 1024;
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AnimationPrefix {
     pub revision: u32,
     pub frames_raw_u16: u16,
@@ -29,7 +31,7 @@ pub struct AnimationPrefix {
     pub parsed_prefix_bytes: usize,
     pub unparsed_bytes: usize,
 }
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct AnimationInspection {
     pub compression_flags: u8,
     pub expanded_bytes: usize,
@@ -65,7 +67,14 @@ impl<'a> Reader<'a> {
 }
 /// Immutable ordinary ANMb only. Returns prefix diagnostics; opaque bytes never escape.
 pub fn inspect(bytes: &[u8], cancel: impl Fn() -> bool) -> Result<AnimationInspection, Error> {
-    let (header, data) = crate::binary::payload(bytes, b"ANMb", MAX_INPUT, MAX_EXPANDED, &cancel)?;
+    Ok(inspect_data(bytes, &cancel)?.0)
+}
+/// Prefix plus the expanded payload, for the keyframe decoder in `keys`.
+fn inspect_data(
+    bytes: &[u8],
+    cancel: &impl Fn() -> bool,
+) -> Result<(AnimationInspection, Vec<u8>), Error> {
+    let (header, data) = crate::binary::payload(bytes, b"ANMb", MAX_INPUT, MAX_EXPANDED, cancel)?;
     // 952..=0x3f8: Toolkit d6a2ef80 has no branch-0 condition above 951 for this layout
     // (docs/update-overlay.md, D68); corroborated on BCUS98245 01.33 by the oracle runs there.
     if !(888..=crate::LBP2_MAX_REVISION).contains(&header.revision)
@@ -113,8 +122,8 @@ pub fn inspect(bytes: &[u8], cancel: impl Fn() -> bool) -> Result<AnimationInspe
     if end > data.len() {
         return Err(Error::Invalid("animation byte array bounds"));
     }
-    check_cancel(&cancel)?;
-    Ok(AnimationInspection {
+    check_cancel(cancel)?;
+    let inspection = AnimationInspection {
         compression_flags: flags,
         expanded_bytes: data.len(),
         prefix: AnimationPrefix {
@@ -132,5 +141,6 @@ pub fn inspect(bytes: &[u8], cancel: impl Fn() -> bool) -> Result<AnimationInspe
             parsed_prefix_bytes: r.offset,
             unparsed_bytes: data.len() - r.offset,
         },
-    })
+    };
+    Ok((inspection, data))
 }
