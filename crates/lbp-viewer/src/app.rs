@@ -97,6 +97,7 @@ pub struct Explorer {
     entry_sort: EntrySort,
     last_entry_sort: Option<EntrySort>,
     initial_entry: Option<(usize, usize)>,
+    census: lbp_catalog::census_summary::CorpusCounts,
 }
 // Source attachment/hex jobs are separate from JSON loading and carry cancellation.
 pub fn capture_path(path: &Path) -> Result<PathBuf, String> {
@@ -206,6 +207,7 @@ impl Explorer {
             entry_sort: EntrySort::from_value(&options.entry_sort),
             last_entry_sort: None,
             initial_entry: options.select_entry,
+            census: options.census,
         };
         if options.demo {
             app.set_catalog(
@@ -954,6 +956,23 @@ impl Explorer {
             ui.separator();
             ui.small(&catalog.snapshot.source_scope);
             ui.small(&catalog.snapshot.payload_integrity);
+        });
+        ui.separator();
+        ui.collapsing("Corpus counts (census files)", |ui| {
+            use lbp_catalog::census_summary::LineKind;
+            for (kind, text) in self.census.lines() {
+                match kind {
+                    LineKind::Heading => {
+                        ui.strong(text);
+                    }
+                    LineKind::Value => {
+                        ui.label(text);
+                    }
+                    LineKind::Note => {
+                        ui.small(text);
+                    }
+                }
+            }
         });
     }
     fn capture(&mut self, ctx: &egui::Context) {

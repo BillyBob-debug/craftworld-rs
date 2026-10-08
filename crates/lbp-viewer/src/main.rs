@@ -24,6 +24,7 @@ pub struct Options {
     pub entries: bool,
     pub channel: usize,
     pub navigation_qa: bool,
+    pub census: lbp_catalog::census_summary::CorpusCounts,
 }
 fn options() -> Result<Option<Options>, String> {
     let mut out = Options::default();
@@ -32,6 +33,10 @@ fn options() -> Result<Option<Options>, String> {
         let flag = arg.to_str().ok_or("Flag must be UTF-8")?;
         if flag == "--help" || flag == "-h" {
             println!("LBP2 Asset Explorer D40 - metadata and bounded hex\nUsage: lbp-viewer [--snapshot FILE | --demo] [--game-dir EXTRACTED_DIR]\n       lbp-viewer --check-snapshot FILE [--game-dir EXTRACTED_DIR]\nOptions: --mesh-view wireframe|solid|textured, --folder MAP_PREFIX, --query TEXT, --sort map|path|guid|hash, --entry-sort table|offset|size|hash, --select-guid HEX, --entries, --select-entry ARCHIVE_INDEX:ENTRY_INDEX\nSearch: path/text, guid:8-digit-hex, hash:40-digit-hex.\nGame files are read only after source validation; protected resources stop at the boundary.\nPlain 2D GTF/TEX BC1/BC3 and TEX/DDS BGRA8 top-mip previews; ordinary MSH wireframe/neutral solid/direct diffuse and modern ANMb/PLNb metadata; other layouts remain unsupported.\nQA only: --qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS --qa-tab metadata|dependencies|referenced-by|raw|hex|texture|mesh|material|material-graph|material-tail|animation|plan|plan-inventory; --qa-channel rgba|r|g|b|a; --qa-material-json NEW_JSON_UNDER_LOCAL_ANALYSIS (with material capture); --qa-texture-json NEW_JSON_UNDER_LOCAL_ANALYSIS (with texture capture); --qa-mesh-json NEW_JSON_UNDER_LOCAL_ANALYSIS (with mesh capture); --qa-animation-json NEW_JSON_UNDER_LOCAL_ANALYSIS (with animation capture); --qa-plan-json NEW_JSON_UNDER_LOCAL_ANALYSIS (with plan capture)");
+            println!(
+                "Corpus counts: {}",
+                lbp_catalog::census_summary::CENSUS_FLAGS_HELP
+            );
             println!("QA navigation: --demo --qa-navigation-roundtrip --qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS (fixed synthetic route/tab checks)");
             return Ok(None);
         }
@@ -45,6 +50,11 @@ fn options() -> Result<Option<Options>, String> {
         }
         if flag == "--qa-navigation-roundtrip" {
             out.navigation_qa = true;
+            continue;
+        }
+        if let Some(role) = lbp_catalog::census_summary::census_flag(flag) {
+            let path = args.next().ok_or_else(|| format!("{flag} needs a FILE"))?;
+            out.census.load(role, std::path::Path::new(&path))?;
             continue;
         }
         let value = args.next().ok_or_else(|| format!("{flag} needs a value"))?;

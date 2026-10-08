@@ -1,6 +1,7 @@
 //! UI-independent, bounded/cancellable snapshot loader and catalog indexes.
 //! Reads authored scanner JSON only; never opens game assets or interprets formats.
 pub mod attachment;
+pub mod census_summary;
 mod model;
 mod synthetic;
 pub use model::*;
