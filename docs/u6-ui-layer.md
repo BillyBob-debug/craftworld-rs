@@ -55,3 +55,9 @@ The window could not be opened in the cloud container (no display libraries or G
 ## Expected effect / not tested
 - Viewable/Complete: +0 (no assets). Not tested: the window itself, gamepad, game fonts and
   textures in widgets, layout at other window sizes.
+
+## Follow-up after D117 (2026-10-08)
+The PC saw the demo rebuild every frame. Cause: the status line printed the rebuild
+counter, so each new tree differed from the last and triggered another respawn. The
+counter is now only logged at debug level; `u6_idle_frames_build_equal_trees` checks that
+frames without input build equal trees, so the demo respawns only on a tab or item change.

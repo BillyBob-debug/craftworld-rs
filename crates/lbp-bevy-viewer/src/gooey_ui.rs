@@ -39,7 +39,7 @@ const ROOT: Uid = Uid(0x5549_0000);
 const TAB_BASE: u64 = 0x5549_1000;
 const ITEM_BASE: u64 = 0x5549_2000;
 
-fn demo_screen(input: FrameInput, state: &mut DemoState, rebuilds: u64) -> UiTree {
+fn demo_screen(input: FrameInput, state: &mut DemoState) -> UiTree {
     let mut b = Builder::new(ROOT, input);
     b.frame(
         Uid(0x5549_0001),
@@ -87,8 +87,13 @@ fn demo_screen(input: FrameInput, state: &mut DemoState, rebuilds: u64) -> UiTre
                         let label = format!("{} {}", TABS[state.tab], i + 1);
                         let enabled = i != 11;
                         let uid = Uid(ITEM_BASE + state.tab as u64 * 0x100 + i);
-                        if b.button_with(uid, label.clone(), Some(ImageRef::Swatch(swatch)), enabled)
-                            .activated
+                        if b.button_with(
+                            uid,
+                            label.clone(),
+                            Some(ImageRef::Swatch(swatch)),
+                            enabled,
+                        )
+                        .activated
                         {
                             state.picked = Some(label);
                         }
@@ -97,7 +102,7 @@ fn demo_screen(input: FrameInput, state: &mut DemoState, rebuilds: u64) -> UiTre
             );
             b.text(
                 format!(
-                    "Picked: {}   |   arrows move, Enter activates, mouse works too   |   rebuilds {rebuilds}",
+                    "Picked: {}   |   arrows move, Enter activates, mouse works too",
                     state.picked.as_deref().unwrap_or("nothing")
                 ),
                 TextStyle::Small,
@@ -196,7 +201,7 @@ fn gooey_rebuild(mut commands: Commands, mut host: ResMut<GooeyHost>, mut demo: 
         focused: host.focused,
         activated: host.activated.take(),
     };
-    let tree = demo_screen(input, &mut demo, host.rebuilds);
+    let tree = demo_screen(input, &mut demo);
     host.focused = settle_focus(&tree, host.focused);
     if tree == host.tree && host.root.is_some() {
         return;
@@ -220,6 +225,7 @@ fn gooey_rebuild(mut commands: Commands, mut host: ResMut<GooeyHost>, mut demo: 
     host.buttons = buttons;
     host.tree = tree;
     host.rebuilds += 1;
+    debug!("UI rebuild {}", host.rebuilds);
 }
 
 fn font(style: TextStyle) -> TextFont {
@@ -403,7 +409,7 @@ mod tests {
     #[test]
     fn u6_demo_screen_ids_unique_and_tabs_switch_items() {
         let mut state = DemoState::default();
-        let tree = demo_screen(FrameInput::default(), &mut state, 0);
+        let tree = demo_screen(FrameInput::default(), &mut state);
         assert!(tree.duplicate_ids.is_empty());
         // 4 tabs + 11 enabled items are focusable.
         assert_eq!(tree.focusable().len(), 15);
@@ -414,11 +420,10 @@ mod tests {
                 activated: Some(tab),
             },
             &mut state,
-            1,
         );
         assert_eq!(state.tab, 2);
         let item = Uid(ITEM_BASE + 2 * 0x100 + 3);
-        let tree = demo_screen(FrameInput::default(), &mut state, 2);
+        let tree = demo_screen(FrameInput::default(), &mut state);
         assert!(tree.find(item).is_some());
         demo_screen(
             FrameInput {
@@ -426,7 +431,6 @@ mod tests {
                 activated: Some(item),
             },
             &mut state,
-            3,
         );
         assert_eq!(state.picked.as_deref(), Some("Stickers 4"));
         // The disabled last item never activates.
@@ -437,9 +441,22 @@ mod tests {
                 activated: Some(locked),
             },
             &mut state,
-            4,
         );
         assert_eq!(state.picked.as_deref(), Some("Stickers 4"));
+    }
+
+    #[test]
+    fn u6_idle_frames_build_equal_trees() {
+        // gooey_rebuild respawns only when the tree changes, so a frame with no input must
+        // build the same tree as the one before it (no per-frame counters in the tree).
+        let mut state = DemoState::default();
+        let first = demo_screen(FrameInput::default(), &mut state);
+        let focused = FrameInput {
+            focused: Some(Uid(TAB_BASE + 1)),
+            activated: None,
+        };
+        assert_eq!(demo_screen(focused, &mut state), first);
+        assert_eq!(demo_screen(FrameInput::default(), &mut state), first);
     }
 }
 

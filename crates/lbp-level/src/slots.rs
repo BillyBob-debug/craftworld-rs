@@ -208,15 +208,33 @@ impl UiKind {
     }
 }
 
+/// Reason given for a U4-type file in text serialization (`SLTt`, ...): an expected
+/// exclusion, not a reader failure.
+pub const NON_BINARY_TEXT: &str = "text serialization (not binary)";
+
 /// Reads a whole resource file whose magic is one of the four U4 kinds.
 pub fn read(
     bytes: &[u8],
     limits: Limits,
     cancel: &dyn Fn() -> bool,
 ) -> std::result::Result<UiDataReport, lbp_resource::binary::Error> {
-    let kind = bytes.get(..4).and_then(UiKind::from_magic).ok_or(
-        lbp_resource::binary::Error::Unsupported("not a U4 resource magic"),
-    )?;
+    use lbp_resource::binary::Error;
+    let kind = [
+        UiKind::SlotList,
+        UiKind::Pins,
+        UiKind::Palette,
+        UiKind::Packs,
+    ]
+    .into_iter()
+    .find(|k| bytes.get(..3) == Some(&k.magic()[..3]))
+    .ok_or(Error::Unsupported("not a U4 resource type"))?;
+    // Same type, other serialization: `t` is Toolkit's text form (SerializationType),
+    // which no reader here implements.
+    match bytes.get(3) {
+        Some(b'b') => {}
+        Some(b't') => return Err(Error::Unsupported(NON_BINARY_TEXT)),
+        _ => return Err(Error::Unsupported("non-binary serialization marker")),
+    }
     let (h, data) =
         lbp_resource::binary::payload(bytes, kind.magic(), MAX_INPUT, MAX_EXPANDED, &cancel)?;
     let rev = Revision {
