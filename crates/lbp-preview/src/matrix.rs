@@ -25,7 +25,7 @@ impl UvMatrix {
         cancelled: impl Fn() -> bool,
     ) -> Result<Vec<[f32; 2]>, String> {
         self.validate()?;
-        if raw.len() > 100_000 {
+        if raw.len() > crate::MAX_VERTICES {
             return Err("UV matrix vertex budget exceeded".into());
         }
         let [a, b, c, d, e, f] = self.values();
@@ -155,7 +155,9 @@ mod tests {
         assert!(m.sampling(&[[f32::MAX, 0.]], || false).is_err());
         assert!(m.sampling(&[[600_000., 0.]], || false).is_err());
         assert!(m.sampling(&[[0., 0.]], || true).is_err());
-        assert!(m.sampling(&vec![[0., 0.]; 100_001], || false).is_err());
+        assert!(m
+            .sampling(&vec![[0., 0.]; crate::MAX_VERTICES + 1], || false)
+            .is_err());
         assert!(m.sampling(&[[0., f32::NAN]], || false).is_err());
         let count = std::cell::Cell::new(0);
         assert!(m

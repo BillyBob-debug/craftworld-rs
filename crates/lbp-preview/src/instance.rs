@@ -261,7 +261,7 @@ pub(crate) fn subtract_alpha(
     let Some(p) = projection.filter(|p| p.alpha_subtract_samplers.contains(&sample)) else {
         return Ok(());
     };
-    if coordinates.len() > 100_000 {
+    if coordinates.len() > crate::MAX_VERTICES {
         return Err("Instance UV vertex budget".into());
     }
     let alpha = p.color.values()[3];
@@ -451,7 +451,13 @@ mod tests {
         subtract_alpha(&mut uv, 1, Some(&p), || false).unwrap();
         assert_eq!(uv, vec![[0.75, 0.25], [-0.75, -0.25]]);
         assert!(subtract_alpha(&mut uv, 1, Some(&p), || true).is_err());
-        assert!(subtract_alpha(&mut vec![[0.; 2]; 100_001], 1, Some(&p), || false).is_err());
+        assert!(subtract_alpha(
+            &mut vec![[0.; 2]; crate::MAX_VERTICES + 1],
+            1,
+            Some(&p),
+            || false
+        )
+        .is_err());
         assert!(subtract_alpha(&mut [[f32::NAN, 0.]], 1, Some(&p), || false).is_err());
         // D96: other static ThingColor port inputs fold into the derived sampler.
         original.wires[3].swizzle_raw = [b'r', 0, 0, 0, 0];

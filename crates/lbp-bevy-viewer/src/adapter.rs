@@ -50,7 +50,10 @@ fn build_mesh(
     uv: Option<&[[f32; 2]]>,
     normalize: bool,
 ) -> Result<Mesh, String> {
-    if positions.is_empty() || positions.len() > 100_000 || triangles.len() > 50_000 {
+    if positions.is_empty()
+        || positions.len() > lbp_preview::MAX_VERTICES
+        || triangles.len() > lbp_preview::MAX_TRIANGLES
+    {
         return Err("Unsupported: empty or over-budget geometry".into());
     }
     if positions.iter().flatten().any(|v| !v.is_finite())
@@ -211,7 +214,7 @@ pub fn buckets<T>(
     ranges: &[std::ops::Range<usize>],
     bindings: &[Result<std::sync::Arc<T>, String>],
 ) -> Result<Vec<Bucket<T>>, String> {
-    if ranges.len() != bindings.len() || triangles.len() > 50_000 {
+    if ranges.len() != bindings.len() || triangles.len() > lbp_preview::MAX_TRIANGLES {
         return Err("Invalid: primitive binding correspondence".into());
     }
     let mut end = 0;

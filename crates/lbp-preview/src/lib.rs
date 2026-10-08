@@ -107,11 +107,17 @@ pub(crate) fn read_mesh(
     }
     let geometry =
         lbp_mesh::decode_geometry(&data, || control.check().is_err()).map_err(|e| e.to_string())?;
-    if geometry.triangles.len() > 50_000 {
-        return Err("Wireframe preview budget: more than 50,000 triangles; inspect metadata with the diagnostic tool".into());
+    if geometry.triangles.len() > MAX_TRIANGLES {
+        return Err(format!("Preview budget: more than {MAX_TRIANGLES} triangles; inspect metadata with the diagnostic tool"));
     }
     Ok((geometry, data))
 }
+
+/// Preview geometry budgets (P2: raised from 50,000 triangles / 100,000 vertices so the
+/// Pod globe, cloth_earth 000027bd, draws; the PC reported it over the old budget).
+pub const MAX_TRIANGLES: usize = 500_000;
+/// Vertex (and per-vertex coordinate) budget for preview derivations.
+pub const MAX_VERTICES: usize = 1_000_000;
 
 /// Per-primitive outcomes share cached assets; no GPU handles or serialized asset data.
 pub struct GroupedMesh {

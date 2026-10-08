@@ -43,7 +43,7 @@ impl UvTransform {
         cancelled: impl Fn() -> bool,
     ) -> Result<Vec<[f32; 2]>, String> {
         self.validate()?;
-        if raw.len() > 100_000 {
+        if raw.len() > crate::MAX_VERTICES {
             return Err("UV sampling vertex budget exceeded".into());
         }
         let [sx, sy, ox, oy] = self.values();
@@ -123,7 +123,9 @@ mod tests {
         assert!(t.sampling(&[[f32::MAX, 0.]], || false).is_err());
         assert!(t.sampling(&[[600_000., 0.]], || false).is_err());
         assert!(t.sampling(&[[0., 0.]], || true).is_err());
-        assert!(t.sampling(&vec![[0., 0.]; 100_001], || false).is_err());
+        assert!(t
+            .sampling(&vec![[0., 0.]; crate::MAX_VERTICES + 1], || false)
+            .is_err());
         assert!(t.sampling(&[[0., f32::NAN]], || false).is_err());
     }
 }

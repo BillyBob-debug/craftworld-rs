@@ -35,7 +35,7 @@ impl BorderDomain {
             return Ok(None);
         }
         addressing(raw, true)?;
-        if uv.is_empty() || uv.len() > 100_000 {
+        if uv.is_empty() || uv.len() > crate::MAX_VERTICES {
             return Err("Unsupported: BORDER UV correspondence/budget".into());
         }
         let mut min = [f32::INFINITY; 2];
