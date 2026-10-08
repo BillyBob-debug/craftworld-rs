@@ -1,7 +1,10 @@
 //! Runs the game's own test scripts in the VM (docs/script-natives.md, "PC checks").
 //! A test script is one that calls a `Test.*` native. Every function of it that takes no
 //! arguments and has code is run once with the bindings over a world that only records
-//! `Test.*` checks. A non-static function runs on a fresh instance of its class, placed in
+//! `Test.*` checks and `WRITE` output; after each test the script framework's own
+//! counters (`.get.NumSucceeded__` / `.get.NumFailed__`, when the class chain has them)
+//! are added to the totals. A non-static function runs on a fresh instance of its class
+//! (fields of the class and its superclasses, then `.init__`), placed in
 //! register 0 as `this` (as the U12 Gooey host does, INFERRED from the D134 trace). A yield resumes on the next "tick", up to a tick limit. Writes the
 //! totals and one row per function (class and function names, outcome, checks) to a NEW
 //! JSON file under ignored `local-analysis/`.
@@ -10,7 +13,7 @@
 use lbp_level::script::{self, class, Class, Script};
 use lbp_level::Limits;
 use lbp_script_vm::natives::{Bindings, World};
-use lbp_script_vm::{Fault, Step, Value, Vm};
+use lbp_script_vm::{ClassId, Fault, LcbRule, ObjectId, Rules, Step, Value, Vm};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -25,6 +28,8 @@ struct Recorder {
     failed: usize,
     /// First failures (message, line), capped.
     failures: Vec<(String, i32)>,
+    /// First `WRITE` lines (the script framework prints failed checks), capped.
+    written: Vec<String>,
 }
 
 impl World for Recorder {
@@ -37,6 +42,36 @@ impl World for Recorder {
                 self.failures.push((message.to_owned(), line));
             }
         }
+    }
+    fn write(&mut self, text: &str) {
+        if self.written.len() < 20 {
+            self.written.push(text.to_owned());
+        }
+    }
+}
+
+/// Reads an int getter (`.get.NumSucceeded__`) on a test instance; `None` when the class
+/// chain has no such getter or it does not return an int.
+fn counter(
+    vm: &mut Vm,
+    host: &mut Bindings<Recorder>,
+    class: ClassId,
+    this: ObjectId,
+    getter: &str,
+) -> Option<i64> {
+    if !vm.has_code(class, getter) {
+        return None;
+    }
+    let mut budget = 10_000;
+    match vm.start_registers(
+        host,
+        class,
+        getter,
+        &[(0, Value::Object(Some(this)))],
+        &mut budget,
+    ) {
+        Ok(Step::Done(Value::Int(n))) => Some(i64::from(n)),
+        _ => None,
     }
 }
 
@@ -82,9 +117,19 @@ fn fault_kind(f: &Fault) -> String {
 }
 
 fn run() -> Result<(), String> {
-    let args: Vec<_> = std::env::args().collect();
+    let all: Vec<_> = std::env::args().collect();
+    let no_init = all.iter().any(|a| a == "--no-init");
+    let lcb = match all.iter().find_map(|a| a.strip_prefix("--lcb=")) {
+        None | Some("bit63") => LcbRule::Bit63,
+        Some("any") => LcbRule::AnyHighBit,
+        Some("bit32") => LcbRule::Bit32,
+        Some(other) => return Err(format!("unknown --lcb={other}")),
+    };
+    let args: Vec<_> = all.iter().filter(|a| !a.starts_with("--")).collect();
     if args.len() != 3 {
-        return Err("usage: script_tests SCRIPT-DIR NEW-JSON".into());
+        return Err(
+            "usage: script_tests [--no-init] [--lcb=bit63|any|bit32] SCRIPT-DIR NEW-JSON".into(),
+        );
     }
     let output = Path::new(&args[2]);
     if !output.starts_with("local-analysis") {
@@ -93,7 +138,7 @@ fn run() -> Result<(), String> {
     if output.exists() {
         return Err("output exists".into());
     }
-    let mut paths: Vec<_> = std::fs::read_dir(&args[1])
+    let mut paths: Vec<_> = std::fs::read_dir(args[1])
         .map_err(|e| e.to_string())?
         .filter_map(|e| e.ok().map(|e| e.path()))
         .filter(|p| p.extension().is_some_and(|x| x == "ff"))
@@ -103,7 +148,10 @@ fn run() -> Result<(), String> {
         return Err("file count budget".into());
     }
     // Load every script so test scripts can call into the others.
-    let mut vm = Vm::default();
+    let mut vm = Vm::new(Rules {
+        lcb,
+        ..Rules::default()
+    });
     let mut tests = Vec::new();
     for p in &paths {
         if std::fs::metadata(p).map_err(|e| e.to_string())?.len() > MAX_FILE_BYTES {
@@ -130,15 +178,22 @@ fn run() -> Result<(), String> {
             host.world = Recorder::default();
             let mut budget = BUDGET;
             let mut ticks = 0usize;
+            let mut this = None;
             let mut step = if *is_static {
                 vm.start(&mut host, *id, name, &[], &mut budget)
             } else {
-                vm.instantiate(*id).and_then(|this| {
+                let made = if no_init {
+                    vm.instantiate(*id)
+                } else {
+                    vm.construct(&mut host, *id, &mut budget)
+                };
+                made.and_then(|o| {
+                    this = Some(o);
                     vm.start_registers(
                         &mut host,
                         *id,
                         name,
-                        &[(0, Value::Object(Some(this)))],
+                        &[(0, Value::Object(Some(o)))],
                         &mut budget,
                     )
                 })
@@ -158,6 +213,17 @@ fn run() -> Result<(), String> {
                 }
             };
             *outcomes.entry(outcome.0.clone()).or_default() += 1;
+            // The script framework (TestBase) counts its own checks; read its counters.
+            let counted = this.map(|o| {
+                (
+                    counter(&mut vm, &mut host, *id, o, ".get.NumSucceeded__"),
+                    counter(&mut vm, &mut host, *id, o, ".get.NumFailed__"),
+                )
+            });
+            if let Some((Some(ok), Some(bad))) = counted {
+                host.world.passed += usize::try_from(ok).unwrap_or(0);
+                host.world.failed += usize::try_from(bad).unwrap_or(0);
+            }
             passed += host.world.passed;
             failed += host.world.failed;
             rows.push(serde_json::json!({
@@ -167,9 +233,12 @@ fn run() -> Result<(), String> {
                 "outcome": outcome.0,
                 "fault": outcome.1,
                 "ticks": ticks,
+                "instructions": BUDGET - budget,
                 "checks_passed": host.world.passed,
                 "checks_failed": host.world.failed,
                 "first_failures": host.world.failures,
+                "framework_counters": counted.map(|(a, b)| [a, b]),
+                "written": host.world.written,
             }));
         }
     }
@@ -184,6 +253,12 @@ fn run() -> Result<(), String> {
         "outcomes": outcomes,
         "checks_passed": passed,
         "checks_failed": failed,
+        "options": {"no_init": no_init, "lcb": format!("{lcb:?}")},
+        "test_class_chains": tests
+            .iter()
+            .map(|(id, _)| vm.super_chain(*id))
+            .collect::<Vec<_>>(),
+        "native_calls": host.calls,
         "unbound_natives": host.unbound,
         "rows": rows,
     });

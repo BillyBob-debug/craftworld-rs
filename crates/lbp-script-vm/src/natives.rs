@@ -127,6 +127,8 @@ pub struct Bindings<W> {
     pub world: W,
     /// Calls to natives without a binding, by `Class.mangled`.
     pub unbound: BTreeMap<String, u64>,
+    /// Every native call that reached the host, bound or not, by `Class.mangled`.
+    pub calls: BTreeMap<String, u64>,
 }
 
 impl<W: World> Bindings<W> {
@@ -134,6 +136,7 @@ impl<W: World> Bindings<W> {
         Self {
             world,
             unbound: BTreeMap::new(),
+            calls: BTreeMap::new(),
         }
     }
 }
@@ -186,6 +189,7 @@ impl<W: World> Host for Bindings<W> {
         function: &str,
         args: &[Value],
     ) -> Result<Value, String> {
+        *self.calls.entry(format!("{class}.{function}")).or_default() += 1;
         match dispatch(&mut self.world, class, function, args) {
             Some(r) => r.map_err(|e| format!("{class}.{function}: {e}")),
             None => {
@@ -326,7 +330,13 @@ fn report(w: &mut dyn World, c: &Call<'_>, passed: bool) -> Result<Value, String
     let n = c.params.len();
     let message = text(param(c, n.wrapping_sub(2))?)?;
     let line = int(param(c, n.wrapping_sub(1))?)?;
-    w.test_check(passed, message, line);
+    if passed {
+        w.test_check(true, message, line);
+    } else {
+        // Failed checks carry the compared values for diagnosis.
+        let values = &c.params[..n.saturating_sub(2)];
+        w.test_check(false, &format!("{message} {values:?}"), line);
+    }
     Ok(Value::Void)
 }
 

@@ -2,7 +2,7 @@
 use lbp_level::script::{FieldDef, FunctionDef, MemberRef, Script, Span, TypeOffset, TypeRef};
 use lbp_level::serial::Descriptor;
 use lbp_script_vm::natives::{Bindings, World};
-use lbp_script_vm::{check::check, Fault, Host, MemberKind, Rules, Step, Value, Vm};
+use lbp_script_vm::{check::check, Fault, Host, LcbRule, MemberKind, Rules, Step, Value, Vm};
 use std::collections::BTreeMap;
 
 /// `op | ty << 8 | a << 16 | b << 32 | c << 48` (Toolkit field positions).
@@ -244,6 +244,7 @@ fn loops_branch_both_rules_and_budget() {
     for rule in [true, false] {
         let mut vm = Vm::new(Rules {
             branch_from_current: rule,
+            ..Rules::default()
         });
         let c = vm.load(sum_script(rule), None);
         let mut budget = 10_000;
@@ -612,4 +613,180 @@ fn locals_start_at_defaults_and_no_register_operands_are_ignored() {
     let r = vm.call(&mut host, c, "Run", &[], &mut budget);
     assert_eq!(r, Ok(Value::Int(1)));
     assert_eq!(host.calls.len(), 1);
+}
+
+#[test]
+fn new_object_runs_inherited_init_and_finds_superclass_by_learned_guid() {
+    // Base (loaded without a GUID) initialises x = 7 in .init__.
+    let mut b = Builder::new();
+    let int_ty = b.ty(INT, "int", None, 0);
+    let x = b.field(int_ty, "x", true);
+    let base = b.build(
+        "Base",
+        None,
+        vec![func(
+            ".init__",
+            &[0],
+            vec![
+                hi(0x03, 4, 7),        // r4 = 7
+                i(0xb4, INT, 4, 0, x), // this.x = r4
+                i(0xa5, 0, 0, 0, 0),   // RETURN
+            ],
+        )],
+    );
+    // Derived names Base only by GUID; its own type references carry that GUID's name.
+    let mut b = Builder::new();
+    let me = b.ty(OBJ, "Derived", Some(0x301), 0);
+    b.ty(OBJ, "Base", Some(0x300), 0);
+    let int_ty = b.ty(INT, "int", None, 0);
+    let x = b.field(int_ty, "x", false);
+    let derived = b.build(
+        "Derived",
+        Some(0x300),
+        vec![func(
+            "Make",
+            &[],
+            vec![
+                i(0xb5, 0, 0, 0, me),  // r0 = new Derived (runs Base.init__)
+                i(0xb3, INT, 4, 0, x), // r4 = r0.x
+                i(0xa5, INT, 0, 4, 0), // RETURN r4
+            ],
+        )],
+    );
+    let mut vm = Vm::default();
+    vm.load(base, None);
+    let d = vm.load(derived, Some(0x301));
+    let mut host = TestHost::default();
+    let mut budget = 100;
+    assert_eq!(
+        vm.call(&mut host, d, "Make", &[], &mut budget),
+        Ok(Value::Int(7))
+    );
+    let o = vm.construct(&mut host, d, &mut budget).unwrap();
+    assert_eq!(vm.field(o, "x"), Some(&Value::Int(7)));
+}
+
+/// A test-script shape end to end: a class with a GUID-only superclass that has
+/// `.init__`, a native `Test.Check` declared on the class, and a non-static test function
+/// run on a constructed instance with `this` in register 0. Checks must reach the world.
+#[test]
+fn test_script_checks_reach_the_world_through_construct() {
+    #[derive(Default)]
+    struct Recorder(Vec<(bool, i32)>);
+    impl World for Recorder {
+        fn test_check(&mut self, passed: bool, _message: &str, line: i32) {
+            self.0.push((passed, line));
+        }
+    }
+    let mut b = Builder::new();
+    let int_ty = b.ty(INT, "int", None, 0);
+    let ready = b.field(int_ty, "ready", true);
+    let base = b.build(
+        "TestBase",
+        None,
+        vec![func(
+            ".init__",
+            &[0],
+            vec![
+                hi(0x03, 4, 1),
+                i(0xb4, INT, 4, 0, ready),
+                i(0xa5, 0, 0, 0, 0),
+            ],
+        )],
+    );
+    let mut b = Builder::new();
+    let me = b.ty(OBJ, "Test", Some(0x401), 0);
+    b.ty(OBJ, "TestBase", Some(0x400), 0);
+    let check = b.fref(me, "Check__bQ7StringAi");
+    let msg = b.s("msg");
+    let test = b.build(
+        "Test",
+        Some(0x400),
+        vec![
+            Func {
+                name: "Check__bQ7StringAi",
+                native: true,
+                args: vec![],
+                stack: 0,
+                code: vec![],
+            },
+            func(
+                "TestSomething",
+                &[],
+                vec![
+                    hi(0x01, 4, 1),               // LCb r4 = true (value in the high word)
+                    hi(0xbc, 8, msg),             // LCsa r8
+                    hi(0x03, 12, 42),             // LCi r12 = line
+                    i(0xa3, OBJ, 0, 0, 0),        // ARG this
+                    i(0xa3, 1, 4, 4, 0),          // ARG r4
+                    i(0xa3, OBJ, 8, 8, 0),        // ARG r8
+                    i(0xa3, INT, 12, 12, 0),      // ARG r12
+                    i(0xa4, 0, 0xffff, check, 0), // CALL Test.Check
+                    i(0xa5, 0, 0, 0, 0),          // RETURN
+                ],
+            ),
+        ],
+    );
+    for (lcb, expect) in [
+        (LcbRule::AnyHighBit, true),
+        (LcbRule::Bit32, true),
+        (LcbRule::Bit63, false),
+    ] {
+        let mut vm = Vm::new(Rules {
+            lcb,
+            ..Rules::default()
+        });
+        vm.load(base.clone(), None);
+        let t = vm.load(test.clone(), None);
+        assert_eq!(vm.super_chain(t), ["Test", "TestBase"]);
+        let mut host = Bindings::new(Recorder::default());
+        let mut budget = 1_000;
+        let this = vm.construct(&mut host, t, &mut budget).unwrap();
+        assert_eq!(vm.field(this, "ready"), Some(&Value::Int(1)));
+        let step = vm
+            .start_registers(
+                &mut host,
+                t,
+                "TestSomething",
+                &[(0, Value::Object(Some(this)))],
+                &mut budget,
+            )
+            .unwrap();
+        assert!(matches!(step, Step::Done(_)));
+        assert_eq!(host.world.0, [(expect, 42)]);
+        assert_eq!(host.calls.get("Test.Check__bQ7StringAi"), Some(&1));
+    }
+}
+
+#[test]
+fn array_insert_at_minus_one_appends() {
+    let mut b = Builder::new();
+    let ints = b.ty(OBJ, "int[]", None, INT);
+    let s = b.build(
+        "Arrays",
+        None,
+        vec![func(
+            "Run",
+            &[],
+            vec![
+                hi(0x03, 4, 0),              // r4 = 0 (size)
+                i(0x9c, 0, 8, 4, ints),      // r8 = new int[0]
+                hi(0x03, 12, 5),             // r12 = 5
+                i(0x9e, INT, 12, 8, 0xffff), // append r12 (no index operand)
+                hi(0x03, 16, -1i32 as u32),  // r16 = -1
+                hi(0x03, 20, 8),             // r20 = 8
+                i(0x9d, INT, 20, 8, 16),     // insert r20 at r16 = -1
+                hi(0x03, 24, 1),             // r24 = 1
+                i(0x99, INT, 28, 8, 24),     // r28 = r8[1]
+                i(0xa5, INT, 0, 28, 0),      // RETURN r28
+            ],
+        )],
+    );
+    let mut vm = Vm::default();
+    let c = vm.load(s, None);
+    let mut budget = 100;
+    assert_eq!(
+        vm.call(&mut TestHost::default(), c, "Run", &[], &mut budget),
+        Ok(Value::Int(8))
+    );
 }
