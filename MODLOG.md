@@ -1,5 +1,9 @@
 # Development log
 
+## 2026-10-08 — D134 U10 name sentinel
+
+Unnamed type rows (0xFFFFFFFF) accepted: all script listing checks now 0. +0 / +0.
+
 ## 2026-10-08 — D133 real scripts
 
 patch.edat decrypted in RPCS3: 426/426 scripts read, Toolkit 3/3, G10 native-call census,

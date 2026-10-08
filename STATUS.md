@@ -3651,3 +3651,11 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
 - Not tested: script-vm PC check 2 (argument layouts); running real scripts. X1/S9 need a
   human at the controls (RPCS3 is not a computer-use target).
 **+0 newly viewable / +0 newly Complete.**
+
+## D134 — U10 unnamed-type sentinel, PR #32 (2026-10-08)
+
+- Type-row name index 0xFFFFFFFF = unnamed. script_census d134 (decrypted 01.33 scripts,
+  unit distinct content hash): 426/426 complete; name_index_out_of_range 0 (was 1,966),
+  unnamed_type_refs 1,966; other listing checks 0; heads/layouts unchanged.
+- Checks: fmt; tests lbp-level, lbp-script-vm; workspace Clippy -D warnings.
+**+0 newly viewable / +0 newly Complete.**
