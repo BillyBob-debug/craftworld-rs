@@ -16,8 +16,10 @@
 //!   calls are kept as generic widgets.
 //! - `LAMS.Translate` takes a LAMS key and returns its string from the supplied tables
 //!   (U1), else `#xxxxxxxx`.
-//! - `Get*Width` / `Get*Height` (e.g. `GetPuterWidth`) return the host's screen size
-//!   (default 1280 x 720; the real values are UNKNOWN).
+//! - Screen queries answer from the host's screen size (default 1280 x 720; the real
+//!   values are UNKNOWN): `Get*XRes` / `Get*YRes` (s32), `Get*Width` / `Get*Height` and
+//!   `GetAspectRatio` (f32); `GetScreenEdgeCrop` returns 0. The Pod scripts' own
+//!   `GetPuterWidth(w)` divides by `GetXRes`, so a default 0 there made widths NaN.
 //! - Everything else returns nothing; the VM then substitutes the default of the call's
 //!   return type. Member reads return `Void` and writes are dropped (counted).
 pub mod load;
@@ -261,6 +263,14 @@ impl Host for GooeyHost<'_> {
                         format!("#{key:08x}").into()
                     }
                 }))
+            }
+            (_, "GetScreenEdgeCrop") => Ok(Value::Float(0.)),
+            (_, "GetAspectRatio") => Ok(Value::Float(self.screen[0] / self.screen[1])),
+            (_, base) if base.starts_with("Get") && base.ends_with("XRes") => {
+                Ok(Value::Int(self.screen[0] as i32))
+            }
+            (_, base) if base.starts_with("Get") && base.ends_with("YRes") => {
+                Ok(Value::Int(self.screen[1] as i32))
             }
             (_, base) if base.starts_with("Get") && base.ends_with("Width") => {
                 Ok(Value::Float(self.screen[0]))

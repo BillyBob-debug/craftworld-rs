@@ -170,6 +170,14 @@ fn u12b_frame_tree_maps_to_a_gooey_tree_and_screen_size_answers() {
         host.call_native("PodComputer", "GetPuterWidth__", &[]),
         Ok(Value::Float(1280.))
     );
+    assert_eq!(
+        host.call_native("HUD", "GetXRes__", &[]),
+        Ok(Value::Int(1280))
+    );
+    assert_eq!(
+        host.call_native("HUD", "GetScreenEdgeCrop__", &[]),
+        Ok(Value::Float(0.))
+    );
     let r = run(&mut vm, &mut host, class, &script, "Draw", 10_000);
     let tree = ui_tree(&r.tree, Uid(1), &["header".into()], FrameInput::default());
     let labels: Vec<&str> = tree

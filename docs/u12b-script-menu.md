@@ -13,7 +13,7 @@ Recent Activity, Store, Me) on screen instead of as a text outline?
 |---|---|---|
 | Frame tree, labels and nesting come from the script run (U12 host) | D136 PC run | CONFIRMED_FROM_LOCAL_DATA (labels); host mapping UNKNOWN as in U12 |
 | Layout: every frame a column; gap = first `DefaultChildSpacing` number, padding = first `Borders` number (0..64), framed when it has properties | none (placeholder) | UNKNOWN; not the game's layout |
-| `Get*Width` / `Get*Height` natives return 1280 / 720 (D136 showed `Sizing=NaN` from a zero `GetPuterWidth`) | none | UNKNOWN |
+| Screen natives answer 1280 x 720: `Get*XRes`/`Get*YRes` (s32), `Get*Width`/`Get*Height`/`GetAspectRatio` (f32), `GetScreenEdgeCrop` 0. The Pod scripts' `GetPuterWidth(w)` divides `w` by `HUD.GetXRes`, so the default 0 gave `Sizing=NaN` (PC listings, first #39 run) | PC run d141 | values UNKNOWN |
 
 ## Implementation
 - `lbp-ui-script`: `load::{from_catalog, load}` (moved from the `ui_trace` example; every
