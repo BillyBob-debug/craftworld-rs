@@ -154,3 +154,42 @@ fn u12_gooey_calls_build_a_frame_tree_and_trace() {
     assert_eq!(lines.len(), 4, "{lines:?}");
     assert!(lines[3].contains("button \"Play\" (DoSpaceButtonNamed)"));
 }
+
+#[test]
+fn u12b_frame_tree_maps_to_a_gooey_tree_and_screen_size_answers() {
+    use lbp_gooey::{FrameInput, Uid, Widget};
+    use lbp_script_vm::Host;
+    use lbp_ui_script::tree::ui_tree;
+
+    let script = menu();
+    let mut vm = Vm::default();
+    let class = vm.load(script.clone(), None);
+    let none = |_: u32| None;
+    let mut host = GooeyHost::new(&none);
+    assert_eq!(
+        host.call_native("PodComputer", "GetPuterWidth__", &[]),
+        Ok(Value::Float(1280.))
+    );
+    assert_eq!(
+        host.call_native("HUD", "GetXRes__", &[]),
+        Ok(Value::Int(1280))
+    );
+    assert_eq!(
+        host.call_native("HUD", "GetScreenEdgeCrop__", &[]),
+        Ok(Value::Float(0.))
+    );
+    let r = run(&mut vm, &mut host, class, &script, "Draw", 10_000);
+    let tree = ui_tree(&r.tree, Uid(1), &["header".into()], FrameInput::default());
+    let labels: Vec<&str> = tree
+        .nodes
+        .iter()
+        .filter_map(|n| match &n.widget {
+            Widget::Button { label, .. } => Some(label.as_str()),
+            Widget::Text { text, .. } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(labels, ["header", "#00001234", "Play"]);
+    assert_eq!(tree.focusable().len(), 1);
+    assert!(tree.duplicate_ids.is_empty());
+}

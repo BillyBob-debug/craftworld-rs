@@ -12,6 +12,8 @@ lbp-mesh.workspace = true
 lbp-texture.workspace = true
 lbp-preview.workspace = true
 lbp-gooey.workspace = true
+lbp-script-vm.workspace = true
+lbp-ui-script.workspace = true
 
 [dev-dependencies]
 # D121: headless WGSL validation of the authored preview shader (same major as Bevy).

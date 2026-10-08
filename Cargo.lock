@@ -3145,7 +3145,9 @@ dependencies = [
  "lbp-gooey",
  "lbp-mesh",
  "lbp-preview",
+ "lbp-script-vm",
  "lbp-texture",
+ "lbp-ui-script",
  "naga 29.0.4",
 ]
 
@@ -3267,6 +3269,7 @@ name = "lbp-ui-script"
 version = "0.1.0"
 dependencies = [
  "lbp-catalog",
+ "lbp-gooey",
  "lbp-level",
  "lbp-preview",
  "lbp-resource",
