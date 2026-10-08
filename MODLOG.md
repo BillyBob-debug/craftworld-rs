@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D133 real scripts
+
+patch.edat decrypted in RPCS3: 426/426 scripts read, Toolkit 3/3, G10 native-call census,
+branch rule confirmed (from current instruction). +0 viewable / +0 Complete.
+
 ## 2026-10-08 — D132 strings and fonts browser
 
 --text-browser merged (21/21 tables, 583,648 keys); OS font fallback fixes missing glyphs

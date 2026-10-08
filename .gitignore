@@ -33,6 +33,7 @@
 !/scripts/PlanThingOracle.java
 !/scripts/TranslationOracle.java
 !/scripts/BevelOracle.java
+!/scripts/ScriptOracle.java
 !/crates/
 !/crates/**/
 !/crates/**/Cargo.toml

@@ -3632,3 +3632,22 @@ The two U5 checks skipped at merge, run afterwards (outputs local-analysis/d127v
 - Checks: fmt; full workspace build (windows-gnu, viewer included); tests lbp-preview,
   lbp-bevy-viewer; workspace Clippy -D warnings.
 **+0 newly viewable / +0 newly Complete.**
+
+## D133 — patch.edat decrypted; U10/G10/check() on real scripts (2026-10-08)
+
+Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
+- RPCS3 boots the user's ISO copy (C:\Users\chill\Emulators\lbp2-iso, read-only) with
+  update 01.33; the extracted disc folder does not boot. RPCS3's Decrypt tool, run while
+  the game holds the key, decrypted a copy of patch.edat: a FARC, 522 entries, 426 FSHb.
+- U10 census d133 (unit distinct content hash, scope decrypted patch.edat): 426/426
+  complete (was 0); 6,518 functions, 160,539 instructions, 0 unknown opcodes; gates clean;
+  name_index_out_of_range 1,966 (inferred rule wrong, follow-up).
+- Toolkit spot check (new scripts/run-script-oracle.ps1): 3/3 equal.
+- G10 (d133-g10): 15,931 native calls of 23,350; 1,964 of 2,538 declared natives called.
+- check() (new lbp-script-vm example script_check): 15,866 branches all in range from the
+  current instruction (15,399 from next) -> VM default confirmed; 0 functions without a
+  terminal.
+- Checks: fmt; lbp-script-vm tests and Clippy -D warnings.
+- Not tested: script-vm PC check 2 (argument layouts); running real scripts. X1/S9 need a
+  human at the controls (RPCS3 is not a computer-use target).
+**+0 newly viewable / +0 newly Complete.**
