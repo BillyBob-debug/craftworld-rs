@@ -93,7 +93,8 @@ pub fn select_small_solid(graph: &GraphMetadata) -> Result<Option<SolidSelection
             };
             let colors = [a, b].map(|w| graph.boxes[w.box_from as usize].type_raw == 3);
             if colors != [true, true] {
-                return Ok(None);
+                // D101: deeper MULTIPLY trees of COLOR/CONST leaves (no texture).
+                return crate::product_tree::select_color_tree(graph, output_index, source);
             }
             let (left, right) = if a.port_to_raw == 0 { (a, b) } else { (b, a) };
             if left.port_to_raw != 0
@@ -131,6 +132,7 @@ pub fn select_small_solid(graph: &GraphMetadata) -> Result<Option<SolidSelection
         ignored_wires: graph.wires.len() - used_wires,
         unwired_diffuse: false,
         product_of,
+        product_tree: None,
     }))
 }
 

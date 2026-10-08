@@ -135,7 +135,7 @@ fn run() -> Result<(), String> {
                             group["third_sampling"] = json!({"frontend":"Bevy","shared_with":"second_sampler_coordinates","uv_channel":asset.texture().unwrap().selection.third_sample.unwrap().uv_channel,"texture":{"path":third.texture_key.path,"offset":third.texture_key.offset,"size":third.texture_key.size},"extent":[third.texture.header.width,third.texture.header.height],"filter":"linear"});
                         }
                         if let Some(fourth) = asset.texture().and_then(|a| a.fourth.as_ref()) {
-                            group["fourth_sampling"] = json!({"frontend":"Bevy","shared_with":"primary_sampler_coordinates","uv_channel":asset.texture().unwrap().selection.fourth_sample.unwrap().uv_channel,"texture":{"path":fourth.texture_key.path,"offset":fourth.texture_key.offset,"size":fourth.texture_key.size},"extent":[fourth.texture.header.width,fourth.texture.header.height],"filter":"linear"});
+                            group["fourth_sampling"] = json!({"frontend":"Bevy","shared_with":match fourth.relative {Some(r) if !r.from_primary => "second_sampler_coordinates", _ => "primary_sampler_coordinates"},"relative":fourth.relative.map(|r| json!({"scale":r.scale,"offset":r.offset})),"uv_channel":asset.texture().unwrap().selection.fourth_sample.unwrap().uv_channel,"texture":{"path":fourth.texture_key.path,"offset":fourth.texture_key.offset,"size":fourth.texture_key.size},"extent":[fourth.texture.header.width,fourth.texture.header.height],"filter":"linear"});
                         }
                     }
                 }
@@ -152,7 +152,7 @@ fn run() -> Result<(), String> {
         rows.push(row);
     }
     source.check_stable()?;
-    let report = json!({"schema_version":12,"supplied_instance_color_bits":options.instance_color.map(|c|c.bits),"animation_base_enabled":animation_base,"scope":"bounded_existing_mesh_samples_diffuse_coverage","asset_unit":"distinct_catalog_guid","mesh_hashes":rows.len(),"mesh_input_bytes":mesh_bytes,"viewable_guids":viewable,"all_diffuse_guids":all_diffuse,"complete_verified_guids":[],"complete_scope":"No visual completeness certification; all_diffuse is only binding coverage","samples":rows});
+    let report = json!({"schema_version":13,"supplied_instance_color_bits":options.instance_color.map(|c|c.bits),"animation_base_enabled":animation_base,"scope":"bounded_existing_mesh_samples_diffuse_coverage","asset_unit":"distinct_catalog_guid","mesh_hashes":rows.len(),"mesh_input_bytes":mesh_bytes,"viewable_guids":viewable,"all_diffuse_guids":all_diffuse,"complete_verified_guids":[],"complete_scope":"No visual completeness certification; all_diffuse is only binding coverage","samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

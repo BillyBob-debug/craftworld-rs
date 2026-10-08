@@ -20,7 +20,7 @@ pub struct Asset {
     pub additional_texture_slots: Vec<usize>,
     /// Source BORDER axes retained separately from guarded display addressing.
     pub border_domain: Option<crate::BorderDomain>,
-    /// Fourth source shares the primary sampler coordinates.
+    /// Fourth source: primary coordinates, or (D101) `relative` to a displayed set.
     pub fourth: Option<Box<SharedSampleAsset>>,
     /// Third source samples second or primary coordinates via `relative`; no fallback.
     pub third: Option<Box<SharedSampleAsset>>,
@@ -42,7 +42,7 @@ pub struct Asset {
 pub struct SharedSampleAsset {
     pub texture: lbp_texture::Texture,
     pub texture_key: LocationKey,
-    /// Third sample only: coordinates as a scale/offset of a displayed set.
+    /// Third (and D101 fourth) sample: coordinates as a scale/offset of a displayed set.
     pub relative: Option<RelativeSampling>,
 }
 /// Sampling coordinates re-derived from an already displayed coordinate set on the
@@ -240,7 +240,7 @@ impl MaterialAsset {
             Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture {} • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",if a.selection.texture_alpha_mix.is_some() {"alpha MIX (port-1 sample alpha)"} else {"sampling"},a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.texture_blend.map(|m|m.label()).or(a.selection.texture_alpha_mix.map(|m|m.label())).or(a.selection.texture_add.map(|m|format!("{} after {}",m.label(),a.selection.tint.label()))).or(a.selection.blend.map(|blend|blend.label())).unwrap_or_else(||a.selection.tint.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture {}, second {}, nearest grid {:?}",if a.selection.texture_blend.is_some(){"BLEND"}else if a.selection.texture_alpha_mix.is_some(){"alpha MIX"}else if a.selection.texture_add.is_some(){"ADD"}else{"product"},second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire • black (0,0,0,0) per Toolkit shader generator; game default unverified • other channels not rendered • ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Solid(a) => format!("Solid diffuse color {:?}{} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),if a.selection.product_of.is_some() {" (COLOR × COLOR product)"} else {""},a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Solid(a) => format!("Solid diffuse color {:?}{} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),if a.selection.product_of.is_some() {" (COLOR × COLOR product)".to_string()} else if let Some(t) = a.selection.product_tree {format!(" ({})", t.label())} else {String::new()},a.selection.ignored_nodes,a.selection.ignored_wires),
         }
     }
 }
@@ -1629,7 +1629,16 @@ pub(crate) fn load_primitive(
         .transpose()?;
     let fourth = selection
         .fourth_sample
-        .map(|s| load_shared_sample(source, catalog, &graph, s.slot, control))
+        .map(|s| {
+            // D101: exact primary share (D60) or a D65-style relative base.
+            let subtracted = instance_projection
+                .as_ref()
+                .map_or(&[][..], |p| &p.alpha_subtract_samplers[..]);
+            let relative = crate::product_tree::relative_fourth(&selection, subtracted)?;
+            let mut shared = load_shared_sample(source, catalog, &graph, s.slot, control)?;
+            shared.relative = Some(relative);
+            Ok::<_, String>(shared)
+        })
         .transpose()?;
     control.check()?;
     source.check_stable()?;
@@ -2118,11 +2127,14 @@ mod tests {
             }
         }
         assert_eq!(select_diffuse(&graph).unwrap(), four);
+        // D101: the fixed chain refuses unshared pairs; the product tree fallback
+        // samples the fourth relative to a displayed set instead.
         graph.boxes[6].parameters_raw[0] = 2f32.to_bits();
-        assert!(select_diffuse(&graph).is_err());
+        let relaxed = select_diffuse(&graph).unwrap();
+        assert!(relaxed.product_tree.is_some() && relaxed.deep_multiply_index.is_none());
         graph.boxes[6].parameters_raw[0] = 1f32.to_bits();
         graph.boxes[6].parameters_raw[3] = (-0f32).to_bits();
-        assert!(select_diffuse(&graph).is_err());
+        assert!(select_diffuse(&graph).unwrap().product_tree.is_some());
         graph.boxes[6].parameters_raw[3] = 0;
         graph.boxes[6].animations[0].name_hex = "41".into();
         assert!(select_diffuse(&graph).is_err());
