@@ -511,6 +511,10 @@ fn load(
                 }
                 Err(e) => return Err(e),
             };
+            let alpha_mix = asset
+                .as_ref()
+                .and_then(|a| a.texture())
+                .is_some_and(|a| a.dual.is_some() && a.selection.texture_alpha_mix.is_some());
             let second_image = if let Some(second) = asset
                 .as_ref()
                 .and_then(|a| a.texture())
@@ -578,12 +582,20 @@ fn load(
                     )
                 })
                 .transpose()?;
-            prepared.push((mesh, image, second_image, third_image, fourth_image, color));
+            prepared.push((
+                mesh,
+                image,
+                second_image,
+                third_image,
+                fourth_image,
+                color,
+                alpha_mix,
+            ));
         }
         if prepared.is_empty() {
             return Err("Unavailable: no nondegenerate faces to display".into());
         }
-        for (mesh, image, second_image, third_image, fourth_image, color) in prepared {
+        for (mesh, image, second_image, third_image, fourth_image, color, alpha_mix) in prepared {
             let image = image.map(|i| images.add(i));
             let mut surface = dual::material(StandardMaterial {
                 base_color: color,
@@ -595,6 +607,9 @@ fn load(
             });
             if let Some(second) = second_image {
                 dual::enable(&mut surface, images.add(second));
+                if alpha_mix {
+                    dual::enable_alpha_mix(&mut surface);
+                }
             }
             if let Some((third, relative)) = third_image {
                 dual::enable_third(&mut surface, images.add(third), relative);

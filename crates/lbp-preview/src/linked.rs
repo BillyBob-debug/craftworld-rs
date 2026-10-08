@@ -237,7 +237,7 @@ impl MaterialAsset {
             Self::Texture(a) if a.selection.animation_base.is_some()=>format!("Animation base-value snapshot • local/global rows verified • {} keys per row {:?} • UV{} {} • time/motion unverified • diffuse only",a.selection.animation_base.unwrap().key_counts[0],a.selection.animation_base.unwrap().key_counts,a.selection.uv_channel,a.selection.uv_transform.label()),
             Self::Texture(a) if a.fourth.is_some() => format!("Diffuse only • four-texture nested product • UV{} {} × UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.fourth_sample.unwrap().uv_channel,a.selection.fourth_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.third.is_some() => format!("Diffuse only • three-texture nested product{} • UV{} {} × UV{} {} × UV{} {} • linear filtering • ignores {} nodes / {} wires",a.third.as_ref().and_then(|t| t.relative).filter(|r| !r.is_identity() || r.from_primary).map_or(String::new(), |r| format!(" (third from {} coordinates × {:?} + {:?})", if r.from_primary {"primary"} else {"second"}, r.scale, r.offset)),a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.selection.third_sample.unwrap().uv_channel,a.selection.third_sample.unwrap().uv_transform.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture sampling • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture {} • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",if a.selection.texture_alpha_mix.is_some() {"alpha MIX (port-1 sample alpha)"} else {"sampling"},a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.texture_blend.map(|m|m.label()).or(a.selection.texture_alpha_mix.map(|m|m.label())).or(a.selection.texture_add.map(|m|format!("{} after {}",m.label(),a.selection.tint.label()))).or(a.selection.blend.map(|blend|blend.label())).unwrap_or_else(||a.selection.tint.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture {}, second {}, nearest grid {:?}",if a.selection.texture_blend.is_some(){"BLEND"}else if a.selection.texture_alpha_mix.is_some(){"alpha MIX"}else if a.selection.texture_add.is_some(){"ADD"}else{"product"},second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire • black (0,0,0,0) per Toolkit shader generator; game default unverified • other channels not rendered • ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) => format!("Solid diffuse color {:?}{} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),if a.selection.product_of.is_some() {" (COLOR × COLOR product)"} else {""},a.selection.ignored_nodes,a.selection.ignored_wires),
@@ -259,6 +259,8 @@ pub struct DiffuseSelection {
     /// `second_sample`; ports and mask refer to them by index.
     pub texture_blend: Option<crate::TextureBlendMask>,
     pub fourth_sample: Option<SamplerSelection>,
+    /// D99: static MULTIPLY tree; COLOR leaves folded into `tint`.
+    pub product_tree: Option<crate::ProductTree>,
     /// D87: CONST/CONST2 UV scale on sampler port 1, folded into `uv_transform`.
     pub sampler_scale: Option<crate::SamplerScale>,
     pub deep_multiply_index: Option<usize>,
@@ -340,12 +342,22 @@ pub(crate) fn sampler(graph: &GraphMetadata, index: usize) -> Result<SamplerSele
 /// Product leaves. Static samplers first; with the animation-base opt-in, any
 /// distinct leaf may instead use its own named base rows (D78 one leaf,
 /// docs/d78-animated-product.md; D92 several, docs/d92-multi-animated.md).
-struct Leaves {
+pub(crate) struct Leaves {
     animated: bool,
-    base: crate::animation_base::AnimatedLeaves,
+    pub(crate) base: crate::animation_base::AnimatedLeaves,
 }
 impl Leaves {
-    fn sample(&mut self, graph: &GraphMetadata, index: usize) -> Result<SamplerSelection, String> {
+    pub(crate) fn new(animated: bool) -> Self {
+        Self {
+            animated,
+            base: Default::default(),
+        }
+    }
+    pub(crate) fn sample(
+        &mut self,
+        graph: &GraphMetadata,
+        index: usize,
+    ) -> Result<SamplerSelection, String> {
         let error = match sampler(graph, index) {
             Ok(selection) => return Ok(selection),
             Err(error) if !self.animated => return Err(error),
@@ -574,9 +586,10 @@ fn select_texture_alpha_mix(
         ignored_wires: graph.wires.len() - 4,
         ..Default::default()
     };
-    if !uses_grid(selection) {
+    // D99: off the grid, the Bevy dual path mixes by the second (port-1) sample alpha.
+    if !uses_grid(selection) && factor_port != 1 {
         return Err(
-            "Unsupported: two-texture alpha MIX requires same-channel integer Repeat grid samplers"
+            "Unsupported: two-texture alpha MIX off the Repeat grid needs the factor on the port-1 sample"
                 .into(),
         );
     }
@@ -863,7 +876,15 @@ pub fn select_diffuse(graph: &GraphMetadata) -> Result<DiffuseSelection, String>
         },
     )
 }
+// D99: pure static MULTIPLY trees the fixed routes refuse (docs/d99-product-trees.md).
 fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<DiffuseSelection, String> {
+    select_fixed_products(graph, leaves)
+        .or_else(|error| crate::product_tree::select(graph, leaves.animated, error))
+}
+fn select_fixed_products(
+    graph: &GraphMetadata,
+    leaves: &mut Leaves,
+) -> Result<DiffuseSelection, String> {
     let boxes = &graph.boxes;
     let wires = &graph.wires;
     if boxes.len() > 1024 || wires.len() > 4096 {
@@ -1092,6 +1113,7 @@ fn select_products(graph: &GraphMetadata, leaves: &mut Leaves) -> Result<Diffuse
         blend_mask: None,
         texture_blend: None,
         fourth_sample: None,
+        product_tree: None,
         sampler_scale: None,
         deep_multiply_index: None,
         third_sample,
@@ -1410,8 +1432,12 @@ pub(crate) fn load_primitive(
         && instance_projection
             .as_ref()
             .is_none_or(|p| p.alpha_subtract_samplers.is_empty() && p.nested_tint.is_none());
+    // D99: port-1-alpha two-texture MIX may use the independent dual path instead.
+    let dual_alpha_mix = selection
+        .texture_alpha_mix
+        .is_some_and(|m| m.factor_port == 1);
     if (selection.blend.is_some()
-        || selection.texture_alpha_mix.is_some()
+        || (selection.texture_alpha_mix.is_some() && !dual_alpha_mix)
         || selection.texture_blend.is_some()
         || selection.texture_add.is_some())
         && selection.second_sample.is_some()
@@ -2026,8 +2052,18 @@ mod tests {
         graph.boxes[2].type_raw = 10; // deeper nesting
         assert!(select_diffuse(&graph).is_err());
         graph.boxes[2].type_raw = 1;
-        graph.wires[1].box_from = 2; // shared leaf
-        assert!(select_diffuse(&graph).is_err());
+        // Shared leaf. D99: a squared leaf times another is a product tree; the
+        // squared leaf takes the exactly shared second/third roles.
+        graph.wires[1].box_from = 2;
+        let squared = select_diffuse(&graph).unwrap();
+        assert!(squared.product_tree.is_some() && squared.sample_index != 2);
+        assert_eq!(
+            (
+                squared.second_sample.unwrap().sample_index,
+                squared.third_sample.unwrap().sample_index
+            ),
+            (2, 2)
+        );
         // Four-leaf chain: first/fourth UV1, second/third UV0.
         graph.boxes = vec![
             node(0),
@@ -2094,8 +2130,12 @@ mod tests {
         graph.wires[1].port_from_raw = 1;
         assert!(select_diffuse(&graph).is_err());
         graph.wires[1].port_from_raw = 0;
-        graph.wires[1].box_from = 1; // duplicate fourth/first leaf
-        assert!(select_diffuse(&graph).is_err());
+        // Duplicate fourth/first leaf. D99: T1² × (two leaves sharing UV0) still
+        // pairs as a product tree chain.
+        graph.wires[1].box_from = 1;
+        let duplicate = select_diffuse(&graph).unwrap();
+        assert_eq!(duplicate.product_tree.unwrap().texture_leaves, 4);
+        assert!(duplicate.fourth_sample.is_some());
         graph.wires[1].box_from = 6;
         graph.wires[4].box_from = 7; // cycle instead of deepest multiply
         assert!(select_diffuse(&graph).is_err());
@@ -2488,7 +2528,8 @@ mod tests {
         assert_eq!(third.sample_index, 4);
         assert_eq!(third.uv_transform.bits(), derived);
         assert_eq!(three.animation_base.unwrap().sample_index, 4);
-        // A matrix (subtype 1) animated leaf cannot be the independent third.
+        // A matrix (subtype 1) animated leaf cannot be the independent third; D99
+        // makes it the primary when the two static leaves share exact coordinates.
         graph.boxes[4].subtype_raw = 1;
         for (i, name) in ["663100", "673100"].into_iter().enumerate() {
             let a = &mut graph.boxes[4].animations[i];
@@ -2500,7 +2541,12 @@ mod tests {
             ) = (7, 3, 1);
             a.base_value_bits = [1f32.to_bits(), 0, 0, 0];
         }
-        assert!(select_diffuse_with_animation_base(&graph, true).is_err());
+        let matrix = select_diffuse_with_animation_base(&graph, true).unwrap();
+        assert_eq!(
+            (matrix.sample_index, matrix.product_tree.is_some()),
+            (4, true)
+        );
+        assert_eq!(matrix.animation_base.unwrap().subtype_raw, 1);
     }
     #[test]
     fn two_textures_and_static_color_under_two_multiplies_select_a_tinted_product() {
@@ -2606,9 +2652,11 @@ mod tests {
         assert!(select_diffuse(&graph).is_err());
         graph.boxes[2].parameters_raw[4] = 0;
         graph.boxes[2] = node(3, 0);
-        assert!(select_diffuse(&graph)
-            .unwrap_err()
-            .contains("two direct texture samples"));
+        // D99: (T × C) × C is a product tree: one texture, both COLOR leaves folded.
+        let folded = select_diffuse(&graph).unwrap();
+        assert_eq!(folded.product_tree.unwrap().color_leaves, 2);
+        assert_eq!(folded.tint.values(), tint.map(|v| v * v));
+        assert!(folded.second_sample.is_none() && folded.color_index.is_none());
         graph.boxes[2] = node(1, 1);
         graph.wires[0].box_from = 5; // cycle through the root
         assert!(select_diffuse(&graph).is_err());
@@ -2851,12 +2899,19 @@ mod tests {
         graph.wires[0].box_from = 2;
         assert!(select_diffuse(&graph).is_err());
         graph.wires[0].box_from = 1;
-        // Different UV channels or non-integer scale leave the grid: unsupported.
+        // D99: different UV channels or a non-integer scale leave the grid; the
+        // port-1 alpha factor then selects the dual path, a port-0 factor does not.
         graph.boxes[2].parameters_raw[4] = 1;
-        assert!(select_diffuse(&graph).unwrap_err().contains("Repeat grid"));
+        let dual = select_diffuse(&graph).unwrap();
+        assert!(!uses_grid(dual) && dual.texture_alpha_mix.unwrap().factor_port == 1);
+        graph.wires[2].box_from = 1;
+        assert!(select_diffuse(&graph)
+            .unwrap_err()
+            .contains("port-1 sample"));
+        graph.wires[2].box_from = 2;
         graph.boxes[2].parameters_raw[4] = 0;
         graph.boxes[2].parameters_raw[0] = 70f32.to_bits();
-        assert!(select_diffuse(&graph).is_err());
+        assert!(!uses_grid(select_diffuse(&graph).unwrap()));
         graph.boxes[2].parameters_raw[0] = 1f32.to_bits();
         // Animated or wired samplers and animated MIX stay unsupported.
         graph.boxes[2].animations[0].name_hex = "623100".into();

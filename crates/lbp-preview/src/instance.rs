@@ -783,8 +783,12 @@ mod tests {
         let mut shared = original.clone();
         shared.wires.push(edge(2, 0, 4));
         let (d, q) = project_instance_color(&shared, color()).unwrap();
-        assert!(q.unwrap().folded_operand.is_none());
-        assert!(crate::select_diffuse(&d).is_err());
+        let q = q.unwrap();
+        assert!(q.folded_operand.is_none());
+        // D99: the derived graph is a product tree, refused under the supplied color.
+        assert!(crate::select_instance_diffuse(&d, &q, true)
+            .unwrap_err()
+            .contains("product tree under a supplied instance color"));
         let mut swizzle = original.clone();
         swizzle.wires[0].swizzle_raw = [b'a', 0, 0, 0, 0];
         let (_, q) = project_instance_color(&swizzle, color()).unwrap();
