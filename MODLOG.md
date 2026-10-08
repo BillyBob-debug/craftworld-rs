@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-08 — D137 script tests
+
+VM binds 2,970/17,704 native calls; the game's own test script passes 532 checks, fails
+3. Gooey trace (#34) still held; RPCS3 input awaits the user's OK. +0 / +0.
+
 ## 2026-10-08 — D135 native bindings
 
 40 VM native bindings merged: 2,347 of 17,704 native calls bound (690/2,472 in gameplay

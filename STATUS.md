@@ -3675,3 +3675,20 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
   1,201 instructions, translated 0/0, outline 2 lines (no English labels); 7/15 functions
   fault (Type on member ops). Gooey 9/45 faulted, PodStateStoriesMenu 5/13.
 **+0 newly viewable / +0 newly Complete.**
+
+## D137 — Rs part 2, PR #35; PR #34 still held (2026-10-08)
+
+- native_coverage d137 (426 decrypted 01.33 scripts; unit call instruction): native calls
+  17,704, bound 2,970 (was 2,347); gameplay 254 scripts: 1,935 calls, 756 bound; test
+  script 1: 537 calls, 524 bound; unknown signature codes none (j = s64, [ = array).
+- script_tests d137 (the game's own test script): 47 functions; outcomes done 24, Type 15,
+  Native 2, Register 2, Index 1, unbound_native 3 (Test.Succeed still unbound); checks
+  passed 532, failed 3 (NeverEvaluated test.cod:438; TestS64 test.cod:1551, 1562).
+- Checks: fmt; lbp-script-vm tests; workspace Clippy -D warnings.
+- PR #34 at 86684dd (D136 reserved): faults 7 -> 3 of 15 PodStateMainMenu functions, but
+  UpdateUI still returns after 48 instructions with translated 0/0 and a 2-line outline;
+  not merged (its step 3 needs English labels).
+- RPCS3 movement run: PINE IPC on 127.0.0.1:28012 reads guest memory (title, 01.33);
+  game at the first-run TV-size screen. Sending keystrokes was denied by the safety
+  check (approval came through the coordinator); needs the user's direct OK.
+**+0 newly viewable / +0 newly Complete.**
