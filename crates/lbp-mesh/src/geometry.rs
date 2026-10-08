@@ -1,7 +1,9 @@
-//! D2 bounded topology traversal: pinned Toolkit Primitive/Bone/AnimBone/shape serializers,
+//! D2 bounded topology traversal: pinned Toolkit Primitive serializer and the bone reader in
+//! skeleton.rs (Bone/AnimBone/shape serializers),
 //! Serializer::resource, MemoryInputStream::m44 and RMesh::getTriangles.
 //! Exact sources/applicability/conflicts/coverage: docs/mesh-geometry.md.
 use super::*;
+use crate::skeleton::{read_skeleton, Skeleton};
 #[derive(Debug, Serialize)]
 pub struct Primitive {
     pub material_flags: u32,
@@ -38,6 +40,8 @@ pub struct Geometry {
     /// One contiguous triangle span per metadata primitive, including empty spans.
     /// Overlapping source index ranges retain separate ownership, never deduplicate.
     pub primitive_triangles: Vec<std::ops::Range<usize>>,
+    /// Stored bones and mirror tables (bind data only; rest positions are not skinned).
+    pub skeleton: Skeleton,
 }
 fn descriptor(
     r: &mut Reader<'_>,
@@ -59,34 +63,6 @@ fn descriptor(
         None
     };
     Ok((flags, kind, guid, hash))
-}
-fn skip_bone(r: &mut Reader<'_>, cancel: &impl Fn() -> bool) -> Result<(), Error> {
-    checked(cancel)?;
-    r.take(32)?;
-    for _ in 0..5 {
-        r.integer()?;
-    } // flags, animation hash, parent/child/sibling (ULEB/zigzag consume same bytes)
-    for _ in 0..2 {
-        let mask = if r.compact {
-            u16::from_be_bytes(r.take(2)?.try_into().unwrap())
-        } else {
-            u16::MAX
-        };
-        r.take(mask.count_ones() as usize * 4)?;
-    }
-    r.take(32)?; // OBB min/max
-    let shapes = r.count(4096)?;
-    for _ in 0..shapes {
-        r.take(32)?;
-        r.integer()?;
-    }
-    let infos = r.count(4096)?;
-    for _ in 0..infos {
-        r.integer()?;
-        r.integer()?;
-    }
-    r.take(8 + 48)?;
-    Ok(()) // Z range, bounds and sphere
 }
 /// Stored rest geometry, no bone/morph transforms, no material shading.
 pub fn decode_geometry(b: &[u8], cancel: impl Fn() -> bool) -> Result<Geometry, Error> {
@@ -163,16 +139,8 @@ pub fn decode_geometry(b: &[u8], cancel: impl Fn() -> bool) -> Result<Geometry, 
         }
         primitives.push(p);
     }
-    let bones = r.count(4096)?;
-    for _ in 0..bones {
-        skip_bone(&mut r, &cancel)?;
-    }
-    let n = r.count(4096)?;
-    r.take(n as usize * 2)?;
-    let n = r.count(4096)?;
-    r.take(n as usize)?;
-    let n = r.count(32)?;
-    r.take(n as usize * 2)?;
+    let skeleton = read_skeleton(&mut r, prefix.compression_flags & 4 != 0, &cancel)?;
+    let bones = skeleton.bones.len() as u32;
     let topology = r.take(1)?[0];
     if !matches!(topology, 5 | 6) {
         return Err(Error::Unsupported("primitive topology"));
@@ -218,6 +186,7 @@ pub fn decode_geometry(b: &[u8], cancel: impl Fn() -> bool) -> Result<Geometry, 
         positions,
         triangles,
         primitive_triangles,
+        skeleton,
     })
 }
 // Triangle-strip parity advances even for degenerates, and resets on fixed u16 restart.
