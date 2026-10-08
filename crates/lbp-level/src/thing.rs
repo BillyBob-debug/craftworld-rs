@@ -173,8 +173,8 @@ pub struct Things {
     pub list: Vec<ThingRecord>,
     /// Length of the PWorld `things` array once every element has been read.
     pub world_array_done: Option<usize>,
-    /// InstanceLayout bodies by per-class sequence number: (machine type, divergent).
-    pub layouts: Vec<Vec<(u8, bool)>>,
+    /// InstanceLayout bodies by per-class sequence number.
+    pub layouts: Vec<Vec<parts::LayoutField>>,
     /// PShape / PRenderMesh bodies by per-class sequence number, so a later
     /// back-reference (Thing part, ContactCache, Decoration) resolves to the same data.
     pub shapes: std::collections::HashMap<usize, parts::Shape>,

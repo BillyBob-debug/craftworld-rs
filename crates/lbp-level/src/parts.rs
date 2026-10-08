@@ -118,6 +118,8 @@
 //!   ARRAY_SAFE_PTR thingarray, ARRAY_OBJECT_REF array of ScriptObjectUID, RESOURCE (i32
 //!   type, res when nonzero), INSTANCE ScriptInstance, STRINGW wstr, STRINGA str,
 //!   AUDIOHANDLE nothing; other types stop.
+//!   Kept as `PartData::script` (Rt, docs/level-scripts.md): resource, field names, machine
+//!   types and values; object references keep their kind and string text only.
 //! - MATERIAL_TWEAK (PMaterialTweak): hideInPlayMode bool, restitution f32, frictionScale
 //!   f32, grabbability i8, grabFilter i8 (> 0x3bc), stickiness i8, noAutoDestruct bool,
 //!   disablePhysicsAudio bool, hasShadow bool (> 0x3ec); (two u8 below 0x343).
@@ -280,6 +282,55 @@ pub struct PartData {
     /// backdrop mesh tail (D119).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level_settings: Option<LevelSettings>,
+    /// PScript: script resource and instance field values (Rt). A part shared by
+    /// back-reference is not repeated here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub script: Option<ScriptPart>,
+}
+
+/// PScript / ScriptInstance as stored: the script resource and, when the instance has a
+/// layout, one entry per serialized layout field in layout order.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct ScriptPart {
+    pub script: Option<Descriptor>,
+    pub fields: Vec<ScriptField>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ScriptField {
+    pub name: String,
+    /// Toolkit MachineType byte (1 bool .. 0xb object reference).
+    pub machine_type: u8,
+    pub value: ScriptValue,
+}
+
+/// One InstanceLayout field: name, machine type, DIVERGENT modifier.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct LayoutField {
+    pub name: String,
+    pub machine_type: u8,
+    pub divergent: bool,
+}
+
+/// Stored value of a script instance field.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum ScriptValue {
+    Bool(bool),
+    Char(i16),
+    Int(i32),
+    Float(f32),
+    V4([f32; 4]),
+    M44([f32; 16]),
+    /// Thing index in the level's Thing list; None = null.
+    Thing(Option<usize>),
+    /// ScriptObjectUID: `kind` 0 = null. Text for STRINGW (14) / STRINGA (16) on first
+    /// occurrence; other contents are read but not kept yet.
+    Object {
+        kind: u32,
+        text: Option<String>,
+    },
+    /// DIVERGENT field the instance does not serialize.
+    NotStored,
 }
 
 /// D121: LevelSettings lighting/fog fields as stored (in-band LBP2 layout, see module
@@ -761,7 +812,10 @@ fn part_body(
             }
         }
         "SWITCH" => switch(r, things)?,
-        "SCRIPT" => script_instance(r, things)?,
+        "SCRIPT" => {
+            let part = script_instance(r, things)?;
+            things.list[me].data.script = Some(part);
+        }
         "MATERIAL_TWEAK" => {
             r.bool()?;
             r.skip_f32(2)?;
@@ -1629,7 +1683,7 @@ fn instance_layout(r: &mut Reader, things: &mut Things) -> Result<()> {
     let n = r.count(4)?;
     let mut fields = Vec::with_capacity(n.min(4096));
     for _ in 0..n {
-        r.str8()?;
+        let name = r.string8()?;
         let (modifiers, machine) = if v >= 0x3d9 {
             let m = u32::from(r.u16()?);
             let t = r.u8()?;
@@ -1647,17 +1701,25 @@ fn instance_layout(r: &mut Reader, things: &mut Things) -> Result<()> {
         };
         r.i32()?;
         let machine = u8::try_from(machine).unwrap_or(u8::MAX);
-        fields.push((machine, modifiers & DIVERGENT != 0));
+        fields.push(LayoutField {
+            name,
+            machine_type: machine,
+            divergent: modifiers & DIVERGENT != 0,
+        });
     }
     r.i32()?;
     things.layouts.push(fields);
     Ok(())
 }
 
-fn script_instance(r: &mut Reader, things: &mut Things) -> Result<()> {
-    r.resource(false)?;
+fn script_instance(r: &mut Reader, things: &mut Things) -> Result<ScriptPart> {
+    let script = r.resource(false)?;
+    let mut part = ScriptPart {
+        script,
+        fields: Vec::new(),
+    };
     if !r.bool()? {
-        return Ok(());
+        return Ok(part);
     }
     let tag = r.tag("InstanceLayout", |r| Ok(r.next_other("InstanceLayout")))?;
     let layout = match tag {
@@ -1676,47 +1738,41 @@ fn script_instance(r: &mut Reader, things: &mut Things) -> Result<()> {
     let Some(fields) = things.layouts.get(layout).cloned() else {
         return r.invalid("instance layout still being read");
     };
-    for (machine, is_divergent) in fields {
-        if is_divergent && !divergent {
-            continue;
-        }
-        match machine {
-            1 => {
-                r.bool()?;
+    part.fields.reserve(fields.len());
+    for f in fields {
+        let value = if f.divergent && !divergent {
+            ScriptValue::NotStored
+        } else {
+            match f.machine_type {
+                1 => ScriptValue::Bool(r.bool()?),
+                2 => ScriptValue::Char(r.i16()?),
+                3 => ScriptValue::Int(r.i32()?),
+                4 => ScriptValue::Float(r.f32()?),
+                5 => ScriptValue::V4(r.v4()?),
+                6 => ScriptValue::M44(r.m44()?),
+                0xa => ScriptValue::Thing(thing_ref(r, things)?),
+                0xb => script_object(r, things)?,
+                other => return r.unsupported(format!("script field machine type {other}")),
             }
-            2 => {
-                r.i16()?;
-            }
-            3 => {
-                r.i32()?;
-            }
-            4 => {
-                r.f32()?;
-            }
-            5 => {
-                r.v4()?;
-            }
-            6 => {
-                r.m44()?;
-            }
-            0xa => {
-                thing_ref(r, things)?;
-            }
-            0xb => script_object(r, things)?,
-            other => return r.unsupported(format!("script field machine type {other}")),
-        }
+        };
+        part.fields.push(ScriptField {
+            name: f.name,
+            machine_type: f.machine_type,
+            value,
+        });
     }
-    Ok(())
+    Ok(part)
 }
 
-fn script_object(r: &mut Reader, things: &mut Things) -> Result<()> {
+fn script_object(r: &mut Reader, things: &mut Things) -> Result<ScriptValue> {
     let kind = r.u32()?;
+    let mut text = None;
     if kind == 0 {
-        return Ok(());
+        return Ok(ScriptValue::Object { kind, text });
     }
     let tag = r.tag("ScriptObject", |r| Ok(r.next_other("ScriptObject")))?;
     if !matches!(tag, Tag::New(_)) {
-        return Ok(());
+        return Ok(ScriptValue::Object { kind, text });
     }
     r.enter()?;
     match kind {
@@ -1749,18 +1805,16 @@ fn script_object(r: &mut Reader, things: &mut Things) -> Result<()> {
                 r.resource(false)?;
             }
         }
-        13 => script_instance(r, things)?,
-        14 => {
-            r.wstr()?;
+        13 => {
+            script_instance(r, things)?;
         }
+        14 => text = Some(r.wstring()?),
         15 => {}
-        16 => {
-            r.str8()?;
-        }
+        16 => text = Some(r.string8()?),
         other => return r.unsupported(format!("script object type {other}")),
     }
     r.leave();
-    Ok(())
+    Ok(ScriptValue::Object { kind, text })
 }
 
 fn render_mesh(r: &mut Reader, things: &mut Things) -> Result<RenderMesh> {

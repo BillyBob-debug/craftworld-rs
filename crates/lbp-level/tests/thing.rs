@@ -1,7 +1,7 @@
 //! L4 Thing header/part flags and L5 subset: authored synthetic recipes only.
 mod common;
 use common::{bit, rev, translate, W};
-use lbp_level::parts::ShapeColor;
+use lbp_level::parts::{ScriptValue, ShapeColor};
 use lbp_level::thing::present_parts;
 use lbp_level::{read_payload, LevelReport, Limits, Stop};
 
@@ -418,6 +418,60 @@ fn contact_shape_is_shared_with_a_later_thing_and_script_name_length() {
     let s = r.things[0].data.shape.as_ref().unwrap();
     assert_eq!((s.vertex_count, s.thickness), (3, 5.));
     assert!(matches!(s.color, ShapeColor::Packed(7)));
+}
+
+#[test]
+fn script_part_keeps_field_names_and_values() {
+    // World Thing with a SCRIPT part: script GUID, an inline InstanceLayout of four fields
+    // (bool, f32, divergent s32, object = wide string) and their values.
+    let field = |w: &mut W, name: &str, modifiers: u16, machine: u8| {
+        w.s32(name.len() as i32).raw(name.as_bytes());
+        w.raw(&modifiers.to_be_bytes())
+            .u8(machine)
+            .u8(0)
+            .u8(0)
+            .u8(0);
+        w.u32(0); // instanceOffset
+    };
+    for flags in [0u8, 1] {
+        let mut w = W::new(flags);
+        w.u32(1).thing_header(1, 0, 0, 0, 0x3f, bit(0x11));
+        w.u32(2).res_guid(0x2d06).u8(1); // PScript tag, script, hasLayout
+        w.u32(3).u32(4); // InstanceLayout tag, 4 fields
+        field(&mut w, "On", 0, 1);
+        field(&mut w, "Speed", 0, 4);
+        field(&mut w, "Cache", 1 << 12, 3);
+        field(&mut w, "Text", 0, 0xb);
+        w.u32(16).u8(0); // instanceSize, reflectDivergent false
+        w.u8(1).f32(2.5); // On, Speed (Cache not stored)
+        w.u32(14).u32(4).s32(2).raw(&[0, b'H', 0, b'i']); // STRINGW "Hi"
+        w.u32(0).u32(0).u32(0).u32(0).u32(0).u8(0).u8(0); // RLevel tail
+        let r = run(&w, 0x3e5);
+        assert_eq!(r.stop, None, "flags {flags}");
+        let p = r.things[0].data.script.as_ref().unwrap();
+        assert_eq!(p.script.and_then(|d| d.guid), Some(0x2d06));
+        let got: Vec<_> = p
+            .fields
+            .iter()
+            .map(|f| (f.name.as_str(), f.machine_type, &f.value))
+            .collect();
+        assert_eq!(
+            got,
+            [
+                ("On", 1, &ScriptValue::Bool(true)),
+                ("Speed", 4, &ScriptValue::Float(2.5)),
+                ("Cache", 3, &ScriptValue::NotStored),
+                (
+                    "Text",
+                    0xb,
+                    &ScriptValue::Object {
+                        kind: 14,
+                        text: Some("Hi".into())
+                    }
+                ),
+            ]
+        );
+    }
 }
 
 #[test]
