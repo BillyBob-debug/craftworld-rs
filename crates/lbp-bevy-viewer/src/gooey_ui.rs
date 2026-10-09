@@ -180,6 +180,7 @@ pub fn run_gooey(
                 title: format!("LBP2 Asset Explorer - {title}"),
                 resolution: (1280, 800).into(),
                 visible: false,
+                focused: crate::activate_on_show(),
                 ..default()
             }),
             ..default()
