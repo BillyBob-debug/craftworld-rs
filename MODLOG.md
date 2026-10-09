@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-09 — D193 sampler port folds under the nested instance tint
+
+Folded sampler ports (D96) and the nested ThingColor tint now combine instead of refusing;
+both rewrites are exact. Targets the last 22 neutral Things in Bravery Test (mesh 00019e98).
++0 viewable / +0 Complete expected; PC verifies.
+
 ## 2026-10-09 — B179 PC verification of D192
 - STATUS.md B179: #95 checks, Bravery Test 35 -> 22 neutral, census unchanged, captures.
 

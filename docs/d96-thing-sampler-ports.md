@@ -48,6 +48,8 @@ sampler in the diffuse ancestry with incoming wires, except the unchanged D80 sh
    bits and each port's evaluated bits. The existing selectors then decide.
 5. `select_instance_diffuse` refuses folds combined with the nested-tint rewrite
    (`folded_sampler`): "folded sampler port inputs under a nested instance tint".
+   Lifted by D193 ([d193-folded-ports-nested-tint.md](d193-folded-ports-nested-tint.md)):
+   the two rewrites compose exactly.
 
 Also: when the diffuse ancestry has no ThingColor, `project_instance_color` now returns
 the original graph unprojected instead of refusing samplers with inputs, so D87's

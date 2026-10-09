@@ -1037,4 +1037,47 @@ mod tests {
         let (derived, _) = project_instance_color(&mix, color()).unwrap();
         assert_eq!(uv_params(&derived, 2), [1., 1., -0.25, -0.75]);
     }
+    #[test]
+    fn d193_port_folded_sampler_composes_with_the_nested_tint() {
+        // TEX a(port 2 = MIX(CONST4, CONST4, THING.a)) × (THING × animated TEX b),
+        // the 25ff1aa3 shape (D96 table). Fold a's offset, fold b under the tint.
+        let mut original = graph(
+            &[0, 10, 1, 10, 2, 1],
+            vec![
+                edge(1, 0, 0),
+                edge(2, 1, 0),
+                edge(3, 1, 1),
+                edge(4, 3, 0),
+                edge(5, 3, 1),
+            ],
+        );
+        animate(&mut original, 5);
+        let x = constant(&mut original, 12, &[0.]);
+        let l = constant(&mut original, 7, &[0., 1., 0., 0.]);
+        let r = constant(&mut original, 7, &[1., 0., 0., 0.]);
+        original.wires.extend([
+            edge(l, x, 0),
+            edge(r, x, 1),
+            swizzled(edge(4, x, 2), b'a'),
+            edge(x, 2, 2),
+        ]);
+        let before = serde_json::to_value(&original).unwrap();
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        let p = p.unwrap();
+        assert_eq!(serde_json::to_value(&original).unwrap(), before);
+        assert_eq!(p.folded_sampler, Some([3, 5]));
+        assert_eq!(p.nested_tint, Some(color()));
+        assert_eq!(p.sampler_port_folds.len(), 1);
+        assert_eq!(p.sampler_port_folds[0].sample_index, 2);
+        assert_eq!(uv_params(&derived, 2), [1., 1., -0.25, -0.75]);
+        assert!(crate::select_instance_diffuse(&derived, &p, false).is_err());
+        let s = crate::select_instance_diffuse(&derived, &p, true).unwrap();
+        assert!(s.second_sample.is_some());
+        let samples = [s.sample_index, s.second_sample.unwrap().sample_index];
+        assert!(samples.contains(&2) && samples.contains(&3), "{samples:?}");
+        // A port-folded sampler must stay static (D96 rule 1).
+        let mut both = original.clone();
+        animate(&mut both, 2);
+        assert!(project_instance_color(&both, color()).is_err());
+    }
 }

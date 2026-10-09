@@ -16,11 +16,10 @@ pub fn select_instance_diffuse(
     if projection.evaluated {
         return crate::select_evaluated(derived);
     }
-    // D96 (docs/d96-thing-sampler-ports.md): folded sampler ports only with direct
-    // samplers; the nested-tint rewrite has no oracle parity for a folded leaf.
-    if !projection.sampler_port_folds.is_empty() && projection.folded_sampler.is_some() {
-        return Err("Unsupported: folded sampler port inputs under a nested instance tint".into());
-    }
+    // D193 (docs/d193-folded-ports-nested-tint.md): D96 sampler port folds and the
+    // nested-tint rewrite compose. Each port fold is already baked into its derived
+    // sampler's scale/offset, and the nested rewrite copies that derived box, so the
+    // two-sample product below is exact; the existing selectors still decide.
     let selection = match crate::select_diffuse_with_animation_base(derived, animation_base) {
         // D92 (docs/d92-multi-animated.md): two or more animated leaves under a
         // supplied color only as a direct ThingColor tint; not with a folded nested

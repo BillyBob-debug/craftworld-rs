@@ -3946,3 +3946,12 @@ levels, baseline D149 0) / +0 newly Complete.**
   on the central beam still draws; likely shape batches gfx 00012ba7/00018401 (INFERRED).
 - Not done: Pod planets 0001d050 vs RPCS3 (no frame on hand).
 **+0 newly viewable / +0 newly Complete.**
+
+## D193 — sampler port folds under the nested instance tint (2026-10-09)
+- `select_instance_diffuse` drops D96 rule 5: port folds are baked into the derived
+  sampler and the nested-tint rewrite copies that box, so the two-sample product is exact
+  (INFERRED composition of two oracle-checked rewrites). docs/d193-folded-ports-nested-tint.md.
+- Target: Bravery Test (0001e795) 22 neutral Things, all 00019e98 with that reason.
+- Cloud (rustc 1.97): lbp-preview tests 117 pass (1 new), Clippy -D warnings pass, fmt clean.
+- Not tested here: level report, corpus census, gameplay-distance capture (PC).
+**+0 newly viewable / +0 newly Complete (expected; PC census decides).**
