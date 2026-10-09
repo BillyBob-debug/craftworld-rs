@@ -6,8 +6,7 @@
 //! cycle come later), and the level's own dynamic objects are simulated but not redrawn.
 //!
 //! `--play-sackboy-at X,Y,Z` sets the spawn (level units, capsule centre); otherwise the
-//! first CHECKPOINT, 69 above its POS, in the nearest 200-unit lane (the game's spawn offset
-//! is UNKNOWN). `--play-sackboy-input STEPS` replaces the pad with a script of
+//! first CHECKPOINT's POS plus [`SPAWN_OFFSET`]. `--play-sackboy-input STEPS` replaces the pad with a script of
 //! `keys:ticks` steps (keys from `l r j b f`, `-` for none; e.g. `r:40,rj:12,-:30`) and prints
 //! Sackboy's position every tick, for comparing paths against RPCS3.
 use bevy::prelude::*;
@@ -15,7 +14,7 @@ use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::level_scene;
 use lbp_sim::avian2d::prelude::*;
 use lbp_sim::character::{spawn_sackboy, SackboyBody, SackboyPlugin, HALF_SEGMENT, RADIUS};
-use lbp_sim::sackboy::{Input, LANE_SPACING};
+use lbp_sim::sackboy::Input;
 use lbp_sim::scene::{material_rule_for_path, MaterialRule};
 use lbp_sim::{build_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin};
 use std::collections::BTreeMap;
@@ -35,6 +34,11 @@ struct Play {
 
 #[derive(Component)]
 struct Marker;
+
+/// Sackboy's start relative to the first CHECKPOINT POS. RPCS3, Rookie Test (PC, d-run
+/// 2026-10-09): checkpoint (-13335, 6971, -250), Sackboy appears at (-13335.7, 6763, 0) and
+/// lands at y 5974. One level only: INFERRED for other levels.
+const SPAWN_OFFSET: [f32; 3] = [0., -208., 250.];
 
 /// Camera distance from Sackboy in level units. PLACEHOLDER (not measured in RPCS3).
 const FOLLOW_DISTANCE: f32 = 1500.;
@@ -144,9 +148,9 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let spawn = match (at, checkpoints.first()) {
         (Some(p), _) => p,
         (None, Some((_, m))) => [
-            m[12],
-            m[13] + RADIUS + HALF_SEGMENT,
-            (m[14] / LANE_SPACING).round() * LANE_SPACING,
+            m[12] + SPAWN_OFFSET[0],
+            m[13] + SPAWN_OFFSET[1],
+            m[14] + SPAWN_OFFSET[2],
         ],
         (None, None) => return Err("--play-sackboy: no CHECKPOINT; give --play-sackboy-at".into()),
     };

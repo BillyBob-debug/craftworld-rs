@@ -182,9 +182,8 @@ floor. Not wired yet: the viewer (pad input, spawn at the checkpoint).
 
 `lbp-bevy-viewer --play-sackboy` with `--level-guid`/`--level-path` builds the level's
 physics scene (material rules by MAP path, `scene::material_rule_for_path`) in the viewer
-app with `SimPlugin` and `SackboyPlugin`, and spawns the capsule at the first CHECKPOINT,
-69 above its POS, in the nearest 200-unit lane (the game's spawn offset is UNKNOWN;
-`--play-sackboy-at X,Y,Z` overrides). Arrows walk and change lanes (Up behind, Down in
+app with `SimPlugin` and `SackboyPlugin`, and spawns the capsule at the first CHECKPOINT POS + (0, -208, +250), the offset measured
+in RPCS3 for Rookie Test (INFERRED elsewhere; `--play-sackboy-at X,Y,Z` overrides). Arrows walk and change lanes (Up behind, Down in
 front), Space jumps; gamepad mapping is in the code but the viewer has no gamepad backend.
 The camera follows at 1,500 units (PLACEHOLDER). Sackboy is a placeholder capsule; the
 level's dynamic objects are simulated but not redrawn. `--play-sackboy-input r:40,rj:12,-:30`
