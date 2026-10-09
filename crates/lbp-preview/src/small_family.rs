@@ -131,6 +131,7 @@ pub fn select_small_solid(graph: &GraphMetadata) -> Result<Option<SolidSelection
         ignored_nodes: graph.boxes.len() - used_nodes,
         ignored_wires: graph.wires.len() - used_wires,
         unwired_diffuse: false,
+        output_swizzle: [0; 5],
         product_of,
         product_tree: None,
     }))
