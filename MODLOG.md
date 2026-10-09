@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-09 — P2w level scenes use the LBP-shaped lighting by default
+
+Level mode turns on the LBP-shaped lighting (RSX-fitted on the Pod) unless --preview-lighting
+(Lambert) or --no-lbp-lighting (unlit) is given. Moon-level block/preset still INFERRED until the
+requested capture (docs/p2w-level-lighting-default.md). +0 viewable / +0 Complete; PC verifies.
+
 ## 2026-10-09 — D193 sampler port folds under the nested instance tint
 
 Folded sampler ports (D96) and the nested ThingColor tint now combine instead of refusing;
