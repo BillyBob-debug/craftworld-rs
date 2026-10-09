@@ -268,6 +268,7 @@ pub(crate) fn select_color_tree(
         ignored_nodes: graph.boxes.len().saturating_sub(used_nodes),
         ignored_wires: graph.wires.len().saturating_sub(used_wires),
         unwired_diffuse: false,
+        output_swizzle: [0; 5],
         product_of: None,
         product_tree: Some(ProductTree {
             root,

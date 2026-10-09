@@ -430,6 +430,7 @@ mod tests {
                 ignored_nodes: 0,
                 ignored_wires: 0,
                 unwired_diffuse: false,
+                output_swizzle: [0; 5],
                 product_of: None,
                 product_tree: None,
             },

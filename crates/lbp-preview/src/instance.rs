@@ -628,6 +628,44 @@ mod tests {
         );
     }
     #[test]
+    fn d190_rgb_identity_output_swizzle_reaches_the_solid_route() {
+        // THING × THING.a with the diffuse wire swizzled (the g21845 shape).
+        let shape = |swizzle: [u8; 5]| {
+            let mut out = edge(1, 0, 0);
+            out.swizzle_raw = swizzle;
+            graph(
+                &[0, 10, 2],
+                vec![edge(2, 1, 0), swizzled(edge(2, 1, 1), b'a'), out],
+            )
+        };
+        let white = crate::DiffuseTint::default();
+        for ok in [*b"rgb\0\0", *b"xyz\0\0", *b"rgba\0", *b"xyzw\0"] {
+            let (derived, p) = crate::project_instance_graph(&shape(ok), white, true).unwrap();
+            assert!(p.unwrap().folded_root.is_some());
+            let s = crate::select_solid_diffuse(&derived).unwrap().unwrap();
+            assert_eq!(s.color, white);
+            assert_eq!(s.output_swizzle, ok);
+            assert_eq!(solid(&derived), Some([1.; 4]));
+        }
+        // Any swizzle that moves or drops an RGB component stays refused.
+        for bad in [
+            *b"a\0\0\0\0",
+            *b"bgr\0\0",
+            *b"rg\0\0\0",
+            *b"xyzx\0",
+            *b"rgbaa",
+        ] {
+            let (derived, _) = crate::project_instance_graph(&shape(bad), white, true).unwrap();
+            assert!(crate::select_solid_diffuse(&derived)
+                .unwrap_err()
+                .contains("subtype-zero COLOR"));
+        }
+        // Unswizzled output keeps zero swizzle metadata.
+        let (derived, _) = project_instance_color(&shape([0; 5]), white).unwrap();
+        let s = crate::select_solid_diffuse(&derived).unwrap().unwrap();
+        assert_eq!(s.output_swizzle, [0; 5]);
+    }
+    #[test]
     fn d86_static_constant_mix_folds_with_parameter_weight_only() {
         // Toolkit MIX form ((r - l) * w) + l, l on port 0, r on port 1, w = word 0.
         let mut original = graph(

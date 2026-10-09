@@ -38,6 +38,10 @@ impl DiffuseAdd {
     pub fn label(self) -> String {
         match self.addend {
             None => "two-texture ADD (linear sum, clamped) • nearest grid".into(),
+            Some(c) if c.validate().is_err() => format!(
+                "ADD static linear color {:?} (clamped) • preview approximation (not game behaviour): addend outside 0..1, sum clamped at encoding",
+                c.values()
+            ),
             Some(c) => format!("ADD static linear color {:?} (clamped)", c.values()),
         }
     }
@@ -53,7 +57,7 @@ impl DiffuseAdd {
             .addend
             .ok_or("Unsupported: ADD pixel bake needs a COLOR")?;
         tint.validate()?;
-        addend.validate()?;
+        finite_addend(addend)?;
         if !rgba.len().is_multiple_of(4) || rgba.len() > 4 * lbp_texture::MAX_PIXELS {
             return Err("Invalid: ADD pixel extent/budget".into());
         }
@@ -192,8 +196,23 @@ fn binary(graph: &GraphMetadata, index: usize) -> Option<[usize; 2]> {
         _ => None,
     }
 }
-/// Unwired, unanimated COLOR within the 0..1 preview bounds.
-fn static_color(graph: &GraphMetadata, index: usize) -> Result<Option<DiffuseTint>, String> {
+/// D190: an ADD addend only needs finite components. The sum is already clamped to
+/// 0..1 at 8-bit encoding (rule 3 of docs/d89-add-uv2.md), so an addend outside 0..1
+/// (the football net's alpha -0.236) has a defined preview value. Labelled preview
+/// approximation; game blending/clamping of an out-of-range sum is unverified.
+fn finite_addend(color: DiffuseTint) -> Result<(), String> {
+    if color.values().iter().any(|v| !v.is_finite()) {
+        return Err("Unsupported: ADD COLOR addend must be finite".into());
+    }
+    Ok(())
+}
+/// Unwired, unanimated COLOR; within the 0..1 preview bounds when `bounded` (a
+/// MULTIPLY tint), otherwise only finite (the D190 addend).
+fn static_color(
+    graph: &GraphMetadata,
+    index: usize,
+    bounded: bool,
+) -> Result<Option<DiffuseTint>, String> {
     let node = &graph.boxes[index];
     if node.type_raw != 3 {
         return Ok(None);
@@ -204,7 +223,11 @@ fn static_color(graph: &GraphMetadata, index: usize) -> Result<Option<DiffuseTin
     let color = DiffuseTint {
         bits: node.parameters_raw[..4].try_into().unwrap(),
     };
-    color.validate()?;
+    if bounded {
+        color.validate()?;
+    } else {
+        finite_addend(color)?;
+    }
     Ok(Some(color))
 }
 
@@ -256,7 +279,7 @@ pub(crate) fn select_add(
             } else {
                 (right, left)
             };
-            let addend = static_color(graph, color)?.ok_or("COLOR expected")?;
+            let addend = static_color(graph, color, false)?.ok_or("COLOR expected")?;
             let (sample_index, tint, multiply_index, color_index, used) = if other == 1 {
                 (operand, DiffuseTint::default(), None, None, (4, 3))
             } else {
@@ -268,7 +291,7 @@ pub(crate) fn select_add(
                     (3, 1) => (b, a),
                     _ => return Err("Unsupported: ADD of COLOR and a MULTIPLY needs one texture sample × one COLOR".into()),
                 };
-                let tint = static_color(graph, tint_index)?.ok_or("COLOR expected")?;
+                let tint = static_color(graph, tint_index, true)?.ok_or("COLOR expected")?;
                 (sample, tint, Some(operand), Some(tint_index), (6, 5))
             };
             if color_index == Some(color) {
@@ -470,9 +493,19 @@ mod tests {
         assert_eq!((s.sample_index, s.multiply_index), (1, None));
         assert_eq!(s.tint, DiffuseTint::default());
         assert_eq!((s.ignored_nodes, s.ignored_wires), (2, 2));
-        // COLOR outside 0..1 (the football net has alpha -0.236).
+        // D190: an addend outside 0..1 (the football net has alpha -0.236) is accepted
+        // and labelled; the sum is clamped at encoding. A tint outside 0..1 and a
+        // nonfinite addend stay refused.
         let mut g = base.clone();
         g.boxes[2].parameters_raw[3] = (-0.236f32).to_bits();
+        let add = crate::select_diffuse(&g).unwrap().texture_add.unwrap();
+        assert_eq!(add.addend.unwrap().values()[3], -0.236);
+        assert!(add.label().contains("preview approximation"));
+        let mut g = base.clone();
+        g.boxes[2].parameters_raw[0] = f32::NAN.to_bits();
+        assert!(crate::select_diffuse(&g).unwrap_err().contains("finite"));
+        let mut g = base.clone();
+        g.boxes[4].parameters_raw[0] = 1.5f32.to_bits();
         assert!(crate::select_diffuse(&g).unwrap_err().contains("0..1"));
         // Multiply of two textures under the ADD needs a three-texture bake.
         let mut g = base.clone();
@@ -529,6 +562,19 @@ mod tests {
             ..add
         };
         assert!(none.pixels(tint, &[0; 4], || false).is_err());
+        // D190: a negative addend alpha lowers alpha and clamps at zero.
+        let below = DiffuseAdd {
+            addend: Some(DiffuseTint {
+                bits: [0f32, 0., 0., -0.236].map(f32::to_bits),
+            }),
+            ..add
+        };
+        let identity = DiffuseTint::default();
+        let out = below
+            .pixels(identity, &[10, 20, 30, 255, 0, 0, 0, 40], || false)
+            .unwrap();
+        assert_eq!(out, [10, 20, 30, 195, 0, 0, 0, 0]);
+        assert!(below.label().contains("preview approximation"));
         // Grid: 1x1 red (scale 2) + 2x1 [black, green] (scale 1) -> 2x1 grid.
         let red = [255, 0, 0, 200];
         let pair = [0, 0, 0, 100, 0, 128, 0, 10];

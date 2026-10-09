@@ -273,7 +273,7 @@ impl MaterialAsset {
             Self::Texture(a) if a.dual.is_some() => format!("Diffuse only • independent two-texture {} • UV{} {} ({}) / UV{} {} ({}) | linear filtering • ignores {} nodes / {} wires",if a.selection.texture_alpha_mix.is_some() {"alpha MIX (port-1 sample alpha)"} else {"sampling"},a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.second_sample.unwrap().uv_channel,a.selection.second_sample.unwrap().uv_transform.label(),a.dual.as_ref().unwrap().wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) => format!("Diffuse only • UV{} • {} • {} • {}×{} {} • {} • {} • ignores {} nodes / {} wires", a.selection.uv_channel,a.selection.uv_transform.label(),a.selection.texture_blend.map(|m|m.label()).or(a.selection.texture_alpha_mix.map(|m|m.label())).or(a.selection.texture_add.map(|m|format!("{} after {}",m.label(),a.selection.tint.label()))).or(a.selection.blend.map(|blend|blend.label())).unwrap_or_else(||a.selection.tint.label()),a.texture.header.width,a.texture.header.height,a.texture.header.pixel_format,a.wrap.label(),if let Some(second)=a.selection.second_sample {format!("two-texture {}, second {}, nearest grid {:?}",if a.selection.texture_blend.is_some(){"BLEND"}else if a.selection.texture_alpha_mix.is_some(){"alpha MIX"}else if a.selection.texture_add.is_some(){"ADD"}else{"product"},second.uv_transform.label(),a.display_extent())} else {"single texture".into()},a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Solid(a) if a.selection.unwired_diffuse => format!("No diffuse wire • black (0,0,0,0) per Toolkit shader generator; game default unverified • other channels not rendered • ignores {} nodes / {} wires",a.selection.ignored_nodes,a.selection.ignored_wires),
-            Self::Solid(a) => format!("Solid diffuse color {:?}{} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),if a.selection.product_of.is_some() {" (COLOR × COLOR product)".to_string()} else if let Some(t) = a.selection.product_tree {format!(" ({})", t.label())} else {String::new()},a.selection.ignored_nodes,a.selection.ignored_wires),
+            Self::Solid(a) => format!("Solid diffuse color {:?}{}{} • no diffuse texture required • ignores {} nodes / {} wires",a.selection.color.values(),if a.selection.product_of.is_some() {" (COLOR × COLOR product)".to_string()} else if let Some(t) = a.selection.product_tree {format!(" ({})", t.label())} else {String::new()},if a.selection.output_swizzle != [0; 5] {format!(" • diffuse wire swizzle .{} (RGB shown; alpha not displayed, its value differs between readings)", String::from_utf8_lossy(&a.selection.output_swizzle).trim_end_matches(char::from(0)))} else {String::new()},a.selection.ignored_nodes,a.selection.ignored_wires),
         }
     }
 }
@@ -1672,19 +1672,17 @@ fn load_diffuse_material(
     };
     let mut dual = None;
     let product = if let Some(second) = selection.second_sample {
-        if selection.third_sample.is_some() && wrap != crate::TextureWrapping::uniform(true) {
-            return Err("Unsupported: texture product requires Repeat on both axes".into());
-        }
+        // D190: a three/four-texture product never bakes a grid (`uses_grid` needs no
+        // third sample), so the primary and second textures keep their own per-axis
+        // samplers on the dual path, exactly as a two-texture dual product does (D82
+        // wrap values). Only the shared third/fourth textures still need Repeat
+        // (`load_shared_sample`), because the viewer draws them with a Repeat sampler.
         let prefix = &graph.material.prefix;
         let descriptor = prefix
             .textures
             .get(second.slot)
             .ok_or("Unsupported: second texture slot")?;
-        if descriptor.kind == 0
-            || descriptor.flags != 0
-            || (selection.third_sample.is_some()
-                && second_wrap != Some(crate::TextureWrapping::uniform(true)))
-        {
+        if descriptor.kind == 0 || descriptor.flags != 0 {
             return Err(
                 "Unsupported: texture product requires present unflagged Repeat texture".into(),
             );
@@ -2767,6 +2765,14 @@ mod tests {
         let three = select_diffuse_with_animation_base(&graph, true).unwrap();
         assert!(select_diffuse(&graph).is_err());
         let third = three.third_sample.unwrap();
+        // D190 relies on this: a three-texture product never takes the Repeat-only
+        // grid bake, so its primary/second textures keep their own wrap samplers.
+        assert!(!uses_grid(three));
+        assert!(!grid_with_wrapping(
+            three,
+            crate::TextureWrapping::uniform(true),
+            Some(crate::TextureWrapping::uniform(true))
+        ));
         assert_eq!(third.sample_index, 4);
         assert_eq!(third.uv_transform.bits(), derived);
         assert_eq!(three.animation_base.unwrap().sample_index, 4);

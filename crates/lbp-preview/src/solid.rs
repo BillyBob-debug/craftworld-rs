@@ -16,6 +16,17 @@ pub struct SolidSelection {
     pub product_of: Option<[usize; 2]>,
     /// D101: COLOR-only MULTIPLY tree folded to `color`; `color_index` is its root.
     pub product_tree: Option<crate::ProductTree>,
+    /// D190: raw swizzle of the diffuse wire into the output; all zero when none.
+    /// Only the RGB-identity prefixes `xyz`/`rgb`/`xyzw`/`rgba` are accepted.
+    pub output_swizzle: [u8; 5],
+}
+/// D190 (docs/d190-small-material-fixes.md): diffuse-wire swizzles whose displayed RGB
+/// is the source RGB under both readings of the Toolkit pin: GfxAssembler `setupPath`
+/// resolves the output's source box without the wire swizzle, while `getWithSwizzle`
+/// (used for every other wire) appends it (`.rgb` then `float4(v, 1.0)`). The two
+/// readings differ only in alpha, which the solid preview does not display.
+pub(crate) fn rgb_identity_swizzle(swizzle: [u8; 5]) -> bool {
+    matches!(&swizzle, b"xyz\0\0" | b"rgb\0\0" | b"xyzw\0" | b"rgba\0")
 }
 pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelection>, String> {
     let boxes = &graph.boxes;
@@ -66,6 +77,7 @@ pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelecti
             unwired_diffuse: true,
             product_of: None,
             product_tree: None,
+            output_swizzle: [0; 5],
         }));
     }
     if diffuse.len() != 1 {
@@ -78,7 +90,7 @@ pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelecti
         return Ok(None);
     }
     if wire.port_from_raw != 0
-        || wire.swizzle_raw != [0; 5]
+        || (wire.swizzle_raw != [0; 5] && !rgb_identity_swizzle(wire.swizzle_raw))
         || [node, output].iter().any(|b| {
             b.subtype_raw != 0
                 || b.animations
@@ -104,5 +116,6 @@ pub fn select_solid_diffuse(graph: &GraphMetadata) -> Result<Option<SolidSelecti
         unwired_diffuse: false,
         product_of: None,
         product_tree: None,
+        output_swizzle: wire.swizzle_raw,
     }))
 }
