@@ -108,9 +108,15 @@ pub fn set_lighting(
     light: Option<&crate::lighting::PreviewLight>,
 ) -> bool {
     let ext = &mut material.extension;
-    match light.filter(|_| ext.normals_trusted) {
+    // P2s: LBP mode lights every draw; untrusted smooth normals use the face normal (3).
+    match light.filter(|l| ext.normals_trusted || l.lbp) {
         Some(l) => {
-            ext.light_dir = l.toward_light.extend(if l.lbp { 2. } else { 1. });
+            let mode = match (l.lbp, ext.normals_trusted) {
+                (false, _) => 1.,
+                (true, true) => 2.,
+                (true, false) => 3.,
+            };
+            ext.light_dir = l.toward_light.extend(mode);
             ext.light_key = l.key.extend(0.);
             ext.light_ambient = l.ambient.extend(0.);
             ext.rim_low = l.rim[0].extend(0.);
@@ -237,7 +243,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
 #endif
     var rgb = color.rgb;
     if light_dir.w > 1.5 {
-        rgb = lbp_output(rgb * preview_light(in.world_normal, face, pbr.V));
+        // P2s: mode 3 (untrusted smooth normals) shades with the face normal.
+        let shading = select(in.world_normal, face, light_dir.w > 2.5);
+        rgb = lbp_output(rgb * preview_light(shading, face, pbr.V));
     } else if light_dir.w > 0.5 {
         rgb *= preview_light(in.world_normal, face, pbr.V);
     }
@@ -286,7 +294,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .filter(|l| !l.trim_start().starts_with('#'))
             .map(|l| l.replace("#{MATERIAL_BIND_GROUP}", "2") + "\n")
             .collect();
-        assert!(body.contains("lbp_output(rgb * preview_light(in.world_normal, face, pbr.V))"));
+        assert!(body.contains("lbp_output(rgb * preview_light(shading, face, pbr.V))"));
         let source = format!("{STUBS}{body}");
         let module = naga::front::wgsl::parse_str(&source)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));

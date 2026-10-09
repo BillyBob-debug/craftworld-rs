@@ -270,7 +270,12 @@ pub fn summary(light: &PreviewLight, unlit: usize, total: usize) -> Vec<String> 
     let mut lines = vec![format!("Lighting: {}", light.label())];
     lines.extend(light.notes.iter().map(|n| format!("  {n}")));
     lines.push(format!(
-        "  {unlit} of {total} draw entities unlit (untrusted generated normals or fixture)"
+        "  {unlit} of {total} draw entities with untrusted generated normals ({})",
+        if light.lbp {
+            "LBP mode: lit flat by their face normals"
+        } else {
+            "unlit"
+        }
     ));
     lines
 }

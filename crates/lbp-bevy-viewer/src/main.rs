@@ -2218,6 +2218,7 @@ fn level_report(v: &Viewer) -> Result<(), String> {
     let pod = v.level.pod;
     let options = v.preview_options();
     let lighting_on = v.lighting.enabled;
+    let lbp_on = v.lighting.lbp;
     let scene_options = level_scene::LevelSceneOptions {
         shape_bevels: v.level.shape_bevels,
         placement,
@@ -2251,7 +2252,11 @@ fn level_report(v: &Viewer) -> Result<(), String> {
                         unlit += usize::from(!p.normals_trusted);
                     }
                 }
-                lines.extend(lighting::summary(&plan.light, unlit, total));
+                let light = lighting::PreviewLight {
+                    lbp: lbp_on,
+                    ..plan.light.clone()
+                };
+                lines.extend(lighting::summary(&light, unlit, total));
             }
             lines.extend(plan.lines);
             for m in &scene.meshes {
@@ -2464,10 +2469,11 @@ fn apply_lighting(
             Some((from, l)) if i >= *from => l.as_ref(),
             _ => light.as_ref(),
         };
-        let lit = materials
+        // Counts draws without trusted normals: unlit, or flat-lit in LBP mode (P2s).
+        let smooth = materials
             .get_mut(handle.id())
-            .is_some_and(|mut m| dual::set_lighting(&mut m, layer));
-        unlit += usize::from(!lit);
+            .is_some_and(|mut m| dual::set_lighting(&mut m, layer) && m.extension.normals_trusted);
+        unlit += usize::from(!smooth);
     }
     for camera in &cameras {
         match light.as_ref().and_then(|l| l.fog) {
