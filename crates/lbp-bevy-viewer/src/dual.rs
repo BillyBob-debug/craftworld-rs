@@ -6,6 +6,7 @@
 //! D99: `enabled.w` selects the two-texture alpha MIX mode (docs/d99-product-trees.md).
 //! D121: opt-in preview lighting multiplies the finished colour by a Lambert factor
 //! (docs/d121-preview-lighting.md); off (`light_dir.w` = 0) leaves the colour untouched.
+//! P2l: `light_dir.w` = 2 selects the opt-in LBP-shaped factor (docs/p2l-lbp-lighting.md).
 use bevy::{
     pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
@@ -42,6 +43,12 @@ pub struct SecondTexture {
     /// D121: ambient colour (rgb).
     #[uniform(111)]
     light_ambient: Vec4,
+    /// P2l: lower rim colour (rgb), used toward N.y = -1.
+    #[uniform(112)]
+    rim_low: Vec4,
+    /// P2l: upper rim colour (rgb), used toward N.y = +1.
+    #[uniform(113)]
+    rim_high: Vec4,
     /// D121: generated normals passed `adapter::normal_trust`; otherwise stays unlit.
     pub normals_trusted: bool,
 }
@@ -103,15 +110,19 @@ pub fn set_lighting(
     let ext = &mut material.extension;
     match light.filter(|_| ext.normals_trusted) {
         Some(l) => {
-            ext.light_dir = l.toward_light.extend(1.);
+            ext.light_dir = l.toward_light.extend(if l.lbp { 2. } else { 1. });
             ext.light_key = l.key.extend(0.);
             ext.light_ambient = l.ambient.extend(0.);
+            ext.rim_low = l.rim[0].extend(0.);
+            ext.rim_high = l.rim[1].extend(0.);
             true
         }
         None => {
             ext.light_dir = Vec4::ZERO;
             ext.light_key = Vec4::ZERO;
             ext.light_ambient = Vec4::ZERO;
+            ext.rim_low = Vec4::ZERO;
+            ext.rim_high = Vec4::ZERO;
             false
         }
     }
@@ -144,6 +155,8 @@ const SOURCE: &str = r#"
 @group(#{MATERIAL_BIND_GROUP}) @binding(109) var<uniform> light_dir: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(110) var<uniform> light_key: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var<uniform> light_ambient: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> rim_low: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(113) var<uniform> rim_high: vec4<f32>;
 // D121 preview Lambert factor (mirrors lighting::PreviewLight::factor/facing_normal).
 // Double-sided: the smooth normal is turned into the hemisphere of the face normal that
 // points at the viewer, so back faces and mirrored instances light like front faces.
@@ -151,6 +164,19 @@ fn preview_light(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec
     if dot(shading, shading) <= 0.0 {
         return vec3<f32>(1.0);
     }
+    let n = facing_normal(shading, face, to_view);
+    if light_dir.w > 1.5 {
+        // P2l (mirrors lighting::PreviewLight::lbp_factor): hemisphere ambient, sun,
+        // grazing rim lerped by N.y; squared for the game's square-then-sqrt combine.
+        let rim = pow(clamp(dot(n, -to_view) + 0.9, 0.0, 1.0), 2.0);
+        let f = light_ambient.rgb * (n.y * 0.15 + 0.5)
+            + light_key.rgb * max(dot(n, light_dir.xyz), 0.0)
+            + mix(rim_low.rgb, rim_high.rgb, (n.y + 1.0) * 0.5) * rim;
+        return f * f;
+    }
+    return light_ambient.rgb + light_key.rgb * max(dot(n, light_dir.xyz), 0.0);
+}
+fn facing_normal(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
     var n = normalize(shading);
     if dot(face, face) > 0.0 {
         var f = normalize(face);
@@ -161,7 +187,7 @@ fn preview_light(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec
             n = -n;
         }
     }
-    return light_ambient.rgb + light_key.rgb * max(dot(n, light_dir.xyz), 0.0);
+    return n;
 }
 @fragment
 fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOutput {
