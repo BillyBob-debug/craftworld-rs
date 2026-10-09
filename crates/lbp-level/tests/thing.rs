@@ -318,6 +318,12 @@ fn level_settings_fields_and_presets() {
     assert_eq!((s.fog_near, s.fog_far), (1000., 4000.));
     assert_eq!((s.rim_color, s.rim_color2), ([0.5; 4], [0.5; 4]));
     assert_eq!(s.presets, 1);
+    // P2l: the preset is kept, in order, with its own values.
+    let kept = lbp_level::parts::LevelSettings::find_presets(&r.things);
+    assert_eq!(kept.len(), 1);
+    assert_eq!(kept[0].sun_position, [7., 8., 9.]);
+    assert_eq!(kept[0].sun_color, [1., 0.9, 0.8, 1.].map(|v: f32| v * 7.));
+    assert_eq!(kept[0].presets, 0);
     // Every truncation stops without panic and without settings claimed complete.
     for n in 0..w.b.len() {
         let mut t = W::new(1);

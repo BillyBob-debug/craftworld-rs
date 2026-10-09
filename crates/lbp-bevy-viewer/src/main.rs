@@ -96,6 +96,8 @@ struct LevelMode {
     /// P2d `--pod-open` (1) / P2h `--pod-t T`: Puter opening progress to start at, for
     /// QA captures of the open and mid-dolly views.
     t0: Option<f32>,
+    /// P2l `--lighting-preset N`: light from stored preset N instead of the main settings.
+    lighting_preset: Option<usize>,
     /// P2e `--runtime-texture MESH:SLOT:TEXTURE` (repeatable; docs/p2e-runtime-texture.md).
     runtime_textures: Vec<lbp_preview::runtime_texture::RuntimeTexture>,
     /// P2f `--pod-shell-camera FX,FY,FZ,TX,TY,TZ`: the closed shell eye from the game's
@@ -487,7 +489,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N: with a level, light from its stored preset N instead of the main settings (P2l)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -527,6 +529,14 @@ fn options() -> Result<Viewer, String> {
             "--level-path" => v.level.path = Some(value),
             "--level-placement" => v.level.placement = level_scene::PosPlacement::parse(&value)?,
             "--runtime-texture" => push_runtime_texture(&mut v.level.runtime_textures, &value)?,
+            "--lighting-preset" => {
+                let n = value
+                    .parse::<usize>()
+                    .ok()
+                    .filter(|&n| n < lbp_level::parts::MAX_KEPT_PRESETS)
+                    .ok_or("--lighting-preset takes a preset index (0 = first)")?;
+                v.level.lighting_preset = Some(n);
+            }
             "--pod-t" => {
                 let t = value
                     .parse::<f32>()
@@ -814,6 +824,7 @@ fn load(
     if v.requested {
         v.requested = false;
         v.lighting.light = lighting::PreviewLight::generic();
+        v.lighting.shell = None;
         v.lighting.dirty = true;
         clear(
             &mut v,
@@ -885,6 +896,12 @@ fn load(
                 (true, Some(globe)) => Some(place_menu_planets(&mut level.scene, globe)?),
                 _ => None,
             };
+            if let Some(n) = v.level.lighting_preset {
+                println!("{}", use_lighting_preset(&mut level.scene, n));
+                if let Some(shell) = level.shell.as_mut() {
+                    println!("Shell: {}", use_lighting_preset(shell, n));
+                }
+            }
             let plan = plan_level(&level.scene, v.level.focus, v.level.pod)?;
             let planets_normalize = plan.normalize;
             let rig = match (&level.shell, v.level.pod) {
@@ -957,6 +974,7 @@ fn load(
                         .collect()
                 });
                 let first = v.scene.len();
+                let planets_light = v.lighting.light.clone();
                 spawn_level(
                     &mut v,
                     &mut commands,
@@ -965,6 +983,9 @@ fn load(
                     &mut images,
                     shell_plan,
                 );
+                // P2l: the shell keeps its own level's light; the planets keep theirs.
+                let shell_light = std::mem::replace(&mut v.lighting.light, planets_light);
+                v.lighting.shell = Some((first, shell_light));
                 for (i, (entity, ..)) in v.scene[first..].iter().enumerate() {
                     let parent = if tent_flags.get(i).copied().unwrap_or(false) {
                         tent
@@ -1407,6 +1428,23 @@ fn plan_level(
 }
 /// D121: preview light from the level's stored settings, in the frame `level_home` uses
 /// (sun direction from the displayed bounds centre; fog distances scaled to display).
+/// P2l: lights the level from its stored preset `n` (which block the game applies is
+/// unknown; docs/p2l-level-presets.md). A missing preset keeps the main settings.
+fn use_lighting_preset(scene: &mut LevelScene, n: usize) -> String {
+    match scene.settings_presets.get(n) {
+        Some(preset) => {
+            scene.settings = Some(*preset);
+            format!(
+                "Lighting preset {n} of {} (instead of the main settings)",
+                scene.settings_presets.len()
+            )
+        }
+        None => format!(
+            "Lighting preset {n}: not stored ({} kept); main settings",
+            scene.settings_presets.len()
+        ),
+    }
+}
 fn level_light(scene: &LevelScene, buckets: &[Result<usize, String>]) -> lighting::PreviewLight {
     let shown = |i: &level_scene::SceneItem| buckets.get(i.mesh).is_some_and(Result::is_ok);
     // Same bounds as `place_items` (D119: backdrop excluded) so the fog scale and sun
@@ -2306,24 +2344,35 @@ fn animate(
 /// D121: pushes the preview light (or its removal) into every scene material and the
 /// camera fog once per toggle or scene change. Off and never applied: touches nothing,
 /// so default captures are unchanged.
+/// P2l: the planets root and the shell root (not the tent), for turning each layer's light.
+type LightRoots<'w, 's> = (
+    Query<'w, 's, &'static Transform, With<PodPlanetsRoot>>,
+    Query<'w, 's, &'static Transform, (With<PodShellRoot>, Without<PodTentRoot>)>,
+);
 fn apply_lighting(
     mut commands: Commands,
     mut v: ResMut<Viewer>,
     mut materials: ResMut<Assets<ViewerMaterial>>,
     cameras: Query<Entity, With<Camera3d>>,
-    planets: Query<&Transform, With<PodPlanetsRoot>>,
+    roots: LightRoots,
 ) {
-    // P2l: the LBP light lives in the level's frame, so it turns with the planets root
-    // (re-applied when the dolly turns it).
-    let turn = planets.iter().next().map_or(Quat::IDENTITY, |t| t.rotation);
+    // P2l: the LBP light lives in each level's frame, so it turns with the planets and
+    // shell roots (re-applied when the dolly turns them).
+    let first_turn = |t: Option<&Transform>| t.map_or(Quat::IDENTITY, |t| t.rotation);
+    let (turn, shell_turn) = (
+        first_turn(roots.0.iter().next()),
+        first_turn(roots.1.iter().next()),
+    );
     let turned = !v.lighting.dirty
         && v.lighting.lbp
         && v.lighting.applied
-        && turn.angle_between(v.lighting.turn) > 1e-3;
+        && (turn.angle_between(v.lighting.turn) > 1e-3
+            || shell_turn.angle_between(v.lighting.shell_turn) > 1e-3);
     if !(v.lighting.dirty || turned) || v.job.is_some() {
         return;
     }
     v.lighting.turn = turn;
+    v.lighting.shell_turn = shell_turn;
     v.lighting.dirty = false;
     let on = v.lighting.enabled;
     if !on && !v.lighting.applied {
@@ -2336,11 +2385,23 @@ fn apply_lighting(
             v.lighting.light.clone()
         }
     });
+    let shell = v.lighting.shell.as_ref().map(|(from, l)| {
+        let l = if v.lighting.lbp {
+            l.lbp_shaped(shell_turn)
+        } else {
+            l.clone()
+        };
+        (*from, on.then_some(l))
+    });
     let mut unlit = 0usize;
-    for (_, _, handle, _) in &v.scene {
+    for (i, (_, _, handle, _)) in v.scene.iter().enumerate() {
+        let layer = match &shell {
+            Some((from, l)) if i >= *from => l.as_ref(),
+            _ => light.as_ref(),
+        };
         let lit = materials
             .get_mut(handle.id())
-            .is_some_and(|mut m| dual::set_lighting(&mut m, light.as_ref()));
+            .is_some_and(|mut m| dual::set_lighting(&mut m, layer));
         unlit += usize::from(!lit);
     }
     for camera in &cameras {
@@ -2365,6 +2426,14 @@ fn apply_lighting(
         Some(l) => lighting::summary(l, unlit, v.scene.len()),
         None => vec!["Lighting: off (unlit)".into()],
     };
+    if let Some((from, Some(l))) = &shell {
+        v.lighting
+            .lines
+            .push(format!("  Pod shell (entities {from}..): own level light"));
+        v.lighting
+            .lines
+            .extend(l.notes.iter().map(|n| format!("    {n}")));
+    }
     if !turned {
         for line in &v.lighting.lines {
             println!("{line}");

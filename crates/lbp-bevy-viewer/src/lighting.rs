@@ -231,6 +231,11 @@ pub struct LightingState {
     pub lbp: bool,
     /// P2l: the Pod planets root rotation the LBP light was last turned by.
     pub turn: Quat,
+    /// P2l: scene entities from this index on (the Pod shell layer and figure) are lit by
+    /// their own level's settings, turned by the shell root.
+    pub shell: Option<(usize, PreviewLight)>,
+    /// P2l: the shell root rotation last applied.
+    pub shell_turn: Quat,
     pub light: PreviewLight,
     /// Set when the toggle or scene changes; `apply` runs once per change.
     pub dirty: bool,
