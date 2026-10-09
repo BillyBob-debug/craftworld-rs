@@ -1016,6 +1016,8 @@ struct Prepared {
     fourth_image: Option<(Image, lbp_preview::RelativeSampling)>,
     color: Color,
     alpha_mix: bool,
+    /// D160: sticker decal overlay (alpha blended, drawn in front of its surface).
+    decal: bool,
     /// D121: generated normals usable for preview lighting.
     normals_trusted: bool,
 }
@@ -1177,6 +1179,7 @@ fn prepare_buckets(
             fourth_image,
             color,
             alpha_mix,
+            decal: false,
             normals_trusted,
         });
     }
@@ -1197,7 +1200,12 @@ fn upload(
         base_color_texture: image.clone(),
         unlit: true,
         cull_mode: None,
-        alpha_mode: AlphaMode::Opaque,
+        alpha_mode: if p.decal {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Opaque
+        },
+        depth_bias: if p.decal { 8.0 } else { 0.0 },
         ..default()
     });
     if let Some(second) = p.second_image {
@@ -1259,6 +1267,20 @@ fn plan_level(
                     &mut evidence,
                     &mut details,
                 ),
+                // D160 sticker decal overlays (world space, alpha blended).
+                level_scene::ScenePayload::Decals { batch, material } => prepare_buckets(
+                    &batch.positions,
+                    vec![(Some(material.clone()), batch.triangles.clone())],
+                    false,
+                    &mut evidence,
+                    &mut details,
+                )
+                .map(|mut v| {
+                    for p in &mut v {
+                        p.decal = true;
+                    }
+                    v
+                }),
             }
         })
         .collect();
