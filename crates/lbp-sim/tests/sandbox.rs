@@ -545,3 +545,35 @@ fn dark_matter_and_world_bodies_are_static() {
         "WORLD body stays: {out:?}"
     );
 }
+
+#[test]
+fn frozen_bodies_sleep_until_touched_and_pickups_hang() {
+    let asleep = |index, y| {
+        let mut t = thing(
+            index,
+            matrix(0., y, 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        );
+        t.data.body.as_mut().unwrap().frozen = 1;
+        t
+    };
+    let mut pickup = asleep(3, 300.);
+    pickup.data.pos.as_mut().unwrap().world = matrix(600., 300., 0., 0., 1., 1.);
+    pickup.parts = vec!["GAMEPLAY_DATA"];
+    // 1: asleep in mid air; 2: awake, dropped onto it from above; 3: a score bubble.
+    let things = vec![floor(), asleep(1, 300.), asleep(2, 700.), pickup];
+    let mut things = things;
+    things[2].data.body.as_mut().unwrap().frozen = 0;
+    let before = run(&things[..2], 60);
+    assert!(
+        (before[1].1[1] - 300.).abs() < 0.01,
+        "asleep stays: {before:?}"
+    );
+    let after = run(&things, 120);
+    assert!(after[1].1[1] < 200., "woken by the falling box: {after:?}");
+    assert!(
+        (after[3].1[1] - 300.).abs() < 0.01 && (after[3].1[0] - 600.).abs() < 0.01,
+        "pick-up hangs: {after:?}"
+    );
+}

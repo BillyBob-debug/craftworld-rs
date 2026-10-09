@@ -102,7 +102,44 @@ impl Plugin for SimPlugin {
         app.add_plugins(PhysicsPlugins::default().with_collision_hooks::<SlabHooks>())
             .insert_resource(Time::<Fixed>::from_hz(TICK_HZ))
             .insert_resource(SubstepCount(SUBSTEPS))
-            .insert_resource(Gravity(Vector::new(0., -self.gravity * UNIT_SCALE)));
+            .insert_resource(Gravity(Vector::new(0., -self.gravity * UNIT_SCALE)))
+            .add_systems(
+                FixedPostUpdate,
+                put_to_sleep
+                    .after(PhysicsSystems::StepSimulation)
+                    .before(PhysicsSystems::Writeback),
+            );
+    }
+}
+
+/// A body that starts asleep (PBody.frozen != 0, INFERRED: a saved level is at rest). avian
+/// builds islands during the first step, so after it the body goes back to its stored pose
+/// with no velocity and its island is put to sleep; contacts and joints wake it.
+#[derive(Component, Debug, Clone, Copy)]
+pub struct StartAsleep {
+    position: Vector,
+    angle: f32,
+}
+
+fn put_to_sleep(
+    mut commands: Commands,
+    mut q: Query<(
+        Entity,
+        &StartAsleep,
+        &mut Position,
+        &mut Rotation,
+        &mut LinearVelocity,
+        &mut AngularVelocity,
+    )>,
+) {
+    for (e, start, mut p, mut r, mut v, mut w) in &mut q {
+        // Without change detection: a changed pose or velocity would wake the island again.
+        p.bypass_change_detection().0 = start.position;
+        *r.bypass_change_detection() = Rotation::radians(start.angle);
+        v.bypass_change_detection().0 = Vector::ZERO;
+        w.bypass_change_detection().0 = 0.;
+        commands.entity(e).remove::<StartAsleep>();
+        commands.queue(avian2d::dynamics::solver::islands::SleepBody(e));
     }
 }
 
@@ -152,19 +189,24 @@ pub fn spawn_scene(commands: &mut Commands, scene: &PhysicsScene) -> Spawned {
         .bodies
         .iter()
         .map(|b| {
-            commands
-                .spawn((
-                    ThingIndex(b.thing),
-                    if b.fixed {
-                        RigidBody::Static
-                    } else {
-                        RigidBody::Dynamic
-                    },
-                    transform(&b.frame),
-                    LinearVelocity(sv(b.velocity)),
-                    AngularVelocity(b.angular_velocity),
-                ))
-                .id()
+            let mut e = commands.spawn((
+                ThingIndex(b.thing),
+                if b.fixed {
+                    RigidBody::Static
+                } else {
+                    RigidBody::Dynamic
+                },
+                transform(&b.frame),
+                LinearVelocity(sv(b.velocity)),
+                AngularVelocity(b.angular_velocity),
+            ));
+            if !b.fixed && b.frozen != 0 {
+                e.insert(StartAsleep {
+                    position: sv(b.frame.position),
+                    angle: b.frame.angle,
+                });
+            }
+            e.id()
         })
         .collect();
     let mut colliders = Vec::with_capacity(scene.colliders.len());

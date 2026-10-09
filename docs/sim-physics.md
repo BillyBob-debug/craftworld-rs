@@ -124,7 +124,20 @@ joint between a fixed body and a static shape. Fixes: a joint whose ends are bot
 catches a panic per level (`levels_panicked`) and reports `why_moved`: for every dynamic
 body and for those that moved more than 100, counts by PBody.frozen, first shape material,
 Thing parts, jointed, shape count, has parent and direction. That census decides the next
-anchoring rule. Not tested: any level after the fix.
+anchoring rule.
+
+Census (PC `d179-physics-rookie-0133.json`): every dynamic body has PBody.frozen 1;
+moved >100: 87 straight down, 31 sideways; 71 of the dynamic bodies are score bubbles
+(GAMEPLAY_DATA, `collectable.mat`), 33 of them moved. Rules added (INFERRED):
+- frozen != 0 starts the body asleep: after the first step it is put back to its stored
+  pose with no velocity (without change detection, which would wake it) and avian's
+  `SleepBody` sleeps its island; contacts and joints wake it (`StartAsleep`).
+- GAMEPLAY_DATA bodies are fixed (pick-ups hang; collected through their trigger).
+Test `frozen_bodies_sleep_until_touched_and_pickups_hang` (a sleeping box stays in mid
+air, a falling box wakes it, a pick-up stays). `level_physics` now runs on a thread with
+the level-loader stack (`--all` overflowed the main stack in the recursive level reader)
+and prints `level N/M: path` to stderr before each level. Not tested: any level after
+these fixes.
 
 ## Next
 

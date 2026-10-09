@@ -24,9 +24,21 @@ use std::path::Path;
 use std::time::Duration;
 
 fn main() {
-    if let Err(e) = run() {
-        eprintln!("level_physics: {e}");
-        std::process::exit(1);
+    // The level reader recurses natively: run on a thread with the level-loader stack.
+    let worker = std::thread::Builder::new()
+        .stack_size(lbp_preview::level_scene::LEVEL_STACK_BYTES)
+        .spawn(run)
+        .expect("spawn the level_physics worker");
+    match worker.join() {
+        Ok(Ok(())) => {}
+        Ok(Err(e)) => {
+            eprintln!("level_physics: {e}");
+            std::process::exit(1);
+        }
+        Err(_) => {
+            eprintln!("level_physics: worker panicked");
+            std::process::exit(1);
+        }
     }
 }
 
@@ -163,7 +175,10 @@ fn run() -> Result<(), String> {
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
-    for (key, label) in keys {
+    let count = keys.len();
+    for (n, (key, label)) in keys.into_iter().enumerate() {
+        // Progress on stderr so a crash names the level it was in.
+        eprintln!("level {}/{count}: {label}", n + 1);
         let read =
             lbp_preview::level_scene::read_level_bytes(&source, &key, &control).and_then(|b| {
                 lbp_level::read(&b, lbp_level::Limits::default(), &|| false)

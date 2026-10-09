@@ -14,6 +14,11 @@
 //!   shapes uses a physical material the caller marks fixed (PUBLIC behaviour: dark matter
 //!   is immovable and anything glued to it stays put; which descriptor is dark matter comes
 //!   from the caller, see [`build_scene_with`]). INFERRED until a PC run confirms it.
+//! - A body with GAMEPLAY_DATA (score bubbles, pick-ups) is fixed: it is collected through
+//!   its trigger, not pushed (INFERRED; the Rookie run had 71 of them falling).
+//! - A dynamic body with PBody.frozen != 0 starts asleep and wakes when touched or pulled
+//!   by a joint (INFERRED: every dynamic body in the Rookie run has frozen 1, so a saved
+//!   level is at rest; see `crate::spawn_scene`).
 //! - Collision is 2D; a shape's slab is world z ± thickness (INFERRED, A3/A4).
 //! - A shape without the COLLIDABLE_GAME flag (0x1) does not collide (COMMUNITY, ShapeFlags).
 //! - PJoints join the entities their endpoint Things belong to (a body, or a static
@@ -154,6 +159,11 @@ fn is_world(t: &ThingRecord) -> bool {
     t.data.world.is_some() || t.parts.contains(&"WORLD")
 }
 
+/// Score bubbles and other pick-ups (GAMEPLAY_DATA) hang where they are placed.
+fn is_pickup(t: &ThingRecord) -> bool {
+    t.parts.contains(&"GAMEPLAY_DATA")
+}
+
 /// Builds the physics description of a level (`things[i]` must be Thing index `i`) with no
 /// fixed materials: only WORLD-owned bodies are static.
 pub fn build_scene(things: &[ThingRecord]) -> PhysicsScene {
@@ -214,7 +224,7 @@ pub fn build_scene_with(
                             velocity: [pb.velocity[0], pb.velocity[1]],
                             angular_velocity: pb.angular_velocity,
                             frozen: pb.frozen,
-                            fixed: is_world(thing),
+                            fixed: is_world(thing) || is_pickup(thing),
                         });
                         scene.bodies.len() - 1
                     })
