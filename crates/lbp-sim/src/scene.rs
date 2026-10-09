@@ -161,6 +161,49 @@ pub struct PhysicsScene {
     pub report: SceneReport,
 }
 
+impl PhysicsScene {
+    /// Top of the highest collider surface at `x` that is not above `y` (plus `SNAP`), in
+    /// the slab at `z`: where something dropped from `(x, y)` lands, without simulating
+    /// (bodies taken where they are stored).
+    pub fn floor_below(&self, [x, y]: [f32; 2], z: f32) -> Option<f32> {
+        const SNAP: f32 = 1.;
+        let mut best: Option<f32> = None;
+        for c in &self.colliders {
+            if (z - c.z).abs() > c.half_thickness {
+                continue;
+            }
+            let (s, k) = c.frame.angle.sin_cos();
+            let world = |p: [f32; 2]| {
+                [
+                    c.frame.position[0] + k * p[0] - s * p[1],
+                    c.frame.position[1] + s * p[0] + k * p[1],
+                ]
+            };
+            for t in &c.triangles {
+                let w = t.map(world);
+                let mut top: Option<f32> = None;
+                for i in 0..3 {
+                    let (a, b) = (w[i], w[(i + 1) % 3]);
+                    let (lo, hi) = (a[0].min(b[0]), a[0].max(b[0]));
+                    if x < lo || x > hi {
+                        continue;
+                    }
+                    let at = if hi - lo < 1e-6 {
+                        a[1].max(b[1])
+                    } else {
+                        a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0])
+                    };
+                    top = Some(top.map_or(at, |v: f32| v.max(at)));
+                }
+                if let Some(top) = top.filter(|t| *t <= y + SNAP) {
+                    best = Some(best.map_or(top, |b| b.max(top)));
+                }
+            }
+        }
+        best
+    }
+}
+
 /// Nearest Thing with BODY on the parent chain of `i`, itself included.
 /// Topmost Thing with BODY on the parent chain of `i` (itself included), and the BODY
 /// Things below it on the chain.

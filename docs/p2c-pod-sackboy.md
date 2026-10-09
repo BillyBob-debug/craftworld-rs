@@ -35,6 +35,16 @@ Where does the shell level put him?
 - `--pod-open` starts open (QA captures of the menu view); R still returns to the
   closed view.
 
+## Data spawn (2026-10-09, setup audit item 1)
+The closed spot above is fitted to RPCS3 pixels. `--pod-figure-data` places him from the
+shell's own data instead: the first CHECKPOINT POS plus the spawn offset measured in
+Rookie Test by memory reads (0, -208, +250; `sackboy_play::SPAWN_OFFSET`, INFERRED for the
+Pod), dropped to the highest collider top below in that slab
+(`PhysicsScene::floor_below`, bodies where stored; test `lbp-sim/tests/floor.rs`). Scale is
+unchanged (model units = level units, STRONG_INFERENCE). The status always prints both
+spots (level units and closed-view fractions), so one PC run compares them; the open
+(holding) spot stays fitted. Not tested on game data.
+
 ## Evidence and limits
 - The fit is a placement to match the reference, not the game's spawn rule.
 - Tests: `checkpoints_need_the_part_and_a_valid_pos`; the P2b rig test also checks

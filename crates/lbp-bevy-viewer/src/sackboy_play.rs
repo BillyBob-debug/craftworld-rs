@@ -177,7 +177,7 @@ fn walk_phase(phase: f32, dt: f32, fps: f32, vx: f32, grounded: bool) -> f32 {
 /// Sackboy's start relative to the first CHECKPOINT POS. RPCS3, Rookie Test (PC, d-run
 /// 2026-10-09): checkpoint (-13335, 6971, -250), Sackboy appears at (-13335.7, 6763, 0) and
 /// lands at y 5974. One level only: INFERRED for other levels.
-const SPAWN_OFFSET: [f32; 3] = [0., -208., 250.];
+pub(crate) const SPAWN_OFFSET: [f32; 3] = [0., -208., 250.];
 
 /// Camera distance from Sackboy in level units. PLACEHOLDER (not measured in RPCS3).
 const FOLLOW_DISTANCE: f32 = 1500.;
@@ -216,6 +216,59 @@ fn parse_script(text: &str) -> Result<Vec<(Input, usize)>, String> {
         .collect()
 }
 
+/// Non-normal material rules by descriptor GUID, from the MAP paths.
+fn material_rules(catalog: &lbp_catalog::Catalog) -> BTreeMap<u32, MaterialRule> {
+    let mut rules = BTreeMap::new();
+    for r in &catalog.snapshot.resources {
+        if let Ok(g) = u32::from_str_radix(r.map_row.guid.trim(), 16) {
+            let rule = material_rule_for_path(&r.map_row.path);
+            if rule != MaterialRule::Normal {
+                rules.entry(g).or_insert(rule);
+            }
+        }
+    }
+    rules
+}
+
+/// Where a level puts Sackboy's feet, from its data alone: the first CHECKPOINT's POS plus
+/// [`SPAWN_OFFSET`], dropped to the highest collider top below in that slab (the Pod figure,
+/// in place of the screenshot fit). Level units; and a line for the status. Runs on the
+/// level worker (deep reader stack).
+pub(crate) fn level_spawn_feet(
+    source: &AttachedSource,
+    catalog: &lbp_catalog::Catalog,
+    key: &lbp_catalog::attachment::LocationKey,
+    control: &LoadControl,
+) -> Result<([f32; 3], String), String> {
+    let bytes = level_scene::read_level_bytes(source, key, control)?;
+    let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
+        .map_err(|e| e.to_string())?;
+    let (thing, m) = *level_scene::checkpoints(&report.things)
+        .first()
+        .ok_or("no CHECKPOINT")?;
+    let rules = material_rules(catalog);
+    let scene = build_scene_with(&report.things, &|d| {
+        d.guid
+            .and_then(|g| rules.get(&g).copied())
+            .unwrap_or_default()
+    });
+    let [x, y, z] = [
+        m[12] + SPAWN_OFFSET[0],
+        m[13] + SPAWN_OFFSET[1],
+        m[14] + SPAWN_OFFSET[2],
+    ];
+    let floor = scene
+        .floor_below([x, y], z)
+        .ok_or_else(|| format!("no floor below ({x:.0}, {y:.0}) in slab z {z:.0}"))?;
+    Ok((
+        [x, floor, z],
+        format!(
+            "data spawn: checkpoint Thing {thing} ({:.0}, {:.0}, {:.0}) + offset, floor y {floor:.0}",
+            m[12], m[13], m[14]
+        ),
+    ))
+}
+
 /// Reads the level and adds physics and Sackboy when `--play-sackboy` is given.
 pub fn install(app: &mut App) -> Result<(), String> {
     let all: Vec<String> = std::env::args().collect();
@@ -251,15 +304,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             let control = LoadControl::default();
             let catalog = lbp_catalog::load(Path::new(&snapshot), &control)?;
             let source = AttachedSource::attach(Path::new(&game), &catalog, &control)?;
-            let mut rules = BTreeMap::<u32, MaterialRule>::new();
-            for r in &catalog.snapshot.resources {
-                if let Ok(g) = u32::from_str_radix(r.map_row.guid.trim(), 16) {
-                    let rule = material_rule_for_path(&r.map_row.path);
-                    if rule != MaterialRule::Normal {
-                        rules.entry(g).or_insert(rule);
-                    }
-                }
-            }
+            let rules = material_rules(&catalog);
             let (key, identity) = level_scene::resolve_level(&catalog, guid, path.as_deref())?;
             let bytes = level_scene::read_level_bytes(&source, &key, &control)?;
             let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
