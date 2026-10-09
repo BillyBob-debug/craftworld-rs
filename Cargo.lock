@@ -3412,6 +3412,7 @@ dependencies = [
  "lbp-preview",
  "lbp-runtime",
  "lbp-script-vm",
+ "lbp-sim",
  "lbp-texture",
  "lbp-ui-script",
  "naga 29.0.4",

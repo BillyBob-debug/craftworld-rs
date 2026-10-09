@@ -208,6 +208,18 @@ first surface facing the motion (move and stop, no slope slide). Tests (`tests/c
 cover standing, walking into a wall, a 260 full-hold jump and a lane change refused without
 floor. Not wired yet: the viewer (pad input, spawn at the checkpoint).
 
+## Part 4: Sackboy in the viewer (2026-10-09)
+
+`lbp-bevy-viewer --play-sackboy` with `--level-guid`/`--level-path` builds the level's
+physics scene (material rules by MAP path, `scene::material_rule_for_path`) in the viewer
+app with `SimPlugin` and `SackboyPlugin`, and spawns the capsule at the first CHECKPOINT POS + (0, -208, +250), the offset measured
+in RPCS3 for Rookie Test (INFERRED elsewhere; `--play-sackboy-at X,Y,Z` overrides). Arrows walk and change lanes (Up behind, Down in
+front), Space jumps; gamepad mapping is in the code but the viewer has no gamepad backend.
+The camera follows at 1,500 units (PLACEHOLDER). Sackboy is a placeholder capsule; the
+level's dynamic objects are simulated but not redrawn. `--play-sackboy-input r:40,rj:12,-:30`
+scripts the keys (l r j b f) and prints the position each tick, for path comparisons with
+RPCS3. Not tested: running it on game data (PC).
+
 ## Next
 
 - Joint animation (motion patterns, winch and piston targets), strength and breaking.
