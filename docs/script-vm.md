@@ -39,7 +39,7 @@ INFERRED (no executable or Toolkit statement; each is a place a real script can 
 | Receiver | Member functions take the receiver as an argument; virtual dispatch uses the lowest staged address | Listings: argument row typed as the own class |
 | Branch target | `pc + offset` (`Rules::branch_from_current`), alternative `pc + 1 + offset` | Settled by D133: all 15,866 branches in the 426 scripts land in range under `pc + offset` (15,399 under the alternative) |
 | `LCv4` | Four consecutive f32 constants from `index` | Constant-table sizes vs `LCv4` indices |
-| m44 layout | Row-major; `GET_M44_XY` = row X, column Y; `rX` row, `cX` column | RPCS3 comparison of a scripted transform |
+| m44 layout | Column-major like the engine (element (row, col) at col * 4 + row, translation at 12..14); `MULm44` A * B is the engine's product (out[col*4+row] = sum a[k*4+row] * b[col*4+k]). `GET_M44_XY` reads element index X*4+Y, so in engine terms column X, row Y | CONFIRMED_FROM_LOCAL_DATA (emulated): the Pod World matrix read in RPCS3 is the transpose of the earlier row-major product (Pod thread, D180 trace, 2026-10-09). Test `m44_product_is_column_major_a_times_b` |
 | Comparisons and casts | C semantics: wrapping int arithmetic, truncating division, `f as i32` | Script behaviour vs RPCS3 |
 | `ARRAY_FIND` | Index of the first equal element or -1 | Script behaviour |
 | Function lookup | By name through the superclass chain; first definition wins and repeats are counted (`ambiguous_calls`) | Census of duplicate names per class |
