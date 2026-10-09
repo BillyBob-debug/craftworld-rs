@@ -36,6 +36,10 @@ pub struct ThingState {
     pub members: Option<BTreeMap<String, Value>>,
     /// PShape colour as a colour vector (`GetShapeEditorColour`).
     pub shape_colour: Option<[f32; 4]>,
+    /// Render-mesh editor colour tint a script set (`SetRenderMeshEditorColourTint`).
+    pub render_mesh_tint: Option<[f32; 4]>,
+    /// Animation playback rate a script set (`Native.SetAnimSpeed`, INFERRED multiplier).
+    pub anim_speed: Option<f32>,
 }
 
 /// An engine part a script reached through a native member (`thing.SpriteLight`), with
@@ -233,6 +237,12 @@ impl LevelWorld {
             .ok_or_else(|| format!("no thing {thing}"))
     }
 
+    fn thing_mut(&mut self, thing: u32) -> Result<&mut ThingState, String> {
+        self.things
+            .get_mut(thing as usize)
+            .ok_or_else(|| format!("no thing {thing}"))
+    }
+
     fn thing_of(base: &Value) -> Result<u32, String> {
         match base {
             Value::Thing(Some(t)) => Ok(*t),
@@ -355,6 +365,27 @@ impl World for LevelWorld {
         }
         t.shape_colour = Some(colour);
         Ok(())
+    }
+    /// Recorded on the Thing; nothing draws it yet. Any Thing may be tinted (scripts call
+    /// it on their own Thing without a `HasPRenderMesh` check).
+    fn set_render_mesh_tint(&mut self, thing: u32, colour: [f32; 4]) -> Result<(), String> {
+        self.thing_mut(thing)?.render_mesh_tint = Some(colour);
+        Ok(())
+    }
+    /// Recorded on the Thing; nothing animates by it yet.
+    fn set_anim_speed(&mut self, thing: u32, speed: f32) -> Result<(), String> {
+        self.thing_mut(thing)?.anim_speed = Some(speed);
+        Ok(())
+    }
+    /// Player `index` is `Game.EPlayerNumber` `index` (INFERRED: no enum values are in the
+    /// script tables); outside `0..num_players()` is an error.
+    fn player_number(&mut self, index: i32) -> Result<i32, String> {
+        let n = self.num_players()?;
+        if (0..n).contains(&index) {
+            Ok(index)
+        } else {
+            Err(format!("player index {index} outside 0..{n}"))
+        }
     }
     fn write(&mut self, text: &str) {
         if self.written.len() < 1000 {

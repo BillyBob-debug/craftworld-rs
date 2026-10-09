@@ -295,6 +295,23 @@ fn class_defaults_inherited_natives_and_parts() {
 }
 
 #[test]
+fn part4_anim_speed_tint_camera_tweak_and_player_numbers() {
+    let mut things = level();
+    things[1].parts.push("CAMERA_TWEAK");
+    let mut world = LevelWorld::from_things(&things);
+    assert_eq!(world.has_part(1, "PCameraTweak"), Ok(true));
+    assert_eq!(world.has_part(2, "PCameraTweak"), Ok(false));
+    world.set_anim_speed(1, 0.).unwrap();
+    world.set_render_mesh_tint(2, [1., 0.5, 0., 1.]).unwrap();
+    assert_eq!(world.things[1].anim_speed, Some(0.));
+    assert_eq!(world.things[2].render_mesh_tint, Some([1., 0.5, 0., 1.]));
+    assert!(world.set_anim_speed(99, 1.).is_err());
+    assert_eq!(world.player_number(0), Ok(0));
+    assert!(world.player_number(1).is_err());
+    assert!(world.player_number(-1).is_err());
+}
+
+#[test]
 fn schedule_creates_then_updates_and_resumes_suspended_scripts() {
     // Lamp with `Tick` renamed to `Update__` and no `OnCreate__`.
     let mut ticker = lamp();

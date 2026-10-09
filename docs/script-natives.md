@@ -19,7 +19,7 @@ used or is committed.
 - Example `native_coverage SCRIPT-DIR NEW-JSON`: the share of native call sites that have
   a binding, over all scripts and over gameplay scripts.
 
-## Bound natives (57 including Yield)
+## Bound natives (61 including Yield)
 
 | Group | Natives | Needs from `World` |
 |---|---|---|
@@ -28,8 +28,8 @@ used or is committed.
 | LAMS | `Translate__i` | text by key |
 | Thing | `GetThingUID__`, `GetParent/GetFirstChild/GetNextSibling__Q5Thing`, `GetWorld__` (also System), `GetWorldPosition__`, `GetCOM__`, `SetLocalPosition__m`, `IsInactive__` | thing tree, transforms |
 | Switch inputs | `IsSwitchTriggered__i`, `GetSwitchActivationBinary/Analogue/Player__i` | switch input per port |
-| PartList | `HasPJoint/PSwitch/PTrigger/PShape/PSpriteLight/PRenderMesh__Q5Thing` | parts |
-| Other | `Audio.PlaySound__Q5ThingQ7StringA`, `Resource.LoadTextureByFilename__g`, `Resource.LoadPlanByFilename__g`, `Game.GetNumPlayers__`, `Game.GetPlayOrEditMode__`, `Audio.GetDialogueList__`, `Thing.Get/SetShapeEditorColour__Q5Thing(r)` (docs/level-scripts.md part 2), `System.Yield__` (in the VM) | audio, resources, players, mode, shape colour |
+| PartList | `HasPJoint/PSwitch/PTrigger/PShape/PSpriteLight/PRenderMesh/PCameraTweak__Q5Thing` | parts |
+| Other | `Audio.PlaySound__Q5ThingQ7StringA`, `Resource.LoadTextureByFilename__g`, `Resource.LoadPlanByFilename__g`, `Game.GetNumPlayers__`, `Game.GetPlayOrEditMode__`, `Audio.GetDialogueList__`, `Thing.Get/SetShapeEditorColour__Q5Thing(r)` (docs/level-scripts.md part 2), `Thing.SetRenderMeshEditorColourTint__Q5Thingr`, `Native.SetAnimSpeed__Q5Thingf`, `Game.GetPlayerNumber__i` (part 4), `System.Yield__` (in the VM) | audio, resources, players, mode, shape colour |
 | Test (part 2) | `Check`, `CheckFalse`, `Fail`, `CheckEqual` on `i b j f p q r`, `CheckSimilar__fff`, each ending `Q7StringAi` | records each check |
 
 Coverage against the G10 export, computed from its tables (unit: call instruction):
