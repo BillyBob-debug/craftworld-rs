@@ -52,12 +52,15 @@ pub const SHAPE_BEVEL_LABEL: &str = shape_mesh::BEVEL_LABEL;
 pub const MAX_LEVEL_BEVELS: usize = 1024;
 
 /// Level-scene options beyond the material preview options.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LevelSceneOptions {
     /// D122: extrude shapes with their bevel profile (inferred, unverified). Default off.
     pub shape_bevels: bool,
     /// D120: POS placement rule (default inverse bind of bone 0).
     pub placement: PosPlacement,
+    /// P2e `--runtime-texture MESH:SLOT:TEXTURE` rules (docs/p2e-runtime-texture.md).
+    /// Empty (default): materials draw as loaded.
+    pub runtime_textures: Vec<crate::runtime_texture::RuntimeTexture>,
 }
 
 /// Parsed bevels by descriptor identity (GUID, SHA-1).
@@ -89,6 +92,8 @@ pub enum MeshSource {
     /// Merged world-space shape extrusions sharing one gfx material GUID (None = no
     /// GUID); `batch` numbers the chunks of that material.
     Shapes { material: Option<u32>, batch: usize },
+    /// D160: STICKERS decal overlays merged per decal texture (GUID hex or SHA-1 hex).
+    Decals { texture: String, batch: usize },
     /// D119: static backdrop mesh primitives (mesh GUID) merged per gfx material GUID.
     Backdrop {
         mesh: Option<u32>,
@@ -117,6 +122,7 @@ impl MeshSource {
                 mesh.map_or("none".into(), |g| format!("{g:08x}")),
                 material.map_or("none".into(), |g| format!("{g:08x}"))
             ),
+            Self::Decals { texture, batch } => format!("sticker decals {texture} batch {batch}"),
             Self::JointSkin { mesh, thing } => {
                 format!("{} skinned for joint Thing {thing}", mesh.label())
             }
@@ -210,17 +216,24 @@ pub struct SceneCounts {
     pub bevels_failed: usize,
     /// D152: DECORATIONS entries (counting unit: entries), those drawn as scene items at
     /// owner POS x offset (x inverse bind of the decoration mesh's bone 0 under the
-    /// inverse-bind rule), and the rest by reason. STICKERS decals are counted, not drawn.
+    /// inverse-bind rule), and the rest by reason.
     pub decorations_total: usize,
     pub decorations_drawn: usize,
     /// Drawn decorations whose mesh has neutral (unsupported material) groups.
     pub decorations_drawn_neutral: usize,
     pub decorations_skipped: BTreeMap<String, usize>,
-    pub sticker_decals_not_drawn: usize,
+    /// D160: STICKERS decals (counting unit: decals, main plus costume arrays), those
+    /// drawn as projected overlays, and the rest by reason (when the pass ran).
+    pub sticker_decals_total: usize,
+    pub sticker_decals_drawn: usize,
+    pub sticker_decals_skipped: BTreeMap<String, usize>,
     /// Reader stop (None = whole level read).
     pub reader_stop: Option<String>,
     /// D119 backdrop (static mesh + plan Things).
     pub backdrop: crate::level_backdrop::BackdropCounts,
+    /// P2e opt-in runtime texture rules: per rule, primitive groups of distinct loaded
+    /// model meshes drawn with the rule's texture, and those left by reason.
+    pub runtime_textures: crate::runtime_texture::RuntimeCounts,
 }
 
 impl SceneCounts {
@@ -333,10 +346,23 @@ impl SceneCounts {
             out.push(format!("  decoration skipped {n}: {reason}"));
         }
         out.push(format!(
-            "Not drawn: {} sticker decals (STICKERS entries; decal projection unsupported)",
-            self.sticker_decals_not_drawn
+            "Sticker decals drawn: {} / {} (STICKERS decals projected on the owner shape's front face; frame inferred)",
+            self.sticker_decals_drawn, self.sticker_decals_total
         ));
+        let listed: usize = self.sticker_decals_skipped.values().sum();
+        for (reason, n) in &self.sticker_decals_skipped {
+            out.push(format!("  sticker decal not drawn {n}: {reason}"));
+        }
+        let rest = self
+            .sticker_decals_total
+            .saturating_sub(self.sticker_decals_drawn + listed);
+        if rest > 0 {
+            out.push(format!(
+                "  sticker decal not drawn {rest}: decal pass not run"
+            ));
+        }
         out.extend(self.backdrop.lines());
+        out.extend(crate::runtime_texture::lines(&self.runtime_textures));
         out.push(match &self.reader_stop {
             None => "Level reader: complete".into(),
             Some(s) => format!("Level reader stopped: {s}"),
@@ -1152,7 +1178,7 @@ fn add_decorations<T>(
     placement: PosPlacement,
     t: &ThingRecord,
 ) {
-    scene.counts.sticker_decals_not_drawn += t.data.sticker_decals;
+    scene.counts.sticker_decals_total += t.data.sticker_decals;
     let skip = |c: &mut SceneCounts, reason: &str| {
         *c.decorations_skipped.entry(reason.to_string()).or_default() += 1
     };
@@ -1386,6 +1412,171 @@ pub enum ScenePayload {
         batch: crate::level_backdrop::BackdropBatch,
         material: Result<std::sync::Arc<MaterialAsset>, String>,
     },
+    /// D160: world-space sticker decal overlays sharing one decal texture (drawn with
+    /// alpha blending; `material` is a plain clamped texture, no gfx material graph).
+    Decals {
+        batch: DecalBatch,
+        material: std::sync::Arc<MaterialAsset>,
+    },
+}
+
+/// D160: merged world-space decal overlay triangles for one decal texture.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct DecalBatch {
+    pub texture: (Option<u32>, Option<[u8; 20]>),
+    pub positions: Vec<[f32; 3]>,
+    pub uv: Vec<[f32; 2]>,
+    pub triangles: Vec<[u32; 3]>,
+    /// Owner Thing indices (one per drawn decal).
+    pub things: Vec<usize>,
+    pub decals: usize,
+}
+
+impl DecalBatch {
+    pub fn texture_label(&self) -> String {
+        match self.texture {
+            (Some(g), _) => format!("{g:08x}"),
+            (None, Some(h)) => h.iter().map(|b| format!("{b:02x}")).collect(),
+            (None, None) => "none".into(),
+        }
+    }
+}
+
+/// D160: projects every main-array STICKERS decal of a SHAPE owner onto its front face
+/// (`lbp_level::decal_mesh`), merges them per owner Thing and decal texture (so a QA focus
+/// on the owner frames its decals) and adds one scene item per batch. `load` turns a texture key into the display material (or an error, counted per
+/// decal). Costume decal arrays and non-shape owners are counted by reason, not drawn.
+pub fn add_sticker_decals<T>(
+    scene: &mut LevelScene<T>,
+    things: &[ThingRecord],
+    mut load: impl FnMut(&DecalBatch) -> Result<T, String>,
+    local_bounds: impl Fn(&T) -> Option<[[f32; 3]; 2]>,
+) {
+    type Key = (usize, Option<u32>, Option<[u8; 20]>);
+    let mut groups: BTreeMap<Key, Vec<(usize, lbp_level::decal_mesh::DecalMesh)>> = BTreeMap::new();
+    let skip = |c: &mut SceneCounts, reason: &str, n: usize| {
+        if n > 0 {
+            *c.sticker_decals_skipped.entry(reason.into()).or_default() += n;
+        }
+    };
+    let mut vertices = 0usize;
+    for t in things {
+        let main = t.data.stickers.len();
+        skip(
+            &mut scene.counts,
+            "costume decal array (costume pieces not projected)",
+            t.data.sticker_decals.saturating_sub(main),
+        );
+        if main == 0 {
+            continue;
+        }
+        if t.data.shape.is_none() {
+            let reason = if t.data.render_mesh.is_some() {
+                "owner is a mesh (mesh UV decal projection unsupported)"
+            } else {
+                "owner has no surface (logic / microchip / switch Thing)"
+            };
+            skip(&mut scene.counts, reason, main);
+            continue;
+        }
+        let face = match shape_mesh::front_face(t) {
+            Ok(f) => f,
+            Err(r) => {
+                skip(
+                    &mut scene.counts,
+                    &format!("owner shape not drawn: {}", r.reason()),
+                    main,
+                );
+                continue;
+            }
+        };
+        for (order, d) in t.data.stickers.iter().enumerate() {
+            let Some(tex) = &d.texture else {
+                skip(&mut scene.counts, "decal: no texture reference", 1);
+                continue;
+            };
+            match lbp_level::decal_mesh::project(&face, d, order) {
+                Ok(m) => {
+                    if vertices + m.positions.len() > MAX_LEVEL_SHAPE_VERTICES
+                        || m.positions.len() > MAX_BATCH_VERTICES
+                    {
+                        skip(&mut scene.counts, "decal: level vertex budget", 1);
+                        continue;
+                    }
+                    vertices += m.positions.len();
+                    groups
+                        .entry((t.index, tex.guid, tex.sha1))
+                        .or_default()
+                        .push((t.index, m));
+                }
+                Err(r) => skip(&mut scene.counts, r.reason(), 1),
+            }
+        }
+    }
+    for ((_, guid, sha1), decals) in groups {
+        let texture = (guid, sha1);
+        let mut batches = vec![DecalBatch {
+            texture,
+            ..Default::default()
+        }];
+        for (thing, m) in decals {
+            let current = batches.last_mut().expect("one batch");
+            if current.positions.len() + m.positions.len() > MAX_BATCH_VERTICES
+                || current.triangles.len() + m.indices.len() / 3 > MAX_BATCH_TRIANGLES
+            {
+                batches.push(DecalBatch {
+                    texture,
+                    ..Default::default()
+                });
+            }
+            let b = batches.last_mut().expect("one batch");
+            let base = b.positions.len() as u32;
+            b.positions.extend_from_slice(&m.positions);
+            b.uv.extend_from_slice(&m.uv);
+            b.triangles.extend(
+                m.indices
+                    .as_chunks::<3>()
+                    .0
+                    .iter()
+                    .map(|t| t.map(|i| i + base)),
+            );
+            b.things.push(thing);
+            b.decals += 1;
+        }
+        for (index, batch) in batches.into_iter().enumerate() {
+            let n = batch.decals;
+            let first = batch.things.first().copied().unwrap_or_default();
+            let label = batch.texture_label();
+            let payload = match load(&batch) {
+                Ok(p) => p,
+                Err(e) => {
+                    skip(&mut scene.counts, &format!("decal texture: {e}"), n);
+                    continue;
+                }
+            };
+            if scene.items.len() >= MAX_LEVEL_ITEMS {
+                skip(&mut scene.counts, "level_item_budget", n);
+                continue;
+            }
+            scene.counts.sticker_decals_drawn += n;
+            scene.meshes.push(SceneMesh {
+                source: MeshSource::Decals {
+                    texture: label,
+                    batch: index,
+                },
+                bounds: local_bounds(&payload),
+                neutral_groups: false,
+                payload,
+            });
+            scene.items.push(SceneItem {
+                mesh: scene.meshes.len() - 1,
+                world: shape_mesh::IDENTITY,
+                thing: first,
+                uid: None,
+                shapes: 0,
+            });
+        }
+    }
 }
 
 /// Resolves a level by GUID or by MAP path (exact, or a `/`-suffix of the stored path,
@@ -1497,7 +1688,9 @@ fn model_bind_poses(p: &ScenePayload) -> Vec<BindPose> {
                 inv: b.inv_skin_pose,
             })
             .collect(),
-        ScenePayload::Shapes { .. } | ScenePayload::Backdrop { .. } => Vec::new(),
+        ScenePayload::Shapes { .. }
+        | ScenePayload::Backdrop { .. }
+        | ScenePayload::Decals { .. } => Vec::new(),
     }
 }
 
@@ -1510,6 +1703,7 @@ fn payload_bounds(p: &ScenePayload) -> Option<[[f32; 3]; 2]> {
         ScenePayload::Model(g) => grouped_bounds(g),
         ScenePayload::Shapes { batch, .. } => points_bounds(&batch.positions),
         ScenePayload::Backdrop { batch, .. } => points_bounds(&batch.positions),
+        ScenePayload::Decals { batch, .. } => points_bounds(&batch.positions),
     }
 }
 
@@ -1644,6 +1838,12 @@ pub fn load_level_scene_with_options(
             .ok_or("Unsupported: level material memory budget (1536 MiB retained)")?;
         Ok(())
     };
+    crate::runtime_texture::validate(&scene_options.runtime_textures)?;
+    let mut runtime_counts: crate::runtime_texture::RuntimeCounts = scene_options
+        .runtime_textures
+        .iter()
+        .map(|r| (*r, Default::default()))
+        .collect();
     let mut scene = build_scene(
         &report.things,
         |src| {
@@ -1653,9 +1853,23 @@ pub fn load_level_scene_with_options(
                 MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
                 MeshSource::Shapes { .. }
                 | MeshSource::Backdrop { .. }
+                | MeshSource::Decals { .. }
                 | MeshSource::JointSkin { .. } => return Err("Invalid: shape source".into()),
             };
-            let mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
+            let mut mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
+            if let MeshSource::Guid(g) = src {
+                apply_runtime_textures(
+                    *g,
+                    &mut mesh,
+                    &scene_options.runtime_textures,
+                    &mut runtime_counts,
+                    source,
+                    catalog,
+                    &key,
+                    control,
+                );
+                control.check()?;
+            }
             charge(retained(&mesh))?;
             Ok(ScenePayload::Model(Box::new(mesh)))
         },
@@ -1664,6 +1878,7 @@ pub fn load_level_scene_with_options(
         model_bind_poses,
         scene_options.placement,
     );
+    scene.counts.runtime_textures = runtime_counts;
     control.check()?;
     skin_span_joints(
         &mut scene,
@@ -1736,6 +1951,23 @@ pub fn load_level_scene_with_options(
         payload_bounds,
     );
     control.check()?;
+    // Decoded decal textures shared by every owner batch that uses them.
+    let mut decoded = HashMap::new();
+    add_sticker_decals(
+        &mut scene,
+        &report.things,
+        |batch| {
+            control.check()?;
+            let asset = load_decal_texture(source, catalog, batch, &mut decoded, control)?;
+            charge(asset.retained_bytes())?;
+            Ok(ScenePayload::Decals {
+                batch: batch.clone(),
+                material: std::sync::Arc::new(asset),
+            })
+        },
+        payload_bounds,
+    );
+    control.check()?;
     load_backdrop(
         &mut scene,
         &report.things,
@@ -1753,6 +1985,59 @@ pub fn load_level_scene_with_options(
     Ok(scene)
 }
 
+/// P2e: applies `--runtime-texture` rules to one loaded model mesh. The mesh bytes are
+/// re-read (UV0) and the texture decoded only when a group matches.
+#[allow(clippy::too_many_arguments)]
+fn apply_runtime_textures(
+    guid: u32,
+    mesh: &mut GroupedMesh,
+    rules: &[crate::runtime_texture::RuntimeTexture],
+    counts: &mut crate::runtime_texture::RuntimeCounts,
+    source: &AttachedSource,
+    catalog: &Catalog,
+    key: &LocationKey,
+    control: &LoadControl,
+) {
+    let vertices = mesh.geometry.positions.len();
+    crate::runtime_texture::apply(
+        guid,
+        crate::runtime_texture::Groups {
+            ranges: &mesh.geometry.primitive_triangles,
+            vertices,
+            bindings: &mut mesh.bindings,
+        },
+        rules,
+        counts,
+        |channel| {
+            let (_, data) = crate::read_mesh(source, key, control)?;
+            let coords = lbp_mesh::decode_uvs(&data, || control.check().is_err())
+                .map_err(|e| e.to_string())?;
+            let uv = crate::linked::selected_uv(&coords, channel, vertices)?;
+            Ok((uv, coords.metadata))
+        },
+        |texture| {
+            control.check()?;
+            let texture_key = resolve(catalog, Some(texture), None)?;
+            let decoded = lbp_texture::decode_reader(
+                texture_key.size,
+                |offset, count| {
+                    source
+                        .read_hex_checked(&texture_key, offset, count, control)
+                        .map(|p| p.bytes)
+                        .map_err(lbp_texture::Error::Input)
+                },
+                || control.check().is_err(),
+            )
+            .map_err(|e| e.to_string())?;
+            Ok((decoded, texture_key))
+        },
+        |material, slot| {
+            let (inspection, _) = crate::linked::read_material_graph(source, material, control)?;
+            crate::runtime_texture::slot_sampler(&inspection.graph, slot)
+        },
+    );
+}
+
 /// P2c: CHECKPOINT Things with a usable POS world matrix (spawn candidates).
 pub fn checkpoints(things: &[ThingRecord]) -> Vec<(usize, [f32; 16])> {
     things
@@ -1764,6 +2049,69 @@ pub fn checkpoints(things: &[ThingRecord]) -> Vec<(usize, [f32; 16])> {
             Some((t.index, pos.world))
         })
         .collect()
+}
+
+/// D160: decodes a decal texture as a plain clamped texture material sampled with the
+/// batch's decal coordinates (no gfx material graph; colour field not applied).
+fn load_decal_texture(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    batch: &DecalBatch,
+    decoded: &mut HashMap<LocationKey, Result<lbp_texture::Texture, String>>,
+    control: &LoadControl,
+) -> Result<MaterialAsset, String> {
+    let hash = batch
+        .texture
+        .1
+        .map(|h| h.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let key = resolve(catalog, batch.texture.0, hash.as_deref())?;
+    let texture = decoded
+        .entry(key.clone())
+        .or_insert_with(|| {
+            lbp_texture::decode_reader(
+                key.size,
+                |offset, count| {
+                    source
+                        .read_hex_checked(&key, offset, count, control)
+                        .map(|p| p.bytes)
+                        .map_err(lbp_texture::Error::Input)
+                },
+                || control.check().is_err(),
+            )
+            .map_err(|e| e.to_string())
+        })
+        .as_ref()
+        .map(|t| lbp_texture::Texture {
+            header: t.header.clone(),
+            expanded_bytes: t.expanded_bytes,
+            top_mip_block_bytes: t.top_mip_block_bytes,
+            unparsed_after_top_mip: t.unparsed_after_top_mip,
+            rgba: t.rgba.clone(),
+        })
+        .map_err(Clone::clone)?;
+    Ok(MaterialAsset::Texture(Box::new(crate::linked::Asset {
+        instance_projection: None,
+        additional_texture_slots: Vec::new(),
+        border_domain: None,
+        fourth: None,
+        third: None,
+        dual: None,
+        product: None,
+        tinted_rgba: None,
+        runtime_texture: None,
+        sampling_uv: batch.uv.clone(),
+        uv: batch.uv.clone(),
+        uv_metadata: lbp_mesh::UvMetadata {
+            vertex_count: u32::try_from(batch.uv.len()).map_err(|_| "decal vertex count")?,
+            channel_count: 1,
+            channels: Vec::new(),
+        },
+        texture,
+        material_key: key.clone(),
+        texture_key: key,
+        wrap: crate::TextureWrapping::uniform(false),
+        selection: crate::DiffuseSelection::default(),
+    })))
 }
 
 /// D119: draws the backdrop static mesh and the backdrop plan's RENDER_MESH Things.
@@ -2018,7 +2366,7 @@ mod tests {
         );
         let c = &scene.counts;
         assert_eq!((c.decorations_total, c.decorations_drawn), (4, 1));
-        assert_eq!(c.sticker_decals_not_drawn, 3);
+        assert_eq!(c.sticker_decals_total, 3);
         assert_eq!(c.drawn, 0);
         assert_eq!(
             c.decorations_skipped["render mesh not read (null or unresolved reference)"],
@@ -2584,6 +2932,82 @@ mod tests {
             3
         );
         assert_eq!(scene.counts.shapes_extruded, 0);
+    }
+
+    #[test]
+    fn sticker_decals_project_per_texture_and_count_reasons() {
+        // D160: two decals (textures 0x11, 0x22) on a shape, one off its face, one on an
+        // edit-only shape, one on a logic Thing, plus two costume decals.
+        let decal = |tex: u32, u: f32| lbp_level::parts::Decal {
+            texture: Some(Descriptor {
+                flags: Some(0),
+                kind_byte: 2,
+                guid: Some(tex),
+                sha1: None,
+            }),
+            u,
+            v: 0.9,
+            xvec: [0.05, 0.],
+            yvec: [0., 0.05],
+            color: 0,
+            kind: 0,
+            metadata_index: 0,
+            num_metadata: None,
+            placed_by: 0,
+            play_mode_frame: 0,
+            scorch_mark: false,
+            plan: None,
+        };
+        let mut owner = shape_thing(0, Some(7), true, 0.);
+        owner.data.stickers = vec![decal(0x11, 0.1), decal(0x22, 0.1), decal(0x11, 5.)];
+        owner.data.sticker_decals = 5;
+        let mut hidden = shape_thing(1, Some(7), false, 0.);
+        hidden.data.stickers = vec![decal(0x11, 0.1)];
+        hidden.data.sticker_decals = 1;
+        let mut logic = thing(2, None, Some(identity_at(0.)));
+        logic.data.render_mesh = None;
+        logic.data.stickers = vec![decal(0x11, 0.1)];
+        logic.data.sticker_decals = 1;
+        let mut scene = LevelScene::<DecalBatch>::default();
+        scene.counts.sticker_decals_total = 7;
+        add_sticker_decals(
+            &mut scene,
+            &[owner, hidden, logic],
+            |b| {
+                if b.texture.0 == Some(0x22) {
+                    Err("Unresolved: GUID".into())
+                } else {
+                    Ok(b.clone())
+                }
+            },
+            |b| points_bounds(&b.positions),
+        );
+        let c = &scene.counts;
+        assert_eq!(c.sticker_decals_drawn, 1);
+        assert_eq!(scene.meshes.len(), 1);
+        let b = &scene.meshes[0].payload;
+        assert_eq!((b.decals, b.texture.0), (1, Some(0x11)));
+        // Square 0..100 at scale 1: u 0.1 -> x 50, v 0.9 -> y 50; front face z = 10 + lift.
+        assert!(b
+            .positions
+            .iter()
+            .all(|p| (p[0] - 50.).abs() <= 25.01 && (p[1] - 50.).abs() <= 25.01 && p[2] > 10.));
+        let skipped = |k: &str| c.sticker_decals_skipped.get(k).copied().unwrap_or(0);
+        assert_eq!(skipped("decal texture: Unresolved: GUID"), 1);
+        assert_eq!(skipped("decal: outside the owner's front face"), 1);
+        assert_eq!(
+            skipped("costume decal array (costume pieces not projected)"),
+            2
+        );
+        assert_eq!(
+            skipped("owner has no surface (logic / microchip / switch Thing)"),
+            1
+        );
+        assert_eq!(c.sticker_decals_skipped.values().sum::<usize>() + 1, 7);
+        assert!(c
+            .lines()
+            .iter()
+            .any(|l| l.starts_with("Sticker decals drawn: 1 / 7")));
     }
 
     #[test]

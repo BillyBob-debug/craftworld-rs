@@ -102,6 +102,9 @@ pub struct LevelWorld {
     /// LBP2 game progression flags set on the profile (`IsLBP2GameProgressionFlagSet__i`).
     /// Empty = a fresh profile, on which PlanetsWorld starts its intro cutscene thread.
     pub progression_flags: BTreeSet<i32>,
+    /// `PodComputer.GetPodComputerInUse__`: a player is at the pod computer ("PuterInUse").
+    /// False by default (INFERRED: nobody at the computer when the Pod loads).
+    pub pod_computer_in_use: bool,
     /// The Planets object `PodComputer.GetPlanets__` returns.
     pub planets: Option<ObjectId>,
     /// Planet objects by `GetCrafteroid__i` index - 1, with their Thing.
@@ -633,9 +636,9 @@ impl World for LevelWorld {
     fn progression_flag(&mut self, flag: i32) -> Result<bool, String> {
         Ok(self.progression_flags.contains(&flag))
     }
-    /// Nobody is at the pod computer in the PC run (INFERRED default).
+    /// [`LevelWorld::pod_computer_in_use`].
     fn pod_computer_in_use(&mut self) -> Result<bool, String> {
-        Ok(false)
+        Ok(self.pod_computer_in_use)
     }
     /// No crash zoom in the PC run (INFERRED default).
     fn crash_zoom(&mut self) -> Result<bool, String> {
