@@ -21,7 +21,9 @@ use lbp_sim::character::{
 };
 use lbp_sim::sackboy::{Input, WALK_SPEED};
 use lbp_sim::scene::{material_rule_for_path, MaterialRule};
-use lbp_sim::{build_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin};
+use lbp_sim::{
+    build_scene_with, build_spawn_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin,
+};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -280,7 +282,7 @@ pub(crate) fn level_spawn_feet(
         .first()
         .ok_or("no CHECKPOINT")?;
     let rules = material_rules(catalog);
-    let scene = build_scene_with(&report.things, &|d| {
+    let scene = build_spawn_scene_with(&report.things, &|d| {
         d.guid
             .and_then(|g| rules.get(&g).copied())
             .unwrap_or_default()

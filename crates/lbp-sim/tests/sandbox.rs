@@ -7,7 +7,8 @@ use lbp_level::parts::{Body, Joint, JointParams, Pos, Shape, ShapeColor};
 use lbp_level::serial::Descriptor;
 use lbp_level::thing::ThingRecord;
 use lbp_sim::scene::{
-    build_scene, build_scene_with, Endpoint, JointKind, MaterialRule, PhysicsScene, DENSITY,
+    build_scene, build_scene_with, build_spawn_scene_with, Endpoint, JointKind, MaterialRule,
+    PhysicsScene, DENSITY,
 };
 use lbp_sim::{spawn_scene, to_level, SimPlugin, ThingIndex, TICK_HZ};
 use std::time::Duration;
@@ -685,10 +686,19 @@ fn tilted_shape_with_vertex_z_collides_in_its_projected_outline() {
     m[13] = -400.;
     m[14] = 0.;
     m[15] = 1.;
-    let scene = build_scene(&[thing(0, m, Some(shape), false)]);
+    let things = [thing(0, m, Some(shape), false)];
+    let scene = build_spawn_scene_with(&things, &|_| MaterialRule::Normal);
     assert_eq!(scene.colliders.len(), 1);
     let top = scene.floor_below([-5., 500.], 0.).unwrap();
     assert!((top + 300.).abs() < 1e-3, "top {top}");
     // Below the block's bottom (y -500) there is nothing.
     assert_eq!(scene.floor_below([-5., -501.], 0.), None);
+    // The simulated scene keeps the in-plane outline: no floor at the projected top.
+    let plain = build_scene(&things);
+    assert_ne!(
+        plain
+            .floor_below([-5., 500.], 0.)
+            .map(|t| (t + 300.).abs() < 1e-3),
+        Some(true)
+    );
 }

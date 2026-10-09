@@ -258,6 +258,26 @@ pub fn build_scene_with(
     things: &[ThingRecord],
     material_rule: &dyn Fn(&Descriptor) -> MaterialRule,
 ) -> PhysicsScene {
+    build_scene_inner(things, material_rule, false)
+}
+
+/// As [`build_scene_with`], but shapes with vertex z under a tilting matrix are projected
+/// through the whole matrix ([`tilted_outline`]). Only for locating a spawn floor
+/// ([`PhysicsScene::floor_below`]): applied to every level's colliders it raised the
+/// `level_physics --all` movers (5,510 -> 5,780 moved >100) and the largest move
+/// (38,482 -> 442,083), so the simulated scene keeps the in-plane outline (PR #83, D212).
+pub fn build_spawn_scene_with(
+    things: &[ThingRecord],
+    material_rule: &dyn Fn(&Descriptor) -> MaterialRule,
+) -> PhysicsScene {
+    build_scene_inner(things, material_rule, true)
+}
+
+fn build_scene_inner(
+    things: &[ThingRecord],
+    material_rule: &dyn Fn(&Descriptor) -> MaterialRule,
+    project_tilted: bool,
+) -> PhysicsScene {
     let mut scene = PhysicsScene::default();
     let mut body_of = BTreeMap::<usize, Option<usize>>::new();
     let mut nested = std::collections::BTreeSet::new();
@@ -288,8 +308,12 @@ pub fn build_scene_with(
         // A shape whose vertices carry z under a matrix that turns local z into the xy plane
         // (the Pod body, Thing 2 of shell 000027b9: local z is world up) has its outline in
         // local x/z, not x/y; the plain x/y outline is a sliver. Such a shape is projected to
-        // world xy through the whole matrix first and triangulated there.
-        let tilted = tilted_outline(shape, m);
+        // world xy through the whole matrix first and triangulated there (spawn scene only).
+        let tilted = if project_tilted {
+            tilted_outline(shape, m)
+        } else {
+            None
+        };
         let projected;
         let outline_of = match &tilted {
             Some(p) => {
