@@ -24,6 +24,8 @@ pub struct Options {
     pub entries: bool,
     pub channel: usize,
     pub navigation_qa: bool,
+    /// Show the window without activating it (always on for `--qa-capture`).
+    pub no_activate: bool,
     pub census: lbp_catalog::census_summary::CorpusCounts,
 }
 fn options() -> Result<Option<Options>, String> {
@@ -38,6 +40,9 @@ fn options() -> Result<Option<Options>, String> {
                 lbp_catalog::census_summary::CENSUS_FLAGS_HELP
             );
             println!("QA navigation: --demo --qa-navigation-roundtrip --qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS (fixed synthetic route/tab checks)");
+            println!(
+                "--no-activate: show the window without taking focus (always on with --qa-capture)"
+            );
             return Ok(None);
         }
         if flag == "--demo" {
@@ -50,6 +55,10 @@ fn options() -> Result<Option<Options>, String> {
         }
         if flag == "--qa-navigation-roundtrip" {
             out.navigation_qa = true;
+            continue;
+        }
+        if flag == "--no-activate" {
+            out.no_activate = true;
             continue;
         }
         if let Some(role) = lbp_catalog::census_summary::census_flag(flag) {
@@ -263,7 +272,10 @@ fn run() -> Result<(), String> {
         renderer: eframe::Renderer::Wgpu,
         viewport: eframe::egui::ViewportBuilder::default()
             .with_inner_size([1320.0, 850.0])
-            .with_min_inner_size([980.0, 640.0]),
+            .with_min_inner_size([980.0, 640.0])
+            // Never steal focus during QA captures: winit shows an inactive window with
+            // SW_SHOWNOACTIVATE on Windows.
+            .with_active(options.capture.is_none() && !options.no_activate),
         ..Default::default()
     };
     eframe::run_native(

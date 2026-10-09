@@ -88,6 +88,7 @@ pub fn run_pod_menu() -> Result<(), String> {
                 title: "LBP2 Asset Explorer - Pod menu".into(),
                 resolution: (1280, 720).into(),
                 visible: false,
+                focused: crate::activate_on_show(),
                 ..default()
             }),
             ..default()
