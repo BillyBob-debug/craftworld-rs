@@ -4,10 +4,14 @@
 //! 00002f6c primitive 2 lists slot 0 as an unrendered required slot). With an explicit
 //! `MESH:SLOT:TEXTURE` rule, a matching Solid-route group is drawn with that texture
 //! instead of its solid colour. Which texture the game binds is not confirmed; the rule
-//! is user-supplied. INFERRED display policy: mesh UV0 untransformed, Repeat on both
-//! axes, untinted (the replaced solid colour is kept only in the label).
+//! is user-supplied. P2g: the material graph's own sampler box for the slot gives the UV
+//! channel and transform (CONFIRMED_FROM_LOCAL_DATA per material; UV0 untransformed when
+//! it cannot be read). INFERRED display policy: Repeat on both axes, untinted (the
+//! replaced solid colour is kept only in the label); the boxes between the sample and
+//! the output are listed so the tint can be decided from evidence.
 use crate::linked::{Asset, MaterialAsset, SolidAsset};
 use lbp_catalog::attachment::LocationKey;
+use lbp_resource::material::GraphMetadata;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -109,6 +113,59 @@ pub struct RuntimeOverride {
 pub struct RuntimeOutcome {
     pub applied: usize,
     pub not_applied: BTreeMap<String, usize>,
+    /// P2g: how the first matched group was sampled.
+    pub sampler: Option<String>,
+}
+
+/// P2g: the material graph's sampler for a rule's slot, and the box types on the first
+/// wire path from that sample to the output (type 0).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SlotSampler {
+    pub uv_channel: usize,
+    pub transform: crate::SamplingTransform,
+    pub chain: Vec<u32>,
+}
+
+/// Finds the first texture-sample box (type 1) naming `slot` and decodes it with the
+/// same static-sampler rule as the diffuse routes. Bounded: graph limits as the slot
+/// review, one step per box along the output path.
+pub fn slot_sampler(graph: &GraphMetadata, slot: usize) -> Result<SlotSampler, String> {
+    let n = graph.boxes.len();
+    if n > 1024
+        || graph.wires.len() > 4096
+        || graph.wires.iter().any(|w| {
+            w.box_from < 0 || w.box_to < 0 || w.box_from as usize >= n || w.box_to as usize >= n
+        })
+    {
+        return Err("Unsupported: material graph bounds/endpoints".into());
+    }
+    let index = graph
+        .boxes
+        .iter()
+        .position(|b| b.type_raw == 1 && b.parameters_raw[5] as usize == slot)
+        .ok_or_else(|| format!("no sampler box for slot {slot}"))?;
+    let sampler = crate::linked::sampler(graph, index)?;
+    let mut seen = vec![false; n];
+    seen[index] = true;
+    let mut chain = Vec::new();
+    let mut at = index;
+    while let Some(w) = graph
+        .wires
+        .iter()
+        .find(|w| w.box_from as usize == at && !seen[w.box_to as usize])
+    {
+        at = w.box_to as usize;
+        seen[at] = true;
+        chain.push(graph.boxes[at].type_raw);
+        if graph.boxes[at].type_raw == 0 {
+            break;
+        }
+    }
+    Ok(SlotSampler {
+        uv_channel: sampler.uv_channel,
+        transform: sampler.uv_transform,
+        chain,
+    })
 }
 
 pub type RuntimeCounts = BTreeMap<RuntimeTexture, RuntimeOutcome>;
@@ -118,10 +175,13 @@ pub fn lines(counts: &RuntimeCounts) -> Vec<String> {
     let mut out = Vec::new();
     for (rule, o) in counts {
         out.push(format!(
-            "{}: {} groups (opt-in; UV0, Repeat, untinted: inferred; game binding unconfirmed)",
+            "{}: {} groups (opt-in; Repeat, untinted: inferred; game binding unconfirmed)",
             rule.label(),
             o.applied
         ));
+        if let Some(sampler) = &o.sampler {
+            out.push(format!("  {sampler}"));
+        }
         for (reason, n) in &o.not_applied {
             out.push(format!("  not applied {n} groups: {reason}"));
         }
@@ -129,7 +189,7 @@ pub fn lines(counts: &RuntimeCounts) -> Vec<String> {
     out
 }
 
-/// A mesh's UV0 coordinates and its UV metadata.
+/// One UV channel of a mesh and its UV metadata.
 pub type MeshUv0 = (Vec<[f32; 2]>, lbp_mesh::UvMetadata);
 /// Decoded runtime texture and where it came from.
 pub type LoadedTexture = (lbp_texture::Texture, LocationKey);
@@ -141,23 +201,25 @@ pub(crate) struct Groups<'a> {
     pub bindings: &'a mut [Result<Arc<MaterialAsset>, String>],
 }
 
-/// Applies matching rules to one loaded mesh. `uv0` decodes the mesh's UV0 on demand
-/// (called at most once); `texture` loads a texture GUID (called at most once per
-/// rule). Failures leave the groups Solid and are counted with their reason.
+/// Applies matching rules to one loaded mesh. `uv` decodes one UV channel on demand
+/// (at most once per channel); `texture` loads a texture GUID (at most once per rule);
+/// `sampler` reads a material's sampler for a slot. Failures leave the groups Solid
+/// and are counted with their reason.
 pub(crate) fn apply(
     mesh: u32,
     grouped: Groups<'_>,
     rules: &[RuntimeTexture],
     counts: &mut RuntimeCounts,
-    mut uv0: impl FnMut() -> Result<MeshUv0, String>,
+    mut uv: impl FnMut(usize) -> Result<MeshUv0, String>,
     mut texture: impl FnMut(u32) -> Result<LoadedTexture, String>,
+    mut sampler: impl FnMut(&LocationKey, usize) -> Result<SlotSampler, String>,
 ) {
     let Groups {
         ranges,
         vertices,
         bindings,
     } = grouped;
-    let mut coords: Option<Result<MeshUv0, String>> = None;
+    let mut coords: BTreeMap<usize, Result<MeshUv0, String>> = BTreeMap::new();
     for rule in rules.iter().filter(|r| r.mesh == mesh) {
         let outcome = counts.entry(*rule).or_default();
         let mut loaded: Option<Result<Arc<LoadedTexture>, String>> = None;
@@ -184,21 +246,43 @@ pub(crate) fn apply(
             let MaterialAsset::Solid(solid) = asset.as_ref() else {
                 continue;
             };
-            let uv = coords.get_or_insert_with(&mut uv0);
+            let read = sampler(&solid.material_key, rule.slot);
+            let (channel, transform) = match &read {
+                Ok(s) => (s.uv_channel, s.transform),
+                Err(_) => (0, crate::SamplingTransform::default()),
+            };
+            outcome.sampler.get_or_insert_with(|| match &read {
+                Ok(s) => format!(
+                    "material sampler UV{} {}; sample-to-output box types {:?}",
+                    s.uv_channel,
+                    s.transform.label(),
+                    s.chain
+                ),
+                Err(e) => format!("material sampler not read ({e}); UV0 untransformed"),
+            });
+            let coords = coords.entry(channel).or_insert_with(|| uv(channel));
             let tex = loaded.get_or_insert_with(|| {
                 texture(rule.texture)
                     .map(Arc::new)
                     .map_err(|e| format!("texture {:08x}: {e}", rule.texture))
             });
-            let built = match (uv, tex) {
+            let built = match (coords, tex) {
                 (Ok((uv, meta)), Ok(tex)) => {
                     if uv.len() != vertices {
-                        Err("Invalid: UV0/vertex correspondence".to_string())
+                        Err(format!("Invalid: UV{channel}/vertex correspondence"))
                     } else {
-                        Ok(replacement(solid, rule, uv, meta, tex))
+                        transform.sampling(uv, || false).map(|sampling| {
+                            replacement(
+                                solid,
+                                rule,
+                                (uv, sampling, meta),
+                                (channel, transform),
+                                tex,
+                            )
+                        })
                     }
                 }
-                (Err(e), _) => Err(format!("mesh UV0: {e}")),
+                (Err(e), _) => Err(format!("mesh UV{channel}: {e}")),
                 (_, Err(e)) => Err(e.clone()),
             };
             match built {
@@ -217,13 +301,14 @@ pub(crate) fn apply(
 fn replacement(
     solid: &SolidAsset,
     rule: &RuntimeTexture,
-    uv: &[[f32; 2]],
-    meta: &lbp_mesh::UvMetadata,
+    (uv, sampling, meta): (&[[f32; 2]], Vec<[f32; 2]>, &lbp_mesh::UvMetadata),
+    (uv_channel, uv_transform): (usize, crate::SamplingTransform),
     tex: &LoadedTexture,
 ) -> MaterialAsset {
     let selection = crate::DiffuseSelection {
         slot: rule.slot,
-        uv_channel: 0,
+        uv_channel,
+        uv_transform,
         ..Default::default()
     };
     MaterialAsset::Texture(Box::new(Asset {
@@ -240,7 +325,7 @@ fn replacement(
         dual: None,
         product: None,
         tinted_rgba: None,
-        sampling_uv: uv.to_vec(),
+        sampling_uv: sampling,
         uv: uv.to_vec(),
         uv_metadata: lbp_mesh::UvMetadata {
             vertex_count: meta.vertex_count,
@@ -429,14 +514,25 @@ mod tests {
             groups(&r, grouped),
             &[rule],
             &mut counts,
-            || {
+            |channel| {
                 uv_calls += 1;
+                assert_eq!(channel, 1);
                 Ok((vec![[0.25, 0.75]; 3], meta()))
             },
             |g| {
                 tex_calls += 1;
                 assert_eq!(g, 0x27fb);
                 Ok(texture())
+            },
+            |_, slot| {
+                assert_eq!(slot, 0);
+                Ok(SlotSampler {
+                    uv_channel: 1,
+                    transform: crate::SamplingTransform::ScaleOffset(crate::UvTransform {
+                        bits: [2f32.to_bits(), 2f32.to_bits(), 0, 0],
+                    }),
+                    chain: vec![3, 0],
+                })
             },
         );
         assert_eq!((uv_calls, tex_calls), (1, 1));
@@ -445,7 +541,9 @@ mod tests {
         let b = bindings[2].as_ref().unwrap();
         assert!(Arc::ptr_eq(a, b));
         let t = a.texture().unwrap();
-        assert_eq!(t.sampling_uv, vec![[0.25, 0.75]; 3]);
+        assert_eq!(t.uv, vec![[0.25, 0.75]; 3]);
+        assert_eq!(t.sampling_uv, vec![[0.5, 1.5]; 3]);
+        assert_eq!(t.selection.uv_channel, 1);
         assert_eq!(t.additional_texture_slots, vec![3]);
         assert_eq!(t.wrap, crate::TextureWrapping::uniform(true));
         assert!(a.label().starts_with("Runtime texture 000027fb"));
@@ -457,7 +555,12 @@ mod tests {
             bindings[4].as_deref(),
             Ok(MaterialAsset::Solid(_))
         ));
-        assert!(lines(&counts)[0].contains("00002f6c slot 0: 2 groups"));
+        let out = lines(&counts);
+        assert!(out[0].contains("00002f6c slot 0: 2 groups"));
+        assert!(
+            out[1].contains("UV1") && out[1].contains("[3, 0]"),
+            "{out:?}"
+        );
     }
 
     #[test]
@@ -471,8 +574,9 @@ mod tests {
             groups(&r, &mut bindings),
             &[rule],
             &mut counts,
-            || Ok((vec![[0.; 2]; 3], meta())),
+            |_| Ok((vec![[0.; 2]; 3], meta())),
             |_| Err("Unresolved: GUID".into()),
+            |_, _| Err("no sampler box for slot 0".into()),
         );
         assert!(matches!(
             bindings[0].as_deref(),
@@ -490,8 +594,12 @@ mod tests {
             groups(&r, &mut bindings),
             &[rule],
             &mut counts,
-            || Ok((vec![[0.; 2]; 2], meta())),
+            |channel| {
+                assert_eq!(channel, 0);
+                Ok((vec![[0.; 2]; 2], meta()))
+            },
             |_| Ok(texture()),
+            |_, _| Err("no sampler box for slot 0".into()),
         );
         assert_eq!(counts[&rule].applied, 0);
         assert_eq!(
@@ -505,9 +613,72 @@ mod tests {
             groups(&r, &mut bindings),
             &[rule],
             &mut counts,
-            || panic!("no UV read"),
+            |_| panic!("no UV read"),
             |_| panic!("no texture read"),
+            |_, _| panic!("no material read"),
         );
         assert!(counts.is_empty());
+    }
+
+    #[test]
+    fn slot_sampler_reads_the_slots_sample_box_and_its_output_path() {
+        use lbp_resource::material::{AnimationMetadata, BoxMetadata, WireMetadata};
+        let node = |kind: u32, p: [u32; 8]| BoxMetadata {
+            type_raw: kind,
+            subtype_raw: 0,
+            declared_parameter_count: 8,
+            parameters_raw: p,
+            position_bits: [0; 4],
+            texture_slot_raw: None,
+            texture_slot_in_range: None,
+            animations: std::array::from_fn(|_| AnimationMetadata {
+                base_value_bits: [0; 4],
+                component_value_count: 0,
+                component_bytes_sha256: String::new(),
+                name_hex: "000000".into(),
+                components_raw: 0,
+                derived_key_count: 0,
+            }),
+        };
+        let edge = |from: i32, to: i32| WireMetadata {
+            box_from: from,
+            box_to: to,
+            port_from_raw: 0,
+            port_to_raw: 0,
+            swizzle_raw: [0; 5],
+            from_in_range: true,
+            to_in_range: true,
+        };
+        let one = 1f32.to_bits();
+        let half = 0.5f32.to_bits();
+        let boxes = vec![
+            node(0, [0; 8]),
+            node(1, [one, one, 0, 0, 0, 1, 0, 0]),
+            node(1, [half, one, 0, 0, 1, 0, 0, 0]),
+            node(3, [0; 8]),
+        ];
+        let wires = vec![edge(2, 3), edge(3, 0), edge(1, 0)];
+        let mut graph = GraphMetadata {
+            box_count: boxes.len(),
+            wire_count: wires.len(),
+            boxes,
+            wires,
+            graph_start: 0,
+            parsed_graph_bytes: 0,
+            unparsed_bytes: 0,
+        };
+        let s = slot_sampler(&graph, 0).unwrap();
+        assert_eq!((s.uv_channel, s.chain.clone()), (1, vec![3, 0]));
+        assert!(
+            s.transform.label().contains("0.5"),
+            "{}",
+            s.transform.label()
+        );
+        assert_eq!(slot_sampler(&graph, 1).unwrap().chain, vec![0]);
+        assert!(slot_sampler(&graph, 2).unwrap_err().contains("no sampler"));
+        graph.wires.insert(0, edge(3, 3)); // a loop to a seen box is skipped
+        assert_eq!(slot_sampler(&graph, 0).unwrap().chain, vec![3, 0]);
+        graph.wires.push(edge(9, 0));
+        assert!(slot_sampler(&graph, 0).is_err());
     }
 }

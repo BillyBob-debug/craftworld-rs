@@ -360,6 +360,11 @@ pub const DOLLY_SECONDS: f32 = 1.0;
 /// Sackboy standing in the closed view: head top and feet as fractions of the 16:9
 /// height, centred at 0.50 of the width (RPCS3, about 0.02).
 pub const SACKBOY_CLOSED: [f32; 2] = [0.56, 0.82];
+/// P2g: the closed tent (pod.mol) draws its window 0.21-0.64 h where RPCS3 has
+/// 0.28-0.69 h (PC run of D165), about 0.06 h too high, while the DualShock is within
+/// 0.01. The tent camera is tilted up by this much of the frame height (a correction
+/// fitted to that measurement; a tilted game camera is INFERRED as the cause).
+pub const TENT_TILT_CLOSED: f32 = 0.06;
 /// Sackboy holding the controller, seen from behind, Puter open: centre (RPCS3, 0.02).
 pub const SACKBOY_OPEN: [f32; 2] = [0.50, 0.90];
 
@@ -376,6 +381,11 @@ pub struct PodRig {
     pub globe_z: f32,
     pub shell: [Vec3; 2],
     pub shell_rot: [Quat; 2],
+    /// P2g: the tent (pod.mol) has its own eye: closed as the shell's but tilted by
+    /// `TENT_TILT_CLOSED`; open past the shell's far side, so the tent leaves the frame
+    /// during the dolly (RPCS3: no tent once open).
+    pub tent: [Vec3; 2],
+    pub tent_rot: [Quat; 2],
     pub scale: f32,
     pub fov: f32,
 }
@@ -398,11 +408,17 @@ impl PodRig {
         // The shell's far side at half the closed eye's distance to the globe.
         let depth = (shell[0].z - shell_near).max(1e-6);
         let scale = 0.5 * (planet[0].z - g.z) / depth;
+        let tilt = (TENT_TILT_CLOSED * 2. * (fov / 2.).tan()).atan();
         Self {
             planet,
             globe_z: g.z,
             shell,
             shell_rot: [Quat::IDENTITY; 2],
+            tent: [
+                shell[0],
+                Vec3::new(shell[1].x, shell[1].y, shell_near - depth * 0.05),
+            ],
+            tent_rot: [Quat::from_rotation_x(tilt), Quat::IDENTITY],
             scale,
             fov,
         }
@@ -428,6 +444,9 @@ impl PodRig {
             .fold(1e-6, f32::max);
         self.shell[0] = from;
         self.shell_rot[0] = rot;
+        // The preset replaces the fitted tilt too.
+        self.tent[0] = from;
+        self.tent_rot[0] = rot;
         self.scale = 0.5 * (self.planet[0].z - self.globe_z) / depth;
         self
     }
@@ -443,6 +462,23 @@ impl PodRig {
 
     fn turn(&self, t: f32) -> Quat {
         self.shell_rot[0].slerp(self.shell_rot[1], Self::ease(t))
+    }
+
+    /// `X -> P + scale R^-1 (X - S)` for a layer whose eye is `s` turned by `rot`.
+    fn layer(&self, t: f32, s: Vec3, rot: Quat) -> Transform {
+        let p = self.planet_eye(t);
+        let inv = rot.inverse();
+        Transform {
+            translation: p - inv * (s * self.scale),
+            rotation: inv,
+            scale: Vec3::splat(self.scale),
+        }
+    }
+
+    /// P2g: the tent root transform at `t`.
+    pub fn tent_root(&self, t: f32) -> Transform {
+        let rot = self.tent_rot[0].slerp(self.tent_rot[1], Self::ease(t));
+        self.layer(t, Self::at(self.tent, t), rot)
     }
 
     /// The planets eye at opening progress `t` (0 closed, 1 open, eased).
@@ -490,14 +526,7 @@ impl PodRig {
 
     /// The shell root transform at `t`: `X -> P + scale R^-1 (X - S)`.
     pub fn shell_root(&self, t: f32) -> Transform {
-        let p = self.planet_eye(t);
-        let s = Self::at(self.shell, t);
-        let inv = self.turn(t).inverse();
-        Transform {
-            translation: p - inv * (s * self.scale),
-            rotation: inv,
-            scale: Vec3::splat(self.scale),
-        }
+        self.layer(t, Self::at(self.shell, t), self.turn(t))
     }
 }
 
@@ -587,6 +616,24 @@ mod tests {
         let top = rig.shell_frac(0., feet + Vec3::Y * 0.05)[1];
         assert!((x - 0.5).abs() < 1e-4 && (low - SACKBOY_CLOSED[1]).abs() < 1e-4);
         assert!((top - SACKBOY_CLOSED[0]).abs() < 1e-4, "{top}");
+        // P2g: the tent shows TENT_TILT_CLOSED lower than the shell closed, and is wholly
+        // behind the eye open.
+        let p = rig.planet_eye(0.);
+        let frac = |q: Vec3| {
+            let c = projection.project_point3(q - p);
+            [(c.x + 1.) / 2., (1. - c.y) / 2.]
+        };
+        let shell_at = frac(rig.shell_root(0.).transform_point(pad.0));
+        let tent_at = frac(rig.tent_root(0.).transform_point(pad.0));
+        assert!(
+            (tent_at[1] - shell_at[1] - TENT_TILT_CLOSED).abs() < 0.01,
+            "{tent_at:?}"
+        );
+        let open_eye = rig.planet_eye(1.);
+        for z in [-0.4, 0.0, 0.3] {
+            let q = rig.tent_root(1.).transform_point(Vec3::new(0.2, 0.1, z));
+            assert!(q.z > open_eye.z, "{z} {q:?} {open_eye:?}");
+        }
         let far = rig.shell_root(0.).transform_point(Vec3::new(0., 0., -0.4));
         assert!(far.z > globe.0.z);
     }

@@ -1417,6 +1417,33 @@ pub(crate) fn load_primitive(
         options,
     )
 }
+/// Reads and inspects one material resource within the material input budget; also
+/// returns its bytes.
+pub(crate) fn read_material_graph(
+    source: &AttachedSource,
+    material_key: &LocationKey,
+    control: &LoadControl,
+) -> Result<(GraphInspection, Vec<u8>), String> {
+    control.check()?;
+    if material_key.size > lbp_resource::material::MAX_INPUT as u64 {
+        return Err("Material input budget exceeded".into());
+    }
+    let mut bytes = Vec::with_capacity(material_key.size as usize);
+    while bytes.len() < material_key.size as usize {
+        control.check()?;
+        let count = (material_key.size as usize - bytes.len()).min(4096);
+        let page = source
+            .read_hex_checked(material_key, bytes.len() as u64, count, control)?
+            .bytes;
+        if page.len() != count {
+            return Err("Short material page".into());
+        }
+        bytes.extend(page);
+    }
+    let graph = lbp_resource::material::inspect_graph(&bytes, || control.check().is_err())
+        .map_err(|e| e.to_string())?;
+    Ok((graph, bytes))
+}
 /// Material selection and loading for `vertices` coordinates from `uv`.
 pub(crate) fn load_material(
     source: &AttachedSource,
@@ -1427,24 +1454,7 @@ pub(crate) fn load_material(
     control: &LoadControl,
     options: crate::PreviewOptions,
 ) -> Result<MaterialAsset, String> {
-    control.check()?;
-    if material_key.size > lbp_resource::material::MAX_INPUT as u64 {
-        return Err("Material input budget exceeded".into());
-    }
-    let mut bytes = Vec::with_capacity(material_key.size as usize);
-    while bytes.len() < material_key.size as usize {
-        control.check()?;
-        let count = (material_key.size as usize - bytes.len()).min(4096);
-        let page = source
-            .read_hex_checked(&material_key, bytes.len() as u64, count, control)?
-            .bytes;
-        if page.len() != count {
-            return Err("Short material page".into());
-        }
-        bytes.extend(page);
-    }
-    let mut graph = lbp_resource::material::inspect_graph(&bytes, || control.check().is_err())
-        .map_err(|e| e.to_string())?;
+    let (mut graph, bytes) = read_material_graph(source, &material_key, control)?;
     let original_graph = graph.graph.clone();
     let instance_projection = if let Some(color) = options.instance_color {
         // D105: falls back to the plain substitution for the graph evaluator.

@@ -2008,11 +2008,11 @@ fn apply_runtime_textures(
         },
         rules,
         counts,
-        || {
+        |channel| {
             let (_, data) = crate::read_mesh(source, key, control)?;
             let coords = lbp_mesh::decode_uvs(&data, || control.check().is_err())
                 .map_err(|e| e.to_string())?;
-            let uv = crate::linked::selected_uv(&coords, 0, vertices)?;
+            let uv = crate::linked::selected_uv(&coords, channel, vertices)?;
             Ok((uv, coords.metadata))
         },
         |texture| {
@@ -2030,6 +2030,10 @@ fn apply_runtime_textures(
             )
             .map_err(|e| e.to_string())?;
             Ok((decoded, texture_key))
+        },
+        |material, slot| {
+            let (inspection, _) = crate::linked::read_material_graph(source, material, control)?;
+            crate::runtime_texture::slot_sampler(&inspection.graph, slot)
         },
     );
 }
