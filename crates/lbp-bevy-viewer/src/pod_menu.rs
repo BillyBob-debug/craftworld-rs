@@ -670,12 +670,17 @@ pub fn install_overlay(app: &mut App) -> Result<(), String> {
     let (report, _) = run_script(snapshot.as_ref(), game.as_ref(), &class, &function)?;
     let menu = layout(&report.tree);
     println!("Pod menu overlay: {} pills", menu.pills.len());
+    let aspect = if all.iter().any(|a| a == "--window-16-9") {
+        ASPECT
+    } else {
+        1280. / 800.
+    };
     app.insert_resource(Menu { menu, focused: 0 })
-        .add_systems(Startup, |mut commands: Commands, menu: Res<Menu>| {
+        .add_systems(Startup, move |mut commands: Commands, menu: Res<Menu>| {
             spawn_overlay(
                 &mut commands,
                 &menu.menu,
-                |f| reference_to_window(f, 1280. / 800.),
+                move |f| reference_to_window(f, aspect),
                 None,
             )
         })

@@ -543,7 +543,10 @@ struct Polygon {
     area: f64,
 }
 
-fn validate(shape: &Shape) -> Result<Polygon, ShapeReject> {
+/// Budgets, finiteness and per-loop point lists (consecutive duplicates removed); shared by
+/// [`validate`] and the lenient fill.
+#[allow(clippy::type_complexity)]
+fn read_loops(shape: &Shape) -> Result<(Vec<P2>, Vec<Vec<usize>>, usize), ShapeReject> {
     let n = shape.vertices.len();
     if n > MAX_INPUT_VERTICES || shape.vertex_count > MAX_INPUT_VERTICES {
         return Err(ShapeReject::VertexBudget {
@@ -603,6 +606,11 @@ fn validate(shape: &Shape) -> Result<Polygon, ShapeReject> {
         loops.push(idx);
         start = end;
     }
+    Ok((pts, loops, removed))
+}
+
+fn validate(shape: &Shape) -> Result<Polygon, ShapeReject> {
+    let (pts, mut loops, removed) = read_loops(shape)?;
     let areas = check_loops(&pts, &loops)?;
     // Winding normalisation: outer CCW, holes CW.
     let mut rewound = 0;
@@ -921,6 +929,127 @@ pub fn outline_triangles(shape: &Shape) -> Result<Outline, ShapeReject> {
             .collect(),
         triangles,
         area: poly.area,
+    })
+}
+
+/// Work budget (edge-slab visits) for [`outline_triangles_lenient`]'s fill.
+pub const MAX_FILL_WORK: usize = 1 << 26;
+
+/// Like [`outline_triangles`], but an outline the strict checks reject for crossing or
+/// misplaced loops (self-intersecting, loops intersecting, hole outside or nested, or a
+/// failed ear clip) is filled by the even-odd rule instead: the region is cut into
+/// horizontal slabs at every vertex and crossing height, and each slab's spans become
+/// trapezoids. Returns the reason the strict path refused, if the fill was used.
+///
+/// For colliders only. INFERRED: the game fills such outlines somehow (these shapes stand in
+/// shipped levels); the even-odd rule is an assumption, and nonzero would differ only where
+/// a loop overlaps itself or a hole lies outside its outer loop.
+pub fn outline_triangles_lenient(
+    shape: &Shape,
+) -> Result<(Outline, Option<ShapeReject>), ShapeReject> {
+    let why = match outline_triangles(shape) {
+        Ok(o) => return Ok((o, None)),
+        Err(
+            e @ (ShapeReject::SelfIntersecting { .. }
+            | ShapeReject::LoopsIntersect { .. }
+            | ShapeReject::HoleOutsideOuter { .. }
+            | ShapeReject::NestedHoles { .. }
+            | ShapeReject::Triangulation
+            | ShapeReject::AreaMismatch),
+        ) => e,
+        Err(e) => return Err(e),
+    };
+    let (pts, loops, _) = read_loops(shape)?;
+    let outline = even_odd_fill(&pts, &loops).ok_or(why.clone())?;
+    Ok((outline, Some(why)))
+}
+
+/// Even-odd fill of closed loops by horizontal slabs (see [`outline_triangles_lenient`]).
+fn even_odd_fill(pts: &[P2], loops: &[Vec<usize>]) -> Option<Outline> {
+    let mut edges: Vec<(P2, P2)> = Vec::new();
+    for idx in loops {
+        for i in 0..idx.len() {
+            let (a, b) = (pts[idx[i]], pts[idx[(i + 1) % idx.len()]]);
+            if a[1] != b[1] {
+                edges.push(if a[1] < b[1] { (a, b) } else { (b, a) });
+            }
+        }
+    }
+    let (mut lo, mut hi) = (f64::MAX, f64::MIN);
+    for p in pts {
+        lo = lo.min(p[1]);
+        hi = hi.max(p[1]);
+    }
+    let extent = hi - lo;
+    if edges.is_empty() || extent <= 0.0 {
+        return None;
+    }
+    if edges.len().checked_mul(edges.len())? > MAX_FILL_WORK {
+        return None;
+    }
+    let mut ys: Vec<f64> = edges.iter().flat_map(|e| [e.0[1], e.1[1]]).collect();
+    for i in 0..edges.len() {
+        for j in i + 1..edges.len() {
+            let ((a, b), (c, d)) = (edges[i], edges[j]);
+            if a[1].max(c[1]) >= b[1].min(d[1]) {
+                continue;
+            }
+            let den = (b[0] - a[0]) * (d[1] - c[1]) - (b[1] - a[1]) * (d[0] - c[0]);
+            if den == 0.0 {
+                continue;
+            }
+            let t = ((c[0] - a[0]) * (d[1] - c[1]) - (c[1] - a[1]) * (d[0] - c[0])) / den;
+            if t > 0.0 && t < 1.0 {
+                let y = a[1] + t * (b[1] - a[1]);
+                if y > c[1] && y < d[1] {
+                    ys.push(y);
+                }
+            }
+        }
+    }
+    ys.sort_by(f64::total_cmp);
+    let eps = 1e-9 * extent;
+    ys.dedup_by(|y, prev| *y - *prev <= eps);
+    if ys.len().checked_mul(edges.len())? > MAX_FILL_WORK {
+        return None;
+    }
+    let x_at = |(a, b): (P2, P2), y: f64| a[0] + (y - a[1]) * (b[0] - a[0]) / (b[1] - a[1]);
+    let mut points: Vec<[f32; 2]> = Vec::new();
+    let mut triangles = Vec::new();
+    let mut area = 0.0;
+    let mut span = Vec::new();
+    for w in ys.windows(2) {
+        let (y0, y1) = (w[0], w[1]);
+        let ym = 0.5 * (y0 + y1);
+        span.clear();
+        span.extend(
+            edges
+                .iter()
+                .filter(|e| e.0[1] < ym && e.1[1] > ym)
+                .map(|&e| (x_at(e, ym), x_at(e, y0), x_at(e, y1))),
+        );
+        span.sort_by(|p: &(f64, f64, f64), q| p.0.total_cmp(&q.0));
+        for &[l, r] in span.as_chunks::<2>().0 {
+            let quad = [[l.1, y0], [r.1, y0], [r.2, y1], [l.2, y1]];
+            for t in [[0, 1, 2], [0, 2, 3]] {
+                let (a, b, c) = (quad[t[0]], quad[t[1]], quad[t[2]]);
+                let o = orient(a, b, c);
+                if o > 0.0 {
+                    area += 0.5 * o;
+                    let k = points.len();
+                    points.extend([a, b, c].map(|p| [p[0] as f32, p[1] as f32]));
+                    triangles.push([k, k + 1, k + 2]);
+                }
+            }
+        }
+        if points.len() > MAX_OUTPUT_VERTICES {
+            return None;
+        }
+    }
+    (!triangles.is_empty()).then_some(Outline {
+        points,
+        triangles,
+        area,
     })
 }
 
