@@ -2,8 +2,10 @@
 //! avian world (lbp-sim, material rules by MAP path) and Sackboy as the kinematic capsule
 //! driven by the RPCS3-measured movement rules at 30 Hz. Arrow keys or the left stick walk
 //! and change lanes (Up = lane behind, Down = lane in front), Space or the South button
-//! jumps; the camera follows him. He is drawn as a placeholder capsule (the mesh and walk
-//! cycle come later), and the level's own dynamic objects are simulated but not redrawn.
+//! jumps; the camera follows him. With `--select-guid` naming the Sackboy mesh he is drawn
+//! as that mesh standing on the capsule (feet at its bottom), turned to the walk direction,
+//! and `--play-animation` (a walk clip) cycles at the walk speed; otherwise as a placeholder
+//! capsule. The level's own dynamic objects are simulated but not redrawn.
 //!
 //! `--play-sackboy-at X,Y,Z` sets the spawn (level units, capsule centre); otherwise the
 //! first CHECKPOINT's POS plus [`SPAWN_OFFSET`]. `--play-sackboy-input STEPS` replaces the pad with a script of
@@ -14,7 +16,7 @@ use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::level_scene;
 use lbp_sim::avian2d::prelude::*;
 use lbp_sim::character::{spawn_sackboy, SackboyBody, SackboyPlugin, HALF_SEGMENT, RADIUS};
-use lbp_sim::sackboy::Input;
+use lbp_sim::sackboy::{Input, WALK_SPEED};
 use lbp_sim::scene::{material_rule_for_path, MaterialRule};
 use lbp_sim::{build_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin};
 use std::collections::BTreeMap;
@@ -34,6 +36,143 @@ struct Play {
 
 #[derive(Component)]
 struct Marker;
+
+/// The Sackboy mesh standing on the capsule: `upright` turns the raw Z-up model to the
+/// display (feet at the origin, level-unit scale); `facing` is the turn about the display Y
+/// axis; `phase` the walk clip's frame.
+#[derive(Component)]
+pub(crate) struct Figure {
+    upright: Mat4,
+    facing: f32,
+    phase: f32,
+}
+
+/// True when the viewer was started with `--play-sackboy`.
+pub(crate) fn enabled() -> bool {
+    std::env::args().any(|a| a == "--play-sackboy")
+}
+
+/// Turn about the display Y axis when walking right (+x) or left. The upright model faces
+/// the camera (+Z); a quarter turn shows him in profile. INFERRED from the Pod figure's
+/// front view; LBP2 may show him three-quarter on (RPCS3 capture to check).
+const FACE_RIGHT: f32 = std::f32::consts::FRAC_PI_2;
+const FACE_LEFT: f32 = -std::f32::consts::FRAC_PI_2;
+
+/// Spawns the Sackboy mesh (`--select-guid`) as the play figure and, with a clip, its rig
+/// and playback (frames chosen by [`show_sackboy`]). Model units are level units (as for
+/// the Pod figure), so `k` is the level display scale.
+pub(crate) fn spawn_figure(
+    v: &mut crate::Viewer,
+    (commands, meshes, materials, images): (
+        &mut Commands,
+        &mut Assets<Mesh>,
+        &mut Assets<crate::ViewerMaterial>,
+        &mut Assets<Image>,
+    ),
+    bindposes: &mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
+    k: f32,
+    preview: &lbp_preview::GroupedMesh,
+    clip: Option<crate::ClipResult>,
+) -> Result<String, String> {
+    let [lo, hi] =
+        crate::adapter_bounds(&preview.geometry.positions).ok_or("Unsupported: empty figure")?;
+    // Raw Z-up model: feet are the lowest z, centred in x and y (depth).
+    let origin = Mat4::from_translation(Vec3::new(
+        -(lo[0] + hi[0]) / 2.,
+        -(lo[1] + hi[1]) / 2.,
+        -lo[2],
+    ));
+    let upright =
+        Mat4::from_scale(Vec3::splat(k)) * Mat4::from_quat(crate::model_up(true)) * origin;
+    let figure = commands
+        .spawn((
+            Transform::from_matrix(upright),
+            Visibility::default(),
+            Figure {
+                upright,
+                facing: FACE_RIGHT,
+                phase: 0.,
+            },
+        ))
+        .id();
+    let mut evidence = crate::browser::PreviewEvidence::default();
+    let mut details = Vec::new();
+    let first = v.scene.len();
+    for p in crate::prepare(preview, false, &mut evidence, &mut details)? {
+        let (mesh, material, image) = crate::upload(p, meshes, materials, images);
+        let entity = commands
+            .spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::IDENTITY,
+                ChildOf(figure),
+            ))
+            .id();
+        v.scene.push((entity, mesh, material, image));
+    }
+    let mut line = format!(
+        "Play figure: model height {:.0} level units (capsule {:.0})",
+        hi[2] - lo[2],
+        2. * (HALF_SEGMENT + RADIUS)
+    );
+    let scene: Vec<_> = v.scene[first..]
+        .iter()
+        .map(|s| (s.0, s.1.clone()))
+        .collect();
+    match clip {
+        None => line += "; no walk clip (--play-animation)",
+        Some(Err(e)) => line += &format!("; walk clip not played: {e}"),
+        Some(Ok(clip)) => {
+            // Raw model units: the identity display frame.
+            let frame = ([0.; 3], 1.);
+            let gpu = if v.cpu_skinning {
+                None
+            } else {
+                let rig = crate::gpu_rig(
+                    commands,
+                    meshes,
+                    bindposes,
+                    &clip.rig,
+                    (&clip.skin.joints, &clip.skin.weights),
+                    (frame, Quat::IDENTITY),
+                    &scene,
+                )?;
+                commands.entity(rig.root).insert(ChildOf(figure));
+                Some(crate::GpuRig {
+                    morphs: !clip.skin.morphs.is_empty() && clip.report.animation_morphs > 0,
+                    ..rig
+                })
+            };
+            line += &format!(
+                "; walk clip {} frames at {} fps",
+                clip.report.frames, clip.report.fps
+            );
+            v.animation_frame = Some(0);
+            v.playing = Some(crate::Playing {
+                clip,
+                frame,
+                started: -1.,
+                shown: None,
+                gpu,
+                meshes: scene.into_iter().map(|s| s.1).collect(),
+                alt: None,
+            });
+        }
+    }
+    Ok(line)
+}
+
+/// The walk clip's next frame position: advances at the clip rate scaled by walking speed
+/// (full rate at [`WALK_SPEED`]) while grounded and moving; otherwise back to frame 0.
+/// INFERRED pacing (RPCS3 stride timing to check).
+fn walk_phase(phase: f32, dt: f32, fps: f32, vx: f32, grounded: bool) -> f32 {
+    let speed = (vx.abs() / WALK_SPEED).min(1.);
+    if grounded && speed > 0.05 {
+        phase + dt * fps * speed
+    } else {
+        0.
+    }
+}
 
 /// Sackboy's start relative to the first CHECKPOINT POS. RPCS3, Rookie Test (PC, d-run
 /// 2026-10-09): checkpoint (-13335, 6971, -250), Sackboy appears at (-13335.7, 6763, 0) and
@@ -257,37 +396,66 @@ fn log_scripted(
     );
 }
 
+#[allow(clippy::too_many_arguments)]
 fn show_sackboy(
     mut commands: Commands,
     display: Option<Res<LevelDisplay>>,
+    time: Res<Time>,
+    mut v: ResMut<crate::Viewer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
-    sackboy: Query<(&Position, &lbp_sim::ZSlab), With<SackboyBody>>,
-    mut marker: Query<&mut Transform, With<Marker>>,
+    sackboy: Query<(&SackboyBody, &Position, &lbp_sim::ZSlab)>,
+    mut marker: Query<&mut Transform, (With<Marker>, Without<Figure>)>,
+    mut figure: Query<(&mut Transform, &mut Figure)>,
     mut orbit: ResMut<crate::Orbit>,
+    mut framed: Local<bool>,
 ) {
-    let (Some(display), Ok((pos, slab))) = (display, sackboy.single()) else {
+    let (Some(display), Ok((body, pos, slab))) = (display, sackboy.single()) else {
         return;
     };
     let p = to_level(pos.0);
     let at = display.0.transform_point3(Vec3::new(p[0], p[1], slab.z));
-    match marker.single_mut() {
-        Ok(mut t) => t.translation = at,
-        Err(_) => {
-            let s = display.0.x_axis.length();
-            commands.spawn((
-                Marker,
-                Mesh3d(meshes.add(Capsule3d::new(RADIUS * s, 2. * HALF_SEGMENT * s))),
-                MeshMaterial3d(materials.add(StandardMaterial {
-                    base_color: Color::srgb(0.85, 0.55, 0.3),
-                    unlit: true,
-                    ..default()
-                })),
-                Transform::from_translation(at),
-            ));
-            // Close in on him once. PLACEHOLDER: the game camera's distance is not measured.
-            orbit.distance = FOLLOW_DISTANCE * s;
+    let s = display.0.x_axis.length();
+    if let Ok((mut t, mut f)) = figure.single_mut() {
+        let vx = body.controller.vx;
+        if vx > 0.5 {
+            f.facing = FACE_RIGHT;
+        } else if vx < -0.5 {
+            f.facing = FACE_LEFT;
         }
+        let feet =
+            display
+                .0
+                .transform_point3(Vec3::new(p[0], p[1] - (HALF_SEGMENT + RADIUS), slab.z));
+        *t = Transform::from_matrix(
+            Mat4::from_translation(feet) * Mat4::from_rotation_y(f.facing) * f.upright,
+        );
+        if let Some(fps) = v
+            .playing
+            .as_ref()
+            .map(|p| f32::from(p.clip.report.fps.max(1)))
+        {
+            f.phase = walk_phase(f.phase, time.delta_secs(), fps, vx, body.grounded);
+            v.animation_frame = Some(f.phase as i64);
+        }
+    } else if let Ok(mut t) = marker.single_mut() {
+        t.translation = at;
+    } else {
+        commands.spawn((
+            Marker,
+            Mesh3d(meshes.add(Capsule3d::new(RADIUS * s, 2. * HALF_SEGMENT * s))),
+            MeshMaterial3d(materials.add(StandardMaterial {
+                base_color: Color::srgb(0.85, 0.55, 0.3),
+                unlit: true,
+                ..default()
+            })),
+            Transform::from_translation(at),
+        ));
+    }
+    if !*framed {
+        *framed = true;
+        // Close in on him once. PLACEHOLDER: the game camera's distance is not measured.
+        orbit.distance = FOLLOW_DISTANCE * s;
     }
     orbit.target = at;
 }
@@ -306,5 +474,13 @@ mod tests {
         assert!(s[3].0.back && s[3].0.x == -1.);
         assert!(parse_script("x:3").is_err());
         assert!(parse_script("r").is_err());
+    }
+
+    #[test]
+    fn walk_cycle_paces_with_speed() {
+        assert_eq!(walk_phase(4., 0.5, 30., WALK_SPEED, true), 19.);
+        assert_eq!(walk_phase(4., 0.5, 30., -WALK_SPEED / 2., true), 11.5);
+        assert_eq!(walk_phase(4., 0.5, 30., WALK_SPEED, false), 0.);
+        assert_eq!(walk_phase(4., 0.5, 30., 0., true), 0.);
     }
 }

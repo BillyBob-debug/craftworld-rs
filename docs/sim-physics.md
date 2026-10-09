@@ -236,6 +236,15 @@ level's dynamic objects are simulated but not redrawn. `--play-sackboy-input r:4
 scripts the keys (l r j b f) and prints the position each tick, for path comparisons with
 RPCS3. Not tested: running it on game data (PC).
 
+Figure (2026-10-09): with `--select-guid` naming the Sackboy mesh (e.g. 0000043f) the
+capsule is drawn as that mesh, feet at the capsule bottom (centre - 69), model units taken
+as level units (as for the Pod figure). He turns a quarter turn about the display Y axis to
+face +x or -x by the sign of vx (INFERRED; LBP2 may show him three-quarter on). With
+`--play-animation` (e.g. 0001a697 walk_medium) the clip's frame advances at the clip fps
+scaled by |vx| / 30 while grounded and returns to frame 0 otherwise (INFERRED pacing; no
+idle or jump clip yet). Root motion in the clip, if any, is not cancelled. Not tested on
+game data (PC capture against RPCS3 pending).
+
 ## Next
 
 - Joint animation (motion patterns, winch and piston targets), strength and breaking.

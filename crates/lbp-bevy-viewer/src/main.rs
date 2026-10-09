@@ -205,8 +205,10 @@ impl Viewer {
         let cached = (paths == self.context_paths)
             .then(|| self.context.clone())
             .flatten();
-        // Level mode ignores the single-mesh GUID, except as the Pod figure (P2c).
-        let guid = if self.level.active() && self.level.shell.is_none() {
+        // Level mode ignores the single-mesh GUID, except as the Pod figure (P2c) or the
+        // play figure (--play-sackboy).
+        let guid = if self.level.active() && self.level.shell.is_none() && !sackboy_play::enabled()
+        {
             String::new()
         } else {
             self.guid.clone()
@@ -1063,6 +1065,23 @@ fn load(
                         (done.clip, done.hold_clip),
                     )?,
                     Err(e) => format!("Figure not loaded: {e}"),
+                    Ok(None) => String::new(),
+                };
+                if !line.is_empty() {
+                    v.level.lines.push(line);
+                }
+            } else if sackboy_play::enabled() {
+                // Part 4: --select-guid names the play figure (the Sackboy mesh).
+                let line = match done.preview {
+                    Ok(Some(preview)) => sackboy_play::spawn_figure(
+                        &mut v,
+                        (&mut commands, &mut meshes, &mut materials, &mut images),
+                        &mut bindposes,
+                        planets_normalize.x_axis.truncate().length(),
+                        &preview,
+                        done.clip,
+                    )?,
+                    Err(e) => format!("Play figure not loaded: {e}"),
                     Ok(None) => String::new(),
                 };
                 if !line.is_empty() {
