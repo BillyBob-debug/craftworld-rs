@@ -20,8 +20,11 @@ pub use scene::{build_scene, build_scene_with, PhysicsScene};
 pub const TICK_HZ: f64 = 30.0;
 /// Solver substeps per tick: our choice (the game's solver is not public).
 pub const SUBSTEPS: u32 = 6;
-/// Gravity in world units per second² along -y. PLACEHOLDER until the S9 jump measurement.
-pub const GRAVITY: f32 = 3000.0;
+/// Gravity in world units per second² along -y: 2,424 (2.693 per tick²). S9 jump
+/// measurement in RPCS3 (Rookie Test, three runs, Sackboy's descent fits one parabola with
+/// error under 0.1%): CONFIRMED_FROM_LOCAL_DATA (emulated) for Sackboy falling; using it for
+/// every body is INFERRED (material gravity multipliers are not read yet).
+pub const GRAVITY: f32 = 2424.0;
 /// avian2d length unit (scales its tolerances). PLACEHOLDER: a guess at a "typical object"
 /// size in LBP world units.
 pub const LENGTH_UNIT: f32 = 100.0;

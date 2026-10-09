@@ -35,7 +35,7 @@ layers. Written in the cloud with synthetic shapes only; the level check needs t
 
 Placeholders (each a named constant): density 20, sliding friction 0.8, restitution
 0.3 (Toolkit RMaterial defaults, used for every shape until RMaterial is read);
-gravity 3000 units/s² (until the S9 jump measurement); avian length unit 100; 6 substeps
+gravity 2,424 units/s² (S9 jump measurement in RPCS3: Sackboy's descent in Rookie Test, three runs, one parabola within 0.1%, CONFIRMED_FROM_LOCAL_DATA emulated; applying it to every body is INFERRED; the rise does not fit the same g, so the jump is shaped by the held button); avian length unit 100; 6 substeps
 (our choice). `PBody.frozen` is kept but unused (meaning UNVERIFIED). Not modelled yet:
 joints, PWorld maxVel/maxAVel clamps, materials, movers, lethal shapes.
 
