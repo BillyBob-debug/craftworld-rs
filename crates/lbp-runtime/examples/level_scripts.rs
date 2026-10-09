@@ -1,7 +1,7 @@
 //! Rt PC check (docs/level-scripts.md): which scripts levels use and how they run.
 //!
 //! level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH NEW-JSON [--entry=NAME]... [--ticks=N]
-//! level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH NEW-JSON --play=TICKS
+//! level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH NEW-JSON --play=TICKS [--flags=N,..]
 //! level_scripts SNAPSHOT GAME-DIRS --all NEW-JSON
 //!
 //! Loads every magic-confirmed script with its MAP GUID (the U12 loader), reads the level(s)
@@ -109,16 +109,27 @@ fn run() -> Result<(), String> {
         .map(str::parse)
         .transpose()
         .map_err(|e| format!("--play: {e}"))?;
+    // `--flags=2,5`: LBP2 game progression flags set on the profile (default none).
+    let flags: std::collections::BTreeSet<i32> = all
+        .iter()
+        .find_map(|a| a.strip_prefix("--flags="))
+        .map(|f| f.split(',').map(str::parse).collect::<Result<_, _>>())
+        .transpose()
+        .map_err(|e| format!("--flags: {e}"))?
+        .unwrap_or_default();
     let args: Vec<&String> = all
         .iter()
         .filter(|a| {
-            !a.starts_with("--entry=") && !a.starts_with("--ticks=") && !a.starts_with("--play=")
+            !a.starts_with("--entry=")
+                && !a.starts_with("--ticks=")
+                && !a.starts_with("--play=")
+                && !a.starts_with("--flags=")
         })
         .collect();
     if args.len() != 5 {
         return Err(
             "usage: level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH|--all NEW-JSON \
-                    [--entry=NAME]... [--ticks=N] [--play=TICKS]"
+                    [--entry=NAME]... [--ticks=N] [--play=TICKS] [--flags=N,..]"
                 .into(),
         );
     }
@@ -204,7 +215,9 @@ fn run() -> Result<(), String> {
     let mut runs = serde_json::Map::new();
     if let (Some(n), Some(mut world)) = (play, last_world.take()) {
         world.add_class_defaults(&vm);
+        world.progression_flags = flags.clone();
         let mut host = Bindings::new(world);
+        let engine_faults = lbp_runtime::add_engine_objects(&mut vm, &mut host, BUDGET_PER_CALL);
         let mut level = LevelScripts::new(&vm, &host.world);
         let created = level.create(&mut vm, &mut host, BUDGET_PER_CALL);
         let mut sum = StepReport::default();
@@ -259,11 +272,26 @@ fn run() -> Result<(), String> {
                     .map(|(k, n)| serde_json::json!({"native": k, "calls": n}))
                     .collect::<Vec<_>>(),
                 "written": host.world.written.iter().take(40).collect::<Vec<_>>(),
+                "engine_object_faults": engine_faults,
+                "gooeys_created": host.world.gooeys_created,
+                "camera": {
+                    "from_to_up": host.world.camera.from_to_up.map(|c| serde_json::json!({
+                        "from": c.from, "to": c.to, "up": c.up, "params": c.params,
+                    })),
+                    "from_to_up_calls": host.world.camera.from_to_up_calls,
+                    "dof_and_fog": host.world.camera.dof_and_fog,
+                    "motion_blur_clears": host.world.camera.motion_blur_clears,
+                },
+                "frame_entries": level.instances.iter().filter_map(|i| {
+                    let e = lbp_runtime::frame_entry(&vm, i.class?)?;
+                    Some(format!("thing {}: {}.{}", i.thing, e.class, e.function))
+                }).collect::<Vec<_>>(),
             }),
         );
     }
     if let (false, Some(mut world)) = (entries.is_empty(), last_world) {
         world.add_class_defaults(&vm);
+        world.progression_flags = flags.clone();
         let mut host = Bindings::new(world);
         let found = instances(&vm, &host.world);
         let mut runner = Runner::default();
