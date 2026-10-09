@@ -1602,6 +1602,7 @@ fn pod_shell(
             PerspectiveProjection::default().fov
         },
     );
+    let mut game_line = String::new();
     if game {
         // P2k: planets eyes from the game's presets, in planets display units; the globe
         // as the closed World transform places it.
@@ -1609,6 +1610,30 @@ fn pod_shell(
         let presets = pod_menu::CAMERA_PRESETS.map(|pair| pair.map(|p| m.transform_point3(p)));
         let globe_closed = planets_root(m, 0.).transform_point(g_centre);
         rig = rig.with_planets_camera(presets, globe_closed);
+        // Where the globe should show (16:9 fractions, radius in heights), for comparison
+        // with the capture: a mismatch points at rendering, not the model.
+        let r = g_size.max_element() / 2.;
+        let shown: Vec<String> = [0., 0.5, 1.]
+            .iter()
+            .map(|&t| {
+                let root = planets_root(m, t);
+                let local = rig.planet_turn(t).inverse()
+                    * (root.transform_point(g_centre) - rig.planet_eye(t));
+                let c = Mat4::perspective_rh(rig.fov, pod_menu::ASPECT_16_9, 0.001, 1000.)
+                    .project_point3(local);
+                let radius = r * root.scale.x / -local.z / (rig.fov / 2.).tan() / 2.;
+                format!(
+                    "t {t}: {:.3}/{:.3} r {radius:.3} h",
+                    (c.x + 1.) / 2.,
+                    (1. - c.y) / 2.
+                )
+            })
+            .collect();
+        game_line = format!(
+            "; globe expected (16:9, vfov {:.1} deg) {}",
+            rig.fov.to_degrees(),
+            shown.join(", ")
+        );
     }
     if let Some(c) = camera {
         let [from, to] = [
@@ -1636,7 +1661,7 @@ fn pod_shell(
         open.x,
         open.y,
         open.z
-    );
+    ) + &game_line;
     Ok((rig, shell_plan, line))
 }
 /// P2c: the `--select-guid` mesh (Sackboy) standing in the Pod shell at model scale
@@ -1928,7 +1953,7 @@ fn place_menu_planets(scene: &mut LevelScene, globe: usize) -> Result<String, St
             n += 1;
         }
         parts.push(format!(
-            "Thing {thing}: {n} items from ({:.0}, {:.0}, {:.0}) scale {stored:.3} to ({:.0}, {:.0}, {:.0}) scale {scale}",
+            "Thing {thing}: {n} items from ({:.0}, {:.0}, {:.0}) item scale {stored:.3} to ({:.0}, {:.0}, {:.0}) scale {scale}",
             from.x, from.y, from.z, to.x, to.y, to.z
         ));
     }
@@ -1956,6 +1981,7 @@ fn pod_dolly(
         if let Projection::Perspective(p) = &mut *projection {
             if p.fov != rig.0.fov {
                 p.fov = rig.0.fov;
+                println!("Pod camera: vertical FOV {:.1} deg", p.fov.to_degrees());
             }
         }
     }
