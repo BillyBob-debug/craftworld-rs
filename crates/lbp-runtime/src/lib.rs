@@ -102,6 +102,9 @@ pub struct LevelWorld {
     /// LBP2 game progression flags set on the profile (`IsLBP2GameProgressionFlagSet__i`).
     /// Empty = a fresh profile, on which PlanetsWorld starts its intro cutscene thread.
     pub progression_flags: BTreeSet<i32>,
+    /// `PodComputer.GetPodComputerInUse__`: a player is at the pod computer ("PuterInUse").
+    /// False by default (INFERRED: nobody at the computer when the Pod loads).
+    pub pod_computer_in_use: bool,
     /// The Planets object `PodComputer.GetPlanets__` returns.
     pub planets: Option<ObjectId>,
     /// Planet objects by `GetCrafteroid__i` index - 1, with their Thing.
@@ -633,9 +636,9 @@ impl World for LevelWorld {
     fn progression_flag(&mut self, flag: i32) -> Result<bool, String> {
         Ok(self.progression_flags.contains(&flag))
     }
-    /// Nobody is at the pod computer in the PC run (INFERRED default).
+    /// [`LevelWorld::pod_computer_in_use`].
     fn pod_computer_in_use(&mut self) -> Result<bool, String> {
-        Ok(false)
+        Ok(self.pod_computer_in_use)
     }
     /// No crash zoom in the PC run (INFERRED default).
     fn crash_zoom(&mut self) -> Result<bool, String> {
@@ -903,6 +906,10 @@ impl Runner {
 pub const CREATE: &str = "OnCreate__";
 /// Function the game runs on every scripted Thing each tick.
 pub const UPDATE: &str = "Update__";
+/// What a started script thread runs (`Thread.ThreadMain__`: OnStart, Run, OnFinish).
+pub const THREAD_MAIN: &str = "ThreadMain__";
+/// Thread starts handled in one step (threads can start threads).
+pub const MAX_THREAD_STARTS: usize = 256;
 /// Game logic rate (X1, CONFIRMED_FROM_LOCAL_DATA in RPCS3: 30 ticks per second).
 pub const TICK_HZ: u32 = 30;
 
@@ -971,6 +978,10 @@ pub struct StepReport {
     pub no_function: usize,
     pub no_class: usize,
     pub faults: Vec<(u32, String)>,
+    /// Script threads started, finished (`ThreadMain__` returned) and faulted this step.
+    pub threads_started: usize,
+    pub threads_done: usize,
+    pub thread_faults: Vec<String>,
 }
 
 impl StepReport {
@@ -993,9 +1004,17 @@ impl StepReport {
 /// start of the tick, in Thing order. A Thing whose script faults is not run again.
 /// A class listed in [`FRAME_ENTRIES`] runs that entry with its arguments instead of
 /// [`UPDATE`].
+///
+/// Script threads (`Thread.Start__` -> `Thread.StartImpl__(this)`, docs/script-vm.md):
+/// a thread started during a step runs `ThreadMain__` on the thread object at the end of
+/// that step, until its first `System.Yield`; each later tick resumes it once, after the
+/// Things' suspended scripts and before the updates (order INFERRED). A faulted thread
+/// is dropped.
 pub struct LevelScripts {
     pub instances: Vec<Instance>,
     runner: Runner,
+    /// Suspended script threads, in start order.
+    threads: Vec<(ObjectId, Task)>,
     /// Things stopped by a fault.
     pub stopped: BTreeSet<u32>,
     /// Ticks run so far.
@@ -1007,6 +1026,7 @@ impl LevelScripts {
         Self {
             instances: instances(vm, world),
             runner: Runner::default(),
+            threads: Vec::new(),
             stopped: BTreeSet::new(),
             ticks: 0,
         }
@@ -1017,9 +1037,79 @@ impl LevelScripts {
         self.runner.pending()
     }
 
+    /// Script threads waiting for the next tick.
+    pub fn threads(&self) -> usize {
+        self.threads.len()
+    }
+
     /// Runs [`CREATE`] on every instance; `budget` is per call.
     pub fn create(&mut self, vm: &mut Vm, host: &mut dyn Host, budget: u64) -> StepReport {
-        self.run_all(vm, host, Some(CREATE), budget, &BTreeSet::new())
+        let mut report = self.run_all(vm, host, Some(CREATE), budget, &BTreeSet::new());
+        self.start_threads(vm, host, budget, &mut report);
+        report
+    }
+
+    fn settle_thread(
+        &mut self,
+        vm: &Vm,
+        id: ObjectId,
+        step: Result<Step, lbp_script_vm::Fault>,
+        report: &mut StepReport,
+    ) {
+        match step {
+            Ok(Step::Done(_)) => report.threads_done += 1,
+            Ok(Step::Yielded(task)) => self.threads.push((id, task)),
+            Err(f) => {
+                let class = vm.class_of(id).map_or("?", |c| vm.class_name(c));
+                let site = vm.last_site().map_or(String::new(), |s| s.to_string());
+                report
+                    .thread_faults
+                    .push(format!("thread {class}: {f:?} at {site}"));
+            }
+        }
+    }
+
+    /// Runs threads started since the last step until their first yield; threads they
+    /// start run too, up to [`MAX_THREAD_STARTS`] per step.
+    fn start_threads(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut dyn Host,
+        budget: u64,
+        report: &mut StepReport,
+    ) {
+        let mut started = 0;
+        loop {
+            let new = vm.take_started_threads();
+            if new.is_empty() {
+                break;
+            }
+            for id in new {
+                started += 1;
+                if started > MAX_THREAD_STARTS {
+                    report
+                        .thread_faults
+                        .push("thread start limit reached".into());
+                    return;
+                }
+                report.threads_started += 1;
+                let Some(class) = vm.class_of(id) else {
+                    report
+                        .thread_faults
+                        .push(format!("thread object {} has no class", id.0));
+                    continue;
+                };
+                let mut b = budget;
+                let step = vm.start_registers(
+                    host,
+                    class,
+                    THREAD_MAIN,
+                    &[(0, Value::Object(Some(id)))],
+                    &mut b,
+                );
+                self.settle_thread(vm, id, step, report);
+            }
+        }
     }
 
     /// One game tick; `budget` is per call or resume.
@@ -1037,12 +1127,18 @@ impl LevelScripts {
                 report.add(thing, o);
             }
         }
+        for (id, task) in std::mem::take(&mut self.threads) {
+            let mut b = budget;
+            let step = vm.resume(host, task, &mut b);
+            self.settle_thread(vm, id, step, &mut report);
+        }
         let update = self.run_all(vm, host, None, budget, &busy);
         report.done += update.done;
         report.yielded += update.yielded;
         report.no_function += update.no_function;
         report.no_class += update.no_class;
         report.faults.extend(update.faults);
+        self.start_threads(vm, host, budget, &mut report);
         self.ticks += 1;
         report
     }

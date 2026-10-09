@@ -271,6 +271,9 @@ pub struct Vm {
     pub ambiguous_calls: usize,
     /// (class, function, absolute pc) of the instruction being executed.
     at: Option<(ClassId, usize, usize)>,
+    /// Thread objects passed to `Thread.StartImpl__`, for the host's scheduler
+    /// ([`Vm::take_started_threads`]).
+    started_threads: Vec<ObjectId>,
 }
 
 impl Default for Vm {
@@ -290,6 +293,7 @@ impl Vm {
             heap: Vec::new(),
             ambiguous_calls: 0,
             at: None,
+            started_threads: Vec::new(),
         }
     }
 
@@ -433,6 +437,19 @@ impl Vm {
             at = self.super_class(c);
         }
         out
+    }
+
+    /// Thread objects started since the last call, in start order.
+    pub fn take_started_threads(&mut self) -> Vec<ObjectId> {
+        std::mem::take(&mut self.started_threads)
+    }
+
+    /// Class of a script instance (None for arrays and unknown objects).
+    pub fn class_of(&self, object: ObjectId) -> Option<ClassId> {
+        match self.heap.get(object.0 as usize)? {
+            HeapObject::Instance { class, .. } => Some(*class),
+            HeapObject::Array(_) => None,
+        }
     }
 
     pub fn array(&self, object: ObjectId) -> Option<&[Value]> {
@@ -1216,9 +1233,18 @@ impl Vm {
                             let owner = owner_class
                                 .and_then(|c| self.native_owner(c, &function))
                                 .map_or(owner, |c| self.classes[c.0 as usize].name.clone());
-                            let v = host
-                                .call_native(&owner, &function, &values)
-                                .map_err(Fault::Native)?;
+                            // Script threads (docs/script-vm.md): `Thread.Start__` passes
+                            // only `this`; the scheduler runs `ThreadMain__` on it.
+                            let v = if owner == "Thread" && function == "StartImpl__" {
+                                match values.first() {
+                                    Some(Value::Object(Some(o))) => self.started_threads.push(*o),
+                                    _ => return Err(Fault::NullObject { pc }),
+                                }
+                                Value::Void
+                            } else {
+                                host.call_native(&owner, &function, &values)
+                                    .map_err(Fault::Native)?
+                            };
                             // A host that returns nothing for a typed call (stubs) gets the
                             // default of the instruction's return machine type.
                             let v = if v == Value::Void && ty != 0 {

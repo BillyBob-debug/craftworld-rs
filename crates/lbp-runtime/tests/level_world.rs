@@ -517,6 +517,12 @@ fn part6_camera_world_position_and_engine_state() {
         q(&mut w, "PodComputer", "GetPodComputerInUse__"),
         Ok(Value::Bool(false))
     );
+    w.pod_computer_in_use = true;
+    assert_eq!(
+        q(&mut w, "PodComputer", "GetPodComputerInUse__"),
+        Ok(Value::Bool(true))
+    );
+    w.pod_computer_in_use = false;
     assert_eq!(q(&mut w, "Game", "GetNumAvatars__"), Ok(Value::Int(0)));
     assert!(q(&mut w, "PodComputer", "GetPodComputer__").is_err());
     assert!(q(&mut w, "Gooey", "CreateGooey__i").is_err(), "arity");
@@ -568,4 +574,115 @@ fn part6_engine_objects_and_pod_computer() {
     assert_eq!(host.world.pod_computer(), Ok(Value::Object(Some(o))));
     assert!(host.world.gooey_pool.is_empty(), "no Gooey class loaded");
     assert!(host.world.create_gooey(0).is_err());
+}
+
+/// `Thread`: `Start__` passes `this` to the native `StartImpl__`; `ThreadMain__` writes 1,
+/// yields, writes 2.
+fn thread_class() -> Script {
+    let int = |r: u16, v: u64| u64::from(0x03u8) | u64::from(r) << 16 | v << 32;
+    Script {
+        class_name: "Thread".into(),
+        super_class: None,
+        type_refs: vec![ty(11, 0), ty(11, 1)],
+        field_refs: vec![],
+        function_refs: vec![
+            MemberRef {
+                type_ref: 0,
+                name: 5,
+            },
+            MemberRef {
+                type_ref: 1,
+                name: 2,
+            },
+        ],
+        function_defs: vec![function(0, 3, 0, 3), function(0, 4, 3, 9)],
+        bytecode: vec![
+            i(0xa3, 11, 0, 0, 0), // ARG @0 = this
+            i(0xa4, 0, 0, 0, 0),  // CALL Thread.StartImpl__ (native)
+            i(0xa5, 0, 0, 0, 0),
+            int(4, 1),
+            i(0xa2, 3, 0, 4, 0), // WRITE r4
+            i(0xa4, 0, 0, 1, 0), // CALL System.Yield
+            int(4, 2),
+            i(0xa2, 3, 0, 4, 0),
+            i(0xa5, 0, 0, 0, 0),
+        ],
+        strings_a: [
+            "Thread",
+            "System",
+            "Yield__",
+            "Start__",
+            lbp_runtime::THREAD_MAIN,
+            "StartImpl__",
+        ]
+        .map(String::from)
+        .to_vec(),
+        ..lamp()
+    }
+}
+
+/// `Spawner.OnCreate__`: `thing(this).t.Start()`.
+fn spawner() -> Script {
+    Script {
+        class_name: "Spawner".into(),
+        super_class: None,
+        type_refs: vec![ty(10, 0), ty(11, 1)],
+        field_refs: vec![MemberRef {
+            type_ref: 0,
+            name: 2,
+        }],
+        function_refs: vec![MemberRef {
+            type_ref: 1,
+            name: 3,
+        }],
+        function_defs: vec![function(0, 4, 0, 4)],
+        bytecode: vec![
+            i(0x95, 11, 4, 0, 0), // r4 = thing(r0).t
+            i(0xa3, 11, 4, 0, 0), // ARG @0 = r4
+            i(0xa4, 0, 0, 0, 0),  // CALL Thread.Start__
+            i(0xa5, 0, 0, 0, 0),
+        ],
+        strings_a: ["Spawner", "Thread", "t", "Start__", lbp_runtime::CREATE]
+            .map(String::from)
+            .to_vec(),
+        ..lamp()
+    }
+}
+
+#[test]
+fn script_thread_runs_until_yield_then_resumes_each_tick() {
+    let mut vm = Vm::default();
+    let thread = vm.load(thread_class(), Some(0xb25d));
+    vm.load(spawner(), Some(GUID));
+    let t = vm.instantiate(thread).unwrap();
+    let mut world = LevelWorld::from_things(&level());
+    world.things[1]
+        .members
+        .as_mut()
+        .unwrap()
+        .insert("t".into(), Value::Object(Some(t)));
+    let mut host = Bindings::new(world);
+    let mut level = LevelScripts::new(&vm, &host.world);
+    let created = level.create(&mut vm, &mut host, 1000);
+    assert_eq!((created.done, created.threads_started), (1, 1));
+    assert!(
+        created.thread_faults.is_empty(),
+        "{:?}",
+        created.thread_faults
+    );
+    assert_eq!(host.world.written, ["Int(1)"]);
+    assert_eq!(level.threads(), 1);
+    let tick = level.tick(&mut vm, &mut host, 1000);
+    assert_eq!((tick.threads_done, tick.threads_started), (1, 0));
+    assert_eq!(host.world.written, ["Int(1)", "Int(2)"]);
+    assert_eq!(level.threads(), 0);
+    // A thread object that is null faults the starting script, not the scheduler.
+    host.world.things[1]
+        .members
+        .as_mut()
+        .unwrap()
+        .insert("t".into(), Value::Object(None));
+    let mut again = LevelScripts::new(&vm, &host.world);
+    let created = again.create(&mut vm, &mut host, 1000);
+    assert_eq!((created.faults.len(), created.threads_started), (1, 0));
 }

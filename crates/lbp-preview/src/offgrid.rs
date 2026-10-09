@@ -629,6 +629,7 @@ pub(crate) fn load(
         texture_key,
         wrap: crate::TextureWrapping::uniform(true),
         selection,
+        runtime_texture: None,
     })))
 }
 

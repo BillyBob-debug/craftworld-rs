@@ -38,6 +38,8 @@ pub struct Asset {
     /// Effective display addressing; source_wrap_raw() retains guarded BORDER axes.
     pub wrap: crate::TextureWrapping,
     pub selection: DiffuseSelection,
+    /// P2e opt-in `--runtime-texture` replacement of a Solid group (None = from the material).
+    pub runtime_texture: Option<crate::runtime_texture::RuntimeOverride>,
 }
 pub struct SharedSampleAsset {
     pub texture: lbp_texture::Texture,
@@ -241,6 +243,10 @@ impl MaterialAsset {
     }
     fn source_label(&self) -> String {
         match self {
+            Self::Texture(a) if a.runtime_texture.is_some() => {
+                let o = a.runtime_texture.unwrap();
+                format!("{} (opt-in --runtime-texture; game binding unconfirmed) • UV0 untransformed, Repeat, untinted (inferred) • {}×{} {} • replaces solid diffuse {:?}", o.rule.label(), a.texture.header.width, a.texture.header.height, a.texture.header.pixel_format, o.replaced_color)
+            }
             Self::Texture(a) if a.selection.grid_graph.is_some() => crate::grid_graph::label(a),
             Self::Texture(a) if a.selection.blend_mask.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.blend_mask.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.selection.alpha_mix.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.alpha_mix.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.border_domain.map_or_else(||a.wrap.label(),|b|b.label()),a.selection.ignored_nodes,a.selection.ignored_wires),
@@ -320,6 +326,21 @@ fn grid_with_wrapping(
     uses_grid(selection)
         && primary == crate::TextureWrapping::uniform(true)
         && secondary == Some(crate::TextureWrapping::uniform(true))
+}
+/// D160: true when the nearest-grid bake of two grid-eligible samples would exceed the
+/// product grid (4096 per axis) or pixel budget, so the dual path is used instead.
+fn grid_over_budget(
+    dimensions: [[u32; 2]; 2],
+    sources: [&[u8]; 2],
+    transforms: [crate::SamplingTransform; 2],
+) -> bool {
+    let (Ok(sa), Ok(sb)) = (
+        crate::product::scales(transforms[0]),
+        crate::product::scales(transforms[1]),
+    ) else {
+        return false;
+    };
+    crate::product::extent(dimensions, sources, [sa, sb]).is_err_and(|e| e.contains("budget"))
 }
 pub(crate) fn sampler(graph: &GraphMetadata, index: usize) -> Result<SamplerSelection, String> {
     let sample = &graph.boxes[index];
@@ -1396,6 +1417,33 @@ pub(crate) fn load_primitive(
         options,
     )
 }
+/// Reads and inspects one material resource within the material input budget; also
+/// returns its bytes.
+pub(crate) fn read_material_graph(
+    source: &AttachedSource,
+    material_key: &LocationKey,
+    control: &LoadControl,
+) -> Result<(GraphInspection, Vec<u8>), String> {
+    control.check()?;
+    if material_key.size > lbp_resource::material::MAX_INPUT as u64 {
+        return Err("Material input budget exceeded".into());
+    }
+    let mut bytes = Vec::with_capacity(material_key.size as usize);
+    while bytes.len() < material_key.size as usize {
+        control.check()?;
+        let count = (material_key.size as usize - bytes.len()).min(4096);
+        let page = source
+            .read_hex_checked(material_key, bytes.len() as u64, count, control)?
+            .bytes;
+        if page.len() != count {
+            return Err("Short material page".into());
+        }
+        bytes.extend(page);
+    }
+    let graph = lbp_resource::material::inspect_graph(&bytes, || control.check().is_err())
+        .map_err(|e| e.to_string())?;
+    Ok((graph, bytes))
+}
 /// Material selection and loading for `vertices` coordinates from `uv`.
 pub(crate) fn load_material(
     source: &AttachedSource,
@@ -1406,24 +1454,7 @@ pub(crate) fn load_material(
     control: &LoadControl,
     options: crate::PreviewOptions,
 ) -> Result<MaterialAsset, String> {
-    control.check()?;
-    if material_key.size > lbp_resource::material::MAX_INPUT as u64 {
-        return Err("Material input budget exceeded".into());
-    }
-    let mut bytes = Vec::with_capacity(material_key.size as usize);
-    while bytes.len() < material_key.size as usize {
-        control.check()?;
-        let count = (material_key.size as usize - bytes.len()).min(4096);
-        let page = source
-            .read_hex_checked(&material_key, bytes.len() as u64, count, control)?
-            .bytes;
-        if page.len() != count {
-            return Err("Short material page".into());
-        }
-        bytes.extend(page);
-    }
-    let mut graph = lbp_resource::material::inspect_graph(&bytes, || control.check().is_err())
-        .map_err(|e| e.to_string())?;
+    let (mut graph, bytes) = read_material_graph(source, &material_key, control)?;
     let original_graph = graph.graph.clone();
     let instance_projection = if let Some(color) = options.instance_color {
         // D105: falls back to the plain substitution for the graph evaluator.
@@ -1512,7 +1543,7 @@ pub(crate) fn load_material(
             )
         })
         .transpose()?;
-    let use_grid = grid_with_wrapping(selection, wrap, second_wrap)
+    let mut use_grid = grid_with_wrapping(selection, wrap, second_wrap)
         && instance_projection
             .as_ref()
             .is_none_or(|p| p.alpha_subtract_samplers.is_empty() && p.nested_tint.is_none());
@@ -1541,7 +1572,7 @@ pub(crate) fn load_material(
         instance_projection.as_ref(),
         || control.check().is_err(),
     )?;
-    let border_domain = crate::BorderDomain::confirm(
+    let mut border_domain = crate::BorderDomain::confirm(
         [
             graph
                 .material
@@ -1618,6 +1649,44 @@ pub(crate) fn load_material(
             || control.check().is_err(),
         )
         .map_err(|e| e.to_string())?;
+        // D160: a plain two-texture product (no MIX/BLEND/ADD) whose authored LCM grid
+        // exceeds the bake budget samples both textures independently on the dual path,
+        // as off-grid products do (D50/D99), instead of failing. Per-texel products are
+        // the same function; only the filtering differs (linear, not nearest-grid).
+        let plain_product = selection.texture_alpha_mix.is_none()
+            && selection.texture_blend.is_none()
+            && selection.texture_add.is_none()
+            && selection.blend.is_none();
+        if use_grid
+            && plain_product
+            && grid_over_budget(
+                [
+                    [texture.header.width, texture.header.height],
+                    [second_texture.header.width, second_texture.header.height],
+                ],
+                [&texture.rgba, &second_texture.rgba],
+                [selection.uv_transform, second.uv_transform],
+            )
+        {
+            use_grid = false;
+            sampling_uv = selection
+                .uv_transform
+                .sampling(&uv, || control.check().is_err())?;
+            crate::instance::subtract_alpha(
+                &mut sampling_uv,
+                selection.sample_index,
+                instance_projection.as_ref(),
+                || control.check().is_err(),
+            )?;
+            border_domain = crate::BorderDomain::confirm(
+                [
+                    prefix.wrap_s_raw.get(selection.slot).copied(),
+                    prefix.wrap_t_raw.get(selection.slot).copied(),
+                ],
+                &sampling_uv,
+                || control.check().is_err(),
+            )?;
+        }
         if use_grid {
             let (width, height, rgba) = if let Some(mix) = selection.texture_alpha_mix {
                 crate::product::pixels_alpha_mixed(
@@ -1742,6 +1811,7 @@ pub(crate) fn load_material(
         texture_key,
         wrap,
         selection,
+        runtime_texture: None,
     })))
 }
 
@@ -2665,6 +2735,39 @@ mod tests {
             (4, true)
         );
         assert_eq!(matrix.animation_base.unwrap().subtype_raw, 1);
+    }
+    #[test]
+    fn product_grid_over_budget_falls_back_only_on_budget() {
+        // D160 (Pod globe sea 0001d257): 512 x 12 against 512 x 1 is a 6144-wide grid.
+        let st = |x: f32| {
+            crate::SamplingTransform::ScaleOffset(crate::UvTransform {
+                bits: [x, x, 0., 0.].map(f32::to_bits),
+            })
+        };
+        let a = vec![0u8; 512 * 512 * 4];
+        let small = vec![0u8; 8 * 8 * 4];
+        assert!(grid_over_budget(
+            [[512, 512], [512, 512]],
+            [&a, &a],
+            [st(12.), st(1.)]
+        ));
+        assert!(!grid_over_budget(
+            [[512, 512], [512, 512]],
+            [&a, &a],
+            [st(2.), st(1.)]
+        ));
+        // Malformed extents are not a budget fallback.
+        assert!(!grid_over_budget(
+            [[512, 512], [8, 9]],
+            [&a, &small],
+            [st(12.), st(1.)]
+        ));
+        // Non-integer scales never select the grid, so no fallback decision.
+        assert!(!grid_over_budget(
+            [[512, 512], [512, 512]],
+            [&a, &a],
+            [st(4.4), st(1.)]
+        ));
     }
     #[test]
     fn two_textures_and_static_color_under_two_multiplies_select_a_tinted_product() {

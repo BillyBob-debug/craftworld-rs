@@ -273,8 +273,12 @@ pub struct PartData {
     pub plan_ref: Option<Descriptor>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub decorations: Vec<Decoration>,
-    /// D152: STICKERS decals (main array plus costume arrays), counted only.
+    /// D152: STICKERS decals (main array plus costume arrays), counted.
     pub sticker_decals: usize,
+    /// D160: main STICKERS decal array with every serialized field (costume arrays are
+    /// counted in `sticker_decals` only).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub stickers: Vec<Decal>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub world: Option<World>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -508,6 +512,26 @@ pub struct Decoration {
     pub plan_guid: Option<u32>,
 }
 
+/// D160: one STICKERS decal. `u`, `v` is the decal centre and `xvec` / `yvec` its half
+/// axes, all in the owner's surface (UV) space; see docs/d160-globe-material-and-stickers.md.
+#[derive(Debug, Clone, Serialize)]
+pub struct Decal {
+    pub texture: Option<Descriptor>,
+    pub u: f32,
+    pub v: f32,
+    pub xvec: [f32; 2],
+    pub yvec: [f32; 2],
+    /// Packed 16-bit colour (layout unverified).
+    pub color: i16,
+    pub kind: i8,
+    pub metadata_index: i16,
+    pub num_metadata: Option<i16>,
+    pub placed_by: i16,
+    pub play_mode_frame: i32,
+    pub scorch_mark: bool,
+    pub plan: Option<Descriptor>,
+}
+
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct World {
     pub things: Vec<Option<usize>>,
@@ -694,7 +718,11 @@ fn part_body(
             r.bool()?;
             r.f32()?;
         }
-        "STICKERS" => things.list[me].data.sticker_decals = stickers(r)?,
+        "STICKERS" => {
+            let (main, total) = stickers(r)?;
+            things.list[me].data.sticker_decals = total;
+            things.list[me].data.stickers = main;
+        }
         "DECORATIONS" => {
             let n = r.count(4)?;
             let mut out = Vec::with_capacity(n.min(4096));
@@ -1967,33 +1995,55 @@ fn decoration(r: &mut Reader, things: &mut Things) -> Result<Decoration> {
     })
 }
 
-fn decal(r: &mut Reader) -> Result<()> {
+fn decal(r: &mut Reader) -> Result<Decal> {
     let v = r.rev.version();
-    r.resource(false)?;
-    r.skip_f32(6)?;
-    r.i16()?;
-    r.i8()?;
-    r.i16()?;
-    if v <= 0x3ba {
-        r.i16()?;
-    }
-    r.i16()?;
-    r.i32()?;
-    r.bool()?;
-    if v >= 0x34c {
-        r.resource(true)?;
+    let texture = r.resource(false)?;
+    let u = r.f32()?;
+    let vv = r.f32()?;
+    let xvec = [r.f32()?, r.f32()?];
+    let yvec = [r.f32()?, r.f32()?];
+    let color = r.i16()?;
+    let kind = r.i8()?;
+    let metadata_index = r.i16()?;
+    let num_metadata = if v <= 0x3ba { Some(r.i16()?) } else { None };
+    let placed_by = r.i16()?;
+    let play_mode_frame = r.i32()?;
+    let scorch_mark = r.bool()?;
+    let plan = if v >= 0x34c {
+        r.resource(true)?
     } else {
-        r.guid()?;
-    }
-    Ok(())
+        r.guid()?.map(|g| Descriptor {
+            flags: None,
+            kind_byte: 2,
+            guid: Some(g),
+            sha1: None,
+        })
+    };
+    Ok(Decal {
+        texture,
+        u,
+        v: vv,
+        xvec,
+        yvec,
+        color,
+        kind,
+        metadata_index,
+        num_metadata,
+        placed_by,
+        play_mode_frame,
+        scorch_mark,
+        plan,
+    })
 }
 
-fn stickers(r: &mut Reader) -> Result<usize> {
+/// Returns the main decal array and the total decal count (main plus costume arrays).
+fn stickers(r: &mut Reader) -> Result<(Vec<Decal>, usize)> {
     let v = r.rev.version();
     let n = r.count(1)?;
     let mut decals = n;
+    let mut main = Vec::with_capacity(n.min(4096));
     for _ in 0..n {
-        decal(r)?;
+        main.push(decal(r)?);
     }
     let costumes = r.count(1)?;
     for _ in 0..costumes {
@@ -2017,7 +2067,7 @@ fn stickers(r: &mut Reader) -> Result<usize> {
             r.resource(false)?;
         }
     }
-    Ok(decals)
+    Ok((main, decals))
 }
 
 fn level_settings(r: &mut Reader) -> Result<LevelSettings> {

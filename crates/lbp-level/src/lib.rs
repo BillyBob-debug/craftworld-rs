@@ -9,6 +9,7 @@
 //! Rules, evidence labels and limits: docs/d107-level-reader.md. Independent
 //! implementation from specification notes; no community reader code copied.
 pub mod bevel;
+pub mod decal_mesh;
 pub mod item_details;
 pub mod level;
 pub mod parts;
