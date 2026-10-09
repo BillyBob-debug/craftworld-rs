@@ -6,14 +6,17 @@
 //! rejected shapes by reason) and runs it headless for N game ticks at 30 Hz (default 90,
 //! three seconds). Reports, per level and in total, how far bodies moved from where the
 //! level stored them: bodies moved more than 1 and more than 100 world units, the largest
-//! move, and bodies whose position became non-finite. Counting unit: SHAPE Thing (scene)
+//! move, and bodies whose position became non-finite. Fixed materials: physical materials
+//! whose MAP path names dark matter (`dark_matter`/`darkmatter`, case-insensitive) make
+//! their body static; the report lists the paths matched and the most used shape materials
+//! so the rule can be checked. Counting unit: SHAPE Thing (scene)
 //! and BODY Thing with a collider (motion). Counts only; no game bytes. Output: a NEW JSON
 //! file under ignored `local-analysis/`.
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
-use lbp_sim::{build_scene, spawn_scene, PhysicsScene, SimPlugin, ThingIndex, TICK_HZ};
+use lbp_sim::{build_scene_with, spawn_scene, PhysicsScene, SimPlugin, ThingIndex, TICK_HZ};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
@@ -100,6 +103,28 @@ fn run() -> Result<(), String> {
     let control = LoadControl::default();
     let catalog = lbp_catalog::load(Path::new(args[1]), &control)?;
     let source = AttachedSource::attach(Path::new(args[2]), &catalog, &control)?;
+    let mut paths = BTreeMap::<u32, String>::new();
+    for r in &catalog.snapshot.resources {
+        if let Ok(g) = u32::from_str_radix(r.map_row.guid.trim(), 16) {
+            paths.entry(g).or_insert_with(|| r.map_row.path.clone());
+        }
+    }
+    let fixed_guids: std::collections::BTreeSet<u32> = paths
+        .iter()
+        .filter(|(_, p)| {
+            let p = p.to_ascii_lowercase().replace(' ', "_");
+            p.ends_with(".mat") && (p.contains("dark_matter") || p.contains("darkmatter"))
+        })
+        .map(|(g, _)| *g)
+        .collect();
+    let fixed =
+        |d: &lbp_level::serial::Descriptor| d.guid.is_some_and(|g| fixed_guids.contains(&g));
+    let material_name = |d: &lbp_level::serial::Descriptor| match d.guid {
+        Some(g) => paths.get(&g).cloned().unwrap_or_else(|| format!("g{g:x}")),
+        None => "by hash".to_string(),
+    };
+    let mut materials = BTreeMap::<String, usize>::new();
+    let (mut fixed_bodies, mut nested_bodies) = (0, 0);
     let mut keys = Vec::new();
     if args[3] == "--all" {
         let mut hashes = BTreeMap::new();
@@ -136,8 +161,15 @@ fn run() -> Result<(), String> {
             not_read += 1;
             continue;
         };
-        let scene = build_scene(&report.things);
+        for t in &report.things {
+            if let Some(m) = t.data.shape.as_ref().and_then(|s| s.material.as_ref()) {
+                *materials.entry(material_name(m)).or_default() += 1;
+            }
+        }
+        let scene = build_scene_with(&report.things, &fixed);
         let r = &scene.report;
+        fixed_bodies += r.fixed_bodies;
+        nested_bodies += r.nested_bodies;
         shapes += r.shapes;
         dynamic += r.dynamic;
         static_ += r.static_;
@@ -156,10 +188,15 @@ fn run() -> Result<(), String> {
             "stopped": report.stop.is_some(),
             "shapes": r.shapes, "dynamic": r.dynamic, "static": r.static_,
             "not_collidable": r.not_collidable, "rejected": r.rejected,
+            "fixed_bodies": r.fixed_bodies, "nested_bodies": r.nested_bodies,
             "bodies": m.bodies, "moved_over_1": m.moved_1, "moved_over_100": m.moved_100,
             "non_finite": m.non_finite, "max_move": m.max_move,
         }));
     }
+    let mut top: Vec<(&String, &usize)> = materials.iter().collect();
+    top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
+    top.truncate(40);
+    let fixed_paths: Vec<&String> = fixed_guids.iter().filter_map(|g| paths.get(g)).collect();
     let doc = serde_json::json!({
         "schema_version": 1,
         "unit": "SHAPE Thing (scene); BODY Thing with a collider (motion), world units",
@@ -169,6 +206,9 @@ fn run() -> Result<(), String> {
         "levels_not_read": not_read,
         "shapes": shapes, "dynamic": dynamic, "static": static_,
         "not_collidable": not_collidable, "rejected": rejected,
+        "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
+        "fixed_material_paths": fixed_paths,
+        "shape_materials_top40": top,
         "bodies": total.bodies, "moved_over_1": total.moved_1,
         "moved_over_100": total.moved_100, "non_finite": total.non_finite,
         "max_move": total.max_move,
@@ -183,10 +223,12 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     println!(
         "levels {} (not read {not_read}); shapes {shapes}: dynamic {dynamic}, static {static_}, \
-         not collidable {not_collidable}, rejected {}; after {ticks} ticks: bodies {}, moved >1 {}, \
+         not collidable {not_collidable}, rejected {}; fixed bodies {fixed_bodies} \
+         ({} dark-matter materials), nested bodies {nested_bodies}; after {ticks} ticks: bodies {}, moved >1 {}, \
          >100 {}, non-finite {}, max move {:.1}",
         levels.len(),
         rejected.values().sum::<usize>(),
+        fixed_paths.len(),
         total.bodies,
         total.moved_1,
         total.moved_100,

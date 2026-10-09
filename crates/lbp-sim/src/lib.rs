@@ -14,7 +14,7 @@ use bevy::prelude::*;
 
 pub mod scene;
 
-pub use scene::{build_scene, PhysicsScene};
+pub use scene::{build_scene, build_scene_with, PhysicsScene};
 
 /// Game ticks per second (X1, CONFIRMED_FROM_LOCAL_DATA, emulated; docs/runtime-research.md).
 pub const TICK_HZ: f64 = 30.0;
@@ -129,7 +129,11 @@ pub fn spawn_scene(commands: &mut Commands, scene: &PhysicsScene) -> Vec<Entity>
             commands
                 .spawn((
                     ThingIndex(b.thing),
-                    RigidBody::Dynamic,
+                    if b.fixed {
+                        RigidBody::Static
+                    } else {
+                        RigidBody::Dynamic
+                    },
                     transform(&b.frame),
                     LinearVelocity(Vector::from(b.velocity)),
                     AngularVelocity(b.angular_velocity),
