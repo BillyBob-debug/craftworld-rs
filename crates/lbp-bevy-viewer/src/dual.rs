@@ -9,6 +9,8 @@
 //! P2l: `light_dir.w` = 2 selects the opt-in LBP-shaped factor (docs/p2l-lbp-lighting.md).
 //! P2q: under that factor, an optional bump map on UV1 tilts the normal and a static
 //! gloss colour adds a specular term (docs/p2q-bump-gloss.md).
+//! D189: `graph_info.x` > 0 evaluates a D100 graph per fragment over raw UV0/UV1
+//! (docs/d189-mixed-uv-graphs.md); graph textures 0..2 reuse bindings 100/103/105.
 use bevy::{
     pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
@@ -67,6 +69,25 @@ pub struct SecondTexture {
     /// P2t: game fog colour (output space).
     #[uniform(119)]
     lbp_fog_color: Vec4,
+    /// D189: graph textures 3..5 (0..2 are `image`, `third_image`, `fourth_image`).
+    #[texture(120)]
+    #[sampler(121)]
+    pub graph_image3: Option<Handle<Image>>,
+    #[texture(122)]
+    #[sampler(123)]
+    pub graph_image4: Option<Handle<Image>>,
+    #[texture(124)]
+    #[sampler(125)]
+    pub graph_image5: Option<Handle<Image>>,
+    /// D189: x = step count (0 = off).
+    #[uniform(126)]
+    graph_info: UVec4,
+    /// D189: `lbp_preview::FragmentStep::code` per step.
+    #[uniform(127)]
+    graph_code: [UVec4; 32],
+    /// D189: `lbp_preview::FragmentStep::param` per step.
+    #[uniform(128)]
+    graph_param: [Vec4; 32],
     /// D121: generated normals passed `adapter::normal_trust`; otherwise stays unlit.
     pub normals_trusted: bool,
 }
@@ -118,6 +139,35 @@ pub fn enable_fourth(
         relative.offset[0],
         relative.offset[1],
     );
+}
+/// D189: per-fragment graph over raw UV0 (`uv`) and UV1 (`uv_b`); `images[k]` is graph
+/// texture k (at most 6), `steps` the encoded D100 program (root last, at most 32).
+pub fn enable_graph(
+    material: &mut ViewerMaterial,
+    images: Vec<Handle<Image>>,
+    steps: &[lbp_preview::FragmentStep],
+) -> Result<(), String> {
+    if images.is_empty()
+        || images.len() > lbp_preview::MAX_FRAGMENT_TEXTURES
+        || steps.is_empty()
+        || steps.len() > lbp_preview::MAX_FRAGMENT_STEPS
+    {
+        return Err("Invalid: per-fragment graph budget".into());
+    }
+    let ext = &mut material.extension;
+    let mut images = images.into_iter();
+    ext.image = images.next();
+    ext.third_image = images.next();
+    ext.fourth_image = images.next();
+    ext.graph_image3 = images.next();
+    ext.graph_image4 = images.next();
+    ext.graph_image5 = images.next();
+    for (k, step) in steps.iter().enumerate() {
+        ext.graph_code[k] = UVec4::from_array(step.code);
+        ext.graph_param[k] = Vec4::from_array(step.param);
+    }
+    ext.graph_info = UVec4::new(steps.len() as u32, 0, 0, 0);
+    Ok(())
 }
 /// P2q: bump map sampled on UV1, offset (.yw - 0.502) × `level` (docs/p2q-bump-gloss.md).
 pub fn enable_bump(material: &mut ViewerMaterial, image: Handle<Image>, level: f32) {
@@ -209,6 +259,73 @@ struct BumpInput {
 }
 @group(#{MATERIAL_BIND_GROUP}) @binding(118) var<uniform> lbp_fog: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(119) var<uniform> lbp_fog_color: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(120) var graph_image3: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(121) var graph_sampler3: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(122) var graph_image4: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(123) var graph_sampler4: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(124) var graph_image5: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(125) var graph_sampler5: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(126) var<uniform> graph_info: vec4<u32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(127) var<uniform> graph_code: array<vec4<u32>, 32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(128) var<uniform> graph_param: array<vec4<f32>, 32>;
+// D189 graph texture k at uv with explicit gradients (non-uniform control flow).
+fn graph_texture(k: u32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec4<f32> {
+    switch k {
+        case 0u: { return textureSampleGrad(second_image, second_sampler, uv, gx, gy); }
+        case 1u: { return textureSampleGrad(third_image, third_sampler, uv, gx, gy); }
+        case 2u: { return textureSampleGrad(fourth_image, fourth_sampler, uv, gx, gy); }
+        case 3u: { return textureSampleGrad(graph_image3, graph_sampler3, uv, gx, gy); }
+        case 4u: { return textureSampleGrad(graph_image4, graph_sampler4, uv, gx, gy); }
+        default: { return textureSampleGrad(graph_image5, graph_sampler5, uv, gx, gy); }
+    }
+}
+// D189 input: step (code >> 3), lane 0 = all four, 1..4 = broadcast lane - 1.
+fn graph_lane(v: vec4<f32>, code: u32) -> vec4<f32> {
+    let lane = code & 7u;
+    if lane == 0u {
+        return v;
+    }
+    return vec4<f32>(v[min(lane - 1u, 3u)]);
+}
+// D189 per-fragment D100 program (mirrors lbp_preview::evaluate_fragment): linear texels,
+// MULTIPLY/ADD per lane, MIX (r - l) * f + l, BLEND l + (r - l) * clamp((m.x - p0)/(p1 - p0)).
+fn graph_color(uv0: vec2<f32>, uv1: vec2<f32>, d0: vec4<f32>, d1: vec4<f32>) -> vec4<f32> {
+    var values: array<vec4<f32>, 32>;
+    let count = min(graph_info.x, 32u);
+    for (var k = 0u; k < count; k++) {
+        let code = graph_code[k];
+        let p = graph_param[k];
+        let a = graph_lane(values[min(code.y >> 3u, 31u)], code.y);
+        let b = graph_lane(values[min(code.z >> 3u, 31u)], code.z);
+        let c = graph_lane(values[min(code.w >> 3u, 31u)], code.w);
+        var v = vec4<f32>(0.0);
+        switch code.x {
+            case 1u: {
+                var base = uv0;
+                var d = d0;
+                if code.z == 1u {
+                    base = uv1;
+                    d = d1;
+                }
+                v = graph_texture(code.y, base * p.xy + p.zw, d.xy * p.xy, d.zw * p.xy);
+            }
+            case 2u: { v = p; }
+            case 3u: { v = a * b; }
+            case 4u: { v = a + b; }
+            case 5u: {
+                var f = c;
+                if code.w == 0xffffffffu {
+                    f = vec4<f32>(p.x);
+                }
+                v = (b - a) * f + a;
+            }
+            case 6u: { v = (b - a) * clamp((c.x - p.x) / (p.y - p.x), 0.0, 1.0) + a; }
+            default: {}
+        }
+        values[k] = v;
+    }
+    return values[max(count, 1u) - 1u];
+}
 // D121 preview Lambert factor (mirrors lighting::PreviewLight::factor/facing_normal).
 // Double-sided: the smooth normal is turned into the hemisphere of the face normal that
 // points at the viewer, so back faces and mirrored instances light like front faces.
@@ -311,6 +428,17 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
     }
 #endif
     var color = pbr.material.base_color;
+#ifdef VERTEX_UVS_A
+#ifdef VERTEX_UVS_B
+    // D189: gradients taken here, in uniform control flow, for textureSampleGrad.
+    let graph_d0 = vec4<f32>(dpdx(in.uv), dpdy(in.uv));
+    let graph_d1 = vec4<f32>(dpdx(in.uv_b), dpdy(in.uv_b));
+    if graph_info.x > 0u {
+        let g = graph_color(in.uv, in.uv_b, graph_d0, graph_d1);
+        color = vec4<f32>(clamp(g.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    }
+#endif
+#endif
 #ifdef VERTEX_UVS_B
     if enabled.x > 0.0 {
         let second = textureSample(second_image, second_sampler, in.uv_b);
@@ -404,6 +532,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
         assert!(body.contains("lit_normal(shading, face, pbr.V, bump)"));
         assert!(body.contains("gloss_term(n, pbr.V, factor)"));
         assert!(body.contains("rgb = lbp_output(rgb, depth);"));
+        assert!(body.contains("graph_color(in.uv, in.uv_b, graph_d0, graph_d1)"));
         let source = format!("{STUBS}{body}");
         let module = naga::front::wgsl::parse_str(&source)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));

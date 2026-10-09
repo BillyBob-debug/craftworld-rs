@@ -146,6 +146,12 @@ impl MeshView {
                         match loaded.linked {
                             Some(Ok(asset)) => {
                                 let material = asset;
+                                if material.texture().is_some_and(|a| a.fragment.is_some()) {
+                                    // D189: no per-fragment graph path here (docs/d189-mixed-uv-graphs.md).
+                                    self.texture_error="Unsupported in legacy viewer: per-fragment UV0/UV1 graph; use Bevy viewer".into();
+                                    println!("{}", self.texture_error);
+                                    return;
+                                }
                                 if material.texture().is_some_and(|a| a.dual.is_some()) {
                                     self.texture_error="Unsupported in legacy viewer: independent two-texture sampling; use Bevy viewer".into();
                                     println!("{}", self.texture_error);

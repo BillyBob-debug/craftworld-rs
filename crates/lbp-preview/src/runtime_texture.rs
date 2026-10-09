@@ -325,6 +325,7 @@ fn replacement(
         fourth: None,
         third: None,
         dual: None,
+        fragment: None,
         product: None,
         tinted_rgba: None,
         sampling_uv: sampling,

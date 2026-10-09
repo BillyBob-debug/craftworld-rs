@@ -14,6 +14,12 @@ pub use blend_mask::{
     TextureBlendMask, BLEND_THRESHOLD_BITS,
 };
 mod border_domain;
+mod fragment;
+pub use fragment::{
+    evaluate as evaluate_fragment, FragmentGraph, FragmentStep, FragmentTexture, FRAGMENT_ADD,
+    FRAGMENT_BLEND, FRAGMENT_MIX, FRAGMENT_MULTIPLY, FRAGMENT_SAMPLE, FRAGMENT_VALUE,
+    FRAGMENT_WEIGHT, MAX_FRAGMENT_STEPS, MAX_FRAGMENT_TEXTURES,
+};
 mod grid_graph;
 mod offgrid;
 pub use grid_graph::{

@@ -777,6 +777,16 @@ pub(crate) fn load(
     if sources.len() != usize::from(marker.sources) {
         return Err("Invalid: graph evaluator program changed".into());
     }
+    if let Some(crate::OffGrid::Fragment { .. }) = marker.off_grid {
+        return crate::fragment::load(
+            &cx,
+            material_key,
+            instance_projection,
+            selection,
+            &program,
+            &sources,
+        );
+    }
     if let Some(kind) = marker.off_grid {
         return crate::offgrid::load(
             &cx,
@@ -878,6 +888,7 @@ pub(crate) fn load(
         wrap,
         selection,
         runtime_texture: None,
+        fragment: None,
     })))
 }
 
@@ -1003,13 +1014,19 @@ mod tests {
             GraphOp::Blend { inputs: [a, b, m], .. }
                 if a.node == 4 && b.node == 3 && m.node == 2 && m.lane.is_none()
         ));
-        // Off the grid (different channel) the evaluable graph reports why.
+        // Off the grid (different channel): D189 per-fragment evaluation.
         let mut off = blend_of_product();
         off.boxes[5].parameters_raw[4] = 1;
         assert_eq!(
-            crate::select_diffuse(&off).unwrap_err(),
-            "Unsupported: BLEND inputs must be COLOR or texture samples (graph evaluator: \
-             off-grid samplers mix UV channels outside a separable product)"
+            crate::select_diffuse(&off)
+                .unwrap()
+                .grid_graph
+                .unwrap()
+                .off_grid,
+            Some(crate::OffGrid::Fragment {
+                samples: 3,
+                textures: 3
+            })
         );
         // An unknown box keeps the fixed route's reason.
         let mut unknown = blend_of_product();

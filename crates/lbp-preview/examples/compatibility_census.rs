@@ -131,6 +131,11 @@ fn run() -> Result<(), String> {
                             group["wrap_frontend"] = json!("Bevy");
                             group["independent_sampling"] = json!({"frontend":"Bevy","second_wrap_uv_raw":dual.wrap.raw(),"second_uv_channel":asset.texture().unwrap().selection.second_sample.unwrap().uv_channel,"second_texture":{"path":dual.texture_key.path,"offset":dual.texture_key.offset,"size":dual.texture_key.size},"filter":"linear","second_extent":[dual.texture.header.width,dual.texture.header.height]});
                         }
+                        if let Some(f) = asset.texture().and_then(|a| a.fragment.as_ref()) {
+                            // D189: Bevy-only per-fragment graph (docs/d189-mixed-uv-graphs.md).
+                            group["wrap_frontend"] = json!("Bevy");
+                            group["fragment_graph"] = json!({"frontend":"Bevy","steps":f.steps.len(),"textures":f.textures.len() + 1,"filter":"linear","policy":"per_fragment_preview_approximation"});
+                        }
                         if let Some(third) = asset.texture().and_then(|a| a.third.as_ref()) {
                             group["third_sampling"] = json!({"frontend":"Bevy","shared_with":"second_sampler_coordinates","uv_channel":asset.texture().unwrap().selection.third_sample.unwrap().uv_channel,"texture":{"path":third.texture_key.path,"offset":third.texture_key.offset,"size":third.texture_key.size},"extent":[third.texture.header.width,third.texture.header.height],"filter":"linear"});
                         }

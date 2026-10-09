@@ -26,6 +26,9 @@ const MAX_SUBSAMPLES: u64 = 4;
 const MAX_TRANSFORM: f64 = 4096.;
 /// Integer test tolerance for `period × scale`.
 const PERIOD_EPSILON: f64 = 1e-4;
+/// D103 refusal that D189 takes to the per-fragment path.
+const NOT_SEPARABLE: &str =
+    "Unsupported: graph evaluator off-grid samplers mix UV channels outside a separable product";
 /// Factor visits when flattening the root product.
 const MAX_FACTORS: usize = 64;
 
@@ -43,6 +46,9 @@ pub enum OffGrid {
         second_channel: u8,
         second_period: [u8; 2],
     },
+    /// D189 (docs/d189-mixed-uv-graphs.md): samples mix UV0 and UV1 outside a separable
+    /// product; no bake, the Bevy viewer evaluates the D100 steps per fragment.
+    Fragment { samples: u8, textures: u8 },
 }
 impl OffGrid {
     pub fn label(self) -> String {
@@ -61,6 +67,12 @@ impl OffGrid {
                  channel, UV{channel} factors on a {period:?} tile × UV{second_channel} \
                  factors on a {second_period:?} tile (bilinear, linear light; each factor \
                  clamped to 0..1 before the dual multiply)"
+            ),
+            Self::Fragment { samples, textures } => format!(
+                "preview approximation (not game behaviour): UV0/UV1 graph evaluated per \
+                 fragment in the Bevy viewer ({samples} samples over {textures} textures, \
+                 viewer bilinear filtering, linear light, clamped to 0..1 at output; legacy \
+                 viewer refuses)"
             ),
         }
     }
@@ -82,7 +94,7 @@ struct Target {
     sources: Vec<usize>,
 }
 
-fn scale_offset(source: &Source) -> Result<[f64; 4], String> {
+pub(crate) fn scale_offset(source: &Source) -> Result<[f64; 4], String> {
     let crate::SamplingTransform::ScaleOffset(t) = source.transform else {
         return Err(
             "Unsupported: graph evaluator off-grid bake needs scale/offset samplers".into(),
@@ -190,13 +202,7 @@ fn targets(
                 0 => constants.push((p, lane)),
                 1 => groups[0].push((p, lane)),
                 2 => groups[1].push((p, lane)),
-                _ => {
-                    return Err(
-                        "Unsupported: graph evaluator off-grid samplers mix UV channels \
-                                outside a separable product"
-                            .into(),
-                    )
-                }
+                _ => return Err(NOT_SEPARABLE.into()),
             }
         }
     } else {
@@ -287,7 +293,12 @@ pub(crate) fn plan(
     sources: &[Source],
     primary_channel: usize,
 ) -> Result<Plan, String> {
-    let (targets, second_sample) = targets(program, sources, primary_channel)?;
+    let (targets, second_sample) = match targets(program, sources, primary_channel) {
+        Ok(t) => t,
+        // D189: not separable by channel; evaluated per fragment instead of baked.
+        Err(e) if e == NOT_SEPARABLE => return crate::fragment::plan(program, sources),
+        Err(e) => return Err(e),
+    };
     let repeat = vec![[1, 1]; sources.len()];
     let first = target_period(&targets[0], sources, &repeat)?;
     let kind = match targets.get(1) {
@@ -507,6 +518,7 @@ pub(crate) fn load(
             second_period,
             ..
         } => vec![period, second_period],
+        OffGrid::Fragment { .. } => return Err("Invalid: graph evaluator fragment bake".into()),
     };
     if periods != expected {
         return Err("Unsupported: graph evaluator off-grid Mirror changes the bake period".into());
@@ -631,11 +643,21 @@ pub(crate) fn load(
         wrap: crate::TextureWrapping::uniform(true),
         selection,
         runtime_texture: None,
+        fragment: None,
     })))
 }
 
 /// Display label for an off-grid asset.
 pub(crate) fn label(a: &crate::Asset, g: crate::GridGraph) -> String {
+    if let Some(f) = &a.fragment {
+        return format!(
+            "Diffuse only • {} • {} steps on raw UV0/UV1 (Bevy per-fragment) • ignores {} nodes / {} wires",
+            g.label(),
+            f.steps.len(),
+            a.selection.ignored_nodes,
+            a.selection.ignored_wires
+        );
+    }
     let second = a.dual.as_ref().map_or(String::new(), |d| {
         format!(
             " × {:?} texels (Bevy dual multiply)",
@@ -828,11 +850,21 @@ mod tests {
         // The COLOR joins the primary group; the UV0 leaf is not evaluated there.
         let position = |i: usize| program.nodes.iter().position(|n| n.index == i).unwrap();
         assert!(t[0].needed[position(6)] && !t[0].needed[position(5)]);
-        // A cross-channel BLEND is not separable.
+        // A cross-channel BLEND is not separable: D189 evaluates it per fragment.
         let mut blend = blend_offgrid(2.5);
         blend.boxes[5].parameters_raw[4] = 1;
-        assert!(crate::select_diffuse(&blend).unwrap_err().ends_with(
-            "(graph evaluator: off-grid samplers mix UV channels outside a separable product)"
+        let program = crate::grid_graph_program(&blend, 1).unwrap();
+        assert_eq!(
+            targets(&program, &program_sources(&program), 0).unwrap_err(),
+            NOT_SEPARABLE
+        );
+        assert!(matches!(
+            crate::select_diffuse(&blend)
+                .unwrap()
+                .grid_graph
+                .unwrap()
+                .off_grid,
+            Some(OffGrid::Fragment { samples: 3, .. })
         ));
     }
 
