@@ -32,7 +32,7 @@ The home view (R) is the closed view.
 ## Evidence and limits
 - The cameras look -Z with no tilt (the RPCS3 views look level). The FOV is the
   viewer's 45 degrees, so only the measured projections are matched.
-- Sackboy is not placed yet (standing, then holding the controller, is the next slice).
+- Sackboy standing: P2c (docs/p2c-pod-sackboy.md).
 - The shell's own lighting and settings are not used (the view's apply).
 - Tests: `p2b_rig_keeps_each_layer_where_its_reference_puts_it` (both layers project to
   their reference points closed and open; the shell stays in front of the globe).

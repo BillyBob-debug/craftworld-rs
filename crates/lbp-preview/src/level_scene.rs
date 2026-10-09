@@ -351,6 +351,9 @@ pub struct LevelScene<T> {
     pub counts: SceneCounts,
     /// D121: stored PLevelSettings (world holder first), for opt-in preview lighting.
     pub settings: Option<LevelSettings>,
+    /// P2c: Things with a CHECKPOINT part and a valid POS (Thing index, world matrix), in
+    /// reader order. The player spawns at a checkpoint.
+    pub checkpoints: Vec<(usize, [f32; 16])>,
 }
 
 impl<T> Default for LevelScene<T> {
@@ -360,6 +363,7 @@ impl<T> Default for LevelScene<T> {
             items: Vec::new(),
             counts: SceneCounts::default(),
             settings: None,
+            checkpoints: Vec::new(),
         }
     }
 }
@@ -1745,7 +1749,21 @@ pub fn load_level_scene_with_options(
     source.check_stable()?;
     scene.counts.reader_stop = report.stop.as_ref().map(|s| format!("{s:?}"));
     scene.settings = LevelSettings::find(&report.things).map(|(_, s)| *s);
+    scene.checkpoints = checkpoints(&report.things);
     Ok(scene)
+}
+
+/// P2c: CHECKPOINT Things with a usable POS world matrix (spawn candidates).
+pub fn checkpoints(things: &[ThingRecord]) -> Vec<(usize, [f32; 16])> {
+    things
+        .iter()
+        .filter(|t| t.parts.contains(&"CHECKPOINT"))
+        .filter_map(|t| {
+            let pos = t.data.pos.as_ref()?;
+            world_matrix_check(&pos.world).ok()?;
+            Some((t.index, pos.world))
+        })
+        .collect()
 }
 
 /// D119: draws the backdrop static mesh and the backdrop plan's RENDER_MESH Things.
@@ -2707,5 +2725,36 @@ mod tests {
             .lines()
             .iter()
             .any(|l| l.contains(SHAPE_BEVEL_LABEL)));
+    }
+
+    #[test]
+    fn checkpoints_need_the_part_and_a_valid_pos() {
+        let thing = |index, parts: Vec<&'static str>, world: Option<[f32; 16]>| ThingRecord {
+            index,
+            parts,
+            data: PartData {
+                pos: world.map(|world| Pos {
+                    bone_of: None,
+                    anim_hash: 0,
+                    world,
+                }),
+                ..PartData::default()
+            },
+            ..ThingRecord::default()
+        };
+        let mut singular = identity_at(0.);
+        singular[0] = 0.;
+        let things = [
+            thing(0, vec!["POS"], Some(identity_at(1.))),
+            thing(1, vec!["POS", "CHECKPOINT"], Some(identity_at(2.))),
+            thing(2, vec!["CHECKPOINT"], None),
+            thing(3, vec!["POS", "CHECKPOINT"], Some(singular)),
+            thing(4, vec!["POS", "CHECKPOINT"], Some(identity_at(5.))),
+        ];
+        let found = checkpoints(&things);
+        assert_eq!(
+            found.iter().map(|c| (c.0, c.1[12])).collect::<Vec<_>>(),
+            [(1, 2.), (4, 5.)]
+        );
     }
 }

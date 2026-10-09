@@ -50,6 +50,8 @@ struct Playing {
     started: f32,
     shown: Option<i64>,
     gpu: Option<GpuRig>,
+    /// The meshes the clip poses (CPU positions and morphs).
+    meshes: Vec<Handle<Mesh>>,
 }
 /// Re: joint entities under a root carrying the display normalisation; the standard
 /// vertex shader skins. Mesh positions stay in display space (see `gpu_rig`).
@@ -163,8 +165,8 @@ impl Viewer {
         let cached = (paths == self.context_paths)
             .then(|| self.context.clone())
             .flatten();
-        // Level mode ignores the single-mesh GUID.
-        let guid = if self.level.active() {
+        // Level mode ignores the single-mesh GUID, except as the Pod figure (P2c).
+        let guid = if self.level.active() && self.level.shell.is_none() {
             String::new()
         } else {
             self.guid.clone()
@@ -426,7 +428,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space opens/closes the Puter (camera dolly)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space opens/closes the Puter (camera dolly); --select-guid HEX (Sackboy 0000043f) stands at its checkpoint, --play-animation HEX plays on it\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -613,6 +615,7 @@ fn main() {
             Update,
             (
                 place_on_second_monitor,
+                clear_pod_shell,
                 load,
                 animate,
                 apply_lighting,
@@ -767,6 +770,7 @@ fn load(
     let attempted_guid = result
         .as_ref()
         .ok()
+        .filter(|done| done.level.is_none())
         .map(|done| done.guid.trim().to_ascii_lowercase());
     let mut evidence = browser::PreviewEvidence::default();
     v.lighting.dirty = true;
@@ -790,6 +794,11 @@ fn load(
             );
             *orbit = v.level.home.unwrap_or_default();
             if let Some((rig, shell_plan)) = rig {
+                let checkpoint = level
+                    .shell
+                    .as_ref()
+                    .and_then(|s| s.checkpoints.first().copied());
+                let normalize = shell_plan.normalize;
                 let root = commands
                     .spawn((rig.shell_root(0.), Visibility::default(), PodShellRoot))
                     .id();
@@ -809,6 +818,24 @@ fn load(
                 v.level.home = Some(*orbit);
                 commands.insert_resource(PodRigRes(rig));
                 commands.insert_resource(pod_menu::PuterState { t: 0., open: false });
+                let line = match (done.preview, checkpoint) {
+                    (Ok(Some(preview)), Some(checkpoint)) => spawn_figure(
+                        &mut v,
+                        (&mut commands, &mut meshes, &mut materials, &mut images),
+                        &mut bindposes,
+                        (root, &rig, normalize, checkpoint),
+                        &preview,
+                        done.clip,
+                    )?,
+                    (Ok(Some(_)), None) => {
+                        "Figure not placed: no CHECKPOINT Thing with a POS in the shell".into()
+                    }
+                    (Err(e), _) => format!("Figure not loaded: {e}"),
+                    (Ok(None), _) => String::new(),
+                };
+                if !line.is_empty() {
+                    v.level.lines.push(line);
+                }
             }
             v.status = format!(
                 "Loaded level {}\n{}",
@@ -883,6 +910,7 @@ fn load(
                     started: -1.,
                     shown: None,
                     gpu,
+                    meshes: v.scene.iter().map(|s| s.1.clone()).collect(),
                 });
                 format!("{text} • skinning: {path}")
             }
@@ -1393,8 +1421,139 @@ fn pod_shell(
     );
     Ok((rig, shell_plan))
 }
+/// P2c: the `--select-guid` mesh (Sackboy) standing at the shell's first checkpoint,
+/// feet at its POS origin and upright (the checkpoint's own rotation is not applied:
+/// INFERRED), in raw model units under the shell root. `--play-animation` plays on it.
+/// Returns a status line with where it lands in the closed view.
+fn spawn_figure(
+    v: &mut Viewer,
+    (commands, meshes, materials, images): (
+        &mut Commands,
+        &mut Assets<Mesh>,
+        &mut Assets<ViewerMaterial>,
+        &mut Assets<Image>,
+    ),
+    bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
+    (root, rig, normalize, (thing, world)): (Entity, &pod_menu::PodRig, Mat4, (usize, [f32; 16])),
+    preview: &lbp_preview::GroupedMesh,
+    clip: Option<Result<lbp_preview::skinned::SkinnedClip, String>>,
+) -> Result<String, String> {
+    let up = model_up(true);
+    let at = Vec3::new(world[12], world[13], world[14]);
+    let place = normalize * Mat4::from_translation(at) * Mat4::from_quat(up);
+    let figure = commands
+        .spawn((
+            Transform::from_matrix(place),
+            Visibility::default(),
+            ChildOf(root),
+        ))
+        .id();
+    let mut evidence = browser::PreviewEvidence::default();
+    let mut details = Vec::new();
+    let first = v.scene.len();
+    for p in prepare(preview, false, &mut evidence, &mut details)? {
+        let (mesh, material, image) = upload(p, meshes, materials, images);
+        let entity = commands
+            .spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::IDENTITY,
+                ChildOf(figure),
+            ))
+            .id();
+        v.scene.push((entity, mesh, material, image));
+    }
+    let [lo, hi] =
+        adapter_bounds(&preview.geometry.positions).ok_or("Unsupported: empty figure")?;
+    let corners = (0..8).map(|c| {
+        let p = Vec3::new(
+            if c & 1 == 0 { lo[0] } else { hi[0] },
+            if c & 2 == 0 { lo[1] } else { hi[1] },
+            if c & 4 == 0 { lo[2] } else { hi[2] },
+        );
+        rig.shell_frac(0., place.transform_point3(p))
+    });
+    let (mut x, mut top, mut feet) = ([f32::MAX, f32::MIN], f32::MAX, f32::MIN);
+    for [fx, fy] in corners {
+        x = [x[0].min(fx), x[1].max(fx)];
+        top = top.min(fy);
+        feet = feet.max(fy);
+    }
+    let [ref_top, ref_feet] = pod_menu::SACKBOY_CLOSED;
+    let mut line = format!(
+        "Figure at shell checkpoint Thing {thing}: closed view x {:.2}..{:.2} w, {top:.2}..{feet:.2} h (RPCS3 Sackboy 0.50 w, {ref_top:.2}..{ref_feet:.2} h)",
+        x[0], x[1]
+    );
+    let scene: Vec<_> = v.scene[first..]
+        .iter()
+        .map(|s| (s.0, s.1.clone()))
+        .collect();
+    match clip {
+        None => {}
+        Some(Err(e)) => line += &format!("; animation not played: {e}"),
+        Some(Ok(clip)) => {
+            // Raw model units: the identity display frame.
+            let frame = ([0.; 3], 1.);
+            let gpu = if v.cpu_skinning {
+                None
+            } else {
+                let rig = gpu_rig(
+                    commands,
+                    meshes,
+                    bindposes,
+                    &clip.rig,
+                    (&clip.skin.joints, &clip.skin.weights),
+                    (frame, Quat::IDENTITY),
+                    &scene,
+                )?;
+                commands.entity(rig.root).insert(ChildOf(figure));
+                Some(GpuRig {
+                    morphs: !clip.skin.morphs.is_empty() && clip.report.animation_morphs > 0,
+                    ..rig
+                })
+            };
+            line += &format!("; animation {} frames", clip.report.frames);
+            v.playing = Some(Playing {
+                clip,
+                frame,
+                started: -1.,
+                shown: None,
+                gpu,
+                meshes: scene.into_iter().map(|s| s.1).collect(),
+            });
+        }
+    }
+    Ok(line)
+}
+/// Raw axis-aligned bounds; None when empty or nonfinite.
+fn adapter_bounds(positions: &[[f32; 3]]) -> Option<[[f32; 3]; 2]> {
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    for p in positions {
+        for i in 0..3 {
+            lo[i] = lo[i].min(p[i]);
+            hi[i] = hi[i].max(p[i]);
+        }
+    }
+    lo.iter()
+        .chain(&hi)
+        .all(|v| v.is_finite())
+        .then_some([lo, hi])
+}
 #[derive(Component)]
 struct PodShellRoot;
+/// Runs before `load`: a new load request drops the previous Pod shell (and its figure).
+fn clear_pod_shell(
+    mut commands: Commands,
+    v: Res<Viewer>,
+    roots: Query<Entity, With<PodShellRoot>>,
+) {
+    if v.requested {
+        for root in &roots {
+            commands.entity(root).despawn();
+        }
+    }
+}
 #[derive(Resource)]
 struct PodRigRes(pod_menu::PodRig);
 fn pod_orbit(eye: Vec3, globe_z: f32) -> Orbit {
@@ -1626,7 +1785,6 @@ fn animate(
     mut transforms: Query<&mut Transform>,
 ) {
     let held = v.animation_frame;
-    let handles: Vec<Handle<Mesh>> = v.scene.iter().map(|s| s.1.clone()).collect();
     let Some(playing) = v.playing.as_mut() else {
         return;
     };
@@ -1664,8 +1822,8 @@ fn animate(
         posed
     };
     let display = adapter::to_display(&posed, playing.frame);
-    for handle in handles {
-        if let Some(mut mesh) = meshes.get_mut(&handle) {
+    for handle in &playing.meshes {
+        if let Some(mut mesh) = meshes.get_mut(handle) {
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, display.clone());
         }
     }

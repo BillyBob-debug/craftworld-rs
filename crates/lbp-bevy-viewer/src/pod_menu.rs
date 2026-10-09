@@ -350,6 +350,9 @@ pub const PAD_CLOSED: ([f32; 2], f32) = ([0.50, 0.70], 0.15);
 pub const PAD_OPEN: ([f32; 2], f32) = ([0.50, 0.86], 0.17);
 /// Opening the Puter takes about a second (RPCS3).
 pub const DOLLY_SECONDS: f32 = 1.0;
+/// Sackboy standing in the closed view: head top and feet as fractions of the 16:9
+/// height, centred at 0.50 of the width (RPCS3, about 0.02).
+pub const SACKBOY_CLOSED: [f32; 2] = [0.56, 0.82];
 
 /// Two layers as the game appears to draw them: the Pod shell (tent, DualShock) over the
 /// planets view through its window, each seen by its own camera. The viewer has one
@@ -362,6 +365,7 @@ pub struct PodRig {
     pub globe_z: f32,
     pub shell: [Vec3; 2],
     pub scale: f32,
+    pub fov: f32,
 }
 
 impl PodRig {
@@ -387,6 +391,7 @@ impl PodRig {
             globe_z: g.z,
             shell,
             scale,
+            fov,
         }
     }
 
@@ -398,6 +403,13 @@ impl PodRig {
     /// The planets eye at opening progress `t` (0 closed, 1 open, eased).
     pub fn planet_eye(&self, t: f32) -> Vec3 {
         Self::at(self.planet, t)
+    }
+
+    /// Where a shell display-space point appears at `t`, as 16:9 frame fractions.
+    pub fn shell_frac(&self, t: f32, q: Vec3) -> [f32; 2] {
+        let c = Mat4::perspective_rh(self.fov, ASPECT, 0.001, 1000.)
+            .project_point3(q - Self::at(self.shell, t));
+        [(c.x + 1.) / 2., (1. - c.y) / 2.]
     }
 
     /// The shell root transform at `t`.
@@ -486,6 +498,9 @@ mod tests {
             // ... and in front of the globe.
             assert!(placed.z > globe.0.z);
         }
+        let closed = rig.shell_frac(0., pad.0);
+        assert!((closed[0] - PAD_CLOSED.0[0]).abs() < 1e-3);
+        assert!((closed[1] - PAD_CLOSED.0[1]).abs() < 1e-3);
         let far = rig.shell_root(0.).transform_point(Vec3::new(0., 0., -0.4));
         assert!(far.z > globe.0.z);
     }
