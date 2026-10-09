@@ -1052,6 +1052,7 @@ fn load(
                     // the planets' preset 0 constants; the shell keeps its own direction.
                     shell_light = lighting::PreviewLight {
                         toward_light: shell_light.toward_light,
+                        display_scale: shell_light.display_scale,
                         ..planets_light
                     };
                 }
@@ -2493,6 +2494,7 @@ fn apply_lighting(
     mut materials: ResMut<Assets<ViewerMaterial>>,
     cameras: Query<Entity, With<Camera3d>>,
     roots: LightRoots,
+    puter: Option<Res<pod_menu::PuterState>>,
 ) {
     // P2l: the LBP light lives in each level's frame, so it turns with the planets and
     // shell roots (re-applied when the dolly turns them).
@@ -2501,16 +2503,19 @@ fn apply_lighting(
         first_turn(roots.0.iter().next()),
         first_turn(roots.1.iter().next()),
     );
+    let pod_t = puter.map_or(v.lighting.pod_t, |p| p.t);
     let turned = !v.lighting.dirty
         && v.lighting.lbp
         && v.lighting.applied
         && (turn.angle_between(v.lighting.turn) > 1e-3
-            || shell_turn.angle_between(v.lighting.shell_turn) > 1e-3);
+            || shell_turn.angle_between(v.lighting.shell_turn) > 1e-3
+            || (pod_t - v.lighting.pod_t).abs() > 1e-3);
     if !(v.lighting.dirty || turned) || v.job.is_some() {
         return;
     }
     v.lighting.turn = turn;
     v.lighting.shell_turn = shell_turn;
+    v.lighting.pod_t = pod_t;
     v.lighting.dirty = false;
     let on = v.lighting.enabled;
     if !on && !v.lighting.applied {
@@ -2518,14 +2523,18 @@ fn apply_lighting(
     }
     let light = on.then(|| {
         if v.lighting.lbp {
-            v.lighting.light.lbp_shaped(turn)
+            let mut l = v.lighting.light.lbp_shaped(turn);
+            l.pod_t = pod_t;
+            l
         } else {
             v.lighting.light.clone()
         }
     });
     let shell = v.lighting.shell.as_ref().map(|(from, l)| {
         let l = if v.lighting.lbp {
-            l.lbp_shaped(shell_turn)
+            let mut l = l.lbp_shaped(shell_turn);
+            l.pod_t = pod_t;
+            l
         } else {
             l.clone()
         };
@@ -2544,7 +2553,8 @@ fn apply_lighting(
         unlit += usize::from(!smooth);
     }
     for camera in &cameras {
-        match light.as_ref().and_then(|l| l.fog) {
+        // P2t: LBP mode fogs in the shader (game output space), not with Bevy's fog.
+        match light.as_ref().filter(|l| !l.lbp).and_then(|l| l.fog) {
             Some(fog) => {
                 commands.entity(camera).insert(bevy::pbr::DistanceFog {
                     color: Color::linear_rgb(fog.color.x, fog.color.y, fog.color.z),

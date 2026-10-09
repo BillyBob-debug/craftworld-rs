@@ -61,6 +61,12 @@ pub struct SecondTexture {
     /// P2q: gloss colour (rgb) and CosinePower (w; 0 = no gloss).
     #[uniform(117)]
     gloss: Vec4,
+    /// P2t: game fog: start, slope (display units), luma CC, on (w).
+    #[uniform(118)]
+    lbp_fog: Vec4,
+    /// P2t: game fog colour (output space).
+    #[uniform(119)]
+    lbp_fog_color: Vec4,
     /// D121: generated normals passed `adapter::normal_trust`; otherwise stays unlit.
     pub normals_trusted: bool,
 }
@@ -143,6 +149,8 @@ pub fn set_lighting(
             ext.light_ambient = l.ambient.extend(l.scales.y);
             ext.rim_low = l.rim[0].extend(l.scales.z);
             ext.rim_high = l.rim[1].extend(l.scales.z);
+            ext.lbp_fog = l.lbp_fog();
+            ext.lbp_fog_color = Vec3::from(crate::lighting::GAME_FOG_COLOR).extend(1.);
             true
         }
         None => {
@@ -151,6 +159,7 @@ pub fn set_lighting(
             ext.light_ambient = Vec4::ZERO;
             ext.rim_low = Vec4::ZERO;
             ext.rim_high = Vec4::ZERO;
+            ext.lbp_fog = Vec4::ZERO;
             false
         }
     }
@@ -170,6 +179,7 @@ impl Plugin for DualPlugin {
 }
 // Independently authored preview shader; imported Bevy interfaces are pinned by Cargo.lock.
 const SOURCE: &str = r#"
+#import bevy_pbr::mesh_view_bindings::view
 #import bevy_pbr::{forward_io::{VertexOutput, FragmentOutput}, pbr_fragment::pbr_input_from_standard_material, pbr_functions::main_pass_post_lighting_processing}
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var second_image: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var second_sampler: sampler;
@@ -197,6 +207,8 @@ struct BumpInput {
     duv2: vec2<f32>,
     offset: vec2<f32>,
 }
+@group(#{MATERIAL_BIND_GROUP}) @binding(118) var<uniform> lbp_fog: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(119) var<uniform> lbp_fog_color: vec4<f32>;
 // D121 preview Lambert factor (mirrors lighting::PreviewLight::factor/facing_normal).
 // Double-sided: the smooth normal is turned into the hemisphere of the face normal that
 // points at the viewer, so back faces and mirrored instances light like front faces.
@@ -257,8 +269,14 @@ fn lit_normal(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>, bump: Bum
 // tintcol (4,4,4) into a plain RGBA8 target, so that sqrt is the only output gamma.
 // Bevy sRGB-encodes our linear output, so return the linear value whose encoding is it.
 const GAME_TINT: f32 = 4.0;
-fn lbp_output(c: vec3<f32>) -> vec3<f32> {
-    let v = clamp(sqrt(max(c * GAME_TINT, vec3<f32>(0.0))), vec3<f32>(0.0), vec3<f32>(1.0));
+// P2t: then the game's fog in that output space, by view depth (lbp_fog).
+fn lbp_output(c: vec3<f32>, depth: f32) -> vec3<f32> {
+    var v = clamp(sqrt(max(c * GAME_TINT, vec3<f32>(0.0))), vec3<f32>(0.0), vec3<f32>(1.0));
+    if lbp_fog.w > 0.5 {
+        let k = clamp((depth - lbp_fog.x) * lbp_fog.y, 0.0, 1.0);
+        let fogged = (dot(v, vec3<f32>(0.3, 0.6, 0.1)) * lbp_fog.z + 1.0) * lbp_fog_color.rgb;
+        v = clamp(mix(v, fogged, k), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
     let low = v / 12.92;
     let high = pow((v + 0.055) / 1.055, vec3<f32>(2.4));
     return select(high, low, v <= vec3<f32>(0.04045));
@@ -330,7 +348,8 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
         let factor = preview_light(n, pbr.V);
         rgb = rgb * factor + gloss_term(n, pbr.V, factor);
         if light_dir.w > 1.5 {
-            rgb = lbp_output(rgb);
+            let depth = -(view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
+            rgb = lbp_output(rgb, depth);
         }
     }
     var out: FragmentOutput;
@@ -349,6 +368,10 @@ struct VertexOutput {
     @location(2) uv: vec2<f32>,
     @location(3) uv_b: vec2<f32>,
 }
+struct ViewStub {
+    view_from_world: mat4x4<f32>,
+}
+@group(0) @binding(0) var<uniform> view: ViewStub;
 struct FragmentOutput {
     @location(0) color: vec4<f32>,
 }
@@ -380,7 +403,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .collect();
         assert!(body.contains("lit_normal(shading, face, pbr.V, bump)"));
         assert!(body.contains("gloss_term(n, pbr.V, factor)"));
-        assert!(body.contains("rgb = lbp_output(rgb);"));
+        assert!(body.contains("rgb = lbp_output(rgb, depth);"));
         let source = format!("{STUBS}{body}");
         let module = naga::front::wgsl::parse_str(&source)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));

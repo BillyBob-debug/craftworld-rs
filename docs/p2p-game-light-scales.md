@@ -72,3 +72,28 @@ lighting summary counts them as "lit flat by their face normals".
 
 Label: INFERRED (the room's draws being the untrusted ones is a hypothesis from the
 unchanged 139; the level report's count line confirms or refutes it).
+
+## P2t: the game's fog, in output space (2026-10-09)
+
+The PC traced the room's brightness to fog, not lighting (RenderDoc frame 14790, eid 2388; the
+shell walls were already lit, "0 of 124 unlit", so P2s changes nothing in this view). We ran
+Bevy DistanceFog after the output step, in linear space, toward the preset fog colour. The
+game fogs in its sqrt output space, before display:
+
+`v = mix(v0, (dot(v0, (0.3, 0.6, 0.1)) × 0.240216 + 1) × fogcol, saturate((depth - start) / 52648))`
+
+with fogcol (0.646, 0.409, 0.228), the slope from vc16, and start 25810 (Pod closed) or 5810
+(open). Under `--lbp-lighting` the shader now does exactly this, with depth the view-space
+distance converted to level units by each layer's display scale. Start is interpolated by
+the Puter opening progress. Bevy DistanceFog is dropped in that mode.
+
+| Rule | Label |
+|---|---|
+| Fog formula, colour, CC 0.240216, slope 1/52648, starts 25810/5810 | CONFIRMED_FROM_LOCAL_DATA (frames 5247, 14790) |
+| Start interpolated by Puter progress between the two frames | INFERRED |
+| depth = view-space z, level units via each layer's normalization | INFERRED (planets also sit under the World transform's scale) |
+| fogcol source (not a clean function of preset 0's fog colour) | UNKNOWN |
+
+The PC's equivalent test patch measured the room at 1.02-1.10x of the game's main pass
+(1.12x of the RPCS3 final frame; the rest is the game's vignette/DoF pass) and moved the
+planets by at most 6%.
