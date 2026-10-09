@@ -12,6 +12,7 @@ use avian2d::prelude::*;
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
+pub mod sackboy;
 pub mod scene;
 
 pub use scene::{build_scene, build_scene_with, PhysicsScene};
