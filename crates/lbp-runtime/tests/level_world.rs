@@ -517,6 +517,12 @@ fn part6_camera_world_position_and_engine_state() {
         q(&mut w, "PodComputer", "GetPodComputerInUse__"),
         Ok(Value::Bool(false))
     );
+    w.pod_computer_in_use = true;
+    assert_eq!(
+        q(&mut w, "PodComputer", "GetPodComputerInUse__"),
+        Ok(Value::Bool(true))
+    );
+    w.pod_computer_in_use = false;
     assert_eq!(q(&mut w, "Game", "GetNumAvatars__"), Ok(Value::Int(0)));
     assert!(q(&mut w, "PodComputer", "GetPodComputer__").is_err());
     assert!(q(&mut w, "Gooey", "CreateGooey__i").is_err(), "arity");

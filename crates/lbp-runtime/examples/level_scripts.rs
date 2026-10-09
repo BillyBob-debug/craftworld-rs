@@ -2,6 +2,7 @@
 //!
 //! level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH NEW-JSON [--entry=NAME]... [--ticks=N]
 //! level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH NEW-JSON --play=TICKS [--flags=N,..]
+//!     [--puter-in-use=TICK]
 //! level_scripts SNAPSHOT GAME-DIRS --all NEW-JSON
 //!
 //! Loads every magic-confirmed script with its MAP GUID (the U12 loader), reads the level(s)
@@ -12,7 +13,9 @@
 //! `--entry`, one level runs that function on every scripted Thing and resumes yielded
 //! scripts for `--ticks` ticks (default 30), reporting outcomes, faults, unbound natives
 //! and `WRITE` lines. `--play` runs the `LevelScripts` schedule instead: `OnCreate__`, then
-//! TICKS ticks of resume + `Update__`. Names and counts only; no bytecode. Output: a NEW JSON file under
+//! TICKS ticks of resume + `Update__`; `--puter-in-use=TICK` makes
+//! `GetPodComputerInUse__` true from that tick on (0 = from `OnCreate__`) and reports the
+//! camera as it was just before the switch too. Names and counts only; no bytecode. Output: a NEW JSON file under
 //! ignored `local-analysis/`. Counting unit: Thing with a PScript part (instances) or
 //! distinct script class (function names).
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
@@ -117,6 +120,13 @@ fn run() -> Result<(), String> {
         .transpose()
         .map_err(|e| format!("--flags: {e}"))?
         .unwrap_or_default();
+    // `--puter-in-use=TICK`: a player is at the pod computer from that tick on.
+    let in_use_from: Option<u64> = all
+        .iter()
+        .find_map(|a| a.strip_prefix("--puter-in-use="))
+        .map(str::parse)
+        .transpose()
+        .map_err(|e| format!("--puter-in-use: {e}"))?;
     let args: Vec<&String> = all
         .iter()
         .filter(|a| {
@@ -124,12 +134,14 @@ fn run() -> Result<(), String> {
                 && !a.starts_with("--ticks=")
                 && !a.starts_with("--play=")
                 && !a.starts_with("--flags=")
+                && !a.starts_with("--puter-in-use=")
         })
         .collect();
     if args.len() != 5 {
         return Err(
             "usage: level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH|--all NEW-JSON \
-                    [--entry=NAME]... [--ticks=N] [--play=TICKS] [--flags=N,..]"
+                    [--entry=NAME]... [--ticks=N] [--play=TICKS] [--flags=N,..] \
+                    [--puter-in-use=TICK]"
                 .into(),
         );
     }
@@ -216,6 +228,7 @@ fn run() -> Result<(), String> {
     if let (Some(n), Some(mut world)) = (play, last_world.take()) {
         world.add_class_defaults(&vm);
         world.progression_flags = flags.clone();
+        world.pod_computer_in_use = in_use_from == Some(0);
         let mut host = Bindings::new(world);
         let engine_faults = lbp_runtime::add_engine_objects(&mut vm, &mut host, BUDGET_PER_CALL);
         let mut level = LevelScripts::new(&vm, &host.world);
@@ -234,7 +247,20 @@ fn run() -> Result<(), String> {
             }
         };
         note_faults(&created);
-        for _ in 0..n {
+        let camera_json = |c: &lbp_runtime::CameraState| {
+            serde_json::json!({
+                "from_to_up": c.from_to_up.map(|c| serde_json::json!({
+                    "from": c.from, "to": c.to, "up": c.up, "params": c.params,
+                })),
+                "from_to_up_calls": c.from_to_up_calls,
+            })
+        };
+        let mut camera_before_in_use = None;
+        for tick in 0..n {
+            if in_use_from.is_some_and(|t| t > 0 && t == tick) {
+                camera_before_in_use = Some(camera_json(&host.world.camera));
+                host.world.pod_computer_in_use = true;
+            }
             let t = level.tick(&mut vm, &mut host, BUDGET_PER_CALL);
             ticks_with_faults += usize::from(!t.faults.is_empty());
             note_faults(&t);
@@ -274,6 +300,8 @@ fn run() -> Result<(), String> {
                 "written": host.world.written.iter().take(40).collect::<Vec<_>>(),
                 "engine_object_faults": engine_faults,
                 "gooeys_created": host.world.gooeys_created,
+                "puter_in_use_from": in_use_from,
+                "camera_before_in_use": camera_before_in_use,
                 "camera": {
                     "from_to_up": host.world.camera.from_to_up.map(|c| serde_json::json!({
                         "from": c.from, "to": c.to, "up": c.up, "params": c.params,
