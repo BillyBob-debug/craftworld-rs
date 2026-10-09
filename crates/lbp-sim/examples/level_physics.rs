@@ -291,6 +291,7 @@ fn run() -> Result<(), String> {
     let mut rejected = BTreeMap::<&str, usize>::new();
     let mut filled = BTreeMap::<&str, usize>::new();
     let (mut joints, mut rejected_joints) = (0, BTreeMap::<&str, usize>::new());
+    let mut anchored = 0;
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -327,6 +328,7 @@ fn run() -> Result<(), String> {
             *filled.entry(k).or_default() += n;
         }
         joints += r.joints;
+        anchored += r.anchored_joint_ends;
         for (k, n) in &r.rejected_joints {
             *rejected_joints.entry(k).or_default() += n;
         }
@@ -424,6 +426,7 @@ fn run() -> Result<(), String> {
             "not_collidable": r.not_collidable, "rejected": r.rejected, "filled": r.filled,
             "flat_samples": r.flat_samples,
             "joints": r.joints, "rejected_joints": r.rejected_joints,
+            "anchored_joint_ends": r.anchored_joint_ends,
             "fixed_bodies": r.fixed_bodies, "nested_bodies": r.nested_bodies,
             "bodies": m.bodies, "moved_over_1": m.moved_1, "moved_over_100": m.moved_100,
             "non_finite": m.non_finite, "max_move": m.max_move,
@@ -451,6 +454,7 @@ fn run() -> Result<(), String> {
         "shapes": shapes, "dynamic": dynamic, "static": static_,
         "not_collidable": not_collidable, "rejected": rejected, "filled": filled,
         "joints": joints, "rejected_joints": rejected_joints,
+        "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,
         "no_collide_material_paths": no_collide_guids.iter().filter_map(|g| paths.get(g)).collect::<Vec<_>>(),
@@ -479,7 +483,7 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     println!(
         "levels {} (not read {not_read}, panicked {}); shapes {shapes}: dynamic {dynamic}, static {static_}, \
-         not collidable {not_collidable}, rejected {}, filled {}; joints {joints} (rejected {}); \
+         not collidable {not_collidable}, rejected {}, filled {}; joints {joints} (rejected {}, anchored ends {anchored}); \
          fixed bodies {fixed_bodies} ({} fixed materials), nested bodies {nested_bodies}; \
          after {ticks} ticks: bodies {}, moved >1 {}, >100 {}, non-finite {}, max move {:.1}",
         levels.len(),
