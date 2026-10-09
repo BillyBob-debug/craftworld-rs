@@ -41,8 +41,13 @@ struct Completed {
     identity: String,
     guid: String,
     level: Option<Result<LevelLoaded, String>>,
-    clip: Option<Result<lbp_preview::skinned::SkinnedClip, String>>,
+    clip: Option<ClipResult>,
+    /// P2d `--pod-hold-animation`: the figure's clip while the Puter is open.
+    hold_clip: Option<ClipResult>,
 }
+type ClipResult = Result<lbp_preview::skinned::SkinnedClip, String>;
+/// A shell CHECKPOINT Thing and its world matrix (`LevelScene::checkpoints`).
+type Checkpoint = (usize, [f32; 16]);
 /// Rd: CPU-skinned playback of one animation on the displayed mesh.
 struct Playing {
     clip: lbp_preview::skinned::SkinnedClip,
@@ -52,6 +57,8 @@ struct Playing {
     gpu: Option<GpuRig>,
     /// The meshes the clip poses (CPU positions and morphs).
     meshes: Vec<Handle<Mesh>>,
+    /// P2d: the other Pod figure clip (standing / holding), swapped in by `pod_figure`.
+    alt: Option<lbp_preview::skinned::SkinnedClip>,
 }
 /// Re: joint entities under a root carrying the display normalisation; the standard
 /// vertex shader skins. Mesh positions stay in display space (see `gpu_rig`).
@@ -85,6 +92,8 @@ struct LevelMode {
     pod: Option<usize>,
     /// P2b `--pod-shell HEX`: the Pod shell level (000027b9) as a layer over the view.
     shell: Option<u32>,
+    /// P2d `--pod-open`: start with the Puter open (QA captures of the menu view).
+    open: bool,
     lines: Vec<String>,
     home: Option<Orbit>,
 }
@@ -115,6 +124,8 @@ struct Viewer {
     instance_rgba: [f32; 4],
     animation_base: bool,
     animation_guid: String,
+    /// P2d `--pod-hold-animation HEX`.
+    hold_animation_guid: String,
     animation_frame: Option<i64>,
     cpu_skinning: bool,
     /// D148: single-mesh model space is Z-up (default) or Y-up (`--model-up`).
@@ -182,6 +193,7 @@ impl Viewer {
         };
         let options = self.preview_options();
         let animation_guid = self.animation_guid.trim().to_ascii_lowercase();
+        let hold_guid = self.hold_animation_guid.trim().to_ascii_lowercase();
         self.playing = None;
         let control = LoadControl::default();
         let worker = control.clone();
@@ -262,17 +274,22 @@ impl Viewer {
                             shell,
                         })
                     });
-                    let clip = (preview.as_ref().is_ok_and(Option::is_some)
-                        && !animation_guid.is_empty())
-                    .then(|| {
-                        let number = u32::from_str_radix(&animation_guid, 16)
-                            .ok()
-                            .filter(|_| animation_guid.len() == 8)
-                            .ok_or("Animation GUID must be eight hexadecimal digits")?;
-                        let key = lbp_preview::skinned::resolve_animation(&catalog, number)?;
-                        let mesh_key = mesh_key.as_ref().ok_or("No mesh key")?;
-                        lbp_preview::skinned::load_clip(&source, mesh_key, &key, &worker)
-                    });
+                    let load_clip = |guid: &str| {
+                        (preview.as_ref().is_ok_and(Option::is_some) && !guid.is_empty()).then(
+                            || {
+                                let number = u32::from_str_radix(guid, 16)
+                                    .ok()
+                                    .filter(|_| guid.len() == 8)
+                                    .ok_or("Animation GUID must be eight hexadecimal digits")?;
+                                let key =
+                                    lbp_preview::skinned::resolve_animation(&catalog, number)?;
+                                let mesh_key = mesh_key.as_ref().ok_or("No mesh key")?;
+                                lbp_preview::skinned::load_clip(&source, mesh_key, &key, &worker)
+                            },
+                        )
+                    };
+                    let clip = load_clip(&animation_guid);
+                    let hold_clip = load_clip(&hold_guid);
                     worker.check()?;
                     Ok(Completed {
                         context: (catalog, source),
@@ -281,6 +298,7 @@ impl Viewer {
                         guid,
                         level,
                         clip,
+                        hold_clip,
                     })
                 };
                 let _ = tx.send(run());
@@ -332,6 +350,7 @@ fn options() -> Result<Viewer, String> {
         instance_rgba: [1.; 4],
         animation_base: false,
         animation_guid: String::new(),
+        hold_animation_guid: String::new(),
         animation_frame: None,
         cpu_skinning: false,
         model_z_up: true,
@@ -403,6 +422,10 @@ fn options() -> Result<Viewer, String> {
             v.lighting.enabled = true;
             continue;
         }
+        if flag == "--pod-open" {
+            v.level.open = true;
+            continue;
+        }
         if flag == "--qa-hide-ui" {
             v.hide_ui = true;
             continue;
@@ -428,7 +451,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space opens/closes the Puter (camera dolly); --select-guid HEX (Sackboy 0000043f) stands at its checkpoint, --play-animation HEX plays on it\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-open: start open; --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -437,6 +460,7 @@ fn options() -> Result<Viewer, String> {
             "--game-dir" => v.game = value,
             "--select-guid" => v.guid = value,
             "--play-animation" => v.animation_guid = value,
+            "--pod-hold-animation" => v.hold_animation_guid = value,
             "--animation-frame" => {
                 v.animation_frame = Some(value.parse().map_err(|_| "invalid animation frame")?)
             }
@@ -620,6 +644,7 @@ fn main() {
                 animate,
                 apply_lighting,
                 pod_dolly,
+                pod_figure,
                 camera,
                 capture,
             )
@@ -799,8 +824,9 @@ fn load(
                     .as_ref()
                     .and_then(|s| s.checkpoints.first().copied());
                 let normalize = shell_plan.normalize;
+                let t0 = if v.level.open { 1. } else { 0. };
                 let root = commands
-                    .spawn((rig.shell_root(0.), Visibility::default(), PodShellRoot))
+                    .spawn((rig.shell_root(t0), Visibility::default(), PodShellRoot))
                     .id();
                 let first = v.scene.len();
                 spawn_level(
@@ -814,24 +840,25 @@ fn load(
                 for (entity, ..) in &v.scene[first..] {
                     commands.entity(root).add_child(*entity);
                 }
-                *orbit = pod_orbit(rig.planet_eye(0.), rig.globe_z);
-                v.level.home = Some(*orbit);
+                // Home (R) stays the closed view.
+                v.level.home = Some(pod_orbit(rig.planet_eye(0.), rig.globe_z));
+                *orbit = pod_orbit(rig.planet_eye(t0), rig.globe_z);
                 commands.insert_resource(PodRigRes(rig));
-                commands.insert_resource(pod_menu::PuterState { t: 0., open: false });
-                let line = match (done.preview, checkpoint) {
-                    (Ok(Some(preview)), Some(checkpoint)) => spawn_figure(
+                commands.insert_resource(pod_menu::PuterState {
+                    t: t0,
+                    open: v.level.open,
+                });
+                let line = match done.preview {
+                    Ok(Some(preview)) => spawn_figure(
                         &mut v,
                         (&mut commands, &mut meshes, &mut materials, &mut images),
                         &mut bindposes,
                         (root, &rig, normalize, checkpoint),
                         &preview,
-                        done.clip,
+                        (done.clip, done.hold_clip),
                     )?,
-                    (Ok(Some(_)), None) => {
-                        "Figure not placed: no CHECKPOINT Thing with a POS in the shell".into()
-                    }
-                    (Err(e), _) => format!("Figure not loaded: {e}"),
-                    (Ok(None), _) => String::new(),
+                    Err(e) => format!("Figure not loaded: {e}"),
+                    Ok(None) => String::new(),
                 };
                 if !line.is_empty() {
                     v.level.lines.push(line);
@@ -911,6 +938,7 @@ fn load(
                     shown: None,
                     gpu,
                     meshes: v.scene.iter().map(|s| s.1.clone()).collect(),
+                    alt: None,
                 });
                 format!("{text} • skinning: {path}")
             }
@@ -1421,10 +1449,12 @@ fn pod_shell(
     );
     Ok((rig, shell_plan))
 }
-/// P2c: the `--select-guid` mesh (Sackboy) standing at the shell's first checkpoint,
-/// feet at its POS origin and upright (the checkpoint's own rotation is not applied:
-/// INFERRED), in raw model units under the shell root. `--play-animation` plays on it.
-/// Returns a status line with where it lands in the closed view.
+/// P2c: the `--select-guid` mesh (Sackboy) standing in the Pod shell at model scale
+/// (level units = model units), upright (D148 rotation), feet centred on the solved spot.
+/// The spot is fitted so the closed view matches RPCS3 (`pod_menu::SACKBOY_CLOSED`):
+/// the shell's checkpoint POS put him above the frame (PC run of #52), so the game's own
+/// spawn offset is UNKNOWN and the checkpoint is reported, not used. `--play-animation`
+/// plays on him; `--pod-hold-animation` while the Puter is open (P2d).
 fn spawn_figure(
     v: &mut Viewer,
     (commands, meshes, materials, images): (
@@ -1434,18 +1464,35 @@ fn spawn_figure(
         &mut Assets<Image>,
     ),
     bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
-    (root, rig, normalize, (thing, world)): (Entity, &pod_menu::PodRig, Mat4, (usize, [f32; 16])),
+    (root, rig, normalize, checkpoint): (Entity, &pod_menu::PodRig, Mat4, Option<Checkpoint>),
     preview: &lbp_preview::GroupedMesh,
-    clip: Option<Result<lbp_preview::skinned::SkinnedClip, String>>,
+    (clip, hold): (Option<ClipResult>, Option<ClipResult>),
 ) -> Result<String, String> {
-    let up = model_up(true);
-    let at = Vec3::new(world[12], world[13], world[14]);
-    let place = normalize * Mat4::from_translation(at) * Mat4::from_quat(up);
+    let bounds @ [lo, hi] =
+        adapter_bounds(&preview.geometry.positions).ok_or("Unsupported: empty figure")?;
+    let k = normalize.x_axis.truncate().length();
+    let feet = rig.fit_figure(k * (hi[2] - lo[2]));
+    // Raw Z-up model: feet are the lowest z, centred in x and y (depth).
+    let origin = Mat4::from_translation(Vec3::new(
+        -(lo[0] + hi[0]) / 2.,
+        -(lo[1] + hi[1]) / 2.,
+        -lo[2],
+    ));
+    let upright = Mat4::from_scale(Vec3::splat(k)) * Mat4::from_quat(model_up(true)) * origin;
+    let place = Mat4::from_translation(feet) * upright;
+    // P2d: holding the controller he is seen from behind: half a turn about the level's
+    // up axis (Y) on the same spot.
+    let back = Mat4::from_translation(feet) * Mat4::from_rotation_y(std::f32::consts::PI) * upright;
     let figure = commands
         .spawn((
             Transform::from_matrix(place),
             Visibility::default(),
             ChildOf(root),
+            PodFigure {
+                front: Transform::from_matrix(place),
+                back: Transform::from_matrix(back),
+                holding: false,
+            },
         ))
         .id();
     let mut evidence = browser::PreviewEvidence::default();
@@ -1463,27 +1510,32 @@ fn spawn_figure(
             .id();
         v.scene.push((entity, mesh, material, image));
     }
-    let [lo, hi] =
-        adapter_bounds(&preview.geometry.positions).ok_or("Unsupported: empty figure")?;
-    let corners = (0..8).map(|c| {
-        let p = Vec3::new(
-            if c & 1 == 0 { lo[0] } else { hi[0] },
-            if c & 2 == 0 { lo[1] } else { hi[1] },
-            if c & 4 == 0 { lo[2] } else { hi[2] },
-        );
-        rig.shell_frac(0., place.transform_point3(p))
-    });
-    let (mut x, mut top, mut feet) = ([f32::MAX, f32::MIN], f32::MAX, f32::MIN);
-    for [fx, fy] in corners {
-        x = [x[0].min(fx), x[1].max(fx)];
-        top = top.min(fy);
-        feet = feet.max(fy);
-    }
-    let [ref_top, ref_feet] = pod_menu::SACKBOY_CLOSED;
+    let level = normalize.inverse().transform_point3(feet);
+    let ([x0, x1], top, low) = figure_frac(rig, 0., place, bounds);
+    let ([o0, o1], o_top, o_low) = figure_frac(rig, 1., back, bounds);
     let mut line = format!(
-        "Figure at shell checkpoint Thing {thing}: closed view x {:.2}..{:.2} w, {top:.2}..{feet:.2} h (RPCS3 Sackboy 0.50 w, {ref_top:.2}..{ref_feet:.2} h)",
-        x[0], x[1]
+        "Figure fitted to the RPCS3 closed view at model scale: feet at level ({:.0}, {:.0}, {:.0}); closed x {x0:.2}..{x1:.2} w, {top:.2}..{low:.2} h; open (from behind) x {o0:.2}..{o1:.2} w, centre {:.2} h (RPCS3 {:.2} h)",
+        level.x,
+        level.y,
+        level.z,
+        (o_top + o_low) / 2.,
+        pod_menu::SACKBOY_OPEN[1]
     );
+    line += &match checkpoint {
+        Some((thing, w)) => format!(
+            "; shell checkpoint Thing {thing} at ({:.0}, {:.0}, {:.0})",
+            w[12], w[13], w[14]
+        ),
+        None => "; no shell checkpoint".into(),
+    };
+    let hold = match hold {
+        None => None,
+        Some(Err(e)) => {
+            line += &format!("; hold animation not played: {e}");
+            None
+        }
+        Some(Ok(clip)) => Some(clip),
+    };
     let scene: Vec<_> = v.scene[first..]
         .iter()
         .map(|s| (s.0, s.1.clone()))
@@ -1513,6 +1565,9 @@ fn spawn_figure(
                 })
             };
             line += &format!("; animation {} frames", clip.report.frames);
+            if let Some(h) = &hold {
+                line += &format!("; hold animation {} frames", h.report.frames);
+            }
             v.playing = Some(Playing {
                 clip,
                 frame,
@@ -1520,10 +1575,66 @@ fn spawn_figure(
                 shown: None,
                 gpu,
                 meshes: scene.into_iter().map(|s| s.1).collect(),
+                alt: hold,
             });
         }
     }
     Ok(line)
+}
+/// Where a figure with raw `bounds`, placed by `place` in shell display space, appears at
+/// Puter progress `t`: x range, head top and feet as 16:9 frame fractions.
+fn figure_frac(
+    rig: &pod_menu::PodRig,
+    t: f32,
+    place: Mat4,
+    [lo, hi]: [[f32; 3]; 2],
+) -> ([f32; 2], f32, f32) {
+    let (mut x, mut top, mut feet) = ([f32::MAX, f32::MIN], f32::MAX, f32::MIN);
+    for c in 0..8 {
+        let p = Vec3::new(
+            if c & 1 == 0 { lo[0] } else { hi[0] },
+            if c & 2 == 0 { lo[1] } else { hi[1] },
+            if c & 4 == 0 { lo[2] } else { hi[2] },
+        );
+        let [fx, fy] = rig.shell_frac(t, place.transform_point3(p));
+        x = [x[0].min(fx), x[1].max(fx)];
+        top = top.min(fy);
+        feet = feet.max(fy);
+    }
+    (x, top, feet)
+}
+/// P2d: the Pod figure's two placements; `pod_figure` switches at half-open.
+#[derive(Component)]
+struct PodFigure {
+    front: Transform,
+    back: Transform,
+    holding: bool,
+}
+/// P2d: past half-open the figure turns its back (holding the controller) and the hold
+/// clip, when given, replaces the standing one; closing reverses both. The game's switch
+/// point during the dolly is UNKNOWN (RPCS3 shows only the end states).
+fn pod_figure(
+    state: Option<Res<pod_menu::PuterState>>,
+    mut v: ResMut<Viewer>,
+    mut figures: Query<(&mut PodFigure, &mut Transform)>,
+) {
+    let Some(state) = state else { return };
+    let holding = state.t > 0.5;
+    for (mut figure, mut transform) in &mut figures {
+        if figure.holding == holding {
+            continue;
+        }
+        figure.holding = holding;
+        *transform = if holding { figure.back } else { figure.front };
+        if let Some(playing) = v.playing.as_mut() {
+            if let Some(mut other) = playing.alt.take() {
+                std::mem::swap(&mut playing.clip, &mut other);
+                playing.alt = Some(other);
+                playing.started = -1.;
+                playing.shown = None;
+            }
+        }
+    }
 }
 /// Raw axis-aligned bounds; None when empty or nonfinite.
 fn adapter_bounds(positions: &[[f32; 3]]) -> Option<[[f32; 3]; 2]> {
@@ -1569,6 +1680,7 @@ fn pod_orbit(eye: Vec3, globe_z: f32) -> Orbit {
 fn pod_dolly(
     time: Res<Time>,
     keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
     rig: Option<Res<PodRigRes>>,
     state: Option<ResMut<pod_menu::PuterState>>,
     mut orbit: ResMut<Orbit>,
@@ -1577,8 +1689,12 @@ fn pod_dolly(
     let (Some(rig), Some(mut state)) = (rig, state) else {
         return;
     };
-    if keys.just_pressed(KeyCode::Space) {
+    let pad = |b| pads.iter().any(|g| g.just_pressed(b));
+    if keys.just_pressed(KeyCode::Space) || pad(GamepadButton::West) {
         state.open = !state.open;
+    }
+    if keys.any_just_pressed([KeyCode::Escape, KeyCode::Backspace]) || pad(GamepadButton::East) {
+        state.open = false;
     }
     let target = if state.open { 1. } else { 0. };
     if state.t == target {
@@ -2493,6 +2609,7 @@ mod tests {
             instance_rgba: [1.; 4],
             animation_base: false,
             animation_guid: String::new(),
+            hold_animation_guid: String::new(),
             animation_frame: None,
             cpu_skinning: false,
             model_z_up: true,
