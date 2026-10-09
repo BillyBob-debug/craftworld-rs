@@ -1969,6 +1969,23 @@ fn uses_instance_color(g: &GroupedMesh) -> bool {
         .any(|b| b.instance_projection().is_some())
 }
 
+/// `--level-report`: the distinct binding errors behind a model's neutral groups, with
+/// how many non-empty groups each one leaves neutral (empty for other payloads).
+pub fn neutral_reasons(p: &ScenePayload) -> Vec<(String, usize)> {
+    let mut out: Vec<(String, usize)> = Vec::new();
+    if let ScenePayload::Model(g) = p {
+        for (range, b) in g.geometry.primitive_triangles.iter().zip(&g.bindings) {
+            if let (false, Err(e)) = (range.is_empty(), b) {
+                match out.iter_mut().find(|(r, _)| r == e) {
+                    Some((_, n)) => *n += 1,
+                    None => out.push((e.clone(), 1)),
+                }
+            }
+        }
+    }
+    out
+}
+
 fn grouped_neutral(g: &GroupedMesh) -> bool {
     g.geometry
         .primitive_triangles

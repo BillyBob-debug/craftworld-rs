@@ -2491,6 +2491,9 @@ fn level_report(v: &Viewer) -> Result<(), String> {
                         ""
                     }
                 ));
+                for (reason, groups) in level_scene::neutral_reasons(&m.payload) {
+                    lines.push(format!("    neutral ({groups} groups): {reason}"));
+                }
             }
             Ok(lines)
         })

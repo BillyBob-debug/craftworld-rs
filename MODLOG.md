@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-09 — D191 level scenes use asset defaults
+
+Levels now draw Things with the new preview defaults and their editorColor tint. Bravery Test
+neutral Things 195 -> 35; tint values not yet checked visually. +0 viewable / +0 Complete.
+
 ## 2026-10-09 — D188-D190 preview defaults, mixed-UV graphs, material fixes
 
 Single-mesh previews now default to animation base values and a white instance colour; mixed
