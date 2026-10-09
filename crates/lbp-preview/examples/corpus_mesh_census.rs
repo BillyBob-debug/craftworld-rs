@@ -10,6 +10,11 @@
 //! `lbp_preview::census`, same values as compatibility_census). Without them the output
 //! is unchanged (schema 1); with them the report is schema 2, the scope names the
 //! opt-ins and `preview_options` records them.
+//! Asset finish: opt-in `--blockers` adds, per mesh, the nonempty groups without a
+//! diffuse binding (material GUID/hash + refusal reason) and a top-level
+//! `blocking_materials` ranking: for each material key, the catalog GUIDs of meshes it
+//! blocks and of meshes it alone blocks (fixing it alone makes them all-diffuse).
+//! Ranking only; not an asset count. Without the flag the output is unchanged.
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::census::{
     apply_preview_flag, coverage, geometry_available, preview_scope_suffix, CorpusTally,
@@ -32,7 +37,7 @@ fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().collect();
     if args.len() < 4 {
         return Err(
-            "corpus_mesh_census SNAPSHOT GAME-DIR NEW-JSON [--hashes MANIFEST] [--max-seconds N] [--animation-base] [--instance-rgba R,G,B,A]"
+            "corpus_mesh_census SNAPSHOT GAME-DIR NEW-JSON [--hashes MANIFEST] [--max-seconds N] [--animation-base] [--instance-rgba R,G,B,A] [--blockers]"
                 .into(),
         );
     }
@@ -40,6 +45,7 @@ fn run() -> Result<(), String> {
     let mut cohort: Option<(String, BTreeSet<String>)> = None;
     let mut max_seconds = 7200u64;
     let mut options = lbp_preview::PreviewOptions::default();
+    let mut blockers = false;
     let mut flags = args[4..].iter();
     while let Some(flag) = flags.next() {
         if apply_preview_flag(&mut options, flag, || flags.next().map(String::as_str))? {
@@ -68,6 +74,7 @@ fn run() -> Result<(), String> {
                     .unwrap_or_default();
                 cohort = Some((name, set));
             }
+            "--blockers" => blockers = true,
             "--max-seconds" => {
                 max_seconds = flags
                     .next()
@@ -144,11 +151,13 @@ fn run() -> Result<(), String> {
     let mut tally = CorpusTally::default();
     let mut rows = Vec::with_capacity(by_hash.len());
     let mut mesh_bytes = 0u64;
+    let mut blocking: BTreeMap<String, Blocker> = BTreeMap::new();
     for (n, (sha, guids)) in by_hash.iter().enumerate() {
         control.check()?;
         if started.elapsed() > deadline {
             return Err(format!("time budget exceeded after {n} mesh hashes"));
         }
+        let mut mesh_blocked: Vec<Value> = Vec::new();
         let outcome = match lbp_preview::resolve(&catalog, None, Some(sha)) {
             Err(e) => MeshOutcome::Failed(e),
             Ok(key) => {
@@ -164,6 +173,9 @@ fn run() -> Result<(), String> {
                     Err(e) => MeshOutcome::Failed(e),
                     Ok(preview) => {
                         let g = &preview.geometry;
+                        if blockers {
+                            mesh_blocked = blocked_groups(&preview);
+                        }
                         let (coverage, neutral_reasons) = coverage(
                             geometry_available(&g.positions, &g.triangles),
                             g.primitive_triangles.iter().zip(&preview.bindings).map(
@@ -181,10 +193,26 @@ fn run() -> Result<(), String> {
             }
         };
         tally.record(guids, &outcome)?;
-        rows.push(match &outcome {
-            MeshOutcome::Failed(e) => json!({"sha1":sha,"guids":guids,"status":"failed","reason":e}),
-            MeshOutcome::Loaded { coverage: c, neutral_reasons } => json!({"sha1":sha,"guids":guids,"status":if !c.geometry_available {"no_geometry"} else if c.all_diffuse() {"all_diffuse"} else {"viewable"},"nonempty_groups":c.nonempty_groups,"supported_groups":c.supported_groups,"neutral_reasons":neutral_reasons}),
-        });
+        let mut row = match &outcome {
+            MeshOutcome::Failed(e) => {
+                json!({"sha1":sha,"guids":guids,"status":"failed","reason":e})
+            }
+            MeshOutcome::Loaded {
+                coverage: c,
+                neutral_reasons,
+            } => {
+                json!({"sha1":sha,"guids":guids,"status":if !c.geometry_available {"no_geometry"} else if c.all_diffuse() {"all_diffuse"} else {"viewable"},"nonempty_groups":c.nonempty_groups,"supported_groups":c.supported_groups,"neutral_reasons":neutral_reasons})
+            }
+        };
+        if blockers {
+            if let MeshOutcome::Loaded { coverage: c, .. } = &outcome {
+                if c.geometry_available && !c.all_diffuse() {
+                    record_blockers(&mut blocking, guids, &mesh_blocked);
+                }
+            }
+            row["blocked_groups"] = Value::Array(mesh_blocked);
+        }
+        rows.push(row);
     }
     source.check_stable()?;
     let suffix = preview_scope_suffix(&options);
@@ -238,6 +266,12 @@ fn run() -> Result<(), String> {
             "verified_game_instance": false
         });
     }
+    if blockers {
+        report["blockers_scope"] = json!(
+            "ranking of material keys by meshes they keep from all-diffuse; not an asset count"
+        );
+        report["blocking_materials"] = rank_blockers(&blocking);
+    }
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -258,6 +292,73 @@ fn run() -> Result<(), String> {
     );
     Ok(())
 }
+#[derive(Default)]
+struct Blocker {
+    reasons: BTreeSet<String>,
+    mesh_guids: BTreeSet<String>,
+    sole_mesh_guids: BTreeSet<String>,
+}
+
+/// Nonempty primitive groups without a diffuse binding, in primitive order.
+fn blocked_groups(preview: &lbp_preview::GroupedMesh) -> Vec<Value> {
+    let g = &preview.geometry;
+    g.metadata
+        .primitives
+        .iter()
+        .zip(&g.primitive_triangles)
+        .zip(&preview.bindings)
+        .enumerate()
+        .filter(|(_, ((_, range), _))| !range.is_empty())
+        .filter_map(|(i, ((p, _), b))| {
+            b.as_ref().err().map(|reason| {
+                json!({"group":i,"key":material_key(p.material_guid, p.material_hash.as_deref()),"reason":reason})
+            })
+        })
+        .collect()
+}
+
+fn material_key(guid: Option<u32>, hash: Option<&str>) -> String {
+    match (guid, hash) {
+        (Some(g), _) => format!("g{g}"),
+        (None, Some(h)) => format!("h{}", h.to_ascii_lowercase()),
+        (None, None) => "none".into(),
+    }
+}
+
+fn record_blockers(
+    map: &mut BTreeMap<String, Blocker>,
+    guids: &BTreeSet<String>,
+    groups: &[Value],
+) {
+    let keys: BTreeSet<&str> = groups.iter().filter_map(|v| v["key"].as_str()).collect();
+    for v in groups {
+        let (Some(key), Some(reason)) = (v["key"].as_str(), v["reason"].as_str()) else {
+            continue;
+        };
+        let entry = map.entry(key.to_owned()).or_default();
+        entry.reasons.insert(reason.to_owned());
+        entry.mesh_guids.extend(guids.iter().cloned());
+        if keys.len() == 1 {
+            entry.sole_mesh_guids.extend(guids.iter().cloned());
+        }
+    }
+}
+
+/// Sorted by sole-blocked GUIDs, then blocked GUIDs, then key (deterministic).
+fn rank_blockers(map: &BTreeMap<String, Blocker>) -> Value {
+    let mut v: Vec<_> = map.iter().collect();
+    v.sort_by(|a, b| {
+        (b.1.sole_mesh_guids.len(), b.1.mesh_guids.len())
+            .cmp(&(a.1.sole_mesh_guids.len(), a.1.mesh_guids.len()))
+            .then_with(|| a.0.cmp(b.0))
+    });
+    Value::Array(
+        v.into_iter()
+            .map(|(k, b)| json!({"key":k,"reasons":b.reasons,"blocked_mesh_guids":b.mesh_guids.len(),"sole_blocked_mesh_guids":b.sole_mesh_guids.len(),"sole_blocked_guid_list":b.sole_mesh_guids}))
+            .collect(),
+    )
+}
+
 fn main() {
     if let Err(e) = run() {
         eprintln!("{e}");
