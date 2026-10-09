@@ -860,6 +860,32 @@ fn ear_clip(pts: &[P2], poly: Vec<usize>) -> Option<Vec<[usize; 3]>> {
     Some(tris)
 }
 
+/// A SHAPE polygon in local xy, triangulated (see [`outline_triangles`]).
+#[derive(Debug, Clone, PartialEq)]
+pub struct Outline {
+    pub points: Vec<[f32; 2]>,
+    /// Counter-clockwise triangles over `points`.
+    pub triangles: Vec<[usize; 3]>,
+    /// Polygon area, holes subtracted.
+    pub area: f64,
+}
+
+/// The polygon of a SHAPE in local xy with its holes, triangulated: the same validation
+/// and triangulation as [`extrude`]'s front cap; for colliders (lbp-sim).
+pub fn outline_triangles(shape: &Shape) -> Result<Outline, ShapeReject> {
+    let poly = validate(shape)?;
+    let triangles = triangulate(&poly)?;
+    Ok(Outline {
+        points: poly
+            .pts
+            .iter()
+            .map(|p| [p[0] as f32, p[1] as f32])
+            .collect(),
+        triangles,
+        area: poly.area,
+    })
+}
+
 /// Front-cap triangulation of a validated polygon (CCW triangles in local xy).
 fn triangulate(poly: &Polygon) -> Result<Vec<[usize; 3]>, ShapeReject> {
     let merged = bridge_holes(&poly.pts, &poly.loops).ok_or(ShapeReject::Triangulation)?;

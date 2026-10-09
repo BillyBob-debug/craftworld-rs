@@ -8,7 +8,8 @@
 //!
 //! Field lists (v = head & 0xffff; "ref" = reference, "res" = resource with flags word,
 //! "desc" = resource without flags word):
-//! - BODY (PBody): posVel v3, angVel f32, frozen i32, editingPlayer ref Thing.
+//! - BODY (PBody): posVel v3, angVel f32, frozen i32, editingPlayer ref Thing. Kept as
+//!   `PartData::body` (velocities and `frozen`).
 //! - POS (PPos): thingOfWhichIAmABone ref Thing, animHash i32, worldPosition m44
 //!   (localPosition is only serialized below 0x341).
 //! - RENDER_MESH (PRenderMesh): mesh res, boneThings thingarray, anim res, animPos,
@@ -260,6 +261,8 @@ pub fn supported_parts() -> &'static [&'static str] {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PartData {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<Body>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pos: Option<Pos>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub render_mesh: Option<RenderMesh>,
@@ -412,6 +415,15 @@ pub struct Pos {
     pub world: [f32; 16],
 }
 
+/// PBody as stored: linear velocity, angular velocity (z only) and the `frozen` int
+/// (meaning UNVERIFIED, docs/runtime-evidence/physics.md A1).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Body {
+    pub velocity: [f32; 3],
+    pub angular_velocity: f32,
+    pub frozen: i32,
+}
+
 /// PJoint placement summary (D120): endpoint Things, contact points in each endpoint's
 /// local frame, rest length and angle, settings, bone indices/lengths, type, render scale.
 #[derive(Debug, Clone, Serialize)]
@@ -561,10 +573,15 @@ fn part_body(
     let v = r.rev.version();
     match name {
         "BODY" => {
-            r.v3()?;
-            r.f32()?;
-            r.i32()?;
+            let velocity = r.v3()?;
+            let angular_velocity = r.f32()?;
+            let frozen = r.i32()?;
             thing_ref(r, things)?;
+            things.list[me].data.body = Some(Body {
+                velocity,
+                angular_velocity,
+                frozen,
+            });
         }
         "POS" => {
             let bone_of = thing_ref(r, things)?;
