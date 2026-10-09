@@ -16,7 +16,7 @@
 //! 24 and `Update__` by 11; the remaining names are UI, switch and enter/leave handlers).
 use lbp_level::parts::{ScriptObject, ScriptPart, ScriptValue, ShapeColor};
 use lbp_level::thing::ThingRecord;
-use lbp_script_vm::natives::{Bindings, CameraFromToUp, World};
+use lbp_script_vm::natives::{Bindings, CameraFromToUp, ResourceKind, World};
 use lbp_script_vm::{ClassId, Host, MemberKind, ObjectId, Step, Task, Value, Vm};
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -97,6 +97,15 @@ pub struct LevelWorld {
     /// during a native call); each call hands out the next one.
     pub gooey_pool: Vec<ObjectId>,
     pub gooeys_created: usize,
+    /// Interactive-music commands scripts sent, by name.
+    pub audio_commands: BTreeMap<String, u64>,
+    /// LBP2 game progression flags set on the profile (`IsLBP2GameProgressionFlagSet__i`).
+    /// Empty = a fresh profile, on which PlanetsWorld starts its intro cutscene thread.
+    pub progression_flags: BTreeSet<i32>,
+    /// The Planets object `PodComputer.GetPlanets__` returns.
+    pub planets: Option<ObjectId>,
+    /// Planet objects by `GetCrafteroid__i` index - 1, with their Thing.
+    pub crafteroids: Vec<(ObjectId, Option<u32>)>,
     /// `Game.SetPlayerScoreMultiplierTimer` by player number.
     pub score_multiplier_timers: BTreeMap<i32, i32>,
 }
@@ -554,6 +563,11 @@ impl World for LevelWorld {
             Err(format!("player index {index} outside 0..{n}"))
         }
     }
+    /// The handle is the GUID itself (INFERRED stand-in: nothing is loaded; scripts only
+    /// keep the handle and pass it back to natives).
+    fn load_resource(&mut self, _kind: ResourceKind, guid: u32) -> Result<u32, String> {
+        Ok(guid)
+    }
     fn set_world_transform(&mut self, thing: u32, m: [f32; 16]) -> Result<(), String> {
         self.thing_mut(thing)?.world_matrix = Some(m);
         Ok(())
@@ -566,6 +580,58 @@ impl World for LevelWorld {
         self.pod_computer
             .map(|o| Value::Object(Some(o)))
             .ok_or_else(|| "no PodComputer object (class not loaded)".into())
+    }
+    fn planets(&mut self) -> Result<Value, String> {
+        self.planets
+            .map(|o| Value::Object(Some(o)))
+            .ok_or_else(|| "no Planets object (class not loaded)".into())
+    }
+    fn crafteroid(&mut self, index: i32) -> Result<Value, String> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| i.checked_sub(1))
+            .and_then(|i| self.crafteroids.get(i))
+            .map(|(o, _)| Value::Object(Some(*o)))
+            .ok_or_else(|| format!("no crafteroid {index}"))
+    }
+    fn planet_thing(&mut self, planet: &Value) -> Result<Option<u32>, String> {
+        match planet {
+            Value::Object(Some(o)) => self
+                .crafteroids
+                .iter()
+                .find(|(p, _)| p == o)
+                .map(|(_, t)| *t)
+                .ok_or_else(|| format!("object {o:?} is not a planet")),
+            other => Err(format!("expected a Planet, got {other:?}")),
+        }
+    }
+    /// INFERRED defaults for the PC run: interactive, no pending links, no avatars spawned
+    /// (there is no Sackboy yet), no video, a 16:9 screen, player 0 leads, no music track
+    /// (GUID 0), no user music (stopped, not paused), interactive music audible, no
+    /// attraction (demo) loop.
+    fn state_query(&mut self, native: &str) -> Result<Value, String> {
+        Ok(match native {
+            "Game.IsNonInteractive__"
+            | "Video.IsVideoPlaying__"
+            | "System.Is4to3__"
+            | "Audio.UserMusicIsPaused__"
+            | "Input.IsInAttractionLoop__i" => Value::Bool(false),
+            "Audio.UserMusicIsStopped__" | "Audio.IsInteractiveMusicAudible__" => Value::Bool(true),
+            "Game.GetNumPendingLinks__"
+            | "Game.GetNumAvatars__"
+            | "Game.GetLocalLeadersPlayerNumber__"
+            | "Audio.GetCurrMusicGuid__" => Value::Int(0),
+            _ => return Err(format!("world does not provide {native}")),
+        })
+    }
+    /// Counted by name; nothing plays.
+    fn audio_command(&mut self, name: &str, _args: &[Value]) -> Result<(), String> {
+        *self.audio_commands.entry(name.to_owned()).or_default() += 1;
+        Ok(())
+    }
+    /// Flags in [`LevelWorld::progression_flags`]; empty is a fresh profile (default).
+    fn progression_flag(&mut self, flag: i32) -> Result<bool, String> {
+        Ok(self.progression_flags.contains(&flag))
     }
     /// Nobody is at the pod computer in the PC run (INFERRED default).
     fn pod_computer_in_use(&mut self) -> Result<bool, String> {
@@ -619,46 +685,98 @@ impl World for LevelWorld {
 /// Gooey objects made ahead for `Gooey.CreateGooey__i`.
 pub const GOOEY_POOL: usize = 16;
 
-/// Makes the engine-owned script objects natives hand out: the PodComputer (`.init__`, then
-/// `.ctor__`) and [`GOOEY_POOL`] Gooey objects (`.init__`). INFERRED: the engine holds one
-/// PodComputer and creates Gooeys on demand. Returns the faults, if any; a PodComputer
-/// whose `.ctor__` faults is still kept.
+/// Runs `function` (`.init__`, `.ctor__`) on a heap object with it as `this` in register 0;
+/// a fault comes back as text with its site.
+fn run_on_object(
+    vm: &mut Vm,
+    host: &mut dyn Host,
+    class: ClassId,
+    object: ObjectId,
+    function: &str,
+    budget: u64,
+) -> Result<(), String> {
+    if !vm.has_code(class, function) {
+        return Ok(());
+    }
+    let mut b = budget;
+    let regs = [(0, Value::Object(Some(object)))];
+    match vm.start_registers(host, class, function, &regs, &mut b) {
+        Ok(Step::Done(_)) => Ok(()),
+        Ok(Step::Yielded(_)) => Err(format!("{function} yielded")),
+        Err(f) => {
+            let site = vm.last_site().map_or(String::new(), |s| s.to_string());
+            Err(format!("{function}: {f:?} at {site}"))
+        }
+    }
+}
+
+/// Makes the engine-owned script objects natives hand out: [`GOOEY_POOL`] Gooey objects
+/// (`.init__`) and the PodComputer (`.init__`, then `.ctor__`). INFERRED: the engine holds
+/// one PodComputer and creates Gooeys on demand. The PodComputer is registered before its
+/// `.init__` runs, because that code already asks for it (`GetPodComputer__`). Returns the
+/// faults, if any; objects whose `.init__`/`.ctor__` faulted are still kept.
 pub fn add_engine_objects(
     vm: &mut Vm,
     host: &mut Bindings<LevelWorld>,
     budget: u64,
 ) -> Vec<String> {
     let mut faults = Vec::new();
+    let make = |vm: &mut Vm, host: &mut Bindings<LevelWorld>, class, pod: bool| {
+        let o = vm.instantiate(class).map_err(|f| format!("{f:?}"))?;
+        if pod {
+            host.world.pod_computer = Some(o);
+        } else {
+            host.world.gooey_pool.push(o);
+        }
+        run_on_object(vm, host, class, o, ".init__", budget)?;
+        if pod {
+            run_on_object(vm, host, class, o, ".ctor__", budget)?;
+        }
+        Ok::<(), String>(())
+    };
     if let Some(class) = vm.class_by_name("Gooey") {
         for _ in 0..GOOEY_POOL {
-            let mut b = budget;
-            match vm.construct(host, class, &mut b) {
-                Ok(o) => host.world.gooey_pool.push(o),
-                Err(f) => {
-                    faults.push(format!("Gooey .init__: {f:?}"));
-                    break;
+            if let Err(e) = make(vm, host, class, false) {
+                faults.push(format!("Gooey {e}"));
+            }
+        }
+    }
+    // Planets and its crafteroids: INFERRED index 1 = the level's Earth (a PlanetThing),
+    // 2 = its OrbitingMoon, from PlanetsView, which reads crafteroids 1 and 2 and returns
+    // early when either Thing is null.
+    if let Some(class) = vm.class_by_name("Planets") {
+        match vm.instantiate(class) {
+            Ok(o) => {
+                host.world.planets = Some(o);
+                if let Err(e) = run_on_object(vm, host, class, o, ".init__", budget) {
+                    faults.push(format!("Planets {e}"));
                 }
+            }
+            Err(f) => faults.push(format!("Planets {f:?}")),
+        }
+    }
+    if let Some(class) = vm.class_by_name("Planet") {
+        for name in ["Earth", "OrbitingMoon"] {
+            let thing = host.world.things.iter().position(|t| {
+                t.script_guid
+                    .and_then(|g| vm.class_by_guid(g))
+                    .is_some_and(|c| vm.class_name(c) == name)
+            });
+            match vm.instantiate(class) {
+                Ok(o) => host
+                    .world
+                    .crafteroids
+                    .push((o, thing.and_then(|t| u32::try_from(t).ok()))),
+                Err(f) => faults.push(format!("Planet {f:?}")),
             }
         }
     }
     if let Some(class) = vm.class_by_name("PodComputer") {
-        let mut b = budget;
-        match vm.construct(host, class, &mut b) {
-            Ok(o) => {
-                host.world.pod_computer = Some(o);
-                if vm.has_code(class, ".ctor__") {
-                    let mut b = budget;
-                    if let Err(f) =
-                        vm.call(host, class, ".ctor__", &[Value::Object(Some(o))], &mut b)
-                    {
-                        let site = vm.last_site().map_or(String::new(), |s| s.to_string());
-                        faults.push(format!("PodComputer .ctor__: {f:?} at {site}"));
-                    }
-                }
-            }
-            Err(f) => faults.push(format!("PodComputer .init__: {f:?}")),
+        if let Err(e) = make(vm, host, class, true) {
+            faults.push(format!("PodComputer {e}"));
         }
     }
+    faults.dedup();
     faults
 }
 
@@ -812,7 +930,7 @@ pub struct FrameEntry {
 /// `UpdateInteractiveMusic__`, so the engine calls it each frame (INFERRED from the
 /// listings; `OnEnterPod__`/`OnExitPod__` are called by PodComputer on pod entry/exit).
 /// Arguments (INFERRED from how the function uses them): +4 bool, passed on to
-/// `UpdatePodCamera` (false); +8 the earth PlanetThing (it gets `EarthSpinOffset`); +12 the
+/// `UpdatePodCamera` (false); +8 the Earth (a PlanetThing; it gets `EarthSpinOffset`); +12 the
 /// moon (`MoonSpinOffset`); +16 bool "snap the view" (true on the first tick only); +17
 /// bool "take the zoom from the pod computer's state" (true).
 fn planets_view_args(cx: &FrameContext<'_>) -> Vec<(u16, Value)> {
@@ -824,14 +942,14 @@ fn planets_view_args(cx: &FrameContext<'_>) -> Vec<(u16, Value)> {
     };
     vec![
         (4, Value::Bool(false)),
-        (8, Value::Thing(find("PlanetThing"))),
+        (8, Value::Thing(find("Earth"))),
         (12, Value::Thing(find("OrbitingMoon"))),
         (16, Value::Bool(cx.tick == 0)),
         (17, Value::Bool(true)),
     ]
 }
 
-/// Per-tick entries other than [`UPDATE`], by class (docs/level-scripts.md "Part 5").
+/// Per-tick entries other than [`UPDATE`], by class (docs/level-scripts.md "Part 6").
 pub const FRAME_ENTRIES: &[FrameEntry] = &[FrameEntry {
     class: "PlanetsWorld",
     function: "UpdatePlanetsView__bQ11PlanetThingQ11PlanetThingbb",

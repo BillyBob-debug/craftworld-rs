@@ -442,3 +442,130 @@ fn stored_objects_become_shared_heap_objects() {
     );
     assert_eq!(get(&mut world, 1, "mesh"), Ok(Value::Object(None)));
 }
+
+#[test]
+fn part6_frame_entry_gets_its_arguments_each_tick() {
+    // `PlanetsWorld` whose per-tick export stores its +16 argument ("snap") in `count`.
+    let mut planets = lamp();
+    planets.class_name = "PlanetsWorld".into();
+    planets.strings_a[0] = "PlanetsWorld".into();
+    planets.strings_a[4] = "UpdatePlanetsView__bQ11PlanetThingQ11PlanetThingbb".into();
+    planets.bytecode = vec![
+        i(0x97, 1, 16, 0, 0), // thing(r0).count = r16
+        i(0xa5, 0, 0, 0, 0),  // RETURN
+    ];
+    let mut f = function(0, 4, 0, 2);
+    f.stack_size = 32;
+    planets.function_defs = vec![f];
+    let mut vm = Vm::default();
+    vm.load(planets, Some(GUID));
+    let mut host = Bindings::new(LevelWorld::from_things(&level()));
+    let mut level = LevelScripts::new(&vm, &host.world);
+    let class = level.instances[0].class.unwrap();
+    assert!(lbp_runtime::frame_entry(&vm, class).is_some());
+    let snap = |host: &mut Bindings<LevelWorld>| {
+        host.world
+            .get_member(MemberKind::Thing, &Value::Thing(Some(1)), "X", "count")
+    };
+    let t = level.tick(&mut vm, &mut host, 1000);
+    assert_eq!((t.done, t.no_function, t.faults.len()), (1, 0, 0));
+    assert_eq!(snap(&mut host), Ok(Value::Bool(true)));
+    level.tick(&mut vm, &mut host, 1000);
+    assert_eq!(snap(&mut host), Ok(Value::Bool(false)));
+}
+
+#[test]
+fn part6_camera_world_position_and_engine_state() {
+    use lbp_script_vm::natives::dispatch;
+    let mut w = LevelWorld::from_things(&level());
+    let v = |x: f32| Value::Vec4([x, 0., 0., 1.]);
+    let f = Value::Float;
+    let args = [v(1.), v(2.), v(3.), f(10.), f(1e5), f(0.), f(1.)];
+    dispatch(&mut w, "Cam", "SetCameraFromToUp__rrrffff", &args)
+        .unwrap()
+        .unwrap();
+    dispatch(&mut w, "Cam", "SetDOFAndFog__fff", &[f(1.), f(2.), f(3.)])
+        .unwrap()
+        .unwrap();
+    dispatch(&mut w, "Cam", "ClearMotionBlur__", &[])
+        .unwrap()
+        .unwrap();
+    let cam = w.camera.from_to_up.unwrap();
+    assert_eq!((cam.from[0], cam.to[0], cam.up[0]), (1., 2., 3.));
+    assert_eq!(cam.params, [10., 1e5, 0., 1.]);
+    assert_eq!(w.camera.dof_and_fog, Some([1., 2., 3.]));
+    assert_eq!(
+        (w.camera.from_to_up_calls, w.camera.motion_blur_clears),
+        (1, 1)
+    );
+    let mut m = [0.; 16];
+    m[12..].copy_from_slice(&[4., 5., 6., 1.]);
+    let me = Value::Thing(Some(2));
+    dispatch(
+        &mut w,
+        "Thing",
+        "SetWorldPosition__m",
+        &[me, Value::Mat44(m)],
+    )
+    .unwrap()
+    .unwrap();
+    assert_eq!(w.world_position(2), Ok([4., 5., 6., 1.]));
+    // Defaults of the PC run, and what is not there yet.
+    let q = |w: &mut LevelWorld, c, n| dispatch(w, c, n, &[]).unwrap();
+    assert_eq!(q(&mut w, "HUD", "GetCinemaModeCount__"), Ok(Value::Int(0)));
+    assert_eq!(
+        q(&mut w, "PodComputer", "GetPodComputerInUse__"),
+        Ok(Value::Bool(false))
+    );
+    assert_eq!(q(&mut w, "Game", "GetNumAvatars__"), Ok(Value::Int(0)));
+    assert!(q(&mut w, "PodComputer", "GetPodComputer__").is_err());
+    assert!(q(&mut w, "Gooey", "CreateGooey__i").is_err(), "arity");
+    let flag = |w: &mut LevelWorld| {
+        dispatch(
+            w,
+            "Profile",
+            "IsLBP2GameProgressionFlagSet__i",
+            &[Value::Int(2)],
+        )
+        .unwrap()
+    };
+    assert_eq!(flag(&mut w), Ok(Value::Bool(false)));
+    w.progression_flags.insert(2);
+    assert_eq!(flag(&mut w), Ok(Value::Bool(true)));
+    // Rookie Test natives.
+    let me = Value::Thing(Some(1));
+    dispatch(&mut w, "Native", "SetAnimPos__Q5Thingf", &[me, f(0.5)])
+        .unwrap()
+        .unwrap();
+    assert_eq!(w.things[1].anim_pos, Some(0.5));
+    let (t, n) = (
+        "Game",
+        "SetPlayerScoreMultiplierTimer__Q18Game.EPlayerNumberi",
+    );
+    dispatch(&mut w, t, n, &[Value::Int(0), Value::Int(90)])
+        .unwrap()
+        .unwrap();
+    assert_eq!(w.score_multiplier_timers.get(&0), Some(&90));
+    assert!(dispatch(&mut w, t, n, &[Value::Int(3), Value::Int(1)])
+        .unwrap()
+        .is_err());
+    dispatch(&mut w, "Native", "DebugPrint__i", &[Value::Int(19)])
+        .unwrap()
+        .unwrap();
+    assert_eq!(w.written, ["19"]);
+}
+
+#[test]
+fn part6_engine_objects_and_pod_computer() {
+    // A class named PodComputer with no code: the object is made and handed out.
+    let mut pod = base();
+    pod.class_name = "PodComputer".into();
+    let mut vm = Vm::default();
+    vm.load(pod, Some(BASE));
+    let mut host = Bindings::new(LevelWorld::from_things(&level()));
+    assert!(lbp_runtime::add_engine_objects(&mut vm, &mut host, 1000).is_empty());
+    let o = host.world.pod_computer.expect("pod computer");
+    assert_eq!(host.world.pod_computer(), Ok(Value::Object(Some(o))));
+    assert!(host.world.gooey_pool.is_empty(), "no Gooey class loaded");
+    assert!(host.world.create_gooey(0).is_err());
+}

@@ -139,6 +139,32 @@ pub trait World {
     fn pod_computer(&mut self) -> Result<Value, String> {
         Err(not_available("the pod computer"))
     }
+    /// The Planets object of the pod computer (`PodComputer.GetPlanets__`).
+    fn planets(&mut self) -> Result<Value, String> {
+        Err(not_available("planets"))
+    }
+    /// `Planets.GetCrafteroid__i`: a Planet object by index (scripts pass 1 and 2).
+    fn crafteroid(&mut self, _index: i32) -> Result<Value, String> {
+        Err(not_available("planets"))
+    }
+    /// `Planet.GetThing__`: the Thing of a Planet object (null when it has none).
+    fn planet_thing(&mut self, _planet: &Value) -> Result<Option<u32>, String> {
+        Err(not_available("planets"))
+    }
+    /// An interactive-music command (`Audio.SetInteractiveMusic*`, `StopInteractiveMusic`)
+    /// with its arguments; nothing plays yet.
+    fn audio_command(&mut self, _name: &str, _args: &[Value]) -> Result<(), String> {
+        Err(not_available("audio"))
+    }
+    /// Engine state queries ([`STATE_QUERIES`]) by `Class.mangled` name; their arguments
+    /// (a player number at most) do not change the answer.
+    fn state_query(&mut self, native: &str) -> Result<Value, String> {
+        Err(not_available(native))
+    }
+    /// `Profile.IsLBP2GameProgressionFlagSet__i` (PlanetsWorld asks for flag 2).
+    fn progression_flag(&mut self, _flag: i32) -> Result<bool, String> {
+        Err(not_available("the profile"))
+    }
     /// Is a player using the pod computer (`PodComputer.GetPodComputerInUse__`)?
     fn pod_computer_in_use(&mut self) -> Result<bool, String> {
         Err(not_available("the pod computer"))
@@ -435,13 +461,15 @@ fn smooth(c: &Call<'_>, k: usize) -> Result<[f32; 4], String> {
     let (max_acc, max_vel) = (float(param(c, 3)?)?, float(param(c, 4)?)?);
     let want = clamp_len(std::array::from_fn(|i| target[i] - pos[i]), k, max_vel);
     let dv = clamp_len(std::array::from_fn(|i| want[i] - vel[i]), k, max_acc);
-    Ok(std::array::from_fn(|i| {
-        if i < k {
-            vel[i] + dv[i]
-        } else {
-            0.
-        }
-    }))
+    Ok(std::array::from_fn(
+        |i| {
+            if i < k {
+                vel[i] + dv[i]
+            } else {
+                0.
+            }
+        },
+    ))
 }
 
 fn matrix(v: &Value) -> Result<[f32; 16], String> {
@@ -697,7 +725,7 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     ("Game", "GetPlayerNumber__i", |w, c| {
         Ok(Value::Int(w.player_number(int(param(c, 0)?)?)?))
     }),
-    // ---- part 5: the Pod camera (PlanetsWorld) and the next Rookie Test natives ----
+    // ---- part 6: the Pod camera (PlanetsWorld) and the next Rookie Test natives ----
     ("Math", "lerp__frr", |_, c| {
         // Vector-library order lerp(t, a, b) = a + (b - a) t (INFERRED).
         let (t, a, b) = (
@@ -705,7 +733,9 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
             vec4(param(c, 1)?)?,
             vec4(param(c, 2)?)?,
         );
-        Ok(Value::Vec4(std::array::from_fn(|i| a[i] + (b[i] - a[i]) * t)))
+        Ok(Value::Vec4(std::array::from_fn(|i| {
+            a[i] + (b[i] - a[i]) * t
+        })))
     }),
     ("Math", "SmoothStep__fff", |_, c| {
         // smoothstep(edge0, edge1, x); PlanetsWorld passes (0, 1, ViewTransition).
@@ -720,8 +750,12 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
         let t = ((x - e0) / (e1 - e0)).clamp(0., 1.);
         Ok(Value::Float(t * t * (3. - 2. * t)))
     }),
-    ("Math", "Smooth3D__rrrff", |_, c| Ok(Value::Vec4(smooth(c, 3)?))),
-    ("Math", "Smooth2D__pppff", |_, c| Ok(Value::Vec4(smooth(c, 2)?))),
+    ("Math", "Smooth3D__rrrff", |_, c| {
+        Ok(Value::Vec4(smooth(c, 3)?))
+    }),
+    ("Math", "Smooth2D__pppff", |_, c| {
+        Ok(Value::Vec4(smooth(c, 2)?))
+    }),
     ("Math", "Smooth__fffff", |_, c| {
         // The caller reads x as the new value and y as the new velocity.
         let pos = float(param(c, 0)?)?;
@@ -751,6 +785,69 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
         Ok(Value::Int(w.cinema_mode_count()?))
     }),
     ("PodComputer", "GetPodComputer__", |w, _| w.pod_computer()),
+    ("PodComputer", "GetPlanets__", |w, _| w.planets()),
+    ("Game", "IsNonInteractive__", |w, _| {
+        w.state_query("Game.IsNonInteractive__")
+    }),
+    ("Game", "GetNumPendingLinks__", |w, _| {
+        w.state_query("Game.GetNumPendingLinks__")
+    }),
+    ("Game", "GetNumAvatars__", |w, _| {
+        w.state_query("Game.GetNumAvatars__")
+    }),
+    ("Video", "IsVideoPlaying__", |w, _| {
+        w.state_query("Video.IsVideoPlaying__")
+    }),
+    ("System", "Is4to3__", |w, _| {
+        w.state_query("System.Is4to3__")
+    }),
+    ("Game", "GetLocalLeadersPlayerNumber__", |w, _| {
+        w.state_query("Game.GetLocalLeadersPlayerNumber__")
+    }),
+    ("Audio", "GetCurrMusicGuid__", |w, _| {
+        w.state_query("Audio.GetCurrMusicGuid__")
+    }),
+    ("Audio", "UserMusicIsStopped__", |w, _| {
+        w.state_query("Audio.UserMusicIsStopped__")
+    }),
+    ("Audio", "UserMusicIsPaused__", |w, _| {
+        w.state_query("Audio.UserMusicIsPaused__")
+    }),
+    ("Audio", "IsInteractiveMusicAudible__", |w, _| {
+        w.state_query("Audio.IsInteractiveMusicAudible__")
+    }),
+    ("Input", "IsInAttractionLoop__i", |w, c| {
+        int(param(c, 0)?)?;
+        w.state_query("Input.IsInAttractionLoop__i")
+    }),
+    ("Audio", "SetInteractiveMusic__ggffiQ5Thing", |w, c| {
+        w.audio_command("SetInteractiveMusic", c.params)?;
+        Ok(Value::Void)
+    }),
+    (
+        "Audio",
+        "SetInteractiveMusicStereoPairVolume__giff",
+        |w, c| {
+            w.audio_command("SetInteractiveMusicStereoPairVolume", c.params)?;
+            Ok(Value::Void)
+        },
+    ),
+    ("Audio", "StopInteractiveMusic__", |w, c| {
+        w.audio_command("StopInteractiveMusic", c.params)?;
+        Ok(Value::Void)
+    }),
+    ("Profile", "IsLBP2GameProgressionFlagSet__i", |w, c| {
+        Ok(Value::Bool(w.progression_flag(int(param(c, 0)?)?)?))
+    }),
+    ("Planets", "GetCrafteroid__i", |w, c| {
+        w.crafteroid(int(param(c, 0)?)?)
+    }),
+    ("Planet", "GetThing__", |w, c| {
+        let planet = c
+            .receiver
+            .ok_or("member native called without a receiver")?;
+        Ok(Value::Thing(w.planet_thing(planet)?))
+    }),
     ("PodComputer", "GetPodComputerInUse__", |w, _| {
         Ok(Value::Bool(w.pod_computer_in_use()?))
     }),
@@ -818,6 +915,21 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
         );
         report(w, c, (a - b).abs() <= eps)
     }),
+];
+
+/// The natives bound through [`World::state_query`], with their return type.
+pub const STATE_QUERIES: [(&str, &str); 11] = [
+    ("Game.IsNonInteractive__", "bool"),
+    ("Game.GetNumPendingLinks__", "s32"),
+    ("Game.GetNumAvatars__", "s32"),
+    ("Video.IsVideoPlaying__", "bool"),
+    ("System.Is4to3__", "bool"),
+    ("Game.GetLocalLeadersPlayerNumber__", "s32"),
+    ("Audio.GetCurrMusicGuid__", "s32"),
+    ("Audio.UserMusicIsStopped__", "bool"),
+    ("Audio.UserMusicIsPaused__", "bool"),
+    ("Audio.IsInteractiveMusicAudible__", "bool"),
+    ("Input.IsInAttractionLoop__i", "bool"),
 ];
 
 /// Natives the VM itself handles; they never reach a host.
@@ -900,6 +1012,55 @@ mod tests {
                 &[Value::Str("a".into()), Value::Str("b".into())]
             ),
             Ok(Value::Str("ab".into()))
+        );
+    }
+
+    #[test]
+    fn part6_math_and_lams_keys() {
+        let (f, v) = (Value::Float, |x: f32, y: f32| Value::Vec4([x, y, 0., 0.]));
+        assert_eq!(
+            call("Math", "lerp__frr", &[f(0.25), v(0., 4.), v(4., 8.)]),
+            Ok(v(1., 5.))
+        );
+        assert_eq!(
+            call("Math", "SmoothStep__fff", &[f(0.), f(1.), f(0.5)]),
+            Ok(f(0.5))
+        );
+        assert_eq!(
+            call("Math", "SmoothStep__fff", &[f(0.), f(1.), f(2.)]),
+            Ok(f(1.))
+        );
+        // Far target: speed capped at max_vel 2, change at max_acc 0.5 from rest.
+        assert_eq!(
+            call(
+                "Math",
+                "Smooth3D__rrrff",
+                &[v(0., 0.), v(0., 0.), v(100., 0.), f(0.5), f(2.)]
+            ),
+            Ok(v(0.5, 0.))
+        );
+        // Near target, already moving at the right speed: lands on it.
+        assert_eq!(
+            call(
+                "Math",
+                "Smooth__fffff",
+                &[f(1.), f(1.), f(2.), f(10.), f(100.)]
+            ),
+            Ok(Value::Vec4([2., 1., 0., 0.]))
+        );
+        // Toolkit makeLamsKeyID vector (docs/u1-translation.md), as s32.
+        let key = crate::natives::lookup("LAMS", "MakeLamsKeyID__Q6String").unwrap();
+        let s = [Value::Str("A".into())];
+        let got = key(
+            &mut Tree,
+            &Call {
+                receiver: None,
+                params: &s,
+            },
+        );
+        assert_eq!(
+            got,
+            Ok(Value::Int(lbp_resource::translation::lams_key("A") as i32))
         );
     }
 
