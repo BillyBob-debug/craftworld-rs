@@ -860,6 +860,30 @@ fn load(
                 let root = commands
                     .spawn((rig.shell_root(t0), Visibility::default(), PodShellRoot))
                     .id();
+                // P2g: pod.mol (the tent) on its own root; the DualShock, cords and the
+                // figure stay on the shell root.
+                let tent = commands
+                    .spawn((
+                        rig.tent_root(t0),
+                        Visibility::default(),
+                        PodShellRoot,
+                        PodTentRoot,
+                    ))
+                    .id();
+                let tent_flags: Vec<bool> = level.shell.as_ref().map_or(Vec::new(), |shell| {
+                    shell_plan
+                        .placed
+                        .iter()
+                        .flat_map(|(mesh, _)| {
+                            let n = shell_plan.prepared[*mesh].as_ref().map_or(0, Vec::len);
+                            let is_tent = matches!(
+                                shell.meshes[*mesh].source,
+                                level_scene::MeshSource::Guid(POD_TENT_MESH)
+                            );
+                            std::iter::repeat_n(is_tent, n)
+                        })
+                        .collect()
+                });
                 let first = v.scene.len();
                 spawn_level(
                     &mut v,
@@ -869,8 +893,13 @@ fn load(
                     &mut images,
                     shell_plan,
                 );
-                for (entity, ..) in &v.scene[first..] {
-                    commands.entity(root).add_child(*entity);
+                for (i, (entity, ..)) in v.scene[first..].iter().enumerate() {
+                    let parent = if tent_flags.get(i).copied().unwrap_or(false) {
+                        tent
+                    } else {
+                        root
+                    };
+                    commands.entity(parent).add_child(*entity);
                 }
                 // The shell plan's lines replace the level's; keep P2e rule lines for both.
                 v.level.lines.extend(
@@ -1745,6 +1774,11 @@ fn adapter_bounds(positions: &[[f32; 3]]) -> Option<[[f32; 3]; 2]> {
 }
 #[derive(Component)]
 struct PodShellRoot;
+/// P2g: the root carrying the tent mesh (pod.mol), placed by `PodRig::tent_root`.
+#[derive(Component)]
+struct PodTentRoot;
+/// pod.mol, the Pod tent (shell level 000027b9 Thing 2).
+const POD_TENT_MESH: u32 = 0x0000_2f6c;
 /// Runs before `load`: a new load request drops the previous Pod shell (and its figure).
 fn clear_pod_shell(
     mut commands: Commands,
@@ -1776,7 +1810,7 @@ fn pod_dolly(
     rig: Option<Res<PodRigRes>>,
     state: Option<ResMut<pod_menu::PuterState>>,
     mut orbit: ResMut<Orbit>,
-    mut roots: Query<&mut Transform, With<PodShellRoot>>,
+    mut roots: Query<(&mut Transform, Has<PodTentRoot>), With<PodShellRoot>>,
 ) {
     let (Some(rig), Some(mut state)) = (rig, state) else {
         return;
@@ -1799,8 +1833,12 @@ fn pod_dolly(
         (state.t - step).max(0.)
     };
     *orbit = pod_orbit(rig.0.planet_eye(state.t), rig.0.globe_z);
-    for mut root in &mut roots {
-        *root = rig.0.shell_root(state.t);
+    for (mut root, tent) in &mut roots {
+        *root = if tent {
+            rig.0.tent_root(state.t)
+        } else {
+            rig.0.shell_root(state.t)
+        };
     }
 }
 fn spawn_level(
