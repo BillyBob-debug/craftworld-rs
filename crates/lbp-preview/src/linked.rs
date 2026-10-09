@@ -38,6 +38,8 @@ pub struct Asset {
     /// Effective display addressing; source_wrap_raw() retains guarded BORDER axes.
     pub wrap: crate::TextureWrapping,
     pub selection: DiffuseSelection,
+    /// P2e opt-in `--runtime-texture` replacement of a Solid group (None = from the material).
+    pub runtime_texture: Option<crate::runtime_texture::RuntimeOverride>,
 }
 pub struct SharedSampleAsset {
     pub texture: lbp_texture::Texture,
@@ -241,6 +243,10 @@ impl MaterialAsset {
     }
     fn source_label(&self) -> String {
         match self {
+            Self::Texture(a) if a.runtime_texture.is_some() => {
+                let o = a.runtime_texture.unwrap();
+                format!("{} (opt-in --runtime-texture; game binding unconfirmed) • UV0 untransformed, Repeat, untinted (inferred) • {}×{} {} • replaces solid diffuse {:?}", o.rule.label(), a.texture.header.width, a.texture.header.height, a.texture.header.pixel_format, o.replaced_color)
+            }
             Self::Texture(a) if a.selection.grid_graph.is_some() => crate::grid_graph::label(a),
             Self::Texture(a) if a.selection.blend_mask.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.blend_mask.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.wrap.label(),a.selection.ignored_nodes,a.selection.ignored_wires),
             Self::Texture(a) if a.selection.alpha_mix.is_some() => format!("Diffuse only • {} • UV{} {} • {} • ignores {} nodes / {} wires",a.selection.alpha_mix.unwrap().label(),a.selection.uv_channel,a.selection.uv_transform.label(),a.border_domain.map_or_else(||a.wrap.label(),|b|b.label()),a.selection.ignored_nodes,a.selection.ignored_wires),
@@ -1742,6 +1748,7 @@ pub(crate) fn load_material(
         texture_key,
         wrap,
         selection,
+        runtime_texture: None,
     })))
 }
 
