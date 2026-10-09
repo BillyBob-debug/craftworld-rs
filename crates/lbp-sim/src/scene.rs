@@ -46,6 +46,8 @@ pub const COLLIDABLE_GAME: i16 = 0x1;
 pub const MAX_PARENT_DEPTH: usize = 256;
 /// Triangles below this area (world units²) after the transform are dropped.
 pub const MIN_TRIANGLE_AREA: f32 = 1e-4;
+/// Flat-transform samples kept per scene (diagnostics).
+pub const FLAT_SAMPLES: usize = 4;
 
 /// Signed area of a triangle (positive when counter-clockwise).
 pub fn area([a, b, c]: &[[f32; 2]; 3]) -> f32 {
@@ -125,9 +127,28 @@ pub struct SceneReport {
     pub rejected: BTreeMap<&'static str, usize>,
     /// Shapes kept by the even-odd fill, by the reason the strict outline refused them.
     pub filled: BTreeMap<&'static str, usize>,
+    /// Up to [`FLAT_SAMPLES`] flat-transform shapes: Thing and the 3x3 linear part of the
+    /// world matrix (columns x, y, z).
+    pub flat_samples: Vec<(usize, [f32; 9])>,
     pub joints: usize,
     /// PJoints left out, by reason.
     pub rejected_joints: BTreeMap<&'static str, usize>,
+}
+
+/// Material rule from a material's MAP path (INFERRED from names and public material
+/// behaviour until RMaterial is read): dark matter and infinite-mass materials are fixed,
+/// hologram does not collide.
+pub fn material_rule_for_path(path: &str) -> MaterialRule {
+    let p = path.to_ascii_lowercase().replace(' ', "_");
+    if !p.ends_with(".mat") {
+        MaterialRule::Normal
+    } else if p.contains("dark_matter") || p.contains("darkmatter") || p.contains("infinite_mass") {
+        MaterialRule::Fixed
+    } else if p.contains("hologram") {
+        MaterialRule::NoCollide
+    } else {
+        MaterialRule::Normal
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -283,8 +304,19 @@ pub fn build_scene_with(
             // scaled to nothing), a tiny outline, or neither.
             let det = m[0] * m[5] - m[1] * m[4];
             let scale = m[0].abs().max(m[1].abs()).max(m[4].abs()).max(m[5].abs());
-            reject(if det.abs() <= 1e-6 * scale * scale {
-                "no triangles: flat transform"
+            let axis = |x: f32, y: f32| x.hypot(y) <= 1e-6 * scale;
+            let flat = scale <= 0. || det.abs() <= 1e-6 * scale * scale;
+            if flat && scene.report.flat_samples.len() < FLAT_SAMPLES {
+                let l = [m[0], m[1], m[2], m[4], m[5], m[6], m[8], m[9], m[10]];
+                scene.report.flat_samples.push((i, l));
+            }
+            reject(if scale <= 0. {
+                "no triangles: flat transform: zero xy scale"
+            } else if axis(m[0], m[1]) || axis(m[4], m[5]) {
+                "no triangles: flat transform: one axis zero"
+            } else if det.abs() <= 1e-6 * scale * scale {
+                // Both axes present but parallel: turned edge-on in 3D, or sheared flat.
+                "no triangles: flat transform: axes parallel"
             } else if outline.area.abs() * f64::from(det.abs()) < 1e-3 {
                 "no triangles: tiny outline"
             } else {
