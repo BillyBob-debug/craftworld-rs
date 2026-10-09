@@ -3854,3 +3854,34 @@ Detail: [docs/d133-patch-scripts.md](docs/d133-patch-scripts.md).
 - Checks per merge: fmt, tests, workspace Clippy -D warnings, both viewer builds.
 **+150 newly viewable (decorations drawn, unit DECORATIONS entries, scope three Da Vinci
 levels, baseline D149 0) / +0 newly Complete.**
+
+## D160-D175 — Pod vs RPCS3, script threads, physics merged (2026-10-08/09)
+
+- D160-D168 (PRs #51-#57, #60): runtime textures, globe sea, sticker decals (1,003 drawn), Pod
+  sampler UV and tent; RPCS3 comparison in docs/pod-rpcs3-comparison.md.
+- D169 (PR #61): pod-in-use camera. level_scripts pod_planets --play=300 --flags=2
+  --puter-in-use=150: before (0,-250,1130)->(0,100,-1500), in use (0,-300,900)->(0,500,-1500);
+  both presets found in RPCS3 memory (table at 0x344cb780), live Story view direction matches.
+- D170 (PR #62): closed window 0.34-0.65 w x 0.28-0.67 h (RPCS3 0.35-0.67 x 0.28-0.69; D168
+  0.33-0.67 x 0.21-0.64); --pod-t mid-dolly vs RPCS3 opening frame (d177-*).
+- D171 (PR #59): script threads; pod_planets --play=300 no flags: threads_started 1, intro thread
+  stops at unbound Video.StartVideo__Q5Thinggb; 0 tick faults.
+- D172 (PR #56): viewer --level-scripts: Pod planets flags 2 649 ticks 0 faults; Rookie create
+  189/23/9 (d185-*).
+- D173 (PR #63): Pod side panels default to room wall art 0001f3b9 (inferred; window_glassy slot
+  0 is a bump map; --glass experiment had no visible effect and was reverted). d184/d187.
+- D174 (PR #64): MULm44 is column-major A*B; World matrix zero now at [1][0] like RPCS3;
+  script_tests 512/1 unchanged.
+- D175 (PRs #54+#58): lbp-sim avian2d physics, joints, frozen bodies asleep, pick-ups and
+  infinite-mass fixed, hologram not a collider. Rookie --ticks=90: moved >1 0 (d189). --all on
+  7bc777f: 378 levels, 0 panicked, moved >100 12,462 of 72,709 bodies (d183).
+- RPCS3 findings: FOV hfov 88.3 deg (1/tan 1.0296, aspect 16:9, near 10, far 100000) in Pod main
+  menu; real menu World matrix is PlanetsView view 1 (pitch 0.35, yaw -0.07, scale 2); layer
+  switch W = -z, lanes 200 apart, linear 35 u/tick (Rookie x -13036, lanes 0/-200).
+- Failed: --glass translucency over nothing (D181); first --all stack overflow (fixed by 512 MB
+  thread); live camera address not stable in memory.
+- Checks per merge: fmt, workspace Clippy -D warnings, crate tests, viewer builds.
+- Not tested: three-lane switch, airborne switch, Pod closed-view FOV, main-menu view in our VM.
+- Next: drive PodStateMainMenu planets view (view 1) in the VM; Earth/Moon bounds; physics
+  movers (frozen=1 fallers); Sackboy controller measurements.
+**+0 newly viewable / +0 newly Complete (Pod/runtime fidelity; sticker decals counted in D167).**

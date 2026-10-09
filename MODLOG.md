@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-09 — D160-D175 Pod vs RPCS3, threads, physics
+
+Pod closed window, side-panel wall art and in-use camera matched to RPCS3; script threads and
+viewer level scripts; MULm44 order fixed; lbp-sim physics merged (Rookie Test stays put).
++0 viewable / +0 Complete.
+
 ## 2026-10-08 — D151-D159 Pod menu, decorations, runtime ticks
 
 Pod main menu renders over the real Pod level with a solved camera; 150 level decorations
