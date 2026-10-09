@@ -25,7 +25,8 @@ layers. Written in the cloud with synthetic shapes only; the level check needs t
 | Rule | Evidence | Applicability |
 | --- | --- | --- |
 | A Thing with BODY is a rigid body at its POS frame | INFERRED (PBody carries the velocities; runtime-evidence/physics.md A2) | LBP2 levels |
-| A SHAPE joins the nearest BODY Thing on its parent chain (itself included); none = static | INFERRED (A1: glued pieces in one parent tree are one body) | Joints not handled yet |
+| A SHAPE joins the topmost BODY Thing on its parent chain (itself included); none = static. BODY Things under another BODY are merged and counted as `nested_bodies` | INFERRED (A1: glued pieces in one parent tree are one body). Changed from "nearest" after the first PC run (Rookie: 0 static, every body fell) | Joints not handled yet |
+| A body is static when its owner Thing has WORLD, or any of its shapes uses a fixed physical material. `level_physics` marks a material fixed when its MAP path names dark matter (`dark_matter`/`darkmatter` `.mat`) | PUBLIC behaviour (dark matter is immovable, glued things stay put; physics evidence B); path match INFERRED until the PC report's `fixed_material_paths` and `shape_materials_top40` confirm it | Test `dark_matter_and_world_bodies_are_static` |
 | Collision is 2D; a shape's slab is world z ± thickness; slabs that only touch do not collide | INFERRED (A3/A4) | Layer spacing UNKNOWN (check P5) |
 | No COLLIDABLE_GAME flag (0x1) = no collider | COMMUNITY (ShapeFlags) | — |
 | Mass = area × massDepth × density | INFERRED (A2); avian derives it from `ColliderDensity` = massDepth × density | — |

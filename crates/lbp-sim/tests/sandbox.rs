@@ -4,8 +4,9 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use lbp_level::parts::{Body, Joint, JointParams, Pos, Shape, ShapeColor};
+use lbp_level::serial::Descriptor;
 use lbp_level::thing::ThingRecord;
-use lbp_sim::scene::{build_scene, Endpoint, JointKind, PhysicsScene, DENSITY};
+use lbp_sim::scene::{build_scene, build_scene_with, Endpoint, JointKind, PhysicsScene, DENSITY};
 use lbp_sim::{spawn_scene, to_level, SimPlugin, ThingIndex, TICK_HZ};
 use std::time::Duration;
 
@@ -465,4 +466,75 @@ fn piston_slides_to_its_limit_and_holds_its_line() {
     let p = out[1].1;
     assert!((p[1] - 800.).abs() < 5. && p[0].abs() < 2., "{p:?}");
     assert!(out[1].2.abs() < 0.01, "does not turn: {}", out[1].2);
+}
+
+#[test]
+fn dark_matter_and_world_bodies_are_static() {
+    const DARK: u32 = 0xd4;
+    let mut dark = rect(200., 100., 7);
+    dark.material = Some(Descriptor {
+        flags: None,
+        kind_byte: 2,
+        guid: Some(DARK),
+        sha1: None,
+    });
+    // 0: dark matter block in mid air; 1: box glued to it (its own BODY merges into 0);
+    // 2: a loose box; 3: a box owned by the WORLD Thing.
+    let mut glued = thing(
+        1,
+        matrix(150., 500., 0., 0., 1., 1.),
+        Some(rect(100., 100., 7)),
+        true,
+    );
+    glued.parent = Some(0);
+    let mut world = thing(
+        3,
+        matrix(-600., 500., 0., 0., 1., 1.),
+        Some(rect(100., 100., 7)),
+        true,
+    );
+    world.parts = vec!["WORLD"];
+    let things = vec![
+        thing(0, matrix(0., 500., 0., 0., 1., 1.), Some(dark), true),
+        glued,
+        thing(
+            2,
+            matrix(600., 500., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        world,
+    ];
+    let scene = build_scene_with(&things, &|d| d.guid == Some(DARK));
+    let r = &scene.report;
+    assert_eq!(
+        (r.dynamic, r.static_, r.fixed_bodies, r.nested_bodies),
+        (1, 3, 2, 1)
+    );
+    assert_eq!(build_scene(&things).report.fixed_bodies, 1, "WORLD only");
+    let mut app = app(scene);
+    for _ in 0..30 {
+        app.update();
+    }
+    let mut q = app
+        .world_mut()
+        .query_filtered::<(&ThingIndex, &Position), With<RigidBody>>();
+    let mut out: Vec<_> = q
+        .iter(app.world())
+        .map(|(t, p)| (t.0, to_level(p.0)))
+        .collect();
+    out.sort_by_key(|o| o.0);
+    let near = |p: [f32; 2], q: [f32; 2]| (p[0] - q[0]).abs() < 0.01 && (p[1] - q[1]).abs() < 0.01;
+    assert!(
+        out[0].0 == 0 && near(out[0].1, [0., 500.]),
+        "dark matter (and the glued box) stay: {out:?}"
+    );
+    assert!(
+        out[1].0 == 2 && out[1].1[1] < 400.,
+        "loose box falls: {out:?}"
+    );
+    assert!(
+        out[2].0 == 3 && near(out[2].1, [-600., 500.]),
+        "WORLD body stays: {out:?}"
+    );
 }

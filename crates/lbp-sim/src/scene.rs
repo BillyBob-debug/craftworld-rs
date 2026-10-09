@@ -6,9 +6,14 @@
 //! docs/sim-physics.md):
 //! - A Thing with BODY is a rigid body at its POS frame (INFERRED: PBody holds the
 //!   velocities, so it is the moving piece).
-//! - A SHAPE Thing belongs to the nearest Thing with BODY on its parent chain, itself
-//!   included (INFERRED, A1: pieces glued in one parent tree form one body). A SHAPE with
-//!   no BODY on the chain is static.
+//! - A SHAPE Thing belongs to the topmost Thing with BODY on its parent chain, itself
+//!   included (INFERRED, A1: pieces glued in one parent tree form one body; a BODY under
+//!   another BODY is counted as `nested_bodies`). A SHAPE with no BODY on the chain is
+//!   static.
+//! - A body is fixed (static) when its owner is the level's WORLD Thing, or when any of its
+//!   shapes uses a physical material the caller marks fixed (PUBLIC behaviour: dark matter
+//!   is immovable and anything glued to it stays put; which descriptor is dark matter comes
+//!   from the caller, see [`build_scene_with`]). INFERRED until a PC run confirms it.
 //! - Collision is 2D; a shape's slab is world z ± thickness (INFERRED, A3/A4).
 //! - A shape without the COLLIDABLE_GAME flag (0x1) does not collide (COMMUNITY, ShapeFlags).
 //! - PJoints join the entities their endpoint Things belong to (a body, or a static
@@ -16,6 +21,7 @@
 //!   names; frame INFERRED). The type mapping is [`JointKind`].
 //! - Mass = area × massDepth × density (INFERRED, A2); density is [`DENSITY`] until RMaterial
 //!   is read (PLACEHOLDER).
+use lbp_level::serial::Descriptor;
 use lbp_level::shape_mesh::outline_triangles;
 use lbp_level::thing::ThingRecord;
 use std::collections::BTreeMap;
@@ -76,6 +82,8 @@ pub struct SceneBody {
     pub angular_velocity: f32,
     /// PBody.frozen as stored (meaning UNVERIFIED; not used yet).
     pub frozen: i32,
+    /// Static body: WORLD owner or a fixed material in the glue tree (see module rules).
+    pub fixed: bool,
 }
 
 /// One SHAPE Thing as a collider.
@@ -102,6 +110,10 @@ pub struct SceneReport {
     pub dynamic: usize,
     pub static_: usize,
     pub not_collidable: usize,
+    /// Bodies made static (counted in `static_` by shape, here by body).
+    pub fixed_bodies: usize,
+    /// BODY Things with another BODY above them on the parent chain (merged into it).
+    pub nested_bodies: usize,
     /// Shapes left out, by reason.
     pub rejected: BTreeMap<&'static str, usize>,
     pub joints: usize,
@@ -118,24 +130,46 @@ pub struct PhysicsScene {
 }
 
 /// Nearest Thing with BODY on the parent chain of `i`, itself included.
-fn body_owner(things: &[ThingRecord], mut i: usize) -> Option<usize> {
+/// Topmost Thing with BODY on the parent chain of `i` (itself included), and the BODY
+/// Things below it on the chain.
+fn body_owner(things: &[ThingRecord], mut i: usize) -> (Option<usize>, Vec<usize>) {
+    let mut found = Vec::new();
     for _ in 0..MAX_PARENT_DEPTH {
-        let t = things.get(i)?;
+        let Some(t) = things.get(i) else {
+            break;
+        };
         if t.data.body.is_some() {
-            return Some(i);
+            found.push(i);
         }
         match t.parent {
             Some(p) if p != i => i = p,
-            _ => return None,
+            _ => break,
         }
     }
-    None
+    let top = found.pop();
+    (top, found)
 }
 
-/// Builds the physics description of a level (`things[i]` must be Thing index `i`).
+fn is_world(t: &ThingRecord) -> bool {
+    t.data.world.is_some() || t.parts.contains(&"WORLD")
+}
+
+/// Builds the physics description of a level (`things[i]` must be Thing index `i`) with no
+/// fixed materials: only WORLD-owned bodies are static.
 pub fn build_scene(things: &[ThingRecord]) -> PhysicsScene {
+    build_scene_with(things, &|_| false)
+}
+
+/// Builds the physics description of a level; a body with any shape whose physical
+/// material satisfies `fixed_material` is static.
+pub fn build_scene_with(
+    things: &[ThingRecord],
+    fixed_material: &dyn Fn(&Descriptor) -> bool,
+) -> PhysicsScene {
     let mut scene = PhysicsScene::default();
     let mut body_of = BTreeMap::<usize, Option<usize>>::new();
+    let mut nested = std::collections::BTreeSet::new();
+    let mut fixed_shape = Vec::new();
     for (i, t) in things.iter().enumerate() {
         let Some(shape) = &t.data.shape else {
             continue;
@@ -161,7 +195,9 @@ pub fn build_scene(things: &[ThingRecord]) -> PhysicsScene {
                 continue;
             }
         };
-        let body = match body_owner(things, i) {
+        let (owner, below) = body_owner(things, i);
+        nested.extend(below);
+        let body = match owner {
             None => None,
             Some(b) => {
                 let slot = *body_of.entry(b).or_insert_with(|| {
@@ -178,6 +214,7 @@ pub fn build_scene(things: &[ThingRecord]) -> PhysicsScene {
                             velocity: [pb.velocity[0], pb.velocity[1]],
                             angular_velocity: pb.angular_velocity,
                             frozen: pb.frozen,
+                            fixed: is_world(thing),
                         });
                         scene.bodies.len() - 1
                     })
@@ -211,11 +248,7 @@ pub fn build_scene(things: &[ThingRecord]) -> PhysicsScene {
             reject("no triangles");
             continue;
         }
-        if body.is_some() {
-            scene.report.dynamic += 1;
-        } else {
-            scene.report.static_ += 1;
-        }
+        fixed_shape.push(shape.material.as_ref().is_some_and(fixed_material));
         scene.colliders.push(SceneCollider {
             thing: i,
             body,
@@ -226,6 +259,20 @@ pub fn build_scene(things: &[ThingRecord]) -> PhysicsScene {
             density: shape.mass_depth.max(0.) * DENSITY,
         });
     }
+    for (c, fixed) in scene.colliders.iter().zip(fixed_shape) {
+        if let (Some(b), true) = (c.body, fixed) {
+            scene.bodies[b].fixed = true;
+        }
+    }
+    for c in &scene.colliders {
+        if c.body.is_some_and(|b| !scene.bodies[b].fixed) {
+            scene.report.dynamic += 1;
+        } else {
+            scene.report.static_ += 1;
+        }
+    }
+    scene.report.fixed_bodies = scene.bodies.iter().filter(|b| b.fixed).count();
+    scene.report.nested_bodies = nested.len();
     scene.add_joints(things);
     scene
 }
@@ -320,7 +367,7 @@ impl PhysicsScene {
     }
 
     fn endpoint(&self, things: &[ThingRecord], t: usize) -> Option<Endpoint> {
-        if let Some(owner) = body_owner(things, t) {
+        if let (Some(owner), _) = body_owner(things, t) {
             if let Some(i) = self.bodies.iter().position(|b| b.thing == owner) {
                 return Some(Endpoint::Body(i));
             }
