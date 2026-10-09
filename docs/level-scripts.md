@@ -312,10 +312,73 @@ RPCS3 comparison. `SetCameraFromToUp` floats (10, 100000, 0, 1): INFERRED near 1
 `part6_camera_world_position_and_engine_state` (flag on and off). Counts: +0 newly
 viewable, +0 newly Complete (no asset change).
 
+## Part 8: script threads (2026-10-09)
+
+Fresh-profile Pod planets stopped at `Thread.StartImpl__`: PlanetsWorld.SetState starts
+the intro cutscene as a thread (PodIntroductionThread : PodThread : Thread). PC findings
+(behaviour only): Thread is abstract with a private `Running` bool; `Start__` asserts
+`!Running`, sets it and calls the native `StartImpl__(this)`; `ThreadMain__` asserts
+`Running`, makes three virtual calls on `this` (most likely OnStart, Run, OnFinish) and
+clears `Running`; `.get.Finished__` = `!Running`. No stop, sleep or is-running native:
+waiting is a script loop over `System.Yield__` (PodThread `Wait__i`,
+`WaitUntilStartPressed__i`, `PlayAudioAndWait__`). `Thread.Start__` is called from 15
+classes (PodComputer 9, Race_End 3, Score_Board 3, PodState menus, PlanetsWorld 2, ...).
+
+Implementation: the VM records the object passed to `Thread.StartImpl__` (null faults the
+caller). `LevelScripts` runs `ThreadMain__` on each new thread at the end of the step
+that started it (create or tick) until it yields, and resumes suspended threads once per
+tick after the Things' suspended scripts and before the updates. Threads that start
+threads run in the same step (at most `MAX_THREAD_STARTS`, 256). A faulted thread is
+dropped and reported. `StepReport` gains `threads_started`, `threads_done` and
+`thread_faults`; `level_scripts --play` reports them and `threads_running_at_end`.
+
+| Rule | Label |
+| --- | --- |
+| A started thread runs `ThreadMain__` with the thread object as `this` | INFERRED from the listings (PC) |
+| It first runs at the end of the starting step, then once per tick | INFERRED; the Pod intro timing in RPCS3 can check it |
+| Threads resume after suspended Thing scripts, before updates | INFERRED |
+
+Test: `lbp-runtime` `script_thread_runs_until_yield_then_resumes_each_tick` (a synthetic
+Thread and a Thing script that starts it: writes 1 at create, 2 on the next tick; a
+null thread faults the starting script). `cargo +1.99.0 clippy -p lbp-script-vm -p
+lbp-runtime --all-targets -- -D warnings` clean; tests pass.
+
+PC check: `level_scripts` on Pod planets with `--play=300` and no flags (fresh profile).
+Expect `threads_started` 1 and the intro thread's next blockers in `thread_faults` (video
+and voice-over natives: `StartVideo__g`, `IsPlayingVideo__`, `RequestVoiceOver__Q7StringAbb`,
+`IsVoiceOverPlaying__`). Then compare with RPCS3: what the fresh-profile Pod shows first
+and for how many ticks.
+
+## Part 7: level scripts in the viewer (2026-10-09)
+
+`lbp-bevy-viewer --level-guid HEX|--level-path PATH --level-scripts
+[--level-scripts-flags N,..]` (module `level_play.rs`) runs the level's scripts inside the
+viewer, at the game tick: `Time<Fixed>` at `lbp_runtime::TICK_HZ` (30), one
+`LevelScripts` step per `FixedUpdate`. The first step is `OnCreate__`; every later one
+is a tick (resume, then `Update__` or the class's frame entry). The setup is the same as
+`level_scripts --play`: load every script with its GUID, read the level,
+`bind_objects`, `add_class_defaults`, the progression flags, `add_engine_objects`. A
+"Level scripts" window shows the tick, create and tick counts, ticks with faults, the
+first fault lines, the most-called unbound natives, the last camera set through
+`Cam.SetCameraFromToUp` and the last `WRITE` lines. `--qa-hide-ui` hides it.
+
+Nothing the scripts change is drawn yet (camera, positions, tints): this part is the
+clock and the counts. Built and linted in the cloud (`cargo +1.99.0 clippy -p
+lbp-bevy-viewer --all-targets -- -D warnings`, viewer tests pass); not run, as the cloud
+has no game data or display.
+
+PC check: the viewer on Pod planets (00018fdb) with `--level-scripts
+--level-scripts-flags 2` on the second monitor. After a few seconds the window should
+show ticks rising at 30 per second, 0 faults and the camera from (0, -250, 1130) to
+(0, 100, -1500), as `level_scripts --play` reported in part 6. Then Rookie Test, where
+the counts should match part 6 (create 189 / 23 / 9).
+
+Counts: +0 newly viewable, +0 newly Complete (no asset change).
+
 ## Next
 
-- Call the scripts from the 30 Hz fixed update of the level viewer once Rookie Test
-  creates and updates without faults; drive the viewer camera from `LevelWorld::camera`.
+- Drive the viewer camera from `LevelWorld::camera` (part 7 runs the scripts and shows
+  the camera values; the level-unit to display-unit mapping needs a PC capture).
 - Script threads (`Thread.Start__` -> `Thread.StartImpl__`) for the Pod intro cutscene.
 - PlanetThing `Update__rb` as a frame entry (its arguments are still unknown).
 - Rookie Test: `LAMS.IsInLams__i` (needs the translation table), then
