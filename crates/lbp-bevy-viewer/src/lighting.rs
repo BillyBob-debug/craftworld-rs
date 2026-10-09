@@ -34,6 +34,10 @@ pub struct PreviewLight {
     pub exposure: f32,
     /// P2l: LBP-shaped mode (`lbp`); off = D121 Lambert preview.
     pub lbp: bool,
+    /// P2t: display units per level unit (scene normalization), for the game fog.
+    pub display_scale: f32,
+    /// P2t: Puter opening progress (0 closed, 1 open) the game fog start follows.
+    pub pod_t: f32,
     /// Values used and every preview choice, for the panel and QA log.
     pub notes: Vec<String>,
 }
@@ -71,6 +75,8 @@ impl PreviewLight {
             rim: [Vec3::ZERO; 2],
             exposure: 1.,
             lbp: false,
+            display_scale: 1.,
+            pod_t: 0.,
             notes: vec!["generic key (upper left, front) 0.65 + ambient 0.35".into()],
         }
     }
@@ -164,6 +170,12 @@ impl PreviewLight {
                 .filter(|e| e.is_finite() && *e > 0.)
                 .unwrap_or(1.),
             lbp: false,
+            display_scale: if scale.is_finite() && scale > 0. {
+                scale
+            } else {
+                1.
+            },
+            pod_t: 0.,
             notes,
         })
     }
@@ -194,6 +206,22 @@ impl PreviewLight {
             self.rim[0].x, self.rim[0].y, self.rim[0].z, self.rim[1].x, self.rim[1].y, self.rim[1].z
         ));
         light
+    }
+
+    /// P2t: fog uniform for the shader: start and slope in display units, CC, on (w).
+    /// Start is interpolated between the closed and open values by `pod_t` (INFERRED).
+    pub fn lbp_fog(&self) -> Vec4 {
+        if !self.lbp {
+            return Vec4::ZERO;
+        }
+        let t = self.pod_t.clamp(0., 1.);
+        let start = GAME_FOG_START[0] + (GAME_FOG_START[1] - GAME_FOG_START[0]) * t;
+        Vec4::new(
+            start * self.display_scale,
+            GAME_FOG_SLOPE / self.display_scale,
+            GAME_FOG_CC,
+            1.,
+        )
     }
 
     /// CPU mirror of the shader's `preview_light` for an already oriented unit normal.
@@ -241,6 +269,14 @@ pub fn facing_normal(smooth: Vec3, face: Vec3, to_view: Vec3) -> Vec3 {
 /// CONFIRMED_FROM_LOCAL_DATA for that frame; the split into constant x exposure (x
 /// multiplier) is INFERRED from one level, as is the shader applying .w to .rgb.
 pub const GAME_SUN_SCALE: f32 = 0.3;
+/// P2t: the game's output-space fog in the Pod (PC RenderDoc frames 5247 and 14790):
+/// v = mix(v, (luma(v) x CC + 1) x COLOR, saturate((depth - start) x SLOPE)), depth in level
+/// units, start 25810 closed and 5810 open. CONFIRMED_FROM_LOCAL_DATA for those frames;
+/// the colour's source and why start moves with the Puter are unknown.
+pub const GAME_FOG_COLOR: [f32; 3] = [0.645597, 0.409244, 0.2281];
+pub const GAME_FOG_CC: f32 = 0.240216;
+pub const GAME_FOG_SLOPE: f32 = 1. / 52648.;
+pub const GAME_FOG_START: [f32; 2] = [25810., 5810.];
 pub const GAME_AMBIENT_SCALE: f32 = 0.45;
 pub const GAME_RIM_SCALE: f32 = 0.6;
 
@@ -257,6 +293,8 @@ pub struct LightingState {
     pub shell: Option<(usize, PreviewLight)>,
     /// P2l: the shell root rotation last applied.
     pub shell_turn: Quat,
+    /// P2t: Puter progress the fog was last applied for.
+    pub pod_t: f32,
     pub light: PreviewLight,
     /// Set when the toggle or scene changes; `apply` runs once per change.
     pub dirty: bool,
@@ -372,6 +410,13 @@ mod tests {
         // Unfitted, game scales: sun colour x multiplier 2 x 0.3 x exposure 2.
         let key = Vec3::new(2., 1., 0.5) * 0.6;
         assert!((light.key - key).length() < 1e-5);
+        // P2t: fog start follows the Puter progress, in display units.
+        let mut fog = light.clone();
+        fog.display_scale = 2.;
+        fog.pod_t = 1.;
+        let f = fog.lbp_fog();
+        assert!((f.x - 5810. * 2.).abs() < 1e-2 && (f.y - 1. / 52648. / 2.).abs() < 1e-9);
+        assert_eq!(PreviewLight::generic().lbp_fog(), Vec4::ZERO);
         // Ambient 0.5 x 0.45 x 2; rims x 0.6 x 2.
         let ambient = 0.45;
         let rim_high = Vec3::new(0.0, 0.1, 0.4) * 1.2;
