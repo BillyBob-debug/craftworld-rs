@@ -2263,6 +2263,7 @@ fn load_decal_texture(
         })
         .map_err(Clone::clone)?;
     Ok(MaterialAsset::Texture(Box::new(crate::linked::Asset {
+        surface: None,
         instance_projection: None,
         additional_texture_slots: Vec::new(),
         border_domain: None,

@@ -6,6 +6,8 @@ use lbp_resource::material::GraphMetadata;
 pub struct PreviewOptions {
     pub animation_base: bool,
     pub instance_color: Option<crate::DiffuseTint>,
+    /// P2q: also load bump/gloss extras (docs/p2q-bump-gloss.md).
+    pub surface: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

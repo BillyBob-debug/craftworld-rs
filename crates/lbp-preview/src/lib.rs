@@ -26,6 +26,7 @@ pub mod level_scene;
 pub mod popit;
 pub mod runtime_texture;
 pub mod story;
+pub mod surface;
 pub mod text;
 pub use blend::DiffuseBlend;
 pub use border_domain::{BorderDomain, INTERIOR_MARGIN};

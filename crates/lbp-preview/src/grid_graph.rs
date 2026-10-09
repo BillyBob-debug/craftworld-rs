@@ -860,6 +860,7 @@ pub(crate) fn load(
     cx.control.check()?;
     cx.source.check_stable()?;
     Ok(crate::MaterialAsset::Texture(Box::new(crate::Asset {
+        surface: None,
         instance_projection,
         additional_texture_slots,
         border_domain,

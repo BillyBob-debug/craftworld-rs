@@ -7,6 +7,8 @@
 //! D121: opt-in preview lighting multiplies the finished colour by a Lambert factor
 //! (docs/d121-preview-lighting.md); off (`light_dir.w` = 0) leaves the colour untouched.
 //! P2l: `light_dir.w` = 2 selects the opt-in LBP-shaped factor (docs/p2l-lbp-lighting.md).
+//! P2q: under that factor, an optional bump map on UV1 tilts the normal and a static
+//! gloss colour adds a specular term (docs/p2q-bump-gloss.md).
 use bevy::{
     pbr::{ExtendedMaterial, MaterialExtension},
     prelude::*,
@@ -49,6 +51,16 @@ pub struct SecondTexture {
     /// P2l: upper rim colour (rgb), used toward N.y = +1.
     #[uniform(113)]
     rim_high: Vec4,
+    /// P2q: bump map (linear, UV1).
+    #[texture(114)]
+    #[sampler(115)]
+    pub bump_image: Option<Handle<Image>>,
+    /// P2q: x = BumpLevel, y = 1 when the bump map is bound.
+    #[uniform(116)]
+    bump_params: Vec4,
+    /// P2q: gloss colour (rgb) and CosinePower (w; 0 = no gloss).
+    #[uniform(117)]
+    gloss: Vec4,
     /// D121: generated normals passed `adapter::normal_trust`; otherwise stays unlit.
     pub normals_trusted: bool,
 }
@@ -101,6 +113,15 @@ pub fn enable_fourth(
         relative.offset[1],
     );
 }
+/// P2q: bump map sampled on UV1, offset (.yw - 0.502) × `level` (docs/p2q-bump-gloss.md).
+pub fn enable_bump(material: &mut ViewerMaterial, image: Handle<Image>, level: f32) {
+    material.extension.bump_image = Some(image);
+    material.extension.bump_params = Vec4::new(level, 1., 0., 0.);
+}
+/// P2q: static gloss colour with exponent `power` (CosinePower).
+pub fn enable_gloss(material: &mut ViewerMaterial, color: [f32; 3], power: f32) {
+    material.extension.gloss = Vec3::from(color).extend(power.max(1.));
+}
 /// D121: applies (Some) or clears (None) preview lighting; returns whether the material
 /// is lit. Untrusted normals keep the unlit colour (counted by the caller).
 pub fn set_lighting(
@@ -111,10 +132,11 @@ pub fn set_lighting(
     match light.filter(|_| ext.normals_trusted) {
         Some(l) => {
             ext.light_dir = l.toward_light.extend(if l.lbp { 2. } else { 1. });
-            ext.light_key = l.key.extend(0.);
-            ext.light_ambient = l.ambient.extend(0.);
-            ext.rim_low = l.rim[0].extend(0.);
-            ext.rim_high = l.rim[1].extend(0.);
+            // P2q: .w carries the game's scalar per light (brdf.cg `light.w`).
+            ext.light_key = l.key.extend(l.scales.x);
+            ext.light_ambient = l.ambient.extend(l.scales.y);
+            ext.rim_low = l.rim[0].extend(l.scales.z);
+            ext.rim_high = l.rim[1].extend(l.scales.z);
             true
         }
         None => {
@@ -157,14 +179,25 @@ const SOURCE: &str = r#"
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var<uniform> light_ambient: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> rim_low: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(113) var<uniform> rim_high: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(114) var bump_image: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(115) var bump_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(116) var<uniform> bump_params: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(117) var<uniform> gloss: vec4<f32>;
+// P2q: screen-space derivatives for the bump frame, taken in uniform control flow.
+struct BumpInput {
+    dp1: vec3<f32>,
+    dp2: vec3<f32>,
+    duv1: vec2<f32>,
+    duv2: vec2<f32>,
+    offset: vec2<f32>,
+}
 // D121 preview Lambert factor (mirrors lighting::PreviewLight::factor/facing_normal).
 // Double-sided: the smooth normal is turned into the hemisphere of the face normal that
 // points at the viewer, so back faces and mirrored instances light like front faces.
-fn preview_light(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
-    if dot(shading, shading) <= 0.0 {
+fn preview_light(n: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
+    if dot(n, n) <= 0.0 {
         return vec3<f32>(1.0);
     }
-    let n = facing_normal(shading, face, to_view);
     if light_dir.w > 1.5 {
         // P2l (mirrors lighting::PreviewLight::lbp_factor): hemisphere ambient, sun,
         // grazing rim lerped by N.y (P2n: P2m's eye-facing rim reverted, D203); squared
@@ -176,6 +209,43 @@ fn preview_light(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec
         return f * f;
     }
     return light_ambient.rgb + light_key.rgb * max(dot(n, light_dir.xyz), 0.0);
+}
+// P2q gloss (LBP mode only), brdf.cg combine `2 * light.w * light^2 * spec`: light.w
+// sums the game's per-light scalars with the same weights as the colours, light^2 is
+// the squared factor, spec = gloss colour x pow(saturate(R.L), CosinePower) with R the
+// mirrored view ray.
+fn gloss_term(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>) -> vec3<f32> {
+    if light_dir.w < 1.5 || gloss.w <= 0.0 || dot(n, n) <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let rim = pow(clamp(dot(n, -to_view) + 0.9, 0.0, 1.0), 2.0);
+    let w = light_ambient.w * (n.y * 0.15 + 0.5)
+        + light_key.w * max(dot(n, light_dir.xyz), 0.0)
+        + mix(rim_low.w, rim_high.w, (n.y + 1.0) * 0.5) * rim;
+    let r = reflect(-to_view, n);
+    let spec = gloss.rgb * pow(clamp(dot(r, light_dir.xyz), 0.0, 1.0), gloss.w);
+    return 2.0 * w * factor * spec;
+}
+// Facing normal, tilted by the bump offset in a cotangent frame built from the
+// position and UV1 derivatives (LBP mode with a bound bump map only).
+fn lit_normal(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>, bump: BumpInput) -> vec3<f32> {
+    if dot(shading, shading) <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let n = facing_normal(shading, face, to_view);
+    if light_dir.w < 1.5 || bump_params.y < 0.5 {
+        return n;
+    }
+    let dp2perp = cross(bump.dp2, n);
+    let dp1perp = cross(n, bump.dp1);
+    let t = dp2perp * bump.duv1.x + dp1perp * bump.duv2.x;
+    let b = dp2perp * bump.duv1.y + dp1perp * bump.duv2.y;
+    let size = max(dot(t, t), dot(b, b));
+    if size <= 1e-20 {
+        return n;
+    }
+    let scale = inverseSqrt(size);
+    return normalize(n + (t * bump.offset.x + b * bump.offset.y) * scale);
 }
 fn facing_normal(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
     var n = normalize(shading);
@@ -194,7 +264,18 @@ fn facing_normal(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec
 fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOutput {
     let pbr = pbr_input_from_standard_material(in, front);
     // Screen-space derivatives stay in uniform control flow.
-    let face = cross(dpdx(in.world_position.xyz), dpdy(in.world_position.xyz));
+    let dp1 = dpdx(in.world_position.xyz);
+    let dp2 = dpdy(in.world_position.xyz);
+    let face = cross(dp1, dp2);
+    var bump = BumpInput(dp1, dp2, vec2<f32>(0.0), vec2<f32>(0.0), vec2<f32>(0.0));
+#ifdef VERTEX_UVS_B
+    bump.duv1 = dpdx(in.uv_b);
+    bump.duv2 = dpdy(in.uv_b);
+    if bump_params.y > 0.5 {
+        let texel = textureSample(bump_image, bump_sampler, in.uv_b);
+        bump.offset = (texel.yw - vec2<f32>(0.502)) * bump_params.x;
+    }
+#endif
     var color = pbr.material.base_color;
 #ifdef VERTEX_UVS_B
     if enabled.x > 0.0 {
@@ -227,7 +308,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
 #endif
     var rgb = color.rgb;
     if light_dir.w > 0.5 {
-        rgb *= preview_light(in.world_normal, face, pbr.V);
+        let n = lit_normal(in.world_normal, face, pbr.V, bump);
+        let factor = preview_light(n, pbr.V);
+        rgb = rgb * factor + gloss_term(n, pbr.V, factor);
     }
     var out: FragmentOutput;
     out.color = main_pass_post_lighting_processing(pbr, vec4<f32>(rgb, 1.0));
@@ -274,7 +357,8 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .filter(|l| !l.trim_start().starts_with('#'))
             .map(|l| l.replace("#{MATERIAL_BIND_GROUP}", "2") + "\n")
             .collect();
-        assert!(body.contains("preview_light(in.world_normal, face, pbr.V)"));
+        assert!(body.contains("lit_normal(in.world_normal, face, pbr.V, bump)"));
+        assert!(body.contains("gloss_term(n, pbr.V, factor)"));
         let source = format!("{STUBS}{body}");
         let module = naga::front::wgsl::parse_str(&source)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));

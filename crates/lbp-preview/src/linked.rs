@@ -40,6 +40,8 @@ pub struct Asset {
     pub selection: DiffuseSelection,
     /// P2e opt-in `--runtime-texture` replacement of a Solid group (None = from the material).
     pub runtime_texture: Option<crate::runtime_texture::RuntimeOverride>,
+    /// P2q opt-in bump/gloss extras (docs/p2q-bump-gloss.md).
+    pub surface: Option<std::sync::Arc<crate::surface::Surface>>,
 }
 pub struct SharedSampleAsset {
     pub texture: lbp_texture::Texture,
@@ -170,6 +172,8 @@ pub struct SolidAsset {
     pub additional_texture_slots: Vec<usize>,
     pub material_key: LocationKey,
     pub selection: crate::SolidSelection,
+    /// P2q opt-in bump/gloss extras (docs/p2q-bump-gloss.md).
+    pub surface: Option<std::sync::Arc<crate::surface::Surface>>,
 }
 /// Explicit no-texture material, distinct from a failed binding or invented image.
 pub enum MaterialAsset {
@@ -180,8 +184,11 @@ impl MaterialAsset {
     /// Heap bytes retained for display: decoded and derived pixels plus coordinate
     /// arrays. Used for the per-mesh aggregate budget; small metadata is ignored.
     pub fn retained_bytes(&self) -> usize {
+        let surface = self
+            .surface()
+            .map_or(0, crate::surface::Surface::retained_bytes);
         let Self::Texture(a) = self else {
-            return 0;
+            return surface;
         };
         let uv = |v: &Vec<[f32; 2]>| v.len() * std::mem::size_of::<[f32; 2]>();
         a.texture.rgba.len()
@@ -196,6 +203,13 @@ impl MaterialAsset {
                 .map_or(0, |d| d.texture.rgba.len() + uv(&d.sampling_uv))
             + a.third.as_ref().map_or(0, |t| t.texture.rgba.len())
             + a.fourth.as_ref().map_or(0, |t| t.texture.rgba.len())
+            + surface
+    }
+    pub fn surface(&self) -> Option<&crate::surface::Surface> {
+        match self {
+            Self::Texture(a) => a.surface.as_deref(),
+            Self::Solid(a) => a.surface.as_deref(),
+        }
     }
     pub fn texture(&self) -> Option<&Asset> {
         match self {
@@ -219,6 +233,9 @@ impl MaterialAsset {
                 " | Other required texture slots unrendered: {:?}",
                 self.additional_texture_slots()
             ));
+        }
+        if let Some(s) = self.surface() {
+            label.push_str(&format!(" | {}", s.label()));
         }
         if let Some(p) = self.instance_projection() {
             format!(
@@ -1444,8 +1461,42 @@ pub(crate) fn read_material_graph(
         .map_err(|e| e.to_string())?;
     Ok((graph, bytes))
 }
-/// Material selection and loading for `vertices` coordinates from `uv`.
+/// Material selection and loading for `vertices` coordinates from `uv`; with the P2q
+/// `surface` option also the bump/gloss extras (docs/p2q-bump-gloss.md).
 pub(crate) fn load_material(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    material_key: LocationKey,
+    vertices: usize,
+    uv_input: UvInput,
+    control: &LoadControl,
+    options: crate::PreviewOptions,
+) -> Result<MaterialAsset, String> {
+    let surface_key = options.surface.then(|| material_key.clone());
+    let mut asset = load_diffuse_material(
+        source,
+        catalog,
+        material_key,
+        vertices,
+        uv_input,
+        control,
+        options,
+    )?;
+    if let Some(key) = surface_key {
+        let (graph, _) = read_material_graph(source, &key, control)?;
+        let surface = crate::surface::load(source, catalog, &graph, vertices, uv_input, control)
+            .unwrap_or_else(|e| crate::surface::Surface {
+                skipped: vec![format!("surface not read ({e})")],
+                ..Default::default()
+            });
+        match &mut asset {
+            MaterialAsset::Texture(a) => a.surface = Some(std::sync::Arc::new(surface)),
+            MaterialAsset::Solid(a) => a.surface = Some(std::sync::Arc::new(surface)),
+        }
+    }
+    Ok(asset)
+}
+fn load_diffuse_material(
     source: &AttachedSource,
     catalog: &Catalog,
     material_key: LocationKey,
@@ -1474,6 +1525,7 @@ pub(crate) fn load_material(
         control.check()?;
         source.check_stable()?;
         return Ok(MaterialAsset::Solid(Box::new(SolidAsset {
+            surface: None,
             material_key,
             selection,
             instance_projection,
@@ -1795,6 +1847,7 @@ pub(crate) fn load_material(
     control.check()?;
     source.check_stable()?;
     Ok(MaterialAsset::Texture(Box::new(Asset {
+        surface: None,
         instance_projection,
         additional_texture_slots,
         border_domain,
@@ -2053,6 +2106,7 @@ mod tests {
         graph.wires = vec![wire(2, 0, 0)];
         let solid = crate::select_solid_diffuse(&graph).unwrap().unwrap();
         let material = MaterialAsset::Solid(Box::new(SolidAsset {
+            surface: None,
             instance_projection: None,
             additional_texture_slots: vec![],
             material_key: LocationKey {
