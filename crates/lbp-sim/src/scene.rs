@@ -28,6 +28,7 @@
 //!   names; frame INFERRED). The type mapping is [`JointKind`].
 //! - Mass = area × massDepth × density (INFERRED, A2); density is [`DENSITY`] until RMaterial
 //!   is read (PLACEHOLDER).
+use lbp_level::parts::Shape;
 use lbp_level::serial::Descriptor;
 use lbp_level::shape_mesh::outline_triangles_lenient;
 use lbp_level::thing::ThingRecord;
@@ -161,6 +162,49 @@ pub struct PhysicsScene {
     pub report: SceneReport,
 }
 
+impl PhysicsScene {
+    /// Top of the highest collider surface at `x` that is not above `y` (plus `SNAP`), in
+    /// the slab at `z`: where something dropped from `(x, y)` lands, without simulating
+    /// (bodies taken where they are stored).
+    pub fn floor_below(&self, [x, y]: [f32; 2], z: f32) -> Option<f32> {
+        const SNAP: f32 = 1.;
+        let mut best: Option<f32> = None;
+        for c in &self.colliders {
+            if (z - c.z).abs() > c.half_thickness {
+                continue;
+            }
+            let (s, k) = c.frame.angle.sin_cos();
+            let world = |p: [f32; 2]| {
+                [
+                    c.frame.position[0] + k * p[0] - s * p[1],
+                    c.frame.position[1] + s * p[0] + k * p[1],
+                ]
+            };
+            for t in &c.triangles {
+                let w = t.map(world);
+                let mut top: Option<f32> = None;
+                for i in 0..3 {
+                    let (a, b) = (w[i], w[(i + 1) % 3]);
+                    let (lo, hi) = (a[0].min(b[0]), a[0].max(b[0]));
+                    if x < lo || x > hi {
+                        continue;
+                    }
+                    let at = if hi - lo < 1e-6 {
+                        a[1].max(b[1])
+                    } else {
+                        a[1] + (b[1] - a[1]) * (x - a[0]) / (b[0] - a[0])
+                    };
+                    top = Some(top.map_or(at, |v: f32| v.max(at)));
+                }
+                if let Some(top) = top.filter(|t| *t <= y + SNAP) {
+                    best = Some(best.map_or(top, |b| b.max(top)));
+                }
+            }
+        }
+        best
+    }
+}
+
 /// Nearest Thing with BODY on the parent chain of `i`, itself included.
 /// Topmost Thing with BODY on the parent chain of `i` (itself included), and the BODY
 /// Things below it on the chain.
@@ -214,6 +258,26 @@ pub fn build_scene_with(
     things: &[ThingRecord],
     material_rule: &dyn Fn(&Descriptor) -> MaterialRule,
 ) -> PhysicsScene {
+    build_scene_inner(things, material_rule, false)
+}
+
+/// As [`build_scene_with`], but shapes with vertex z under a tilting matrix are projected
+/// through the whole matrix ([`tilted_outline`]). Only for locating a spawn floor
+/// ([`PhysicsScene::floor_below`]): applied to every level's colliders it raised the
+/// `level_physics --all` movers (5,510 -> 5,780 moved >100) and the largest move
+/// (38,482 -> 442,083), so the simulated scene keeps the in-plane outline (PR #83, D212).
+pub fn build_spawn_scene_with(
+    things: &[ThingRecord],
+    material_rule: &dyn Fn(&Descriptor) -> MaterialRule,
+) -> PhysicsScene {
+    build_scene_inner(things, material_rule, true)
+}
+
+fn build_scene_inner(
+    things: &[ThingRecord],
+    material_rule: &dyn Fn(&Descriptor) -> MaterialRule,
+    project_tilted: bool,
+) -> PhysicsScene {
     let mut scene = PhysicsScene::default();
     let mut body_of = BTreeMap::<usize, Option<usize>>::new();
     let mut nested = std::collections::BTreeSet::new();
@@ -240,7 +304,25 @@ pub fn build_scene_with(
             reject("bad transform");
             continue;
         };
-        let outline = match outline_triangles_lenient(shape) {
+        let m = &pos.world;
+        // A shape whose vertices carry z under a matrix that turns local z into the xy plane
+        // (the Pod body, Thing 2 of shell 000027b9: local z is world up) has its outline in
+        // local x/z, not x/y; the plain x/y outline is a sliver. Such a shape is projected to
+        // world xy through the whole matrix first and triangulated there (spawn scene only).
+        let tilted = if project_tilted {
+            tilted_outline(shape, m)
+        } else {
+            None
+        };
+        let projected;
+        let outline_of = match &tilted {
+            Some(p) => {
+                projected = p.clone();
+                &projected
+            }
+            None => shape,
+        };
+        let outline = match outline_triangles_lenient(outline_of) {
             Ok((v, why)) => {
                 if let Some(why) = why {
                     *scene.report.filled.entry(why.reason()).or_default() += 1;
@@ -284,12 +366,12 @@ pub fn build_scene_with(
             }
         };
         let frame = body.map_or(own, |b| scene.bodies[b].frame);
-        let m = &pos.world;
-        let world = |p: [f32; 2]| {
-            [
+        let world = |p: [f32; 2]| match tilted {
+            Some(_) => [p[0] + m[12], p[1] + m[13]],
+            None => [
                 m[0] * p[0] + m[4] * p[1] + m[12],
                 m[1] * p[0] + m[5] * p[1] + m[13],
-            ]
+            ],
         };
         let mut triangles = Vec::with_capacity(outline.triangles.len());
         for t in &outline.triangles {
@@ -353,6 +435,29 @@ pub fn build_scene_with(
     scene.report.nested_bodies = nested.len();
     scene.add_joints(things);
     scene
+}
+
+/// The shape with its vertices projected to world xy (translation left out) when it carries
+/// vertex z and the matrix's local z axis has an xy part; `None` for a plain xy shape, which
+/// keeps the in-plane route. INFERRED from the Pod (RPCS3 memory, D212): Sackboy stands at
+/// y -478 there, 69 above the projected floor edge (y -551..-542), not on the sliver at -152.
+pub fn tilted_outline(shape: &Shape, m: &[f32; 16]) -> Option<Shape> {
+    let scale = (0..3)
+        .map(|c| m[c * 4].hypot(m[c * 4 + 1]))
+        .fold(0f32, f32::max);
+    if !shape.requires_z || !scale.is_finite() || scale <= 0. || m[8].hypot(m[9]) <= 1e-3 * scale {
+        return None;
+    }
+    let mut out = shape.clone();
+    for v in &mut out.vertices {
+        *v = [
+            m[0] * v[0] + m[4] * v[1] + m[8] * v[2],
+            m[1] * v[0] + m[5] * v[1] + m[9] * v[2],
+            0.,
+        ];
+    }
+    out.requires_z = false;
+    Some(out)
 }
 
 /// PJoint type as the sandbox maps it (docs/runtime-research.md §4 joint table).

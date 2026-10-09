@@ -76,6 +76,8 @@ struct LevelLoaded {
     identity: String,
     /// P2b `--pod-shell HEX`: the Pod shell level drawn over this one.
     shell: Option<LevelScene>,
+    /// The shell's own spawn for the figure, from its data (feet in shell level units).
+    shell_feet: Option<Result<([f32; 3], String), String>>,
 }
 /// D113 level mode (docs/d113-level-scene.md). Empty target = single-mesh mode.
 #[derive(Default)]
@@ -112,6 +114,8 @@ struct LevelMode {
     shell_camera: Option<[f32; 6]>,
     /// P2k `--pod-game-camera`: the planets view through the game's own camera, World
     /// matrix and menu placement (docs/p2k-pod-game-camera.md) instead of the globe fit.
+    /// `--pod-figure-data`: the Pod figure at the shell's data spawn, not the fit.
+    figure_data: bool,
     game_camera: bool,
     lines: Vec<String>,
     home: Option<Orbit>,
@@ -291,20 +295,26 @@ impl Viewer {
                         let shell = shell_guid
                             .map(|g| {
                                 let (key, _) = level_scene::resolve_level(&catalog, Some(g), None)?;
-                                level_scene::load_level_scene_with_options(
+                                let shell = level_scene::load_level_scene_with_options(
                                     &source,
                                     &catalog,
                                     &key,
                                     &worker,
                                     options,
                                     scene_options,
-                                )
+                                )?;
+                                let feet = sackboy_play::level_spawn_feet(
+                                    &source, &catalog, &key, &worker,
+                                );
+                                Ok::<_, String>((shell, feet))
                             })
                             .transpose()?;
+                        let (shell, shell_feet) = shell.unzip();
                         Ok(LevelLoaded {
                             scene,
                             identity,
                             shell,
+                            shell_feet,
                         })
                     });
                     let load_clip = |guid: &str| {
@@ -470,6 +480,10 @@ fn options() -> Result<Viewer, String> {
             v.level.game_camera = true;
             continue;
         }
+        if flag == "--pod-figure-data" {
+            v.level.figure_data = true;
+            continue;
+        }
         if flag == "--pod-open" {
             v.level.t0 = Some(1.);
             continue;
@@ -524,7 +538,7 @@ fn options() -> Result<Viewer, String> {
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit (window shown without taking focus)
 --no-activate: show the window without taking focus or the foreground (interactive runs)
---qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N|main: with a level, light from its stored preset N instead of the main settings (P2l; --lbp-lighting defaults to preset 0 when one is stored, main forces the main block)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\n--play-sackboy: with a level, its shapes as a physics world and Sackboy as a capsule at the first checkpoint (arrows walk and change lanes, Space jumps; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f) with the position printed each tick\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N|main: with a level, light from its stored preset N instead of the main settings (P2l; --lbp-lighting defaults to preset 0 when one is stored, main forces the main block)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open; --pod-figure-data: closed spot from the shell's data (checkpoint + spawn offset, dropped to the floor) instead of the RPCS3 fit (both are reported)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\n--play-sackboy: with a level, its shapes as a physics world and Sackboy as a capsule at the first checkpoint (arrows walk and change lanes, Space jumps; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f) with the position printed each tick\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -1078,6 +1092,7 @@ fn load(
                         (root, &rig, normalize, checkpoint),
                         &preview,
                         (done.clip, done.hold_clip),
+                        level.shell_feet,
                     )?,
                     Err(e) => format!("Figure not loaded: {e}"),
                     Ok(None) => String::new(),
@@ -1792,9 +1807,11 @@ fn pod_shell(
 /// P2c: the `--select-guid` mesh (Sackboy) standing in the Pod shell at model scale
 /// (level units = model units), upright (D148 rotation), feet centred on the solved spot.
 /// The spot is fitted so the closed view matches RPCS3 (`pod_menu::SACKBOY_CLOSED`):
-/// the shell's checkpoint POS put him above the frame (PC run of #52), so the game's own
-/// spawn offset is UNKNOWN and the checkpoint is reported, not used. `--play-animation`
-/// plays on him; `--pod-hold-animation` while the Puter is open (P2d).
+/// the shell's checkpoint POS put him above the frame (PC run of #52). D-next: with
+/// `--pod-figure-data` the closed spot comes from the shell's data instead (checkpoint x +
+/// the Moon spawn x, lane 0, dropped to the Pod floor; `sackboy_play::level_spawn_feet`);
+/// both spots are reported either way. `--play-animation` plays on him;
+/// `--pod-hold-animation` while the Puter is open (P2d).
 fn spawn_figure(
     v: &mut Viewer,
     (commands, meshes, materials, images): (
@@ -1807,6 +1824,7 @@ fn spawn_figure(
     (root, rig, normalize, checkpoint): (Entity, &pod_menu::PodRig, Mat4, Option<Checkpoint>),
     preview: &lbp_preview::GroupedMesh,
     (clip, hold): (Option<ClipResult>, Option<ClipResult>),
+    data_feet: Option<Result<([f32; 3], String), String>>,
 ) -> Result<String, String> {
     let bounds @ [lo, hi] =
         adapter_bounds(&preview.geometry.positions).ok_or("Unsupported: empty figure")?;
@@ -1819,7 +1837,17 @@ fn spawn_figure(
         -lo[2],
     ));
     let upright = Mat4::from_scale(Vec3::splat(k)) * Mat4::from_quat(model_up(true)) * origin;
-    let place = Mat4::from_translation(feet) * upright;
+    let fitted = Mat4::from_translation(feet) * upright;
+    let data = data_feet.map(|r| {
+        r.map(|(f, line)| {
+            let at = normalize.transform_point3(Vec3::from(f));
+            (Vec3::from(f), Mat4::from_translation(at) * upright, line)
+        })
+    });
+    let place = match &data {
+        Some(Ok((_, m, _))) if v.level.figure_data => *m,
+        _ => fitted,
+    };
     // P2d: holding the controller he is seen from behind: half a turn about the level's
     // up axis (Y), P2f: at his own spot, fitted so his centre shows where RPCS3 has it.
     let open_feet = rig.fit_figure_open(k * (hi[2] - lo[2]));
@@ -1853,7 +1881,7 @@ fn spawn_figure(
         v.scene.push((entity, mesh, material, image));
     }
     let level = normalize.inverse().transform_point3(feet);
-    let ([x0, x1], top, low) = figure_frac(rig, 0., place, bounds);
+    let ([x0, x1], top, low) = figure_frac(rig, 0., fitted, bounds);
     let ([o0, o1], o_top, o_low) = figure_frac(rig, 1., back, bounds);
     let mut line = format!(
         "Figure fitted to the RPCS3 closed view at model scale: feet at level ({:.0}, {:.0}, {:.0}); closed x {x0:.2}..{x1:.2} w, {top:.2}..{low:.2} h; open (from behind) x {o0:.2}..{o1:.2} w, centre {:.2} h (RPCS3 {:.2} h)",
@@ -1869,6 +1897,20 @@ fn spawn_figure(
             w[12], w[13], w[14]
         ),
         None => "; no shell checkpoint".into(),
+    };
+    line += &match &data {
+        None => String::new(),
+        Some(Err(e)) => format!("; data spawn not found: {e}"),
+        Some(Ok((f, m, l))) => {
+            let ([d0, d1], d_top, d_low) = figure_frac(rig, 0., *m, bounds);
+            format!(
+                "; {l}: feet at level ({:.0}, {:.0}, {:.0}), closed x {d0:.2}..{d1:.2} w, {d_top:.2}..{d_low:.2} h{}",
+                f.x,
+                f.y,
+                f.z,
+                if v.level.figure_data { " (used)" } else { " (not used; --pod-figure-data)" }
+            )
+        }
     };
     let hold = match hold {
         None => None,
