@@ -101,6 +101,9 @@ struct LevelMode {
     /// P2f `--pod-shell-camera FX,FY,FZ,TX,TY,TZ`: the closed shell eye from the game's
     /// camera preset (shell level units, up +Y) instead of the DualShock fit.
     shell_camera: Option<[f32; 6]>,
+    /// P2k `--pod-game-camera`: the planets view through the game's own camera, World
+    /// matrix and menu placement (docs/p2k-pod-game-camera.md) instead of the globe fit.
+    game_camera: bool,
     lines: Vec<String>,
     home: Option<Orbit>,
 }
@@ -435,6 +438,10 @@ fn options() -> Result<Viewer, String> {
             pod_wall = false;
             continue;
         }
+        if flag == "--pod-game-camera" {
+            v.level.game_camera = true;
+            continue;
+        }
         if flag == "--pod-open" {
             v.level.t0 = Some(1.);
             continue;
@@ -468,7 +475,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -855,8 +862,14 @@ fn load(
         let done = result?;
         v.context = Some(done.context);
         if let Some(level) = done.level {
-            let level = level?;
+            let mut level = level?;
+            let game = v.level.game_camera && level.shell.is_some();
+            let menu_line = match (game, v.level.pod) {
+                (true, Some(globe)) => Some(place_menu_planets(&mut level.scene, globe)?),
+                _ => None,
+            };
             let plan = plan_level(&level.scene, v.level.focus, v.level.pod)?;
+            let planets_normalize = plan.normalize;
             let rig = match (&level.shell, v.level.pod) {
                 (Some(shell), Some(globe)) => Some(pod_shell(
                     &level.scene,
@@ -864,9 +877,11 @@ fn load(
                     globe,
                     shell,
                     v.level.shell_camera,
+                    game,
                 )?),
                 _ => None,
             };
+            let planets_first = v.scene.len();
             spawn_level(
                 &mut v,
                 &mut commands,
@@ -875,6 +890,20 @@ fn load(
                 &mut images,
                 plan,
             );
+            if game {
+                // P2k: the planets level hangs under the World transform.
+                let t0 = v.level.t0.unwrap_or(0.);
+                let root = commands
+                    .spawn((
+                        planets_root(planets_normalize, t0),
+                        Visibility::default(),
+                        PodPlanetsRoot(planets_normalize),
+                    ))
+                    .id();
+                for (entity, ..) in &v.scene[planets_first..] {
+                    commands.entity(root).add_child(*entity);
+                }
+            }
             *orbit = v.level.home.unwrap_or_default();
             if let Some((rig, shell_plan, rig_line)) = rig {
                 let checkpoint = level
@@ -934,8 +963,8 @@ fn load(
                         .map(|l| format!("Main level: {l}")),
                 );
                 // Home (R) stays the closed view.
-                v.level.home = Some(pod_orbit(rig.planet_eye(0.), rig.globe_z));
-                *orbit = pod_orbit(rig.planet_eye(t0), rig.globe_z);
+                v.level.home = Some(pod_orbit(&rig, 0.));
+                *orbit = pod_orbit(&rig, t0);
                 commands.insert_resource(PodRigRes(rig));
                 commands.insert_resource(pod_menu::PuterState {
                     t: t0,
@@ -944,6 +973,7 @@ fn load(
                     hold: t0 > 0. && t0 < 1.,
                 });
                 v.level.lines.push(rig_line);
+                v.level.lines.extend(menu_line.clone());
                 let line = match done.preview {
                     Ok(Some(preview)) => spawn_figure(
                         &mut v,
@@ -1535,6 +1565,7 @@ fn pod_shell(
     globe: usize,
     shell: &LevelScene,
     camera: Option<[f32; 6]>,
+    game: bool,
 ) -> Result<(pod_menu::PodRig, LevelPlan, String), String> {
     const DUALSHOCK: u32 = 0x0000_42af;
     let display = |m: &Mat4, [a, b]: [[f32; 3]; 2]| {
@@ -1565,8 +1596,45 @@ fn pod_shell(
         (g_centre, g_size.max_element() / 2.),
         (p_centre, p_size.x),
         near,
-        PerspectiveProjection::default().fov,
+        if game {
+            pod_menu::GAME_FOV
+        } else {
+            PerspectiveProjection::default().fov
+        },
     );
+    let mut game_line = String::new();
+    if game {
+        // P2k: planets eyes from the game's presets, in planets display units; the globe
+        // as the closed World transform places it.
+        let m = plan.normalize;
+        let presets = pod_menu::CAMERA_PRESETS.map(|pair| pair.map(|p| m.transform_point3(p)));
+        let globe_closed = planets_root(m, 0.).transform_point(g_centre);
+        rig = rig.with_planets_camera(presets, globe_closed);
+        // Where the globe should show (16:9 fractions, radius in heights), for comparison
+        // with the capture: a mismatch points at rendering, not the model.
+        let r = g_size.max_element() / 2.;
+        let shown: Vec<String> = [0., 0.5, 1.]
+            .iter()
+            .map(|&t| {
+                let root = planets_root(m, t);
+                let local = rig.planet_turn(t).inverse()
+                    * (root.transform_point(g_centre) - rig.planet_eye(t));
+                let c = Mat4::perspective_rh(rig.fov, pod_menu::ASPECT_16_9, 0.001, 1000.)
+                    .project_point3(local);
+                let radius = r * root.scale.x / -local.z / (rig.fov / 2.).tan() / 2.;
+                format!(
+                    "t {t}: {:.3}/{:.3} r {radius:.3} h",
+                    (c.x + 1.) / 2.,
+                    (1. - c.y) / 2.
+                )
+            })
+            .collect();
+        game_line = format!(
+            "; globe expected (16:9, vfov {:.1} deg) {}",
+            rig.fov.to_degrees(),
+            shown.join(", ")
+        );
+    }
     if let Some(c) = camera {
         let [from, to] = [
             n.transform_point3(Vec3::new(c[0], c[1], c[2])),
@@ -1593,7 +1661,7 @@ fn pod_shell(
         open.x,
         open.y,
         open.z
-    );
+    ) + &game_line;
     Ok((rig, shell_plan, line))
 }
 /// P2c: the `--select-guid` mesh (Sackboy) standing in the Pod shell at model scale
@@ -1808,11 +1876,7 @@ struct PodTentRoot;
 /// pod.mol, the Pod tent (shell level 000027b9 Thing 2).
 const POD_TENT_MESH: u32 = 0x0000_2f6c;
 /// Runs before `load`: a new load request drops the previous Pod shell (and its figure).
-fn clear_pod_shell(
-    mut commands: Commands,
-    v: Res<Viewer>,
-    roots: Query<Entity, With<PodShellRoot>>,
-) {
+fn clear_pod_shell(mut commands: Commands, v: Res<Viewer>, roots: Query<Entity, PodRoots>) {
     if v.requested {
         for root in &roots {
             commands.entity(root).despawn();
@@ -1821,13 +1885,82 @@ fn clear_pod_shell(
 }
 #[derive(Resource)]
 struct PodRigRes(pod_menu::PodRig);
-fn pod_orbit(eye: Vec3, globe_z: f32) -> Orbit {
+/// Shell, tent and (P2k) planets roots.
+type PodRoots = Or<(With<PodShellRoot>, With<PodPlanetsRoot>)>;
+/// P2b/P2k: the shell and tent roots, the planets root and the camera projection, for
+/// `pod_dolly`.
+type PodLayers<'w, 's> = (
+    Query<'w, 's, (&'static mut Transform, Has<PodTentRoot>), With<PodShellRoot>>,
+    Query<'w, 's, (&'static mut Transform, &'static PodPlanetsRoot), Without<PodShellRoot>>,
+    Query<'w, 's, &'static mut Projection, With<Camera3d>>,
+);
+/// The planets view at `t` as an orbit: from the planets eye along its turn, target at
+/// the rig's focus distance (P2k: a turned camera gives yaw and pitch).
+fn pod_orbit(rig: &pod_menu::PodRig, t: f32) -> Orbit {
+    let eye = rig.planet_eye(t);
+    let back = rig.planet_turn(t) * Vec3::Z;
     Orbit {
-        yaw: 0.,
-        pitch: 0.,
-        distance: eye.z - globe_z,
-        target: Vec3::new(eye.x, eye.y, globe_z),
+        yaw: back.x.atan2(back.z),
+        pitch: back.y.clamp(-1., 1.).asin(),
+        distance: rig.focus,
+        target: eye - back * rig.focus,
     }
+}
+/// P2k: root of the planets level under `--pod-game-camera`; holds the level's display
+/// normalization (level units to display units).
+#[derive(Component)]
+struct PodPlanetsRoot(Mat4);
+/// P2k: the World transform at `t` in display units: `N W(t) N^-1`.
+fn planets_root(normalize: Mat4, t: f32) -> Transform {
+    Transform::from_matrix(normalize * pod_menu::planets_world_at(t) * normalize.inverse())
+}
+/// P2k: moves the Earth (Thing `globe`) and the Moon to their main-menu placement in World
+/// space: each Thing's items are scaled about the Thing's first model item origin to the menu
+/// scale and moved to the menu position (rotation kept; the game also spins the Earth).
+fn place_menu_planets(scene: &mut LevelScene, globe: usize) -> Result<String, String> {
+    let mut parts = Vec::new();
+    for (thing, (to, scale)) in [
+        (globe, pod_menu::EARTH_MENU),
+        (pod_menu::MOON_THING, pod_menu::MOON_MENU),
+    ] {
+        // The pivot is the Thing's first model item (decal and shape batches carry
+        // identity matrices).
+        let model = |i: &&level_scene::SceneItem| {
+            i.thing == thing
+                && matches!(
+                    scene.meshes.get(i.mesh).map(|m| &m.payload),
+                    Some(level_scene::ScenePayload::Model(_))
+                )
+        };
+        let Some(first) = scene.items.iter().find(model) else {
+            parts.push(format!("Thing {thing} not drawn"));
+            continue;
+        };
+        let world = Mat4::from_cols_array(&first.world);
+        let from = world.w_axis.truncate();
+        let stored = world.x_axis.truncate().length();
+        if !(stored.is_finite() && stored > 1e-6 && from.is_finite()) {
+            return Err(format!(
+                "--pod-game-camera: Thing {thing} has no usable matrix"
+            ));
+        }
+        let moved = Mat4::from_translation(to)
+            * Mat4::from_scale(Vec3::splat(scale / stored))
+            * Mat4::from_translation(-from);
+        let mut n = 0;
+        for item in scene.items.iter_mut().filter(|i| i.thing == thing) {
+            item.world = (moved * Mat4::from_cols_array(&item.world)).to_cols_array();
+            n += 1;
+        }
+        parts.push(format!(
+            "Thing {thing}: {n} items from ({:.0}, {:.0}, {:.0}) item scale {stored:.3} to ({:.0}, {:.0}, {:.0}) scale {scale}",
+            from.x, from.y, from.z, to.x, to.y, to.z
+        ));
+    }
+    Ok(format!(
+        "Game camera (World, presets, vfov 57.3 deg; menu placement): {}",
+        parts.join("; ")
+    ))
 }
 /// P2b: Space opens or closes the Puter: the view dollies through the Pod window in
 /// `DOLLY_SECONDS` while the shell layer follows its own camera.
@@ -1838,11 +1971,20 @@ fn pod_dolly(
     rig: Option<Res<PodRigRes>>,
     state: Option<ResMut<pod_menu::PuterState>>,
     mut orbit: ResMut<Orbit>,
-    mut roots: Query<(&mut Transform, Has<PodTentRoot>), With<PodShellRoot>>,
+    mut layers: PodLayers,
 ) {
     let (Some(rig), Some(mut state)) = (rig, state) else {
         return;
     };
+    // P2k: the camera's field of view follows the rig (the game's under --pod-game-camera).
+    for mut projection in &mut layers.2 {
+        if let Projection::Perspective(p) = &mut *projection {
+            if p.fov != rig.0.fov {
+                p.fov = rig.0.fov;
+                println!("Pod camera: vertical FOV {:.1} deg", p.fov.to_degrees());
+            }
+        }
+    }
     let pad = |b| pads.iter().any(|g| g.just_pressed(b));
     if keys.just_pressed(KeyCode::Space) || pad(GamepadButton::West) {
         state.open = !state.open;
@@ -1865,8 +2007,11 @@ fn pod_dolly(
     } else {
         (state.t - step).max(0.)
     };
-    *orbit = pod_orbit(rig.0.planet_eye(state.t), rig.0.globe_z);
-    for (mut root, tent) in &mut roots {
+    *orbit = pod_orbit(&rig.0, state.t);
+    for (mut root, PodPlanetsRoot(normalize)) in &mut layers.1 {
+        *root = planets_root(*normalize, state.t);
+    }
+    for (mut root, tent) in &mut layers.0 {
         *root = if tent {
             rig.0.tent_root(state.t)
         } else {
