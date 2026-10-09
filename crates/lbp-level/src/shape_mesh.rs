@@ -1029,8 +1029,7 @@ fn even_odd_fill(pts: &[P2], loops: &[Vec<usize>]) -> Option<Outline> {
                 .map(|&e| (x_at(e, ym), x_at(e, y0), x_at(e, y1))),
         );
         span.sort_by(|p: &(f64, f64, f64), q| p.0.total_cmp(&q.0));
-        for pair in span.chunks_exact(2) {
-            let (l, r) = (pair[0], pair[1]);
+        for &[l, r] in span.as_chunks::<2>().0 {
             let quad = [[l.1, y0], [r.1, y0], [r.2, y1], [l.2, y1]];
             for t in [[0, 1, 2], [0, 2, 3]] {
                 let (a, b, c) = (quad[t[0]], quad[t[1]], quad[t[2]]);
