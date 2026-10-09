@@ -14,7 +14,7 @@
 //! Entry names: `OnCreate__` and `Update__` are the create/update functions (PC D152:
 //! across the 49 classes Rookie Test and the other levels use, `OnCreate__` is defined by
 //! 24 and `Update__` by 11; the remaining names are UI, switch and enter/leave handlers).
-use lbp_level::parts::{ScriptPart, ScriptValue, ShapeColor};
+use lbp_level::parts::{ScriptObject, ScriptPart, ScriptValue, ShapeColor};
 use lbp_level::thing::ThingRecord;
 use lbp_script_vm::natives::{Bindings, CameraFromToUp, World};
 use lbp_script_vm::{ClassId, Host, MemberKind, ObjectId, Step, Task, Value, Vm};
@@ -79,8 +79,15 @@ pub struct LevelWorld {
     pub world: Option<u32>,
     /// `WRITE` output of the scripts.
     pub written: Vec<String>,
-    /// Stored script values with no VM value yet (object references other than strings).
+    /// Stored non-null object references with no VM value: before [`Self::bind_objects`]
+    /// every member that is not a string; after it, references (members, array elements,
+    /// instance fields) whose object could not be built (resource, audio handle, instance
+    /// of a class the VM has not loaded).
     pub unconverted: usize,
+    /// Script object contents by the level's object number (first occurrence).
+    pub stored_objects: BTreeMap<usize, ScriptObject>,
+    /// Members waiting for a VM object: (Thing, field, object number).
+    pub object_members: Vec<(u32, String, usize)>,
     /// Parts handed to scripts; a part handle is its index + 1 (`Raw(0)` is null).
     pub part_handles: Vec<PartState>,
     pub camera: CameraState,
@@ -95,8 +102,14 @@ pub struct LevelWorld {
 }
 
 /// VM value for a stored script field; `None` for a field the instance does not store.
-/// Object references other than strings become null and are counted by the caller.
+/// Object references other than strings with their text at hand become null and are
+/// counted by the caller ([`LevelWorld::bind_objects`] builds them).
 pub fn member_value(v: &ScriptValue) -> Option<(Value, bool)> {
+    stored_value(v, &|_| None)
+}
+
+/// [`member_value`] with `object` giving the VM value for an object number.
+fn stored_value(v: &ScriptValue, object: &dyn Fn(usize) -> Option<Value>) -> Option<(Value, bool)> {
     Some(match v {
         ScriptValue::Bool(b) => (Value::Bool(*b), true),
         ScriptValue::Char(c) => (Value::Char(*c as u16), true),
@@ -106,10 +119,31 @@ pub fn member_value(v: &ScriptValue) -> Option<(Value, bool)> {
         ScriptValue::M44(m) => (Value::Mat44(*m), true),
         ScriptValue::Thing(t) => (Value::Thing(t.and_then(|i| u32::try_from(i).ok())), true),
         ScriptValue::Object { kind: 0, .. } => (Value::Object(None), true),
-        ScriptValue::Object { text: Some(t), .. } => (Value::Str(t.as_str().into()), true),
-        ScriptValue::Object { .. } => (Value::Object(None), false),
+        ScriptValue::Object { id, body, .. } => match (body.as_deref(), id.and_then(object)) {
+            (Some(ScriptObject::Text(t)), _) => (Value::Str(t.as_str().into()), true),
+            (_, Some(v)) => (v, true),
+            _ => (Value::Object(None), false),
+        },
         ScriptValue::NotStored => return None,
     })
+}
+
+/// Object contents by number, from a stored value and everything nested in it.
+fn collect_objects(v: &ScriptValue, out: &mut BTreeMap<usize, ScriptObject>) {
+    let ScriptValue::Object {
+        id: Some(id),
+        body: Some(body),
+        ..
+    } = v
+    else {
+        return;
+    };
+    match &**body {
+        ScriptObject::Objects(items) => items.iter().for_each(|i| collect_objects(i, out)),
+        ScriptObject::Instance(p) => p.fields.iter().for_each(|f| collect_objects(&f.value, out)),
+        _ => {}
+    }
+    out.entry(*id).or_insert_with(|| (**body).clone());
 }
 
 /// `"PSpriteLight"` -> `"SPRITE_LIGHT"`, the reader's part name.
@@ -164,6 +198,13 @@ impl LevelWorld {
             .iter()
             .position(|t| t.data.world.is_some())
             .and_then(handle);
+        for t in list {
+            if let Some(part) = &t.data.script {
+                for f in &part.fields {
+                    collect_objects(&f.value, &mut w.stored_objects);
+                }
+            }
+        }
         for (i, t) in list.iter().enumerate() {
             if let Some(part) = &t.data.script {
                 w.add_script(i, part);
@@ -173,19 +214,123 @@ impl LevelWorld {
     }
 
     fn add_script(&mut self, i: usize, part: &ScriptPart) {
-        let state = &mut self.things[i];
-        state.script_guid = part.script.and_then(|d| d.guid);
-        if part.fields.is_empty() {
-            return;
-        }
+        let stored = &self.stored_objects;
+        let text = |id: usize| match stored.get(&id) {
+            Some(ScriptObject::Text(t)) => Some(Value::Str(t.as_str().into())),
+            _ => None,
+        };
         let mut members = BTreeMap::new();
         for f in &part.fields {
-            if let Some((v, converted)) = member_value(&f.value) {
-                self.unconverted += usize::from(!converted);
+            if let Some((v, converted)) = stored_value(&f.value, &text) {
+                if !converted {
+                    self.unconverted += 1;
+                    if let ScriptValue::Object { id: Some(id), .. } = f.value {
+                        self.object_members.push((i as u32, f.name.clone(), id));
+                    }
+                }
                 members.insert(f.name.clone(), v);
             }
         }
-        state.members = Some(members);
+        let state = &mut self.things[i];
+        state.script_guid = part.script.and_then(|d| d.guid);
+        if !part.fields.is_empty() {
+            state.members = Some(members);
+        }
+    }
+
+    /// Builds the level's stored script objects on the VM heap and points the members that
+    /// reference them at those objects. Arrays become script arrays; an instance becomes
+    /// an instance of the class with its script GUID (class defaults, then the stored
+    /// fields); strings stay string values. Objects with one number are one heap object, so
+    /// shared references stay shared. Resources, audio handles and instances of classes
+    /// the VM has not loaded stay null and are counted in `unconverted`. Returns the
+    /// number of heap objects created.
+    pub fn bind_objects(&mut self, vm: &mut Vm) -> usize {
+        let thing = |t: &Option<usize>| Value::Thing(t.and_then(|i| u32::try_from(i).ok()));
+        let mut built = BTreeMap::<usize, Value>::new();
+        let mut created = 0;
+        // Allocate first so references in any order (and cycles) resolve.
+        for (&id, body) in &self.stored_objects {
+            let made = match body {
+                ScriptObject::Text(t) => {
+                    built.insert(id, Value::Str(t.as_str().into()));
+                    continue;
+                }
+                ScriptObject::Bools(v) => vm.new_array(v.iter().map(|&b| Value::Bool(b)).collect()),
+                ScriptObject::Ints(v) => vm.new_array(v.iter().map(|&i| Value::Int(i)).collect()),
+                ScriptObject::Floats(v) => {
+                    vm.new_array(v.iter().map(|&f| Value::Float(f)).collect())
+                }
+                ScriptObject::Vectors(v) => {
+                    vm.new_array(v.iter().map(|&f| Value::Vec4(f)).collect())
+                }
+                ScriptObject::Things(v) => vm.new_array(v.iter().map(thing).collect()),
+                ScriptObject::Objects(_) => vm.new_array(Vec::new()),
+                ScriptObject::Instance(part) => {
+                    match part
+                        .script
+                        .and_then(|d| d.guid)
+                        .and_then(|g| vm.class_by_guid(g))
+                    {
+                        Some(class) => vm.instantiate(class),
+                        None => continue,
+                    }
+                }
+                ScriptObject::Resource { .. } | ScriptObject::AudioHandle => continue,
+            };
+            if let Ok(o) = made {
+                built.insert(id, Value::Object(Some(o)));
+                created += 1;
+            }
+        }
+        let object = |i: usize| built.get(&i).cloned();
+        let mut unconverted = 0;
+        for (id, body) in &self.stored_objects {
+            let Some(Value::Object(Some(o))) = built.get(id) else {
+                continue;
+            };
+            match body {
+                ScriptObject::Objects(items) => {
+                    let values: Vec<Value> = items
+                        .iter()
+                        .map(|v| {
+                            let (v, ok) =
+                                stored_value(v, &object).unwrap_or((Value::Object(None), true));
+                            unconverted += usize::from(!ok);
+                            v
+                        })
+                        .collect();
+                    if let Some(a) = vm.array_mut(*o) {
+                        *a = values;
+                    }
+                }
+                ScriptObject::Instance(part) => {
+                    let mut stored = Vec::new();
+                    for f in &part.fields {
+                        if let Some((v, ok)) = stored_value(&f.value, &object) {
+                            unconverted += usize::from(!ok);
+                            stored.push((f.name.clone(), v));
+                        }
+                    }
+                    if let Some(fields) = vm.fields_mut(*o) {
+                        fields.extend(stored);
+                    }
+                }
+                _ => {}
+            }
+        }
+        for (t, name, id) in std::mem::take(&mut self.object_members) {
+            match object(id) {
+                Some(v) => {
+                    if let Some(m) = self.things[t as usize].members.as_mut() {
+                        m.insert(name, v);
+                    }
+                }
+                None => unconverted += 1,
+            }
+        }
+        self.unconverted = unconverted;
+        created
     }
 
     /// Gives every scripted Thing whose class is loaded the fields of its class and

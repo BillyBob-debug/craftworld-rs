@@ -10,8 +10,8 @@ level bytes or engine code was used or is committed.
 - **`lbp-level`**: the PScript part now keeps its data (`PartData::script`): the script
   resource and, when the instance has a layout, one `ScriptField` per serialized layout
   field (name, machine type, value). Values: bool, char, s32, f32, v4, m44, Thing
-  reference (Thing index), object reference (kind, and the text of a STRINGW/STRINGA on
-  its first occurrence), and `NotStored` for a DIVERGENT field the instance does not
+  reference (Thing index), object reference (kind, object number and, on its first
+  occurrence, the contents; part 5), and `NotStored` for a DIVERGENT field the instance does not
   serialize. The read order is unchanged (the module doc's SCRIPT rule). A PScript shared
   by back-reference is not repeated.
 - **New crate `lbp-runtime`** (runtime only; the parsing crates do not depend on it):
@@ -43,7 +43,7 @@ INFERRED (each is a place the PC run or RPCS3 can disagree):
 | Thing handle | Thing index in the level's list | Internal choice; never shown to scripts except through natives |
 | Children order | Thing-list order | Scripts that walk children (`GetFirstChild`/`GetNextSibling`) |
 | World position | POS world matrix translation, w as stored | RPCS3 comparison |
-| Object references | Strings become string values; other kinds (arrays, instances, resources) are null for now and counted as `unconverted_values` | The PC count says whether they matter |
+| Object references | Strings become string values; arrays and instances become VM heap objects (part 5); resources and audio handles are null and counted as `unconverted_values` | The PC count says whether they matter |
 
 Entry names (settled, PC D152 `level_scripts --all`, unit: distinct class, 49 classes in
 use over 378 levels): `OnCreate__` 24 classes, `Update__` 11. The other frequent names are
@@ -197,10 +197,49 @@ Tests: `lbp-runtime` `part4_anim_speed_tint_camera_tweak_and_player_numbers`.
 
 Counts: +0 newly viewable, +0 newly Complete (no asset change).
 
+## Part 5: object-reference members (2026-10-09)
+
+The Pod planets run showed PlanetsView reading about 124 object-reference members the
+VM did not model. Stored script objects now reach the VM:
+
+- **`lbp-level`**: `ScriptValue::Object { kind, id, body }`. `id` numbers the level's
+  script objects in first-occurrence order (the per-class sequence of the shared
+  reference table), so a back-reference carries the `id` of its first occurrence; only
+  the first occurrence has a `body` (`ScriptObject`): bool / s32 / f32 / v4 arrays, Thing
+  arrays (Thing indices), object arrays (nested values), a resource (type and
+  descriptor), a nested instance (`ScriptPart`), text (STRINGW and STRINGA), audio handle.
+  The read order is the module doc's ScriptObjectUID rule, unchanged.
+- **`lbp-script-vm`**: `Vm::new_array`, `Vm::array_mut`, `Vm::fields_mut` for hosts that
+  load stored objects.
+- **`lbp-runtime`**: `LevelWorld::from_things` collects every object body by number
+  (members, array elements, instance fields). `LevelWorld::bind_objects(&mut vm)`
+  allocates one heap object per number (so shared references stay one object, cycles
+  included), fills object arrays and instance fields, then points members at them. An
+  instance gets the class with its script GUID, class defaults first, stored fields on
+  top. Strings stay string values. Resources, audio handles and instances of classes the
+  VM has not loaded stay null and are counted in `unconverted`. Returns the number of
+  heap objects built; `level_scripts` reports it as `objects_built`.
+
+| Rule | Evidence | Applicability |
+| --- | --- | --- |
+| Object numbers follow the shared tag table (a back-reference is the same object) | INFERRED from the ScriptObjectUID layout (module doc of `parts.rs`) | Instances in levels read by `lbp-level` |
+| An instance object starts from class defaults, stored fields override | INFERRED, the same rule as a scripted Thing's members (part 2) | Classes the VM has loaded |
+| Resource objects are null | Not modelled: the VM has no resource value yet | Counted, so the PC count shows whether it matters |
+
+Tests: `lbp-level` `script_objects_keep_contents_and_shared_identity` (string, f32
+array, object array with a back-reference, a null and a nested instance);
+`lbp-runtime` `stored_objects_become_shared_heap_objects`.
+
+Not tested: real levels (cloud has no game data). PC check: `level_scripts` on
+pod_planets (00018fdb) with `--play`, reporting `unconverted_values`, `objects_built`
+and the PlanetsView faults.
+
+Counts: +0 newly viewable, +0 newly Complete (no asset change).
+
 ## Next
 
 - Call the scripts from the 30 Hz fixed update of the level viewer once Rookie Test
   creates and updates without faults.
 - Bind the natives part 4 reports, in call-count order; for the Pod camera, PodComputer,
   Cam and the PPos `WorldPosition` member first.
-- Object-reference values (arrays and instances) as VM heap objects.
+- Resource object values, if the PC count shows scripts reading them.

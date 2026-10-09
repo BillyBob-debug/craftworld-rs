@@ -1,7 +1,7 @@
 //! L4 Thing header/part flags and L5 subset: authored synthetic recipes only.
 mod common;
 use common::{bit, rev, translate, W};
-use lbp_level::parts::{ScriptValue, ShapeColor};
+use lbp_level::parts::{ScriptObject, ScriptValue, ShapeColor};
 use lbp_level::thing::present_parts;
 use lbp_level::{read_payload, LevelReport, Limits, Stop};
 
@@ -466,12 +466,66 @@ fn script_part_keeps_field_names_and_values() {
                     0xb,
                     &ScriptValue::Object {
                         kind: 14,
-                        text: Some("Hi".into())
+                        id: Some(0),
+                        body: Some(Box::new(ScriptObject::Text("Hi".into())))
                     }
                 ),
             ]
         );
     }
+}
+
+#[test]
+fn script_objects_keep_contents_and_shared_identity() {
+    // Fields: a wide string, an f32 array, and an object array holding a back-reference to
+    // the string, a null and a nested instance without a layout.
+    let field = |w: &mut W, name: &str, machine: u8| {
+        w.s32(name.len() as i32).raw(name.as_bytes());
+        w.raw(&0u16.to_be_bytes()).u8(machine).u8(0).u8(0).u8(0);
+        w.u32(0);
+    };
+    let mut w = W::new(1);
+    w.u32(1).thing_header(1, 0, 0, 0, 0x3f, bit(0x11));
+    w.u32(2).res_guid(0x2d06).u8(1);
+    w.u32(3).u32(3);
+    field(&mut w, "Text", 0xb);
+    field(&mut w, "Speeds", 0xb);
+    field(&mut w, "Refs", 0xb);
+    w.u32(12).u8(0);
+    w.u32(16).u32(4).s32(2).raw(b"Hi"); // STRINGA "Hi", tag 4
+    w.u32(4).u32(5).u32(2).f32(1.5).f32(-2.); // ARRAY_F32, tag 5
+    w.u32(11).u32(6).u32(3); // ARRAY_OBJECT_REF, tag 6, three elements
+    w.u32(16).u32(4); // back-reference to tag 4
+    w.u32(0); // null
+    w.u32(13).u32(7).res_guid(0x2d07).u8(0); // INSTANCE, tag 7, no layout
+    w.u32(0).u32(0).u32(0).u32(0).u32(0).u8(0).u8(0);
+    let r = run(&w, 0x3e5);
+    assert_eq!(r.stop, None);
+    let p = r.things[0].data.script.as_ref().unwrap();
+    let v: Vec<_> = p.fields.iter().map(|f| &f.value).collect();
+    let obj = |v: &ScriptValue| match v {
+        ScriptValue::Object { kind, id, body } => (*kind, *id, body.as_deref().cloned()),
+        other => panic!("not an object: {other:?}"),
+    };
+    assert_eq!(
+        obj(v[0]),
+        (16, Some(0), Some(ScriptObject::Text("Hi".into())))
+    );
+    assert_eq!(
+        obj(v[1]),
+        (4, Some(1), Some(ScriptObject::Floats(vec![1.5, -2.])))
+    );
+    let (kind, id, Some(ScriptObject::Objects(items))) = obj(v[2]) else {
+        panic!("object array expected");
+    };
+    assert_eq!((kind, id, items.len()), (11, Some(2), 3));
+    assert_eq!(obj(&items[0]), (16, Some(0), None));
+    assert_eq!(obj(&items[1]), (0, None, None));
+    let (13, Some(3), Some(ScriptObject::Instance(inst))) = obj(&items[2]) else {
+        panic!("instance expected");
+    };
+    assert_eq!(inst.script.and_then(|d| d.guid), Some(0x2d07));
+    assert!(inst.fields.is_empty());
 }
 
 #[test]
