@@ -1969,19 +1969,31 @@ fn uses_instance_color(g: &GroupedMesh) -> bool {
         .any(|b| b.instance_projection().is_some())
 }
 
-/// `--level-report`: the distinct binding errors behind a model's neutral groups, with
-/// how many non-empty groups each one leaves neutral (empty for other payloads).
+/// `--level-report`: the distinct binding errors behind a mesh's neutral groups, with
+/// how many non-empty groups each one leaves neutral. A shape or backdrop batch is one
+/// group: its gfx material error, when the batch has triangles (empty for decals).
 pub fn neutral_reasons(p: &ScenePayload) -> Vec<(String, usize)> {
     let mut out: Vec<(String, usize)> = Vec::new();
-    if let ScenePayload::Model(g) = p {
-        for (range, b) in g.geometry.primitive_triangles.iter().zip(&g.bindings) {
-            if let (false, Err(e)) = (range.is_empty(), b) {
-                match out.iter_mut().find(|(r, _)| r == e) {
-                    Some((_, n)) => *n += 1,
-                    None => out.push((e.clone(), 1)),
+    match p {
+        ScenePayload::Model(g) => {
+            for (range, b) in g.geometry.primitive_triangles.iter().zip(&g.bindings) {
+                if let (false, Err(e)) = (range.is_empty(), b) {
+                    match out.iter_mut().find(|(r, _)| r == e) {
+                        Some((_, n)) => *n += 1,
+                        None => out.push((e.clone(), 1)),
+                    }
                 }
             }
         }
+        ScenePayload::Shapes {
+            batch,
+            material: Err(e),
+        } if !batch.triangles.is_empty() => out.push((e.clone(), 1)),
+        ScenePayload::Backdrop {
+            batch,
+            material: Err(e),
+        } if !batch.triangles.is_empty() => out.push((e.clone(), 1)),
+        _ => {}
     }
     out
 }
@@ -2659,6 +2671,33 @@ mod tests {
         let mut only = two_group_mesh(Err("x".into()));
         only.geometry.primitive_triangles = vec![0..2, 2..2];
         assert!(!grouped_neutral(&only));
+    }
+
+    #[test]
+    fn shape_batch_neutral_reason_is_its_material_error() {
+        let batch = ShapeBatch {
+            material: Some(0x12ba7),
+            positions: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+            uv0: vec![[0., 0.]; 3],
+            triangles: vec![[0, 1, 2]],
+            things: vec![7],
+        };
+        let failed = ScenePayload::Shapes {
+            batch: batch.clone(),
+            material: Err("Unsupported: x".into()),
+        };
+        assert_eq!(
+            neutral_reasons(&failed),
+            vec![("Unsupported: x".to_string(), 1)]
+        );
+        let empty = ScenePayload::Shapes {
+            batch: ShapeBatch {
+                triangles: Vec::new(),
+                ..batch
+            },
+            material: Err("Unsupported: x".into()),
+        };
+        assert!(neutral_reasons(&empty).is_empty());
     }
     use lbp_level::parts::{GeneratedMesh, Joint, PartData, Pos, RenderMesh, Shape, ShapeColor};
     use lbp_level::serial::Descriptor;
