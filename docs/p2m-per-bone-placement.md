@@ -51,3 +51,12 @@ room measured L213 vs RPCS3 L75 and the Moon L140 vs L67 (the grazing rim of D20
 139 / 64). The rim term is back to V from the eye (0 facing, 0.81 at grazing). The darker
 RPCS3 globe edge is left unexplained until the RSX capture gives the real constants.
 Per-bone placement: Earth r 0.247 h vs RPCS3 0.260 (was 0.290); Moon 0.127 vs 0.118.
+
+## P2o (2026-10-09): on by default under `--pod-game-camera`
+
+PC corpus check (/mnt/project-files/2026-10-09-per-bone-level-report.md): 18,892 items placed
+per bone and 1,113 unchanged across all 236 levels. bravery_test and crazy_inferno looked identical to
+the default at the opening view. Per-bone placement is now on by default only under
+`--pod-game-camera`, where the Pod Earth confirms it; `--no-per-bone-placement` turns it off
+there. Elsewhere it stays opt-in: it copies a mesh per item (memory/load cost not measured)
+and shows no visible gain.
