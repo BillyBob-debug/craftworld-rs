@@ -357,6 +357,8 @@ pub const PAD_CLOSED: ([f32; 2], f32) = ([0.50, 0.70], 0.15);
 pub const PAD_OPEN: ([f32; 2], f32) = ([0.50, 0.86], 0.17);
 /// Opening the Puter takes about a second (RPCS3).
 pub const DOLLY_SECONDS: f32 = 1.0;
+/// The game's frame aspect (RPCS3 16:9), for expected positions.
+pub const ASPECT_16_9: f32 = ASPECT;
 
 /// P2k: one PlanetsView (PlanetsWorld script): pitch, yaw (radians) and offset (level
 /// units). CONFIRMED_FROM_LOCAL_DATA: view 0 from the D180/D174 VM trace, view 1 (main
