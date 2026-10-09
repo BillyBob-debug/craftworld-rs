@@ -129,9 +129,15 @@ pub fn set_lighting(
     light: Option<&crate::lighting::PreviewLight>,
 ) -> bool {
     let ext = &mut material.extension;
-    match light.filter(|_| ext.normals_trusted) {
+    // P2s: LBP mode lights every draw; untrusted smooth normals use the face normal (3).
+    match light.filter(|l| ext.normals_trusted || l.lbp) {
         Some(l) => {
-            ext.light_dir = l.toward_light.extend(if l.lbp { 2. } else { 1. });
+            let mode = match (l.lbp, ext.normals_trusted) {
+                (false, _) => 1.,
+                (true, true) => 2.,
+                (true, false) => 3.,
+            };
+            ext.light_dir = l.toward_light.extend(mode);
             // P2q: .w carries the game's scalar per light (brdf.cg `light.w`).
             ext.light_key = l.key.extend(l.scales.x);
             ext.light_ambient = l.ambient.extend(l.scales.y);
@@ -318,7 +324,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
 #endif
     var rgb = color.rgb;
     if light_dir.w > 0.5 {
-        let n = lit_normal(in.world_normal, face, pbr.V, bump);
+        // P2s: mode 3 (untrusted smooth normals) shades with the face normal.
+        let shading = select(in.world_normal, face, light_dir.w > 2.5);
+        let n = lit_normal(shading, face, pbr.V, bump);
         let factor = preview_light(n, pbr.V);
         rgb = rgb * factor + gloss_term(n, pbr.V, factor);
         if light_dir.w > 1.5 {
@@ -370,7 +378,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .filter(|l| !l.trim_start().starts_with('#'))
             .map(|l| l.replace("#{MATERIAL_BIND_GROUP}", "2") + "\n")
             .collect();
-        assert!(body.contains("lit_normal(in.world_normal, face, pbr.V, bump)"));
+        assert!(body.contains("lit_normal(shading, face, pbr.V, bump)"));
         assert!(body.contains("gloss_term(n, pbr.V, factor)"));
         assert!(body.contains("rgb = lbp_output(rgb);"));
         let source = format!("{STUBS}{body}");

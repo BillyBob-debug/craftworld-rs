@@ -59,3 +59,16 @@ Change (`--lbp-lighting` only):
 Not done: the luminance fog step (`fogcc = (lum + fogccparams.y) × fogccparams.x + 1`, lerp
 to fogcol by the vertex fog factor), because the vertex fog factor is unknown. Bevy distance
 fog stays as before. The shell's light direction is still its own level's, not checked.
+
+## P2s: every draw lit in LBP mode (2026-10-09)
+
+The PC re-measure of P2r (PR #82 comment): planets 0.79-1.01 of RPCS3, but the room stayed at
+139 against 75, the same value as D188 before any lighting change. A region that no lighting
+change moves is most likely not lit at all. Draws whose generated smooth normals fail
+`adapter::normal_trust` were kept unlit (D121). In the game every Pod draw is lit (all 161 in
+the capture share the lit constants), so under `--lbp-lighting` those draws are now lit with
+their face normal (flat), mode `light_dir.w = 3`. `--preview-lighting` is unchanged. The
+lighting summary counts them as "lit flat by their face normals".
+
+Label: INFERRED (the room's draws being the untrusted ones is a hypothesis from the
+unchanged 139; the level report's count line confirms or refutes it).
