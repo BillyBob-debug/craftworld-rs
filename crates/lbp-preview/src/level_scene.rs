@@ -110,6 +110,16 @@ pub enum MeshSource {
 }
 
 impl MeshSource {
+    /// Mesh GUID behind this source, looking through per-item skinned copies
+    /// (JointSkin/BoneSkin keep the original mesh identity).
+    pub fn base_guid(&self) -> Option<u32> {
+        match self {
+            Self::Guid(g) => Some(*g),
+            Self::JointSkin { mesh, .. } | Self::BoneSkin { mesh, .. } => mesh.base_guid(),
+            _ => None,
+        }
+    }
+
     pub fn label(&self) -> String {
         match self {
             Self::Guid(g) => format!("{g:08x}"),
@@ -2834,6 +2844,22 @@ mod tests {
         assert!(c.lines().iter().any(|l| l.starts_with(
             "Placed from JOINT endpoints (D120 preview approximation): 2 Things (1 pivot"
         )));
+    }
+
+    /// D187: skinned per-item copies keep the mesh GUID for lookups (the Pod shell's
+    /// DualShock lookup failed under --per-bone-placement).
+    #[test]
+    fn d187_base_guid_looks_through_skinned_copies() {
+        let bone = MeshSource::BoneSkin {
+            mesh: Box::new(MeshSource::Guid(0x42af)),
+            thing: 3,
+        };
+        let joint = MeshSource::JointSkin {
+            mesh: Box::new(bone),
+            thing: 1,
+        };
+        assert_eq!(joint.base_guid(), Some(0x42af));
+        assert_eq!(MeshSource::Sha1("ab".into()).base_guid(), None);
     }
 
     /// D147: span joints skin with rigid A/B bone groups; only blended vertices stretch.

@@ -994,10 +994,8 @@ fn load(
                         .iter()
                         .flat_map(|(mesh, _)| {
                             let n = shell_plan.prepared[*mesh].as_ref().map_or(0, Vec::len);
-                            let is_tent = matches!(
-                                shell.meshes[*mesh].source,
-                                level_scene::MeshSource::Guid(POD_TENT_MESH)
-                            );
+                            let is_tent =
+                                shell.meshes[*mesh].source.base_guid() == Some(POD_TENT_MESH);
                             std::iter::repeat_n(is_tent, n)
                         })
                         .collect()
@@ -1665,12 +1663,7 @@ fn pod_shell(
     let (g_centre, g_size) = display(&plan.normalize, g);
     let shell_plan = plan_level(shell, None, None)?;
     let pad = shell
-        .bounds_where(|i| {
-            matches!(
-                shell.meshes[i.mesh].source,
-                level_scene::MeshSource::Guid(DUALSHOCK)
-            )
-        })
+        .bounds_where(|i| shell.meshes[i.mesh].source.base_guid() == Some(DUALSHOCK))
         .ok_or("--pod-shell: no DualShock (mesh 000042af) in the shell level")?;
     let (p_centre, p_size) = display(&shell_plan.normalize, pad);
     let [lo, hi] = shell.bounds().ok_or("--pod-shell: empty shell level")?;
