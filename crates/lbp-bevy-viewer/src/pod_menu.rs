@@ -368,11 +368,14 @@ pub const SACKBOY_OPEN: [f32; 2] = [0.50, 0.90];
 /// camera, so the shell is placed each frame by `X = P + scale (X_shell - S)` (P, S the
 /// planets and shell eyes): scaling about the eye keeps its projection, and `scale` puts
 /// the whole shell in front of the globe. Eyes are display-space, closed then open.
+/// P2f: a shell eye may also turn (`shell_rot`, identity = looking -Z), for the game's own
+/// camera (`with_game_camera`); the root then also applies the inverse turn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PodRig {
     pub planet: [Vec3; 2],
     pub globe_z: f32,
     pub shell: [Vec3; 2],
+    pub shell_rot: [Quat; 2],
     pub scale: f32,
     pub fov: f32,
 }
@@ -399,14 +402,47 @@ impl PodRig {
             planet,
             globe_z: g.z,
             shell,
+            shell_rot: [Quat::IDENTITY; 2],
             scale,
             fov,
         }
     }
 
-    fn at(pair: [Vec3; 2], t: f32) -> Vec3 {
+    /// P2f: the closed shell eye from the game's camera preset (`from` looking at `to`, up
+    /// +Y; shell display space). `bounds` (the shell's display bounds) reset `scale` so
+    /// the shell's far side stays at half the closed planets distance.
+    pub fn with_game_camera(mut self, from: Vec3, to: Vec3, [lo, hi]: [Vec3; 2]) -> Self {
+        let rot = Transform::from_translation(from)
+            .looking_at(to, Vec3::Y)
+            .rotation;
+        let forward = rot * Vec3::NEG_Z;
+        let depth = (0..8)
+            .map(|c| {
+                let p = Vec3::new(
+                    if c & 1 == 0 { lo.x } else { hi.x },
+                    if c & 2 == 0 { lo.y } else { hi.y },
+                    if c & 4 == 0 { lo.z } else { hi.z },
+                );
+                (p - from).dot(forward)
+            })
+            .fold(1e-6, f32::max);
+        self.shell[0] = from;
+        self.shell_rot[0] = rot;
+        self.scale = 0.5 * (self.planet[0].z - self.globe_z) / depth;
+        self
+    }
+
+    fn ease(t: f32) -> f32 {
         let t = t.clamp(0., 1.);
-        pair[0].lerp(pair[1], t * t * (3. - 2. * t))
+        t * t * (3. - 2. * t)
+    }
+
+    fn at(pair: [Vec3; 2], t: f32) -> Vec3 {
+        pair[0].lerp(pair[1], Self::ease(t))
+    }
+
+    fn turn(&self, t: f32) -> Quat {
+        self.shell_rot[0].slerp(self.shell_rot[1], Self::ease(t))
     }
 
     /// The planets eye at opening progress `t` (0 closed, 1 open, eased).
@@ -416,8 +452,8 @@ impl PodRig {
 
     /// Where a shell display-space point appears at `t`, as 16:9 frame fractions.
     pub fn shell_frac(&self, t: f32, q: Vec3) -> [f32; 2] {
-        let c = Mat4::perspective_rh(self.fov, ASPECT, 0.001, 1000.)
-            .project_point3(q - Self::at(self.shell, t));
+        let local = self.turn(t).inverse() * (q - Self::at(self.shell, t));
+        let c = Mat4::perspective_rh(self.fov, ASPECT, 0.001, 1000.).project_point3(local);
         [(c.x + 1.) / 2., (1. - c.y) / 2.]
     }
 
@@ -426,16 +462,42 @@ impl PodRig {
     /// `SACKBOY_CLOSED`. Solves depth from the projected height, then height from the feet.
     pub fn fit_figure(&self, h: f32) -> Vec3 {
         let tan = (self.fov / 2.).tan();
-        let [top, feet] = SACKBOY_CLOSED;
-        let depth = h / ((feet - top) * 2. * tan);
-        self.shell[0] + Vec3::new(0., (0.5 - feet) * 2. * tan * depth, -depth)
+        let depth = self.figure_depth(h);
+        let local = Vec3::new(0., (0.5 - SACKBOY_CLOSED[1]) * 2. * tan * depth, -depth);
+        self.shell[0] + self.shell_rot[0] * local
     }
 
-    /// The shell root transform at `t`.
+    /// Distance in front of the closed eye at which `fit_figure` stands the figure.
+    pub fn figure_depth(&self, h: f32) -> f32 {
+        let [top, feet] = SACKBOY_CLOSED;
+        h / ((feet - top) * 2. * (self.fov / 2.).tan())
+    }
+
+    /// P2f: feet for the figure holding the controller: as far in front of the open eye as
+    /// `figure_depth`, its centre at `SACKBOY_OPEN` (the hold spot is not measured, only
+    /// where it shows; same distance is INFERRED).
+    pub fn fit_figure_open(&self, h: f32) -> Vec3 {
+        let tan = (self.fov / 2.).tan();
+        let depth = self.figure_depth(h);
+        let [x, y] = SACKBOY_OPEN;
+        let local = Vec3::new(
+            (x - 0.5) * 2. * tan * ASPECT * depth,
+            (0.5 - y) * 2. * tan * depth,
+            -depth,
+        );
+        self.shell[1] + self.shell_rot[1] * local - Vec3::Y * (h / 2.)
+    }
+
+    /// The shell root transform at `t`: `X -> P + scale R^-1 (X - S)`.
     pub fn shell_root(&self, t: f32) -> Transform {
         let p = self.planet_eye(t);
         let s = Self::at(self.shell, t);
-        Transform::from_translation(p - s * self.scale).with_scale(Vec3::splat(self.scale))
+        let inv = self.turn(t).inverse();
+        Transform {
+            translation: p - inv * (s * self.scale),
+            rotation: inv,
+            scale: Vec3::splat(self.scale),
+        }
     }
 }
 
@@ -527,6 +589,35 @@ mod tests {
         assert!((top - SACKBOY_CLOSED[0]).abs() < 1e-4, "{top}");
         let far = rig.shell_root(0.).transform_point(Vec3::new(0., 0., -0.4));
         assert!(far.z > globe.0.z);
+    }
+
+    #[test]
+    fn p2f_game_camera_turns_the_shell_and_keeps_projection() {
+        let fov = std::f32::consts::FRAC_PI_4;
+        let globe = (Vec3::new(-0.3, 0.2, 0.0), 0.25);
+        let pad = (Vec3::new(0.01, -0.2, -0.1), 0.12);
+        let bounds = [Vec3::new(-0.5, -0.5, -0.4), Vec3::new(0.5, 0.5, 0.2)];
+        let (from, to) = (Vec3::new(0., -0.1, 0.45), Vec3::new(0., 0.03, -0.6));
+        let rig = PodRig::new(globe, pad, -0.4, fov).with_game_camera(from, to, bounds);
+        let projection = Mat4::perspective_rh(fov, ASPECT, 0.001, 1000.);
+        let q = Vec3::new(0.05, -0.15, -0.05);
+        // The game camera's own view of q ...
+        let view = Mat4::look_at_rh(from, to, Vec3::Y);
+        let c = projection.project_point3(view.transform_point3(q));
+        let want = [(c.x + 1.) / 2., (1. - c.y) / 2.];
+        let at = rig.shell_frac(0., q);
+        assert!((at[0] - want[0]).abs() < 1e-4 && (at[1] - want[1]).abs() < 1e-4);
+        // ... is where the placed shell shows from the planets eye.
+        let placed = rig.shell_root(0.).transform_point(q);
+        let c = projection.project_point3(placed - rig.planet_eye(0.));
+        let got = [(c.x + 1.) / 2., (1. - c.y) / 2.];
+        assert!((got[0] - want[0]).abs() < 1e-4 && (got[1] - want[1]).abs() < 1e-4);
+        assert!(rig.shell_root(0.).transform_point(bounds[0]).z > globe.0.z);
+        // The open hold spot projects its centre to SACKBOY_OPEN.
+        let h = 0.05;
+        let centre = rig.fit_figure_open(h) + Vec3::Y * (h / 2.);
+        let f = rig.shell_frac(1., centre);
+        assert!((f[0] - SACKBOY_OPEN[0]).abs() < 1e-4 && (f[1] - SACKBOY_OPEN[1]).abs() < 1e-4);
     }
 
     #[test]
