@@ -133,6 +133,8 @@ pub struct SceneReport {
     pub joints: usize,
     /// PJoints left out, by reason.
     pub rejected_joints: BTreeMap<&'static str, usize>,
+    /// Joint ends fixed in the world because their Thing has no collider.
+    pub anchored_joint_ends: usize,
 }
 
 /// Material rule from a material's MAP path (INFERRED from names and public material
@@ -396,12 +398,16 @@ impl JointKind {
 }
 
 /// What a joint end is attached to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Endpoint {
     /// Index in [`PhysicsScene::bodies`].
     Body(usize),
     /// Index in [`PhysicsScene::colliders`] of a static shape.
     Static(usize),
+    /// A Thing with a POS but no collider (a hologram or non-collidable piece, say): a
+    /// fixed point in the world at its frame. INFERRED: such pieces do not fall in the
+    /// game, so what hangs from them stays up.
+    Anchor { thing: usize, frame: Frame },
 }
 
 /// One PJoint between two scene entities.
@@ -439,6 +445,7 @@ impl PhysicsScene {
         match e {
             Endpoint::Body(i) => self.bodies[i].frame,
             Endpoint::Static(i) => self.colliders[i].frame,
+            Endpoint::Anchor { frame, .. } => frame,
         }
     }
 
@@ -448,10 +455,15 @@ impl PhysicsScene {
                 return Some(Endpoint::Body(i));
             }
         }
-        self.colliders
+        if let Some(i) = self
+            .colliders
             .iter()
             .position(|c| c.thing == t && c.body.is_none())
-            .map(Endpoint::Static)
+        {
+            return Some(Endpoint::Static(i));
+        }
+        let frame = Frame::of_matrix(&things.get(t)?.data.pos.as_ref()?.world)?;
+        Some(Endpoint::Anchor { thing: t, frame })
     }
 
     /// Adds the level's PJoints between scene entities ([`build_scene`] calls it).
@@ -464,6 +476,10 @@ impl PhysicsScene {
             match self.joint(things, i, j) {
                 Ok(joint) => {
                     self.report.joints += 1;
+                    self.report.anchored_joint_ends += [joint.a, joint.b]
+                        .iter()
+                        .filter(|e| matches!(e, Endpoint::Anchor { .. }))
+                        .count();
                     self.joints.push(joint);
                 }
                 Err(why) => *self.report.rejected_joints.entry(why).or_default() += 1,
@@ -482,13 +498,13 @@ impl PhysicsScene {
             return Err("missing endpoint");
         };
         let (Some(a), Some(b)) = (self.endpoint(things, ta), self.endpoint(things, tb)) else {
-            return Err("endpoint without a collider");
+            return Err("endpoint without a collider or POS");
         };
         if a == b {
             return Err("both ends on one body");
         }
         let fixed = |e: Endpoint| match e {
-            Endpoint::Static(_) => true,
+            Endpoint::Static(_) | Endpoint::Anchor { .. } => true,
             Endpoint::Body(i) => self.bodies[i].fixed,
         };
         // avian2d needs a dynamic body on at least one end (both static panics: "neither

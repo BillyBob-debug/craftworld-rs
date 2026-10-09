@@ -180,6 +180,22 @@ zero_area_loop 57, no_loops 26. Movers first moved at ticks 2-5 (3,098), 6-30 (2
 axes parallel (turned edge-on); `flat_samples` per level (Thing and the 3x3 linear part,
 up to 4); `why_moved.sleep` (never asleep, asleep to the end, woke at 1-5, 6-30, 31+).
 
+## Part 2f: what holds the fallers up (2026-10-09)
+
+PR #75 (shapes turned on their side as their slab's side view) was closed unmerged: on the
+PC its 6,325 new colliders did not reduce movers (5,843 -> 5,941) and raised the max move
+(37k -> 184k). Its `below_at_start` census (a ray 1,000 down from each dynamic body after
+tick 1, same slab, own colliders skipped) found, under the 5,941 movers: a dynamic body
+4,253, nothing 1,565, static 122, a sideways shape 1. So the movers are mostly stacks whose
+base falls, plus pieces hanging in the air.
+
+Of the 7,939 rejected joints, 5,350 had an end on a Thing without a collider (holograms,
+non-collidable pieces), so what hangs from them fell. Such an end is now
+`Endpoint::Anchor`: a fixed point at that Thing's frame (a static body without collider).
+INFERRED: those pieces do not fall in the game. Counted as `anchored_joint_ends`; the
+`below_at_start` key stays in `level_physics`. Test
+`string_from_a_thing_without_a_collider_holds_a_box`. Not tested: levels after the change.
+
 ## Part 3: Sackboy movement rules (2026-10-09)
 
 `lbp_sim::sackboy`: a Bevy-free per-tick controller. The caller supplies the pad state,

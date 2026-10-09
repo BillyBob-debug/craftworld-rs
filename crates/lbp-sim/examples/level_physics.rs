@@ -13,12 +13,13 @@
 //! and BODY Thing with a collider (motion). Counts only; no game bytes. Output: a NEW JSON
 //! file under ignored `local-analysis/`.
 use avian2d::prelude::*;
+use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_sim::{
     build_scene_with, scene::MaterialRule, spawn_scene, to_level, PhysicsScene, SimPlugin,
-    ThingIndex, TICK_HZ,
+    ThingIndex, ZSlab, TICK_HZ,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -56,7 +57,62 @@ struct Motion {
     first_moved: BTreeMap<usize, usize>,
     /// Bodies seen asleep, and the first tick each was awake again after that.
     asleep: std::collections::BTreeSet<usize>,
+    /// What a downward ray from each dynamic body meets after tick 1 (same slab, own
+    /// colliders skipped).
+    below: BTreeMap<usize, &'static str>,
     woke: BTreeMap<usize, usize>,
+}
+
+/// Ray this far below each dynamic body's origin (world units).
+const BELOW_RAY: f32 = 1000.;
+
+fn below_bodies(
+    spatial: &SpatialQuery,
+    bodies: &Query<(Entity, &ThingIndex, &RigidBody, &Position)>,
+    colliders: &Query<(Entity, &ColliderOf, &ZSlab, &ThingIndex)>,
+) -> BTreeMap<usize, &'static str> {
+    let mut out = BTreeMap::new();
+    for (e, t, rb, pos) in bodies {
+        if *rb != RigidBody::Dynamic {
+            continue;
+        }
+        let own: Vec<ZSlab> = colliders
+            .iter()
+            .filter(|c| c.1.body == e)
+            .map(|c| *c.2)
+            .collect();
+        let mut best: Option<(f32, Entity)> = None;
+        spatial.ray_hits_callback(
+            pos.0,
+            Dir2::NEG_Y,
+            BELOW_RAY * lbp_sim::UNIT_SCALE,
+            true,
+            &SpatialQueryFilter::default(),
+            |h| {
+                if let Ok((_, of, slab, _)) = colliders.get(h.entity) {
+                    if of.body != e
+                        && own.iter().any(|s| s.overlaps(slab))
+                        && best.is_none_or(|b| h.distance < b.0)
+                    {
+                        best = Some((h.distance, h.entity));
+                    }
+                }
+                true
+            },
+        );
+        let what = match best {
+            None => "nothing within 1000",
+            Some((_, c)) => {
+                let (_, of, _, _) = colliders.get(c).expect("hit is a collider");
+                match bodies.get(of.body).map(|b| *b.2) {
+                    Ok(RigidBody::Dynamic) => "dynamic body",
+                    _ => "static",
+                }
+            }
+        };
+        out.insert(t.0, what);
+    }
+    out
 }
 
 fn simulate(scene: &PhysicsScene, ticks: usize) -> Motion {
@@ -84,6 +140,16 @@ fn simulate(scene: &PhysicsScene, ticks: usize) -> Motion {
     let mut m = Motion::default();
     for tick in 1..=ticks {
         app.update();
+        if tick == 1 {
+            m.below = app
+                .world_mut()
+                .run_system_once(move |spatial: SpatialQuery,
+                      bodies: Query<(Entity, &ThingIndex, &RigidBody, &Position)>,
+                      colliders: Query<(Entity, &ColliderOf, &ZSlab, &ThingIndex)>| {
+                    below_bodies(&spatial, &bodies, &colliders)
+                })
+                .unwrap_or_default();
+        }
         let mut q = app
             .world_mut()
             .query_filtered::<(&ThingIndex, &Position, Has<Sleeping>), With<RigidBody>>();
@@ -225,6 +291,7 @@ fn run() -> Result<(), String> {
     let mut rejected = BTreeMap::<&str, usize>::new();
     let mut filled = BTreeMap::<&str, usize>::new();
     let (mut joints, mut rejected_joints) = (0, BTreeMap::<&str, usize>::new());
+    let mut anchored = 0;
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -261,6 +328,7 @@ fn run() -> Result<(), String> {
             *filled.entry(k).or_default() += n;
         }
         joints += r.joints;
+        anchored += r.anchored_joint_ends;
         for (k, n) in &r.rejected_joints {
             *rejected_joints.entry(k).or_default() += n;
         }
@@ -312,6 +380,14 @@ fn run() -> Result<(), String> {
                 (true, Some(&t)) => bucket(t),
             };
             let keys = [
+                (
+                    "below_at_start",
+                    m.below
+                        .get(&b.thing)
+                        .copied()
+                        .unwrap_or("not a body")
+                        .to_string(),
+                ),
                 ("first_moved_tick", first.to_string()),
                 ("sleep", sleep.to_string()),
                 ("frozen", b.frozen.to_string()),
@@ -350,6 +426,7 @@ fn run() -> Result<(), String> {
             "not_collidable": r.not_collidable, "rejected": r.rejected, "filled": r.filled,
             "flat_samples": r.flat_samples,
             "joints": r.joints, "rejected_joints": r.rejected_joints,
+            "anchored_joint_ends": r.anchored_joint_ends,
             "fixed_bodies": r.fixed_bodies, "nested_bodies": r.nested_bodies,
             "bodies": m.bodies, "moved_over_1": m.moved_1, "moved_over_100": m.moved_100,
             "non_finite": m.non_finite, "max_move": m.max_move,
@@ -377,6 +454,7 @@ fn run() -> Result<(), String> {
         "shapes": shapes, "dynamic": dynamic, "static": static_,
         "not_collidable": not_collidable, "rejected": rejected, "filled": filled,
         "joints": joints, "rejected_joints": rejected_joints,
+        "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,
         "no_collide_material_paths": no_collide_guids.iter().filter_map(|g| paths.get(g)).collect::<Vec<_>>(),
@@ -405,7 +483,7 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     println!(
         "levels {} (not read {not_read}, panicked {}); shapes {shapes}: dynamic {dynamic}, static {static_}, \
-         not collidable {not_collidable}, rejected {}, filled {}; joints {joints} (rejected {}); \
+         not collidable {not_collidable}, rejected {}, filled {}; joints {joints} (rejected {}, anchored ends {anchored}); \
          fixed bodies {fixed_bodies} ({} fixed materials), nested bodies {nested_bodies}; \
          after {ticks} ticks: bodies {}, moved >1 {}, >100 {}, non-finite {}, max move {:.1}",
         levels.len(),

@@ -639,3 +639,27 @@ fn crossing_outline_is_filled_and_holds_a_box() {
     let p = run(&things, 120)[1].1;
     assert!((p[1] - 50.).abs() < 5., "rests on top of the floor: {p:?}");
 }
+
+#[test]
+fn string_from_a_thing_without_a_collider_holds_a_box() {
+    // The top end is a Thing with a POS but no shape (as a hologram or decoration): the
+    // joint anchors it in the world instead of being dropped.
+    let things = vec![
+        thing(0, matrix(0., 1000., 0., 0., 1., 1.), None, false),
+        thing(
+            1,
+            matrix(0., 900., 0., 0., 1., 1.),
+            Some(rect(50., 50., 7)),
+            true,
+        ),
+        joint(2, 5, 0, [0.; 3], 1, [0.; 3], 300.),
+    ];
+    let scene = build_scene(&things);
+    assert_eq!(
+        (scene.report.joints, scene.report.anchored_joint_ends),
+        (1, 1)
+    );
+    let out = run(&things, 90);
+    let p = out[1].1;
+    assert!((p[1] - 700.).abs() < 10. && p[0].abs() < 5., "{p:?}");
+}

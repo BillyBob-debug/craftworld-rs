@@ -256,9 +256,12 @@ fn spawn_joint(
     bodies: &[Entity],
     colliders: &[Entity],
 ) -> Entity {
-    let entity = |e: scene::Endpoint| match e {
+    let mut entity = |e: scene::Endpoint| match e {
         scene::Endpoint::Body(i) => bodies[i],
         scene::Endpoint::Static(i) => colliders[i],
+        scene::Endpoint::Anchor { thing, frame } => commands
+            .spawn((ThingIndex(thing), RigidBody::Static, transform(&frame)))
+            .id(),
     };
     let (a, b) = (entity(j.a), entity(j.b));
     let v = sv;
