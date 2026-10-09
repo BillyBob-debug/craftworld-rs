@@ -54,6 +54,9 @@ struct Motion {
     moved: Vec<(usize, [f32; 2])>,
     /// First tick (1-based) each body was more than 1 unit from its start.
     first_moved: BTreeMap<usize, usize>,
+    /// Bodies seen asleep, and the first tick each was awake again after that.
+    asleep: std::collections::BTreeSet<usize>,
+    woke: BTreeMap<usize, usize>,
 }
 
 fn simulate(scene: &PhysicsScene, ticks: usize) -> Motion {
@@ -83,8 +86,13 @@ fn simulate(scene: &PhysicsScene, ticks: usize) -> Motion {
         app.update();
         let mut q = app
             .world_mut()
-            .query_filtered::<(&ThingIndex, &Position), With<RigidBody>>();
-        for (t, p) in q.iter(app.world()) {
+            .query_filtered::<(&ThingIndex, &Position, Has<Sleeping>), With<RigidBody>>();
+        for (t, p, sleeping) in q.iter(app.world()) {
+            if sleeping {
+                m.asleep.insert(t.0);
+            } else if m.asleep.contains(&t.0) {
+                m.woke.entry(t.0).or_insert(tick);
+            }
             if m.first_moved.contains_key(&t.0) {
                 continue;
             }
@@ -293,8 +301,19 @@ fn run() -> Result<(), String> {
                 Some(6..=30) => "6-30",
                 Some(_) => "31+",
             };
+            let bucket = |t: usize| match t {
+                0..=5 => "woke 1-5",
+                6..=30 => "woke 6-30",
+                _ => "woke 31+",
+            };
+            let sleep = match (m.asleep.contains(&b.thing), m.woke.get(&b.thing)) {
+                (false, _) => "never asleep",
+                (true, None) => "asleep to the end",
+                (true, Some(&t)) => bucket(t),
+            };
             let keys = [
                 ("first_moved_tick", first.to_string()),
+                ("sleep", sleep.to_string()),
                 ("frozen", b.frozen.to_string()),
                 ("material", material),
                 ("parts", t.parts.join("+")),
@@ -329,6 +348,7 @@ fn run() -> Result<(), String> {
             "stopped": report.stop.is_some(),
             "shapes": r.shapes, "dynamic": r.dynamic, "static": r.static_,
             "not_collidable": r.not_collidable, "rejected": r.rejected, "filled": r.filled,
+            "flat_samples": r.flat_samples,
             "joints": r.joints, "rejected_joints": r.rejected_joints,
             "fixed_bodies": r.fixed_bodies, "nested_bodies": r.nested_bodies,
             "bodies": m.bodies, "moved_over_1": m.moved_1, "moved_over_100": m.moved_100,
