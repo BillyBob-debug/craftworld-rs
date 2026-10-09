@@ -1,0 +1,276 @@
+//! Sackboy's movement rules, Bevy-free: one call per 30 Hz game tick turns the pad state and
+//! what the body touches into a per-tick velocity and a lane. Collision stays with the
+//! caller (the physics world says whether Sackboy stands on something and which lanes have
+//! floor); this module holds only the rules measured in RPCS3.
+//!
+//! Evidence: RPCS3 frame-by-frame reads of Sackboy's position in Rookie Test (01.33, PC runs
+//! S9 and d190, 2026-10-09): CONFIRMED_FROM_LOCAL_DATA (emulated) for every constant below
+//! unless a comment says otherwise. Units are LBP world units and game ticks. Not modelled
+//! yet: the crouch/landing dips (about 35 units for 1-2 and 8 ticks; visual only), slopes,
+//! grabbing, swimming, terminal velocity, the 10 u/tick plateau seen once after landing.
+
+/// Gravity per tick² (2,424 u/s²).
+pub const GRAVITY_TICK: f32 = 2.693;
+/// Ground acceleration and deceleration per tick² (linear: 3, 6, ... 30).
+pub const WALK_ACCEL: f32 = 3.0;
+/// Ground top speed per tick (900 u/s), reached in 10 ticks.
+pub const WALK_SPEED: f32 = 30.0;
+/// Air acceleration per tick² while the stick is held.
+pub const AIR_ACCEL: f32 = 2.4;
+/// The stick cannot push past this in the air (speed carried from the ground is kept).
+pub const AIR_SPEED: f32 = 22.0;
+/// Upward speed per tick for each tick the jump button is held (index 0 = take-off tick).
+/// The first three ticks always play; after the button is released, or after the table,
+/// gravity takes over. A tap peaks at 143 units, a full hold at 260 (saturates by tick 10).
+pub const JUMP_PROFILE: [f32; 10] = [12.0, 19.3, 23.3, 25.1, 25.5, 24.8, 23.5, 21.8, 19.7, 17.4];
+/// Ticks of the jump profile that play even on a tap.
+pub const JUMP_MIN_TICKS: usize = 3;
+/// Distance between lanes (Rookie Test lanes at z -400, -200, 0).
+pub const LANE_SPACING: f32 = 200.0;
+/// Lane change speed per tick (linear slide, about 6 ticks per lane).
+pub const LANE_SPEED: f32 = 35.0;
+
+/// Pad state for one tick.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Input {
+    /// Stick x: -1 left .. 1 right (its sign is used; analogue walk speed is not measured).
+    pub x: f32,
+    pub jump: bool,
+    /// Lane behind (-z), the W key in the RPCS3 mapping.
+    pub back: bool,
+    /// Lane in front (+z), the S key.
+    pub front: bool,
+}
+
+/// What the world says this tick.
+pub struct Contact<'a> {
+    /// Standing on something.
+    pub grounded: bool,
+    /// Whether a lane centred at this z has floor under Sackboy.
+    pub lane_has_floor: &'a dyn Fn(f32) -> bool,
+}
+
+/// Movement state between ticks.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct Sackboy {
+    /// Velocity in units per tick.
+    pub vx: f32,
+    pub vy: f32,
+    /// Current and target lane z.
+    pub z: f32,
+    pub lane: f32,
+    /// Ticks since take-off while the jump profile is playing.
+    jump_tick: Option<usize>,
+    was_grounded: bool,
+    prev: Input,
+}
+
+impl Sackboy {
+    pub fn at_lane(z: f32) -> Self {
+        Self {
+            z,
+            lane: z,
+            was_grounded: true,
+            ..Self::default()
+        }
+    }
+
+    /// Advances one tick and returns the displacement (dx, dy, dz) to apply.
+    pub fn step(&mut self, input: Input, contact: &Contact) -> [f32; 3] {
+        let grounded = contact.grounded && self.jump_tick.is_none();
+        let dir = if input.x > 0. {
+            1.
+        } else if input.x < 0. {
+            -1.
+        } else {
+            0.
+        };
+        // Horizontal.
+        if grounded {
+            if dir != 0. {
+                self.vx = approach(self.vx, dir * WALK_SPEED, WALK_ACCEL);
+            } else {
+                self.vx = approach(self.vx, 0., WALK_ACCEL);
+            }
+        } else if dir != 0. && self.vx * dir < AIR_SPEED {
+            self.vx = approach(self.vx, dir * AIR_SPEED, AIR_ACCEL);
+        }
+        // Vertical.
+        let pressed = |now: bool, before: bool| now && !before;
+        if grounded && pressed(input.jump, self.prev.jump) {
+            self.jump_tick = Some(0);
+        }
+        match self.jump_tick {
+            Some(t) if t < JUMP_PROFILE.len() && (t < JUMP_MIN_TICKS || input.jump) => {
+                self.vy = JUMP_PROFILE[t];
+                self.jump_tick = Some(t + 1);
+            }
+            _ => {
+                self.jump_tick = None;
+                self.vy = if grounded { 0. } else { self.vy - GRAVITY_TICK };
+            }
+        }
+        // Lanes: a press on the ground, or a key held on the landing tick (an air press
+        // released before landing is dropped).
+        if grounded {
+            let landed = !self.was_grounded;
+            let back = pressed(input.back, self.prev.back) || (landed && input.back);
+            let front = pressed(input.front, self.prev.front) || (landed && input.front);
+            let step = match (back, front) {
+                (true, false) => -LANE_SPACING,
+                (false, true) => LANE_SPACING,
+                _ => 0.,
+            };
+            if step != 0. && (contact.lane_has_floor)(self.lane + step) {
+                self.lane += step;
+            }
+        }
+        let dz = approach(self.z, self.lane, LANE_SPEED) - self.z;
+        self.z += dz;
+        self.was_grounded = grounded;
+        self.prev = input;
+        [self.vx, self.vy, dz]
+    }
+}
+
+fn approach(v: f32, target: f32, step: f32) -> f32 {
+    if v < target {
+        (v + step).min(target)
+    } else {
+        (v - step).max(target)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Flat floor at y = 0 with lanes 0 and -200; returns per-tick (x, y, z).
+    fn run(inputs: impl Fn(usize) -> Input, ticks: usize) -> Vec<[f32; 3]> {
+        let lanes = |z: f32| z == 0. || z == -200.;
+        let mut s = Sackboy::at_lane(0.);
+        let mut p = [0.; 3];
+        let mut out = Vec::new();
+        for t in 0..ticks {
+            let grounded = p[1] <= 0.;
+            let d = s.step(
+                inputs(t),
+                &Contact {
+                    grounded,
+                    lane_has_floor: &lanes,
+                },
+            );
+            p = [p[0] + d[0], (p[1] + d[1]).max(0.), p[2] + d[2]];
+            out.push(p);
+        }
+        out
+    }
+
+    fn apex(path: &[[f32; 3]]) -> (usize, f32) {
+        path.iter()
+            .enumerate()
+            .map(|(t, p)| (t + 1, p[1]))
+            .fold((0, f32::MIN), |a, b| if b.1 > a.1 { b } else { a })
+    }
+
+    #[test]
+    fn walk_reaches_top_speed_in_ten_ticks_and_stops_in_ten() {
+        let path = run(
+            |t| Input {
+                x: if t < 30 { 1. } else { 0. },
+                ..Default::default()
+            },
+            60,
+        );
+        let speed = |t: usize| path[t][0] - path[t - 1][0];
+        assert_eq!(speed(9), 30.);
+        assert_eq!(speed(8), 27.);
+        // Measured stop distance 158 (release-tick alignment unknown): 135..165 here.
+        let stop = path[59][0] - path[29][0];
+        assert!((135. ..=165.).contains(&stop), "{stop}");
+    }
+
+    #[test]
+    fn jump_heights_match_the_measured_tap_and_holds() {
+        let jump_for = |held: usize| {
+            run(
+                move |t| Input {
+                    jump: (1..=held).contains(&t),
+                    ..Default::default()
+                },
+                40,
+            )
+        };
+        // Tap: apex 143.4 at tick 11 after take-off; 7-tick hold 244.4; long hold 260.1.
+        let (t, h) = apex(&jump_for(2));
+        assert!((h - 143.4).abs() < 1. && t - 1 == 11, "tap {t} {h}");
+        assert!((apex(&jump_for(7)).1 - 244.4).abs() < 1.);
+        assert!((apex(&jump_for(19)).1 - 260.1).abs() < 1.);
+        // Air time about 21 ticks for a tap.
+        let air = jump_for(2).iter().filter(|p| p[1] > 0.).count();
+        assert!((20..=22).contains(&air), "{air}");
+    }
+
+    #[test]
+    fn air_control_is_capped_but_ground_speed_carries() {
+        // Standing jump, then right held in the air: 2.4 per tick up to 22.
+        let path = run(
+            |t| Input {
+                jump: (1..=19).contains(&t),
+                x: if t >= 3 { 1. } else { 0. },
+                ..Default::default()
+            },
+            20,
+        );
+        let speed = |t: usize| path[t][0] - path[t - 1][0];
+        assert!(
+            (speed(4) - 4.8).abs() < 1e-4 && speed(19) == 22.,
+            "{path:?}"
+        );
+        // Running jump: top speed 30 kept in the air.
+        let path = run(
+            |t| Input {
+                x: 1.,
+                jump: (12..=20).contains(&t),
+                ..Default::default()
+            },
+            30,
+        );
+        assert_eq!(path[25][0] - path[24][0], 30.);
+    }
+
+    #[test]
+    fn lanes_change_on_the_ground_only_and_slide_35_per_tick() {
+        // Ground press: z slides to -200 at 35 per tick; a second press finds no lane.
+        let path = run(
+            |t| Input {
+                back: t == 1 || t == 12,
+                ..Default::default()
+            },
+            20,
+        );
+        assert_eq!(path[1][2], -35.);
+        assert_eq!(path[7][2], -200.);
+        assert_eq!(path[19][2], -200.);
+        // Pressed and released in the air: ignored.
+        let path = run(
+            |t| Input {
+                jump: (1..=19).contains(&t),
+                back: (10..=14).contains(&t),
+                ..Default::default()
+            },
+            40,
+        );
+        assert_eq!(path[39][2], 0.);
+        // Held through the landing: applies on landing.
+        let path = run(
+            |t| Input {
+                jump: (1..=19).contains(&t),
+                back: (25..=35).contains(&t),
+                ..Default::default()
+            },
+            45,
+        );
+        assert_eq!(path[44][2], -200.);
+    }
+}

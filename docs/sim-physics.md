@@ -150,6 +150,26 @@ by material: hologram 3,970 of 21,260, metal 3,255, `general_infinite_mass` 814 
 behaviour until RMaterial is read); it reports `no_collide_material_paths`. Test
 `no_collide_material_is_not_a_collider`. Not tested: levels after the change.
 
+## Part 3: Sackboy movement rules (2026-10-09)
+
+`lbp_sim::sackboy`: a Bevy-free per-tick controller. The caller supplies the pad state,
+whether Sackboy stands on something, and which lanes have floor; the controller returns the
+tick's displacement. All constants are CONFIRMED_FROM_LOCAL_DATA (emulated, RPCS3 frame
+reads in Rookie Test, PC runs S9 and d190):
+
+| Rule | Value |
+|---|---|
+| Gravity | 2.693 u/tick² (2,424 u/s²) |
+| Walk | accelerates and decelerates linearly at 3 u/tick², top speed 30 u/tick (10 ticks); measured stop distance 158 |
+| Air | stick adds 2.4 u/tick² up to 22 u/tick; speed carried from the ground is kept (drag at most about 0.01/tick); it carries through landing |
+| Jump | upward speed per held tick 12.0, 19.3, 23.3, 25.1, 25.5, 24.8, 23.5, 21.8, 19.7, 17.4; the first 3 always play; then gravity. Tap apex 143.4 at tick 11, 7-tick hold 244.4, full hold 260.1 |
+| Lanes | 200 apart; W = behind (-z), S = in front (+z); applies on a ground press or a key held on the landing tick; air presses dropped; z slides 35 u/tick; no lane with floor = no change |
+
+Tests (`sackboy::tests`) reproduce the measured walk, tap/hold apexes and air time, air
+control cap, carried speed and lane rules. Not modelled: crouch and landing dips (about 35
+units, visual), slopes, analogue stick speed, grab, swim, terminal velocity. Not wired yet:
+the avian character body and the viewer.
+
 ## Next
 
 - Joint animation (motion patterns, winch and piston targets), strength and breaking.
