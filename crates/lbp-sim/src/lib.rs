@@ -20,8 +20,11 @@ pub use scene::{build_scene, build_scene_with, PhysicsScene};
 pub const TICK_HZ: f64 = 30.0;
 /// Solver substeps per tick: our choice (the game's solver is not public).
 pub const SUBSTEPS: u32 = 6;
-/// Gravity in world units per second² along -y. PLACEHOLDER until the S9 jump measurement.
-pub const GRAVITY: f32 = 3000.0;
+/// Gravity in world units per second² along -y: 2,424 (2.693 per tick²). S9 jump
+/// measurement in RPCS3 (Rookie Test, three runs, Sackboy's descent fits one parabola with
+/// error under 0.1%): CONFIRMED_FROM_LOCAL_DATA (emulated) for Sackboy falling; using it for
+/// every body is INFERRED (material gravity multipliers are not read yet).
+pub const GRAVITY: f32 = 2424.0;
 /// Physics units per LBP world unit: the solver works in "metres" of 100 world units
 /// (our choice). In world units a 100-unit box has an angular inertia near 1e8, and
 /// avian skips motors whose inverse inertia is below f32 epsilon. Everything spawned is
