@@ -61,6 +61,9 @@ pub struct LevelSceneOptions {
     /// P2e `--runtime-texture MESH:SLOT:TEXTURE` rules (docs/p2e-runtime-texture.md).
     /// Empty (default): materials draw as loaded.
     pub runtime_textures: Vec<crate::runtime_texture::RuntimeTexture>,
+    /// P2m `--per-bone-placement`: POS models with boneThings place each vertex by its
+    /// bone's Thing (docs/p2m-per-bone-placement.md). Default off (bone 0 rule, D120).
+    pub per_bone: bool,
 }
 
 /// Parsed bevels by descriptor identity (GUID, SHA-1).
@@ -102,6 +105,8 @@ pub enum MeshSource {
     },
     /// D147: per-item skinned copy of a span-JOINT mesh (Thing index in reader order).
     JointSkin { mesh: Box<MeshSource>, thing: usize },
+    /// P2m: per-item copy of a POS model mesh placed per bone by its boneThings.
+    BoneSkin { mesh: Box<MeshSource>, thing: usize },
 }
 
 impl MeshSource {
@@ -125,6 +130,9 @@ impl MeshSource {
             Self::Decals { texture, batch } => format!("sticker decals {texture} batch {batch}"),
             Self::JointSkin { mesh, thing } => {
                 format!("{} skinned for joint Thing {thing}", mesh.label())
+            }
+            Self::BoneSkin { mesh, thing } => {
+                format!("{} placed per bone for Thing {thing}", mesh.label())
             }
         }
     }
@@ -194,6 +202,14 @@ pub struct SceneCounts {
     pub joint_span_skinned: usize,
     pub joint_span_skin_failed: BTreeMap<String, usize>,
     pub joint_skin_unweighted_vertices: usize,
+    /// P2m (per_bone on): POS model items with two or more boneThings drawn per bone,
+    /// those whose bones all match the bone-0 rule (left as they were), the ones kept at
+    /// the bone-0 rule by reason, and vertices without a usable weight (bone-0 rule).
+    pub per_bone: bool,
+    pub per_bone_skinned: usize,
+    pub per_bone_unchanged: usize,
+    pub per_bone_failed: BTreeMap<String, usize>,
+    pub per_bone_unweighted_vertices: usize,
     /// Drawn Things whose mesh has neutral (unsupported material) groups.
     pub drawn_with_neutral_groups: usize,
     pub meshes_loaded: usize,
@@ -299,6 +315,16 @@ impl SceneCounts {
         ));
         for (reason, n) in &self.joint_span_skin_failed {
             out.push(format!("  kept stretched {n}: {reason}"));
+        }
+        if self.per_bone {
+            let kept: usize = self.per_bone_failed.values().sum();
+            out.push(format!(
+                "Per-bone placement (P2m, inferred rigid skinning by boneThings): {} items placed per bone; {} unchanged (bones match bone 0); {} kept at bone 0; {} vertices without usable weight",
+                self.per_bone_skinned, self.per_bone_unchanged, kept, self.per_bone_unweighted_vertices
+            ));
+            for (reason, n) in &self.per_bone_failed {
+                out.push(format!("  kept at bone 0 {n}: {reason}"));
+            }
         }
         out.push(format!(
             "Shapes: {} SHAPE Things; {} extruded; {} placed in {} material batches",
@@ -966,6 +992,106 @@ pub fn skin_span_joints<T>(
                 c.joint_skin_unweighted_vertices += unweighted;
             }
             Err(e) => *c.joint_span_skin_failed.entry(e).or_default() += 1,
+        }
+    }
+}
+
+/// P2m: draws POS model items whose RENDER_MESH lists two or more boneThings with each
+/// vertex placed by its own bone: POS(boneThings[j]) x inverse bind(j), expressed in the
+/// item's frame so the item matrix stays. Bones without a placed Thing keep the item
+/// matrix. Items whose bones all match it are left unchanged. Same callbacks as
+/// `skin_span_joints`.
+pub fn skin_bone_things<T>(
+    scene: &mut LevelScene<T>,
+    things: &[ThingRecord],
+    mut skin_of: impl FnMut(&SceneMesh<T>) -> Result<SkinWeights, String>,
+    positions_of: impl Fn(&T) -> Option<&[[f32; 3]]>,
+    bind_poses: impl Fn(&T) -> Vec<BindPose>,
+    skinned: impl Fn(&T, Vec<[f32; 3]>) -> T,
+) {
+    const ITEM: [f32; 16] = [
+        1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+    ];
+    scene.counts.per_bone = true;
+    let pos_of = |i: usize| {
+        things
+            .get(i)
+            .filter(|t| t.index == i)
+            .and_then(|t| t.data.pos.as_ref())
+            .map(|p| p.world)
+    };
+    let mut skins: HashMap<usize, Result<SkinWeights, String>> = HashMap::new();
+    for item_index in 0..scene.items.len() {
+        let item = &scene.items[item_index];
+        let Some(t) = things.get(item.thing) else {
+            continue;
+        };
+        let (Some(_), Some(rm)) = (&t.data.pos, &t.data.render_mesh) else {
+            continue;
+        };
+        if rm.bone_things.len() < 2 {
+            continue;
+        }
+        let (mesh_index, world) = (item.mesh, item.world);
+        let result = (|| {
+            let m = &scene.meshes[mesh_index];
+            if !matches!(m.source, MeshSource::Guid(_) | MeshSource::Sha1(_)) {
+                return Ok(None);
+            }
+            let to_item = crate::level_backdrop::affine_inverse(&world)?;
+            let matrices: Vec<[f32; 16]> = bind_poses(&m.payload)
+                .iter()
+                .enumerate()
+                .map(
+                    |(j, b)| match rm.bone_things.get(j).copied().flatten().and_then(pos_of) {
+                        Some(w) => mul44(&to_item, &mul44(&w, &b.inv)),
+                        None => ITEM,
+                    },
+                )
+                .collect();
+            let near_item = |m: &[f32; 16]| m.iter().zip(ITEM).all(|(a, b)| (a - b).abs() < 1e-4);
+            if matrices.iter().all(near_item) {
+                return Ok(None);
+            }
+            if matrices.iter().flatten().any(|v| !v.is_finite()) {
+                return Err("bone matrix not finite".to_string());
+            }
+            if scene.meshes.len() >= MAX_LEVEL_MESHES {
+                return Err("Unsupported: level distinct-mesh budget".to_string());
+            }
+            let (joints, weights) = skins
+                .entry(mesh_index)
+                .or_insert_with(|| skin_of(m))
+                .clone()?;
+            let positions = positions_of(&m.payload).ok_or("mesh without positions")?;
+            let (moved, unweighted) = skin_span_positions(positions, &joints, &weights, &matrices)?;
+            if moved.iter().flatten().any(|v| !v.is_finite()) {
+                return Err("skinned position not finite".into());
+            }
+            Ok(Some((
+                SceneMesh {
+                    source: MeshSource::BoneSkin {
+                        mesh: Box::new(m.source.clone()),
+                        thing: t.index,
+                    },
+                    bounds: None,
+                    neutral_groups: m.neutral_groups,
+                    payload: skinned(&m.payload, moved),
+                },
+                unweighted,
+            )))
+        })();
+        let c = &mut scene.counts;
+        match result {
+            Ok(Some((mut mesh, unweighted))) => {
+                mesh.bounds = positions_of(&mesh.payload).and_then(points_bounds);
+                scene.meshes.push(mesh);
+                scene.items[item_index].mesh = scene.meshes.len() - 1;
+                c.per_bone_skinned += 1;
+                c.per_bone_unweighted_vertices += unweighted;
+            }
+            Ok(None) => c.per_bone_unchanged += 1,
+            Err(e) => *c.per_bone_failed.entry(e).or_default() += 1,
         }
     }
 }
@@ -1857,7 +1983,8 @@ pub fn load_level_scene_with_options(
                 MeshSource::Shapes { .. }
                 | MeshSource::Backdrop { .. }
                 | MeshSource::Decals { .. }
-                | MeshSource::JointSkin { .. } => return Err("Invalid: shape source".into()),
+                | MeshSource::JointSkin { .. }
+                | MeshSource::BoneSkin { .. } => return Err("Invalid: shape source".into()),
             };
             let mut mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
             if let MeshSource::Guid(g) = src {
@@ -1913,6 +2040,38 @@ pub fn load_level_scene_with_options(
             _ => unreachable!("positions_of returns None for non-model payloads"),
         },
     );
+    if scene_options.per_bone {
+        skin_bone_things(
+            &mut scene,
+            &report.things,
+            |m| {
+                control.check()?;
+                let key = match &m.source {
+                    MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
+                    MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
+                    _ => return Err("Invalid: bone mesh source".into()),
+                };
+                let (_, skin) = read_mesh_skin(source, &key, control)?;
+                Ok((skin.joints, skin.weights))
+            },
+            |p| match p {
+                ScenePayload::Model(m) => Some(&m.geometry.positions[..]),
+                _ => None,
+            },
+            model_bind_poses,
+            |p, positions| match p {
+                ScenePayload::Model(m) => {
+                    let mut copy = GroupedMesh {
+                        geometry: m.geometry.clone(),
+                        bindings: m.bindings.clone(),
+                    };
+                    copy.geometry.positions = positions;
+                    ScenePayload::Model(Box::new(copy))
+                }
+                _ => unreachable!("positions_of returns None for non-model payloads"),
+            },
+        );
+    }
     control.check()?;
     let bevels = if scene_options.shape_bevels {
         Some(load_bevels(
@@ -2678,6 +2837,73 @@ mod tests {
     }
 
     /// D147: span joints skin with rigid A/B bone groups; only blended vertices stretch.
+    #[test]
+    fn p2m_bone_things_place_each_vertex_by_its_bone() {
+        let mut squash = identity_at(0.);
+        squash[10] = 0.5;
+        let mut earth = thing(0, Some(0x10), Some(identity_at(0.)));
+        let mut moon = thing(2, Some(0x10), Some(identity_at(100.)));
+        earth.data.render_mesh.as_mut().unwrap().bone_things = vec![Some(0), Some(1)];
+        moon.data.render_mesh.as_mut().unwrap().bone_things = vec![Some(2), Some(2)];
+        let things = vec![earth, thing(1, None, Some(squash)), moon];
+        let mesh: Vec<[f32; 3]> = vec![[0., 0., 10.], [0., 0., 10.], [1., 0., 10.]];
+        let joints = vec![[0, 0, 0, 0], [1, 0, 0, 0], [0; 4]];
+        let weights = vec![[1., 0., 0., 0.], [1., 0., 0., 0.], [0.; 4]];
+        let id = identity_at(0.);
+        let binds = || vec![BindPose { skin: id, inv: id }; 2];
+        let mut scene = build_scene(
+            &things,
+            |_| Ok(mesh.clone()),
+            |p| points_bounds(p),
+            |_| false,
+            |_| binds(),
+            PosPlacement::InverseBind,
+        );
+        let worlds: Vec<_> = scene.items.iter().map(|i| i.world).collect();
+        skin_bone_things(
+            &mut scene,
+            &things,
+            |_| Ok((joints.clone(), weights.clone())),
+            |p| Some(&p[..]),
+            |_| binds(),
+            |_, positions| positions,
+        );
+        let c = &scene.counts;
+        assert!(c.per_bone);
+        assert_eq!(
+            (
+                c.per_bone_skinned,
+                c.per_bone_unchanged,
+                c.per_bone_unweighted_vertices
+            ),
+            (1, 1, 1)
+        );
+        assert!(c.per_bone_failed.is_empty());
+        // Item matrices stay; the Earth gets its own copy with bone 1 squashed in z.
+        assert_eq!(
+            scene.items.iter().map(|i| i.world).collect::<Vec<_>>(),
+            worlds
+        );
+        let item = scene.items.iter().find(|i| i.thing == 0).unwrap();
+        assert_eq!(
+            scene.meshes[item.mesh].source,
+            MeshSource::BoneSkin {
+                mesh: Box::new(MeshSource::Guid(0x10)),
+                thing: 0
+            }
+        );
+        assert_eq!(
+            scene.meshes[item.mesh].payload,
+            vec![[0., 0., 10.], [0., 0., 5.], [1., 0., 10.]]
+        );
+        let moon = scene.items.iter().find(|i| i.thing == 2).unwrap();
+        assert_eq!(scene.meshes[moon.mesh].source, MeshSource::Guid(0x10));
+        assert!(c
+            .lines()
+            .iter()
+            .any(|l| l.starts_with("Per-bone placement")));
+    }
+
     #[test]
     fn span_joints_skin_rigid_ends_and_stretch_the_bridge() {
         let things = vec![
