@@ -364,7 +364,14 @@ pub const SACKBOY_CLOSED: [f32; 2] = [0.56, 0.82];
 /// 0.28-0.69 h (PC run of D165), about 0.06 h too high, while the DualShock is within
 /// 0.01. The tent camera is tilted up by this much of the frame height (a correction
 /// fitted to that measurement; a tilted game camera is INFERRED as the cause).
-pub const TENT_TILT_CLOSED: f32 = 0.06;
+/// P2h: with the tilt (D168) the window measured 0.32-0.68 w x 0.28-0.72 h, about 0.03
+/// too large on each side; `TENT_PULL` shrinks it about the frame centre first, so the
+/// tilt drops to the remaining 0.045 h.
+pub const TENT_TILT_CLOSED: f32 = 0.045;
+/// P2h: closed window size, RPCS3 over ours at D168 (0.32 x 0.41 over 0.36 x 0.44, about
+/// 0.91). The closed tent eye backs off along its view so the far wall (the window)
+/// projects this much smaller (correction fitted to that measurement).
+pub const TENT_PULL: f32 = 0.91;
 /// Sackboy holding the controller, seen from behind, Puter open: centre (RPCS3, 0.02).
 pub const SACKBOY_OPEN: [f32; 2] = [0.50, 0.90];
 
@@ -415,7 +422,7 @@ impl PodRig {
             shell,
             shell_rot: [Quat::IDENTITY; 2],
             tent: [
-                shell[0],
+                shell[0] + Vec3::Z * (depth * (1. / TENT_PULL - 1.)),
                 Vec3::new(shell[1].x, shell[1].y, shell_near - depth * 0.05),
             ],
             tent_rot: [Quat::from_rotation_x(tilt), Quat::IDENTITY],
@@ -535,6 +542,8 @@ impl PodRig {
 pub struct PuterState {
     pub t: f32,
     pub open: bool,
+    /// P2h `--pod-t`: stay at `t` until the next open/close key (mid-dolly captures).
+    pub hold: bool,
 }
 
 /// Maps a 16:9 reference frame fraction into a window of `aspect`, keeping offsets from
@@ -616,19 +625,20 @@ mod tests {
         let top = rig.shell_frac(0., feet + Vec3::Y * 0.05)[1];
         assert!((x - 0.5).abs() < 1e-4 && (low - SACKBOY_CLOSED[1]).abs() < 1e-4);
         assert!((top - SACKBOY_CLOSED[0]).abs() < 1e-4, "{top}");
-        // P2g: the tent shows TENT_TILT_CLOSED lower than the shell closed, and is wholly
-        // behind the eye open.
+        // P2g/P2h: on the far wall the tent shows TENT_PULL smaller about the centre and
+        // TENT_TILT_CLOSED lower than the shell closed, and is wholly behind the eye open.
         let p = rig.planet_eye(0.);
         let frac = |q: Vec3| {
             let c = projection.project_point3(q - p);
             [(c.x + 1.) / 2., (1. - c.y) / 2.]
         };
-        let shell_at = frac(rig.shell_root(0.).transform_point(pad.0));
-        let tent_at = frac(rig.tent_root(0.).transform_point(pad.0));
-        assert!(
-            (tent_at[1] - shell_at[1] - TENT_TILT_CLOSED).abs() < 0.01,
-            "{tent_at:?}"
-        );
+        let wall = Vec3::new(rig.shell[0].x + 0.05, rig.shell[0].y + 0.04, -0.4);
+        let shell_at = frac(rig.shell_root(0.).transform_point(wall));
+        let tent_at = frac(rig.tent_root(0.).transform_point(wall));
+        let want = 0.5 + (shell_at[1] - 0.5) * TENT_PULL + TENT_TILT_CLOSED;
+        assert!((tent_at[1] - want).abs() < 0.01, "{tent_at:?} {want}");
+        let want_x = 0.5 + (shell_at[0] - 0.5) * TENT_PULL;
+        assert!((tent_at[0] - want_x).abs() < 0.01, "{tent_at:?} {want_x}");
         let open_eye = rig.planet_eye(1.);
         for z in [-0.4, 0.0, 0.3] {
             let q = rig.tent_root(1.).transform_point(Vec3::new(0.2, 0.1, z));
