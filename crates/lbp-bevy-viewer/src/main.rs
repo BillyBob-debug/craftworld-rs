@@ -195,8 +195,10 @@ impl Viewer {
         let cached = (paths == self.context_paths)
             .then(|| self.context.clone())
             .flatten();
-        // Level mode ignores the single-mesh GUID, except as the Pod figure (P2c).
-        let guid = if self.level.active() && self.level.shell.is_none() {
+        // Level mode ignores the single-mesh GUID, except as the Pod figure (P2c) or the
+        // play figure (--play-sackboy).
+        let guid = if self.level.active() && self.level.shell.is_none() && !sackboy_play::enabled()
+        {
             String::new()
         } else {
             self.guid.clone()

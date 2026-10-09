@@ -408,6 +408,7 @@ fn show_sackboy(
     mut marker: Query<&mut Transform, (With<Marker>, Without<Figure>)>,
     mut figure: Query<(&mut Transform, &mut Figure)>,
     mut orbit: ResMut<crate::Orbit>,
+    mut framed: Local<bool>,
 ) {
     let (Some(display), Ok((body, pos, slab))) = (display, sackboy.single()) else {
         return;
@@ -415,7 +416,6 @@ fn show_sackboy(
     let p = to_level(pos.0);
     let at = display.0.transform_point3(Vec3::new(p[0], p[1], slab.z));
     let s = display.0.x_axis.length();
-    let first = marker.is_empty() && figure.is_empty();
     if let Ok((mut t, mut f)) = figure.single_mut() {
         let vx = body.controller.vx;
         if vx > 0.5 {
@@ -452,7 +452,8 @@ fn show_sackboy(
             Transform::from_translation(at),
         ));
     }
-    if first {
+    if !*framed {
+        *framed = true;
         // Close in on him once. PLACEHOLDER: the game camera's distance is not measured.
         orbit.distance = FOLLOW_DISTANCE * s;
     }
