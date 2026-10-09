@@ -1324,7 +1324,8 @@ fn prepare(
     details: &mut Vec<String>,
 ) -> Result<Vec<Prepared>, String> {
     let g = &preview.geometry;
-    let buckets = adapter::buckets(&g.triangles, &g.primitive_triangles, &preview.bindings)?;
+    let (triangles, ranges) = drop_materialless(preview)?;
+    let buckets = adapter::buckets(&triangles, &ranges, &preview.bindings)?;
     for (index, (range, binding)) in g
         .primitive_triangles
         .iter()
@@ -1332,7 +1333,7 @@ fn prepare(
         .enumerate()
     {
         if !range.is_empty() && binding.is_err() && preview.materialless(index) {
-            // D188: neutral, labelled, and outside the diffuse-group denominator.
+            // D188/D192: hidden (the game skips it), outside the diffuse-group denominator.
             evidence.materialless_groups += 1;
         } else if !range.is_empty() {
             evidence.total_groups += 1;
@@ -1359,6 +1360,7 @@ fn prepare(
     {
         let label = match binding {
             Ok(a) => a.label(),
+            Err(e) if preview.materialless(index) => format!("Hidden: {e}"),
             Err(e) => format!("Neutral: {e}"),
         };
         details.push(format!(
@@ -1367,6 +1369,34 @@ fn prepare(
         ));
     }
     prepare_buckets(&g.positions, buckets, normalize, evidence, details)
+}
+/// D192: triangles and primitive ranges without the material-less groups. The game's
+/// per-primitive draw loop skips a primitive whose material is null (no bind, no draw;
+/// Ghidra, CONFIRMED), so those groups are not drawn. A whole-mesh depth/shadow pass
+/// may still use them (INFERRED, not drawn here). Ranges stay one per primitive.
+type TrianglePartition = (Vec<[u32; 3]>, Vec<std::ops::Range<usize>>);
+fn drop_materialless(preview: &lbp_preview::GroupedMesh) -> Result<TrianglePartition, String> {
+    let g = &preview.geometry;
+    let mut triangles = Vec::with_capacity(g.triangles.len());
+    let mut ranges = Vec::with_capacity(g.primitive_triangles.len());
+    let mut end = 0;
+    for (index, range) in g.primitive_triangles.iter().enumerate() {
+        let source = g
+            .triangles
+            .get(range.clone())
+            .filter(|_| range.start == end)
+            .ok_or("Invalid: primitive triangle partition")?;
+        end = range.end;
+        let start = triangles.len();
+        if !preview.materialless(index) {
+            triangles.extend_from_slice(source);
+        }
+        ranges.push(start..triangles.len());
+    }
+    if end != g.triangles.len() {
+        return Err("Invalid: unowned triangles".into());
+    }
+    Ok((triangles, ranges))
 }
 /// Material buckets over one position array (model mesh or merged shape batch).
 fn prepare_buckets(

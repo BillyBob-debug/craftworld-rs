@@ -140,7 +140,7 @@ pub const DEFAULTS_EVIDENCE: [(&str, &str); 4] = [
     ),
     (
         "materialless_group",
-        "descriptor shape CONFIRMED_FROM_LOCAL_DATA (all-zero material and alternatives descriptors); game draw UNKNOWN; Toolkit MeshExporter emits a default white material CONFIRMED_FROM_COMMUNITY_CODE (export only); excluded from the all-diffuse denominator, drawn neutral",
+        "descriptor shape CONFIRMED_FROM_LOCAL_DATA (all-zero material and alternatives descriptors); game skips the colour draw (D192, Ghidra CONFIRMED; depth/shadow use INFERRED); Toolkit MeshExporter emits a default white material CONFIRMED_FROM_COMMUNITY_CODE (export only); excluded from the all-diffuse denominator, not drawn",
     ),
 ];
 

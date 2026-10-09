@@ -3919,3 +3919,16 @@ levels, baseline D149 0) / +0 newly Complete.**
   visually proven (most changed Things are off-frame or small at the default camera).
 - Verification: https://github.com/chilladept/lbp2-asset-explorer/pull/93#issuecomment-6088926155
 **+0 newly viewable / +0 newly Complete (level fidelity: 160 fewer neutral Things in Bravery Test).**
+
+## D192 — material-less primitives hidden (PR #95) (2026-10-09)
+- PC Ghidra (01.33 EBOOT): the per-primitive draw loop skips a null-material primitive (no
+  bind, no draw; 0x33c814, test 0x33ca88), CONFIRMED. A whole-mesh depth/shadow use is
+  INFERRED. docs/d192-materialless-hidden.md.
+- Viewer no longer draws material-less groups (single mesh and levels); level neutral count
+  ignores them. --level-report lists the binding error per neutral group.
+- PC report at ea55c1e (before): Bravery Test 35 neutral Things, every one with a
+  material-less group; 00019e98 (22) also has a folded-sampler nested-tint group.
+- Folds in #94's D191 STATUS/MODLOG entries.
+- Cloud: lbp-preview lib tests 116 pass, lbp-catalog tests pass, fmt clean. No game data.
+- Not tested here: level report after the change, close-camera capture (PC).
+**+0 newly viewable / +0 newly Complete.**

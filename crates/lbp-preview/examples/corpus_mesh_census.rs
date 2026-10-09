@@ -271,7 +271,7 @@ fn run() -> Result<(), String> {
             }
         ),
         "asset_unit": "distinct_catalog_guid",
-        "definitions": {"viewable":"mesh loads and has a nonzero-area triangle (geometry availability, not visual fidelity)","all_diffuse":"viewable, at least one nonempty primitive group needs a diffuse binding, and every such group has one; material-less groups are excluded (binding coverage, not visual verification)","materialless_group":"nonempty primitive group with no material GUID/hash and all-zero material and alternatives descriptors; drawn neutral, no diffuse invented, not a blocker","complete":"not certified; requires manual visual check"},
+        "definitions": {"viewable":"mesh loads and has a nonzero-area triangle (geometry availability, not visual fidelity)","all_diffuse":"viewable, at least one nonempty primitive group needs a diffuse binding, and every such group has one; material-less groups are excluded (binding coverage, not visual verification)","materialless_group":"nonempty primitive group with no material GUID/hash and all-zero material and alternatives descriptors; not drawn (the game skips it, D192), no diffuse invented, not a blocker","complete":"not certified; requires manual visual check"},
         "budgets": {"max_mesh_hashes": MAX_MESH_HASHES, "max_aggregate_mesh_bytes": MAX_AGGREGATE_MESH_BYTES, "per_mesh_input_bytes": lbp_mesh::MAX_INPUT, "max_seconds": max_seconds},
         "snapshot_mesh_type_rows": type_rows,
         "corpus_mesh_hashes": corpus_hashes,

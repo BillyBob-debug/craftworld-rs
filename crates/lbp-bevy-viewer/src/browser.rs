@@ -11,7 +11,7 @@ pub struct PreviewEvidence {
     /// D188: the instance colour / animation snapshot came from the standalone default.
     pub instance_default: bool,
     pub animation_default: bool,
-    /// D188: material-less groups, drawn neutral, outside `total_groups`.
+    /// D188/D192: material-less groups, hidden (game skips them), outside `total_groups`.
     pub materialless_groups: usize,
     pub textured_groups: usize,
     pub solid_groups: usize,
@@ -129,7 +129,7 @@ impl Browser {
             ui.small("Animation base-value snapshot: game texture placement unverified; Complete cannot be confirmed.");
         }
         if evidence.materialless_groups != 0 {
-            ui.small(format!("{} material-less groups (no material descriptor) drawn neutral; what the game draws is unknown; Complete cannot be confirmed.", evidence.materialless_groups));
+            ui.small(format!("{} material-less groups (no material descriptor) hidden: the game skips their colour draw (D192, confirmed); a depth/shadow use is inferred; Complete cannot be confirmed.", evidence.materialless_groups));
         }
         ui.add_enabled_ui(evidence.can_verify(), |ui| {
             ui.checkbox(

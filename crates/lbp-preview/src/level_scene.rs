@@ -1986,12 +1986,14 @@ pub fn neutral_reasons(p: &ScenePayload) -> Vec<(String, usize)> {
     out
 }
 
+/// D192: material-less groups are hidden (the game skips them), so they are not neutral.
 fn grouped_neutral(g: &GroupedMesh) -> bool {
     g.geometry
         .primitive_triangles
         .iter()
         .zip(&g.bindings)
-        .any(|(range, b)| !range.is_empty() && b.is_err())
+        .enumerate()
+        .any(|(i, (range, b))| !range.is_empty() && b.is_err() && !g.materialless(i))
 }
 
 fn retained(g: &GroupedMesh) -> usize {
@@ -2584,6 +2586,80 @@ fn load_backdrop(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Two one-triangle primitives: 0 material-less, 1 with an unresolved GUID.
+    fn two_group_mesh(second: Result<std::sync::Arc<MaterialAsset>, String>) -> GroupedMesh {
+        let primitive = |guid: Option<u32>| lbp_mesh::Primitive {
+            material_flags: 0,
+            material_kind: if guid.is_some() { 2 } else { 0 },
+            material_guid: guid,
+            material_hash: None,
+            alternatives_flags: 0,
+            alternatives_kind: 0,
+            alternatives_guid: None,
+            alternatives_hash: None,
+            min_vertex_raw: 0,
+            max_vertex_raw: 2,
+            first_index: 0,
+            index_count: 3,
+            region: 0,
+        };
+        GroupedMesh {
+            geometry: lbp_mesh::Geometry {
+                metadata: lbp_mesh::GeometryMetadata {
+                    prefix: lbp_mesh::MeshPrefix {
+                        revision: 950,
+                        compression_flags: 7,
+                        counts: [3, 6, 0, 0, 2, 0, 0],
+                        morph_names_hex: Vec::new(),
+                        min_uv_bits: Vec::new(),
+                        max_uv_bits: Vec::new(),
+                        area_scale_bits: None,
+                        stream_offsets: Vec::new(),
+                        position_bounds: None,
+                        position_bounds_bits: None,
+                        position_bytes_sha256: String::new(),
+                        attribute_bytes: 0,
+                        attribute_sha256: String::new(),
+                        index_bytes: 12,
+                        index_sha256: String::new(),
+                        expanded_bytes: 0,
+                        parsed_prefix_bytes: 0,
+                        unparsed_bytes: 0,
+                    },
+                    primitives: vec![primitive(None), primitive(Some(0x1234))],
+                    bone_count: 1,
+                    primitive_type: 5,
+                    triangle_count: 2,
+                    triangle_indices_sha256: String::new(),
+                    parsed_geometry_bytes: 0,
+                    unparsed_after_geometry: 0,
+                },
+                positions: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+                triangles: vec![[0, 1, 2], [0, 2, 1]],
+                primitive_triangles: vec![0..1, 1..2],
+                skeleton: Default::default(),
+            },
+            bindings: vec![Err(crate::MATERIALLESS_REASON.into()), second],
+        }
+    }
+
+    #[test]
+    fn materialless_groups_are_hidden_not_neutral_d192() {
+        let other = two_group_mesh(Err("Unresolved: missing".into()));
+        assert!(grouped_neutral(&other));
+        let reasons = neutral_reasons(&ScenePayload::Model(Box::new(other)));
+        assert_eq!(
+            reasons,
+            vec![
+                (crate::MATERIALLESS_REASON.to_string(), 1),
+                ("Unresolved: missing".to_string(), 1)
+            ]
+        );
+        let mut only = two_group_mesh(Err("x".into()));
+        only.geometry.primitive_triangles = vec![0..2, 2..2];
+        assert!(!grouped_neutral(&only));
+    }
     use lbp_level::parts::{GeneratedMesh, Joint, PartData, Pos, RenderMesh, Shape, ShapeColor};
     use lbp_level::serial::Descriptor;
 
