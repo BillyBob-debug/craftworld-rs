@@ -16,6 +16,7 @@ lbp-script-vm.workspace = true
 lbp-ui-script.workspace = true
 lbp-level.workspace = true
 lbp-runtime.workspace = true
+lbp-sim.workspace = true
 
 [dev-dependencies]
 # D121: headless WGSL validation of the authored preview shader (same major as Bevy).

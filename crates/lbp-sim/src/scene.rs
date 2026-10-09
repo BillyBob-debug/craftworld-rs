@@ -128,6 +128,22 @@ pub struct SceneReport {
     pub rejected_joints: BTreeMap<&'static str, usize>,
 }
 
+/// Material rule from a material's MAP path (INFERRED from names and public material
+/// behaviour until RMaterial is read): dark matter and infinite-mass materials are fixed,
+/// hologram does not collide.
+pub fn material_rule_for_path(path: &str) -> MaterialRule {
+    let p = path.to_ascii_lowercase().replace(' ', "_");
+    if !p.ends_with(".mat") {
+        MaterialRule::Normal
+    } else if p.contains("dark_matter") || p.contains("darkmatter") || p.contains("infinite_mass") {
+        MaterialRule::Fixed
+    } else if p.contains("hologram") {
+        MaterialRule::NoCollide
+    } else {
+        MaterialRule::Normal
+    }
+}
+
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PhysicsScene {
     pub bodies: Vec<SceneBody>,
