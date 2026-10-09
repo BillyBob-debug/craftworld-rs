@@ -169,6 +169,17 @@ outline and other. `level_physics` adds `filled`, a `first_moved_tick` key to `w
 `lenient_outline_fills_crossing_loops_by_even_odd` (lbp-level),
 `crossing_outline_is_filled_and_holds_a_box` (lbp-sim). Not tested: levels after the change.
 
+## Part 2e: PC run d192 and where movers come from (2026-10-09)
+
+d192 `--all` with #67: 3,682 shapes filled (self_intersecting 3,680, hole_outside_outer 2),
+but movers over 100 only fell from 5,868 to 5,843. Rejected 6,473: "no triangles: flat
+transform" 6,325 (world matrix collapses the xy plane), tiny outline 7, loop_too_small 58,
+zero_area_loop 57, no_loops 26. Movers first moved at ticks 2-5 (3,098), 6-30 (2,076), 31+
+(669); the top 15 levels are DLC (DC Comics, Move, Toy Story, Cosmos, Eve). Rookie Test still
+0 moved. Diagnostics added: "flat transform" split into zero xy scale, one axis zero, and
+axes parallel (turned edge-on); `flat_samples` per level (Thing and the 3x3 linear part,
+up to 4); `why_moved.sleep` (never asleep, asleep to the end, woke at 1-5, 6-30, 31+).
+
 ## Part 3: Sackboy movement rules (2026-10-09)
 
 `lbp_sim::sackboy`: a Bevy-free per-tick controller. The caller supplies the pad state,
