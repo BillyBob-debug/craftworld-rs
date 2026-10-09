@@ -43,3 +43,11 @@ confirmed: INFERRED.
 Cloud session: unit tests and workspace clippy only. Needs a PC capture with
 `--pod-game-camera --pod-open --window-16-9 --lbp-lighting --per-bone-placement` against
 the D156 RPCS3 frame.
+
+## P2n (2026-10-09): rim change reverted
+
+D203 (PC, /mnt/project-files/2026-10-09-pod-per-bone-capture.md): with the eye-facing rim the
+room measured L213 vs RPCS3 L75 and the Moon L140 vs L67 (the grazing rim of D201 gave
+139 / 64). The rim term is back to V from the eye (0 facing, 0.81 at grazing). The darker
+RPCS3 globe edge is left unexplained until the RSX capture gives the real constants.
+Per-bone placement: Earth r 0.247 h vs RPCS3 0.260 (was 0.290); Moon 0.127 vs 0.118.
