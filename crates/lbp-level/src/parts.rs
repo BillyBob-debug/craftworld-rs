@@ -8,7 +8,8 @@
 //!
 //! Field lists (v = head & 0xffff; "ref" = reference, "res" = resource with flags word,
 //! "desc" = resource without flags word):
-//! - BODY (PBody): posVel v3, angVel f32, frozen i32, editingPlayer ref Thing.
+//! - BODY (PBody): posVel v3, angVel f32, frozen i32, editingPlayer ref Thing. Kept as
+//!   `PartData::body` (velocities and `frozen`).
 //! - POS (PPos): thingOfWhichIAmABone ref Thing, animHash i32, worldPosition m44
 //!   (localPosition is only serialized below 0x341).
 //! - RENDER_MESH (PRenderMesh): mesh res, boneThings thingarray, anim res, animPos,
@@ -67,7 +68,7 @@
 //!   f32, stiff bool, slideDir v3, animationPattern i32, ten f32 (range, time, phase, speed,
 //!   pause, a/b angle offsets, modStartFrames, modDeltaFrames, modScale), renderScale f32,
 //!   jointSoundEnum i32, tweakTargetMax/MinLength f32, currentlyEditing bool,
-//!   hideInPlayMode bool, behaviour i32.
+//!   hideInPlayMode bool, behaviour i32. Drive fields kept as `Joint::params`.
 //! - CHECKPOINT (PCheckpoint): activeFlags bool (subVersion <= 0x101), activationFrame i32,
 //!   spawnsLeft s32, maxSpawnsLeft s32, instanceInfiniteSpawns bool, spawningList
 //!   thingarray, spawningDelay i32, lifeMultiplier i32, teamFilter i32.
@@ -260,6 +261,8 @@ pub fn supported_parts() -> &'static [&'static str] {
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct PartData {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<Body>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub pos: Option<Pos>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub render_mesh: Option<RenderMesh>,
@@ -416,6 +419,15 @@ pub struct Pos {
     pub world: [f32; 16],
 }
 
+/// PBody as stored: linear velocity, angular velocity (z only) and the `frozen` int
+/// (meaning UNVERIFIED, docs/runtime-evidence/physics.md A1).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize)]
+pub struct Body {
+    pub velocity: [f32; 3],
+    pub angular_velocity: f32,
+    pub frozen: i32,
+}
+
 /// PJoint placement summary (D120): endpoint Things, contact points in each endpoint's
 /// local frame, rest length and angle, settings, bone indices/lengths, type, render scale.
 #[derive(Debug, Clone, Serialize)]
@@ -432,6 +444,24 @@ pub struct Joint {
     pub joint_type: i32,
     pub render_scale: f32,
     pub hide_in_play_mode: bool,
+    /// Strength, motion and piston settings (lbp-sim joints).
+    pub params: JointParams,
+}
+
+/// PJoint fields that drive the joint, as stored (units UNVERIFIED).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct JointParams {
+    pub offset_time: f32,
+    pub invert_angle: bool,
+    pub strength: f32,
+    pub stiff: bool,
+    pub slide_dir: [f32; 3],
+    pub animation_pattern: i32,
+    /// range, time, phase, speed, pause, aAngleOffset, bAngleOffset, modStartFrames,
+    /// modDeltaFrames, modScale.
+    pub motion: [f32; 10],
+    pub tweak_target_max_length: f32,
+    pub tweak_target_min_length: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -585,10 +615,15 @@ fn part_body(
     let v = r.rev.version();
     match name {
         "BODY" => {
-            r.v3()?;
-            r.f32()?;
-            r.i32()?;
+            let velocity = r.v3()?;
+            let angular_velocity = r.f32()?;
+            let frozen = r.i32()?;
             thing_ref(r, things)?;
+            things.list[me].data.body = Some(Body {
+                velocity,
+                angular_velocity,
+                frozen,
+            });
         }
         "POS" => {
             let bone_of = thing_ref(r, things)?;
@@ -750,20 +785,24 @@ fn part_body(
             let b_contact = r.v3()?;
             let length = r.f32()?;
             let angle = r.f32()?;
-            r.f32()?;
-            r.bool()?;
+            let offset_time = r.f32()?;
+            let invert_angle = r.bool()?;
             let settings = r.resource(false)?;
             let bone_idx = r.int_array()?;
             let bone_lengths = r.v4()?;
             let joint_type = r.i32()?;
-            r.f32()?;
-            r.bool()?;
-            r.v3()?;
-            r.i32()?;
-            r.skip_f32(10)?;
+            let strength = r.f32()?;
+            let stiff = r.bool()?;
+            let slide_dir = r.v3()?;
+            let animation_pattern = r.i32()?;
+            let mut motion = [0.; 10];
+            for m in &mut motion {
+                *m = r.f32()?;
+            }
             let render_scale = r.f32()?;
             r.i32()?;
-            r.skip_f32(2)?;
+            let tweak_target_max_length = r.f32()?;
+            let tweak_target_min_length = r.f32()?;
             r.bool()?;
             let hide_in_play_mode = r.bool()?;
             r.i32()?;
@@ -780,6 +819,17 @@ fn part_body(
                 joint_type,
                 render_scale,
                 hide_in_play_mode,
+                params: JointParams {
+                    offset_time,
+                    invert_angle,
+                    strength,
+                    stiff,
+                    slide_dir,
+                    animation_pattern,
+                    motion,
+                    tweak_target_max_length,
+                    tweak_target_min_length,
+                },
             });
         }
         "CHECKPOINT" => {

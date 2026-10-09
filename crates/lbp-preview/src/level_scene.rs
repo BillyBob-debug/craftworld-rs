@@ -2470,6 +2470,7 @@ mod tests {
             joint_type,
             render_scale: 1.,
             hide_in_play_mode: false,
+            params: Default::default(),
         });
         t
     }

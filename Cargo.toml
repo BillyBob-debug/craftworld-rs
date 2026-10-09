@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/lbp-core", "crates/lbp-archive", "crates/lbp-resource", "crates/lbp-io", "crates/lbp-cli", "crates/lbp-catalog", "crates/lbp-viewer", "crates/lbp-texture", "crates/lbp-mesh", "crates/lbp-bevy-viewer", "crates/lbp-preview", "crates/lbp-level", "crates/lbp-gooey", "crates/lbp-script-vm", "crates/lbp-ui-script", "crates/lbp-runtime"]
+members = ["crates/lbp-core", "crates/lbp-archive", "crates/lbp-resource", "crates/lbp-io", "crates/lbp-cli", "crates/lbp-catalog", "crates/lbp-viewer", "crates/lbp-texture", "crates/lbp-mesh", "crates/lbp-bevy-viewer", "crates/lbp-preview", "crates/lbp-level", "crates/lbp-gooey", "crates/lbp-script-vm", "crates/lbp-ui-script", "crates/lbp-runtime", "crates/lbp-sim"]
 resolver = "2"
 
 [workspace.package]
@@ -30,3 +30,4 @@ lbp-gooey = { path = "crates/lbp-gooey" }
 lbp-script-vm = { path = "crates/lbp-script-vm" }
 lbp-ui-script = { path = "crates/lbp-ui-script" }
 lbp-runtime = { path = "crates/lbp-runtime" }
+lbp-sim = { path = "crates/lbp-sim" }
