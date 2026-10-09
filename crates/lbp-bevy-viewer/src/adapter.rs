@@ -204,6 +204,17 @@ pub fn image_axes(
     });
     Ok(image)
 }
+/// P2q: a data texture (bump map) sampled without the sRGB decode.
+pub fn linear_image(
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+    wrap: lbp_preview::TextureWrapping,
+) -> Result<Image, String> {
+    let mut image = image_axes(width, height, pixels, wrap)?;
+    image.texture_descriptor.format = TextureFormat::Rgba8Unorm;
+    Ok(image)
+}
 /// Distinct material draws per mesh: lbp-preview's 64-load cap plus one neutral bucket.
 /// GPU image memory stays bounded by lbp-preview's 640 MiB retained-bytes budget.
 pub const MAX_DRAWS: usize = 65;

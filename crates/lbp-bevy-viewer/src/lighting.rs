@@ -34,6 +34,11 @@ pub struct PreviewLight {
     pub exposure: f32,
     /// P2l: LBP-shaped mode (`lbp`); off = D121 Lambert preview.
     pub lbp: bool,
+    /// P2q: the scalar (.w) the game sends with the sun, ambient and rim colours; it
+    /// weights the gloss term (brdf.cg `light.w`). Zero outside LBP mode.
+    pub scales: Vec3,
+    /// P2q: level sun multiplier (already folded into `raw_key`); 1 without settings.
+    pub multiplier: f32,
     /// P2t: display units per level unit (scene normalization), for the game fog.
     pub display_scale: f32,
     /// P2t: Puter opening progress (0 closed, 1 open) the game fog start follows.
@@ -75,6 +80,8 @@ impl PreviewLight {
             rim: [Vec3::ZERO; 2],
             exposure: 1.,
             lbp: false,
+            scales: Vec3::ZERO,
+            multiplier: 1.,
             display_scale: 1.,
             pod_t: 0.,
             notes: vec!["generic key (upper left, front) 0.65 + ambient 0.35".into()],
@@ -170,6 +177,8 @@ impl PreviewLight {
                 .filter(|e| e.is_finite() && *e > 0.)
                 .unwrap_or(1.),
             lbp: false,
+            scales: Vec3::ZERO,
+            multiplier,
             display_scale: if scale.is_finite() && scale > 0. {
                 scale
             } else {
@@ -200,6 +209,11 @@ impl PreviewLight {
         light.key = self.raw_key * GAME_SUN_SCALE * e;
         light.ambient = self.raw_ambient * GAME_AMBIENT_SCALE * e;
         light.rim = self.rim.map(|r| r * GAME_RIM_SCALE * e);
+        light.scales = Vec3::new(
+            GAME_SUN_SCALE * self.multiplier * e,
+            GAME_AMBIENT_SCALE * e,
+            GAME_RIM_SCALE * e,
+        );
         light.toward_light = (turn * self.toward_light).normalize_or_zero();
         light.notes.push(format!(
             "LBP-shaped: ambient x (N.y 0.15 + 0.5), sun, rim ({:.3}, {:.3}, {:.3}) below to ({:.3}, {:.3}, {:.3}) above x (N.V + 0.9)^2; game scales sun {GAME_SUN_SCALE} x multiplier, ambient {GAME_AMBIENT_SCALE}, rim {GAME_RIM_SCALE}, all x exposure {e:.3} (RSX capture fit)",
@@ -410,6 +424,8 @@ mod tests {
         // Unfitted, game scales: sun colour x multiplier 2 x 0.3 x exposure 2.
         let key = Vec3::new(2., 1., 0.5) * 0.6;
         assert!((light.key - key).length() < 1e-5);
+        // P2q: the scalars the game sends in .w (sun x multiplier, ambient, rim).
+        assert!((light.scales - Vec3::new(1.2, 0.9, 1.2)).length() < 1e-5);
         // P2t: fog start follows the Puter progress, in display units.
         let mut fog = light.clone();
         fog.display_scale = 2.;

@@ -312,6 +312,8 @@ fn replacement(
         ..Default::default()
     };
     MaterialAsset::Texture(Box::new(Asset {
+        // P2q: the material's own bump/gloss extras stay with the replaced diffuse.
+        surface: solid.surface.clone(),
         instance_projection: solid.instance_projection.clone(),
         additional_texture_slots: solid
             .additional_texture_slots
@@ -406,6 +408,7 @@ mod tests {
 
     fn solid(slots: Vec<usize>) -> Arc<MaterialAsset> {
         Arc::new(MaterialAsset::Solid(Box::new(SolidAsset {
+            surface: None,
             instance_projection: None,
             additional_texture_slots: slots,
             material_key: LocationKey {
