@@ -49,6 +49,12 @@ pub struct SecondTexture {
     /// P2l: upper rim colour (rgb), used toward N.y = +1.
     #[uniform(113)]
     rim_high: Vec4,
+    /// P2t: game fog: start, slope (display units), luma CC, on (w).
+    #[uniform(118)]
+    lbp_fog: Vec4,
+    /// P2t: game fog colour (output space).
+    #[uniform(119)]
+    lbp_fog_color: Vec4,
     /// D121: generated normals passed `adapter::normal_trust`; otherwise stays unlit.
     pub normals_trusted: bool,
 }
@@ -108,13 +114,21 @@ pub fn set_lighting(
     light: Option<&crate::lighting::PreviewLight>,
 ) -> bool {
     let ext = &mut material.extension;
-    match light.filter(|_| ext.normals_trusted) {
+    // P2s: LBP mode lights every draw; untrusted smooth normals use the face normal (3).
+    match light.filter(|l| ext.normals_trusted || l.lbp) {
         Some(l) => {
-            ext.light_dir = l.toward_light.extend(if l.lbp { 2. } else { 1. });
+            let mode = match (l.lbp, ext.normals_trusted) {
+                (false, _) => 1.,
+                (true, true) => 2.,
+                (true, false) => 3.,
+            };
+            ext.light_dir = l.toward_light.extend(mode);
             ext.light_key = l.key.extend(0.);
             ext.light_ambient = l.ambient.extend(0.);
             ext.rim_low = l.rim[0].extend(0.);
             ext.rim_high = l.rim[1].extend(0.);
+            ext.lbp_fog = l.lbp_fog();
+            ext.lbp_fog_color = Vec3::from(crate::lighting::GAME_FOG_COLOR).extend(1.);
             true
         }
         None => {
@@ -123,6 +137,7 @@ pub fn set_lighting(
             ext.light_ambient = Vec4::ZERO;
             ext.rim_low = Vec4::ZERO;
             ext.rim_high = Vec4::ZERO;
+            ext.lbp_fog = Vec4::ZERO;
             false
         }
     }
@@ -142,6 +157,7 @@ impl Plugin for DualPlugin {
 }
 // Independently authored preview shader; imported Bevy interfaces are pinned by Cargo.lock.
 const SOURCE: &str = r#"
+#import bevy_pbr::mesh_view_bindings::view
 #import bevy_pbr::{forward_io::{VertexOutput, FragmentOutput}, pbr_fragment::pbr_input_from_standard_material, pbr_functions::main_pass_post_lighting_processing}
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var second_image: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var second_sampler: sampler;
@@ -157,6 +173,8 @@ const SOURCE: &str = r#"
 @group(#{MATERIAL_BIND_GROUP}) @binding(111) var<uniform> light_ambient: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(112) var<uniform> rim_low: vec4<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(113) var<uniform> rim_high: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(118) var<uniform> lbp_fog: vec4<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(119) var<uniform> lbp_fog_color: vec4<f32>;
 // D121 preview Lambert factor (mirrors lighting::PreviewLight::factor/facing_normal).
 // Double-sided: the smooth normal is turned into the hemisphere of the face normal that
 // points at the viewer, so back faces and mirrored instances light like front faces.
@@ -176,6 +194,22 @@ fn preview_light(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec
         return f * f;
     }
     return light_ambient.rgb + light_key.rgb * max(dot(n, light_dir.xyz), 0.0);
+}
+// P2r (RSX capture, all lit Pod draws): the game writes sqrt(colour x tintcol) with
+// tintcol (4,4,4) into a plain RGBA8 target, so that sqrt is the only output gamma.
+// Bevy sRGB-encodes our linear output, so return the linear value whose encoding is it.
+const GAME_TINT: f32 = 4.0;
+// P2t: then the game's fog in that output space, by view depth (lbp_fog).
+fn lbp_output(c: vec3<f32>, depth: f32) -> vec3<f32> {
+    var v = clamp(sqrt(max(c * GAME_TINT, vec3<f32>(0.0))), vec3<f32>(0.0), vec3<f32>(1.0));
+    if lbp_fog.w > 0.5 {
+        let k = clamp((depth - lbp_fog.x) * lbp_fog.y, 0.0, 1.0);
+        let fogged = (dot(v, vec3<f32>(0.3, 0.6, 0.1)) * lbp_fog.z + 1.0) * lbp_fog_color.rgb;
+        v = clamp(mix(v, fogged, k), vec3<f32>(0.0), vec3<f32>(1.0));
+    }
+    let low = v / 12.92;
+    let high = pow((v + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(high, low, v <= vec3<f32>(0.04045));
 }
 fn facing_normal(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
     var n = normalize(shading);
@@ -226,7 +260,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
     }
 #endif
     var rgb = color.rgb;
-    if light_dir.w > 0.5 {
+    if light_dir.w > 1.5 {
+        // P2s: mode 3 (untrusted smooth normals) shades with the face normal.
+        let shading = select(in.world_normal, face, light_dir.w > 2.5);
+        let depth = -(view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
+        rgb = lbp_output(rgb * preview_light(shading, face, pbr.V), depth);
+    } else if light_dir.w > 0.5 {
         rgb *= preview_light(in.world_normal, face, pbr.V);
     }
     var out: FragmentOutput;
@@ -245,6 +284,10 @@ struct VertexOutput {
     @location(2) uv: vec2<f32>,
     @location(3) uv_b: vec2<f32>,
 }
+struct ViewStub {
+    view_from_world: mat4x4<f32>,
+}
+@group(0) @binding(0) var<uniform> view: ViewStub;
 struct FragmentOutput {
     @location(0) color: vec4<f32>,
 }
@@ -274,7 +317,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .filter(|l| !l.trim_start().starts_with('#'))
             .map(|l| l.replace("#{MATERIAL_BIND_GROUP}", "2") + "\n")
             .collect();
-        assert!(body.contains("preview_light(in.world_normal, face, pbr.V)"));
+        assert!(body.contains("lbp_output(rgb * preview_light(shading, face, pbr.V), depth)"));
         let source = format!("{STUBS}{body}");
         let module = naga::front::wgsl::parse_str(&source)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));

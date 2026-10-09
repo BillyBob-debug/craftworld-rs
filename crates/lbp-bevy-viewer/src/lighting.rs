@@ -30,8 +30,14 @@ pub struct PreviewLight {
     pub raw_ambient: Vec3,
     /// P2l: rim colours (rimColor below, rimColor2 above), zero without level settings.
     pub rim: [Vec3; 2],
+    /// P2p: level exposure (1 without level settings or when unusable).
+    pub exposure: f32,
     /// P2l: LBP-shaped mode (`lbp`); off = D121 Lambert preview.
     pub lbp: bool,
+    /// P2t: display units per level unit (scene normalization), for the game fog.
+    pub display_scale: f32,
+    /// P2t: Puter opening progress (0 closed, 1 open) the game fog start follows.
+    pub pod_t: f32,
     /// Values used and every preview choice, for the panel and QA log.
     pub notes: Vec<String>,
 }
@@ -67,7 +73,10 @@ impl PreviewLight {
             raw_key: Vec3::splat(0.65),
             raw_ambient: Vec3::splat(0.35),
             rim: [Vec3::ZERO; 2],
+            exposure: 1.,
             lbp: false,
+            display_scale: 1.,
+            pod_t: 0.,
             notes: vec!["generic key (upper left, front) 0.65 + ambient 0.35".into()],
         }
     }
@@ -157,7 +166,16 @@ impl PreviewLight {
             raw_key,
             raw_ambient,
             rim,
+            exposure: Some(s.exposure)
+                .filter(|e| e.is_finite() && *e > 0.)
+                .unwrap_or(1.),
             lbp: false,
+            display_scale: if scale.is_finite() && scale > 0. {
+                scale
+            } else {
+                1.
+            },
+            pod_t: 0.,
             notes,
         })
     }
@@ -176,15 +194,34 @@ impl PreviewLight {
     /// planets root). The uniform mapping (exposure, tint, rim constants) is INFERRED.
     pub fn lbp_shaped(&self, turn: Quat) -> Self {
         let mut light = self.clone();
+        let e = self.exposure;
         light.lbp = true;
-        light.key = self.raw_key;
-        light.ambient = self.raw_ambient;
+        // P2p: the scales the game sends with each colour (D-RSX capture of the Pod).
+        light.key = self.raw_key * GAME_SUN_SCALE * e;
+        light.ambient = self.raw_ambient * GAME_AMBIENT_SCALE * e;
+        light.rim = self.rim.map(|r| r * GAME_RIM_SCALE * e);
         light.toward_light = (turn * self.toward_light).normalize_or_zero();
         light.notes.push(format!(
-            "LBP-shaped (inferred): ambient x (N.y 0.15 + 0.5), sun unfitted, rim ({:.3}, {:.3}, {:.3}) below to ({:.3}, {:.3}, {:.3}) above x (N.V + 0.9)^2",
+            "LBP-shaped: ambient x (N.y 0.15 + 0.5), sun, rim ({:.3}, {:.3}, {:.3}) below to ({:.3}, {:.3}, {:.3}) above x (N.V + 0.9)^2; game scales sun {GAME_SUN_SCALE} x multiplier, ambient {GAME_AMBIENT_SCALE}, rim {GAME_RIM_SCALE}, all x exposure {e:.3} (RSX capture fit)",
             self.rim[0].x, self.rim[0].y, self.rim[0].z, self.rim[1].x, self.rim[1].y, self.rim[1].z
         ));
         light
+    }
+
+    /// P2t: fog uniform for the shader: start and slope in display units, CC, on (w).
+    /// Start is interpolated between the closed and open values by `pod_t` (INFERRED).
+    pub fn lbp_fog(&self) -> Vec4 {
+        if !self.lbp {
+            return Vec4::ZERO;
+        }
+        let t = self.pod_t.clamp(0., 1.);
+        let start = GAME_FOG_START[0] + (GAME_FOG_START[1] - GAME_FOG_START[0]) * t;
+        Vec4::new(
+            start * self.display_scale,
+            GAME_FOG_SLOPE / self.display_scale,
+            GAME_FOG_CC,
+            1.,
+        )
     }
 
     /// CPU mirror of the shader's `preview_light` for an already oriented unit normal.
@@ -225,6 +262,24 @@ pub fn facing_normal(smooth: Vec3, face: Vec3, to_view: Vec3) -> Vec3 {
     }
 }
 
+/// P2p: per-colour scales in the game's Pod shader constants (.w of suncol, ambcol and
+/// both rim colours), fitted to the PC's RenderDoc capture of RPCS3 with pod_planets
+/// preset 0 (multiplier 1.0206, exposure 1.2165): sun 0.372 = 0.3 x 1.0206 x 1.2165,
+/// ambient 0.547 = 0.45 x 1.2165, rim 0.730 = 0.6 x 1.2165 (each within 0.001).
+/// CONFIRMED_FROM_LOCAL_DATA for that frame; the split into constant x exposure (x
+/// multiplier) is INFERRED from one level, as is the shader applying .w to .rgb.
+pub const GAME_SUN_SCALE: f32 = 0.3;
+/// P2t: the game's output-space fog in the Pod (PC RenderDoc frames 5247 and 14790):
+/// v = mix(v, (luma(v) x CC + 1) x COLOR, saturate((depth - start) x SLOPE)), depth in level
+/// units, start 25810 closed and 5810 open. CONFIRMED_FROM_LOCAL_DATA for those frames;
+/// the colour's source and why start moves with the Puter are unknown.
+pub const GAME_FOG_COLOR: [f32; 3] = [0.645597, 0.409244, 0.2281];
+pub const GAME_FOG_CC: f32 = 0.240216;
+pub const GAME_FOG_SLOPE: f32 = 1. / 52648.;
+pub const GAME_FOG_START: [f32; 2] = [25810., 5810.];
+pub const GAME_AMBIENT_SCALE: f32 = 0.45;
+pub const GAME_RIM_SCALE: f32 = 0.6;
+
 /// Viewer-side toggle state.
 #[derive(Default)]
 pub struct LightingState {
@@ -238,6 +293,8 @@ pub struct LightingState {
     pub shell: Option<(usize, PreviewLight)>,
     /// P2l: the shell root rotation last applied.
     pub shell_turn: Quat,
+    /// P2t: Puter progress the fog was last applied for.
+    pub pod_t: f32,
     pub light: PreviewLight,
     /// Set when the toggle or scene changes; `apply` runs once per change.
     pub dirty: bool,
@@ -251,7 +308,12 @@ pub fn summary(light: &PreviewLight, unlit: usize, total: usize) -> Vec<String> 
     let mut lines = vec![format!("Lighting: {}", light.label())];
     lines.extend(light.notes.iter().map(|n| format!("  {n}")));
     lines.push(format!(
-        "  {unlit} of {total} draw entities unlit (untrusted generated normals or fixture)"
+        "  {unlit} of {total} draw entities with untrusted generated normals ({})",
+        if light.lbp {
+            "LBP mode: lit flat by their face normals"
+        } else {
+            "unlit"
+        }
     ));
     lines
 }
@@ -342,20 +404,32 @@ mod tests {
         let mut s = settings();
         s.rim_color = [0.2, 0.1, 0.0, 1.];
         s.rim_color2 = [0.0, 0.1, 0.4, 1.];
+        s.exposure = 2.;
         let light = PreviewLight::from_settings(&s, Vec3::ZERO, 1.).lbp_shaped(Quat::IDENTITY);
         assert!(light.lbp);
-        // Unfitted: sun colour x multiplier 2.
-        assert_eq!(light.key, Vec3::new(2., 1., 0.5));
+        // Unfitted, game scales: sun colour x multiplier 2 x 0.3 x exposure 2.
+        let key = Vec3::new(2., 1., 0.5) * 0.6;
+        assert!((light.key - key).length() < 1e-5);
+        // P2t: fog start follows the Puter progress, in display units.
+        let mut fog = light.clone();
+        fog.display_scale = 2.;
+        fog.pod_t = 1.;
+        let f = fog.lbp_fog();
+        assert!((f.x - 5810. * 2.).abs() < 1e-2 && (f.y - 1. / 52648. / 2.).abs() < 1e-9);
+        assert_eq!(PreviewLight::generic().lbp_fog(), Vec4::ZERO);
+        // Ambient 0.5 x 0.45 x 2; rims x 0.6 x 2.
+        let ambient = 0.45;
+        let rim_high = Vec3::new(0.0, 0.1, 0.4) * 1.2;
         let up = Vec3::Y;
         // Facing the viewer straight on: no rim; sun overhead lights fully.
         let f = light.lbp_factor(up, up);
-        assert!((f - (Vec3::splat(0.5 * 0.65) + Vec3::new(2., 1., 0.5))).length() < 1e-5);
+        assert!((f - (Vec3::splat(ambient * 0.65) + key)).length() < 1e-5);
         // Grazing view: rim (0.9^2) with the upper colour for an upward normal.
         let g = light.lbp_factor(up, Vec3::X);
-        assert!((g - f - Vec3::new(0.0, 0.1, 0.4) * 0.81).length() < 1e-5);
+        assert!((g - f - rim_high * 0.81).length() < 1e-5);
         // Downward normal: lower ambient (0.35) and no sun.
         let d = light.lbp_factor(-up, -up);
-        assert!((d - Vec3::splat(0.5 * 0.35)).length() < 1e-5);
+        assert!((d - Vec3::splat(ambient * 0.35)).length() < 1e-5);
         // The turn moves the light with the scene.
         let t = PreviewLight::from_settings(&s, Vec3::ZERO, 1.)
             .lbp_shaped(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
