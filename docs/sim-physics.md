@@ -114,6 +114,18 @@ PC check: `level_physics` now also reports joints and rejected joints by reason;
 command as part 1. A level with bolted wheels or pistons shows whether the frames and
 endpoints resolve (rejections) and whether jointed bodies stay put (moves).
 
+## Part 2b: PC run on Rookie Test (2026-10-09)
+
+PC (#58 at 7e5c7a5, 90 ticks): 45 fixed bodies, 7 nested, fixed materials only
+`dark_matter.mat`; of 238 bodies 184 moved more than 1 and 118 more than 100 (max 17,767);
+59 joints (65 rejected). `--all` panicked in avian ("neither body is in an island"): a
+joint between a fixed body and a static shape. Fixes: a joint whose ends are both static
+(static shape or fixed body) is now rejected as "both ends static"; `level_physics`
+catches a panic per level (`levels_panicked`) and reports `why_moved`: for every dynamic
+body and for those that moved more than 100, counts by PBody.frozen, first shape material,
+Thing parts, jointed, shape count, has parent and direction. That census decides the next
+anchoring rule. Not tested: any level after the fix.
+
 ## Next
 
 - Joint animation (motion patterns, winch and piston targets), strength and breaking.

@@ -411,7 +411,13 @@ impl PhysicsScene {
         if a == b {
             return Err("both ends on one body");
         }
-        if matches!((a, b), (Endpoint::Static(_), Endpoint::Static(_))) {
+        let fixed = |e: Endpoint| match e {
+            Endpoint::Static(_) => true,
+            Endpoint::Body(i) => self.bodies[i].fixed,
+        };
+        // avian2d needs a dynamic body on at least one end (both static panics: "neither
+        // body is in an island").
+        if fixed(a) && fixed(b) {
             return Err("both ends static");
         }
         let (Some(world_a), Some(world_b)) = (

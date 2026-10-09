@@ -504,12 +504,19 @@ fn dark_matter_and_world_bodies_are_static() {
             true,
         ),
         world,
+        // 4: a bolt between the two fixed bodies (avian panics on a joint with no dynamic
+        // end, so it must be rejected).
+        joint_with(4, 7, 0, [0.; 3], 3, [0.; 3], 0., JointParams::default()),
     ];
     let scene = build_scene_with(&things, &|d| d.guid == Some(DARK));
     let r = &scene.report;
     assert_eq!(
         (r.dynamic, r.static_, r.fixed_bodies, r.nested_bodies),
         (1, 3, 2, 1)
+    );
+    assert_eq!(
+        scene.report.rejected_joints.get("both ends static"),
+        Some(&1)
     );
     assert_eq!(build_scene(&things).report.fixed_bodies, 1, "WORLD only");
     let mut app = app(scene);
