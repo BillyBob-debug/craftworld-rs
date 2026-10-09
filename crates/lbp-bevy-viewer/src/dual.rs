@@ -177,6 +177,16 @@ fn preview_light(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec
     }
     return light_ambient.rgb + light_key.rgb * max(dot(n, light_dir.xyz), 0.0);
 }
+// P2r (RSX capture, all lit Pod draws): the game writes sqrt(colour x tintcol) with
+// tintcol (4,4,4) into a plain RGBA8 target, so that sqrt is the only output gamma.
+// Bevy sRGB-encodes our linear output, so return the linear value whose encoding is it.
+const GAME_TINT: f32 = 4.0;
+fn lbp_output(c: vec3<f32>) -> vec3<f32> {
+    let v = clamp(sqrt(max(c * GAME_TINT, vec3<f32>(0.0))), vec3<f32>(0.0), vec3<f32>(1.0));
+    let low = v / 12.92;
+    let high = pow((v + 0.055) / 1.055, vec3<f32>(2.4));
+    return select(high, low, v <= vec3<f32>(0.04045));
+}
 fn facing_normal(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
     var n = normalize(shading);
     if dot(face, face) > 0.0 {
@@ -226,7 +236,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
     }
 #endif
     var rgb = color.rgb;
-    if light_dir.w > 0.5 {
+    if light_dir.w > 1.5 {
+        rgb = lbp_output(rgb * preview_light(in.world_normal, face, pbr.V));
+    } else if light_dir.w > 0.5 {
         rgb *= preview_light(in.world_normal, face, pbr.V);
     }
     var out: FragmentOutput;
@@ -274,7 +286,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .filter(|l| !l.trim_start().starts_with('#'))
             .map(|l| l.replace("#{MATERIAL_BIND_GROUP}", "2") + "\n")
             .collect();
-        assert!(body.contains("preview_light(in.world_normal, face, pbr.V)"));
+        assert!(body.contains("lbp_output(rgb * preview_light(in.world_normal, face, pbr.V))"));
         let source = format!("{STUBS}{body}");
         let module = naga::front::wgsl::parse_str(&source)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));
