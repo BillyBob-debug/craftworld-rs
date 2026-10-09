@@ -45,3 +45,19 @@ B = `lbp-bevy-viewer --snapshot local-analysis/d133-inventory-0133-edat.json --g
 1. B `--runtime-texture 00002f6c:0:000027fb` closed; 2. same with 00004277;
 3. B `--pod-open`. Report the "material sampler" line, the window fractions closed, and
 whether any tent shows open.
+
+## P2h: window size, mid-dolly captures (after D168)
+D168 (PC, beside RPCS3): the open view shows no tent (matches); the closed window is
+0.32-0.68 w x 0.28-0.72 h vs RPCS3 0.35-0.67 x 0.28-0.69, about 0.03 too large each side.
+- `TENT_PULL` = 0.91 (RPCS3 size over ours) backs the closed tent eye off along its view
+  so the far wall projects 0.91 as large about the frame centre; `TENT_TILT_CLOSED`
+  drops to the remaining 0.045 h. Both are corrections fitted to the D165/D168
+  measurements, not game values. Test: a far-wall point shows `TENT_PULL` smaller and
+  `TENT_TILT_CLOSED` lower than from the shell eye.
+- `--pod-t T` (0-1) starts the Puter at that opening progress and holds it until Space,
+  so QA captures can show the dolly mid-way (`--pod-open` = `--pod-t 1`).
+- Side panels: unchanged; the binding is still unknown (both candidates wrong with the
+  material's own sampler).
+
+PC check: B (above) closed, B `--pod-t 0.5`, B `--pod-open`; compare with RPCS3 closed,
+about 0.5 s after Square, and open.

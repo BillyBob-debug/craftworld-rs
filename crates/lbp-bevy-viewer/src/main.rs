@@ -92,8 +92,9 @@ struct LevelMode {
     pod: Option<usize>,
     /// P2b `--pod-shell HEX`: the Pod shell level (000027b9) as a layer over the view.
     shell: Option<u32>,
-    /// P2d `--pod-open`: start with the Puter open (QA captures of the menu view).
-    open: bool,
+    /// P2d `--pod-open` (1) / P2h `--pod-t T`: Puter opening progress to start at, for
+    /// QA captures of the open and mid-dolly views.
+    t0: Option<f32>,
     /// P2e `--runtime-texture MESH:SLOT:TEXTURE` (repeatable; docs/p2e-runtime-texture.md).
     runtime_textures: Vec<lbp_preview::runtime_texture::RuntimeTexture>,
     /// P2f `--pod-shell-camera FX,FY,FZ,TX,TY,TZ`: the closed shell eye from the game's
@@ -429,7 +430,7 @@ fn options() -> Result<Viewer, String> {
             continue;
         }
         if flag == "--pod-open" {
-            v.level.open = true;
+            v.level.t0 = Some(1.);
             continue;
         }
         if flag == "--qa-hide-ui" {
@@ -457,7 +458,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-open: start open; --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-open: start open; --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -497,6 +498,14 @@ fn options() -> Result<Viewer, String> {
             "--level-path" => v.level.path = Some(value),
             "--level-placement" => v.level.placement = level_scene::PosPlacement::parse(&value)?,
             "--runtime-texture" => push_runtime_texture(&mut v.level.runtime_textures, &value)?,
+            "--pod-t" => {
+                let t = value
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|t| (0. ..=1.).contains(t))
+                    .ok_or("--pod-t takes a number from 0 (closed) to 1 (open)")?;
+                v.level.t0 = Some(t);
+            }
             "--pod-shell-camera" => {
                 let n: Vec<f32> = value
                     .split(',')
@@ -856,7 +865,7 @@ fn load(
                     .as_ref()
                     .and_then(|s| s.checkpoints.first().copied());
                 let normalize = shell_plan.normalize;
-                let t0 = if v.level.open { 1. } else { 0. };
+                let t0 = v.level.t0.unwrap_or(0.);
                 let root = commands
                     .spawn((rig.shell_root(t0), Visibility::default(), PodShellRoot))
                     .id();
@@ -913,7 +922,9 @@ fn load(
                 commands.insert_resource(PodRigRes(rig));
                 commands.insert_resource(pod_menu::PuterState {
                     t: t0,
-                    open: v.level.open,
+                    open: t0 >= 1.,
+                    // Mid-dolly starts stay put (QA); Space then opens or closes.
+                    hold: t0 > 0. && t0 < 1.,
                 });
                 v.level.lines.push(rig_line);
                 let line = match done.preview {
@@ -1818,9 +1829,14 @@ fn pod_dolly(
     let pad = |b| pads.iter().any(|g| g.just_pressed(b));
     if keys.just_pressed(KeyCode::Space) || pad(GamepadButton::West) {
         state.open = !state.open;
+        state.hold = false;
     }
     if keys.any_just_pressed([KeyCode::Escape, KeyCode::Backspace]) || pad(GamepadButton::East) {
         state.open = false;
+        state.hold = false;
+    }
+    if state.hold {
+        return;
     }
     let target = if state.open { 1. } else { 0. };
     if state.t == target {
