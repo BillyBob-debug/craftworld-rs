@@ -612,3 +612,30 @@ fn no_collide_material_is_not_a_collider() {
         (1, 1, 0)
     );
 }
+
+#[test]
+fn crossing_outline_is_filled_and_holds_a_box() {
+    // A floor whose second loop crosses its bottom edge: refused by the strict outline,
+    // kept by the even-odd fill, and the box still lands on its top.
+    let mut shape = rect(4000., 100., 7);
+    let notch = [[1400., -70.], [1600., -70.], [1600., -30.], [1400., -30.]];
+    shape.vertices.extend(notch.map(|p| [p[0], p[1], 0.]));
+    shape.vertex_count = 8;
+    shape.loops.push(4);
+    let mut floor = floor();
+    floor.data.shape = Some(shape);
+    let things = vec![
+        floor,
+        thing(
+            1,
+            matrix(0., 300., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+    ];
+    let report = build_scene(&things).report;
+    assert_eq!(report.filled.get("loops_intersect"), Some(&1));
+    assert!(report.rejected.is_empty(), "{:?}", report.rejected);
+    let p = run(&things, 120)[1].1;
+    assert!((p[1] - 50.).abs() < 5., "rests on top of the floor: {p:?}");
+}
