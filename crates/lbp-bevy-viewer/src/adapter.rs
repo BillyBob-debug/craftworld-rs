@@ -167,9 +167,9 @@ pub fn image_axes(
 ) -> Result<Image, String> {
     image_axes_fmt(width, height, pixels, wrap, true)
 }
-/// Anisotropy used with the trilinear game-texture sampler (the PS3 game filters its
-/// textures; the exact setting is read from a capture, see docs/p2u-mipmaps.md).
-pub const ANISOTROPY: u16 = 16;
+/// Anisotropy of the trilinear game-texture sampler: the Pod RenderDoc capture shows
+/// LINEAR_MIPMAP_LINEAR, LOD bias 0 and MAX_ANISOTROPY 1 (docs/p2u-mipmaps.md).
+pub const ANISOTROPY: u16 = 1;
 fn srgb_to_linear(v: u8) -> f32 {
     let c = f32::from(v) / 255.;
     if c <= 0.04045 {
@@ -290,7 +290,7 @@ fn image_axes_fmt(
         mag_filter: ImageFilterMode::Linear,
         min_filter: ImageFilterMode::Linear,
         mipmap_filter: ImageFilterMode::Linear,
-        anisotropy_clamp: if levels > 1 { ANISOTROPY } else { 1 },
+        anisotropy_clamp: ANISOTROPY,
         ..default()
     });
     Ok(image)

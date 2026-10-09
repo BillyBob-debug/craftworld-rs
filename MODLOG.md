@@ -2,9 +2,9 @@
 
 ## 2026-10-09 — P2u mipmaps and anisotropic filtering
 
-Game textures get a CPU box-filtered mip chain (linear-light for colour) and a trilinear 16x
-anisotropic sampler; point-sampled textures stay nearest. Pure viewer change, +0 viewable /
-+0 Complete. Game filter settings still INFERRED (docs/p2u-mipmaps.md); PC verifies shots.
+Game textures get a CPU box-filtered mip chain (linear-light for colour) and a trilinear
+sampler (anisotropy 1, as the game); point-sampled textures stay nearest. Pure viewer change, +0 viewable /
++0 Complete. Sampler matches the Pod capture (docs/p2u-mipmaps.md); PC verifies shots.
 
 ## 2026-10-09 — D193 sampler port folds under the nested instance tint
 
