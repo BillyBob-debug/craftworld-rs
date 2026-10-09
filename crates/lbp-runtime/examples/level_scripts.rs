@@ -244,11 +244,16 @@ fn run() -> Result<(), String> {
             sum.no_function += t.no_function;
             sum.no_class += t.no_class;
             sum.faults.extend(t.faults);
+            sum.threads_started += t.threads_started;
+            sum.threads_done += t.threads_done;
+            sum.thread_faults.extend(t.thread_faults);
         }
         let report = |r: &StepReport| {
             serde_json::json!({
                 "done": r.done, "yielded": r.yielded, "resumed": r.resumed,
                 "no_function": r.no_function, "no_class": r.no_class, "faults": r.faults.len(),
+                "threads_started": r.threads_started, "threads_done": r.threads_done,
+                "thread_faults": r.thread_faults.iter().take(MAX_FAULTS).collect::<Vec<_>>(),
             })
         };
         let mut unbound: Vec<_> = host.unbound.iter().collect();
@@ -264,6 +269,7 @@ fn run() -> Result<(), String> {
                 "ticks_total": report(&sum),
                 "ticks_with_faults": ticks_with_faults,
                 "stopped_by_fault": level.stopped.len(),
+                "threads_running_at_end": level.threads(),
                 "pending_at_end": level.pending(),
                 "faults_by_kind": fault_kinds,
                 "first_faults": first_faults,
