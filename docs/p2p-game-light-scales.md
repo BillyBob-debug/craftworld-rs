@@ -35,3 +35,27 @@ the sun also x multiplier, as before). `--preview-lighting` is unchanged.
   x by finding where suncol/ambcol/rimcol are uploaded.
 - Not tested here: needs a PC capture against RPCS3 (D188 baseline: room 1.9x too bright,
   globe 0.7x too dark).
+
+## P2r: output tint and gamma, one light set for the shell (2026-10-09)
+
+The PC read the same capture again (local-analysis/results/2026-10-09-pod-renderdoc-tint-fog.md,
+frame 5247, Pod closed). All 161 lit draws (Earth, Moon, pod.bin shell) share one constant set:
+tintcol (4,4,4,1), fogccparams (0.240216,0,0,0), fogcol (0.646,0.409,0.228), and the preset 0
+sun/ambient/rim values above. The Earth diffuse is SRGB DXT1 (decoded to linear on sample),
+and the render target is plain RGBA8, so `sqrt(colour × tintcol)` is the only output gamma.
+
+Change (`--lbp-lighting` only):
+- The shader now ends `v = sqrt(diffuse × light² × 4)`, clamped to 1, and returns the linear
+  value whose sRGB encoding is v, because Bevy encodes our output.
+- The Pod shell is lit with the planets' preset 0 values. Its own light direction is kept.
+
+| Rule | Label |
+|---|---|
+| tintcol (4,4,4) and the sqrt output into RGBA8 (this frame, all lit draws) | CONFIRMED_FROM_LOCAL_DATA |
+| fc slot names (tintcol, fogccparams, fogcol), matched to brdf.cg | STRONG_INFERENCE |
+| Shell draws use the planets' constants | CONFIRMED_FROM_LOCAL_DATA (eid 748) |
+| tintcol 4 is constant, not level- or menu-driven | INFERRED (one frame) |
+
+Not done: the luminance fog step (`fogcc = (lum + fogccparams.y) × fogccparams.x + 1`, lerp
+to fogcol by the vertex fog factor), because the vertex fog factor is unknown. Bevy distance
+fog stays as before. The shell's light direction is still its own level's, not checked.

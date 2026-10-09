@@ -1045,7 +1045,16 @@ fn load(
                     shell_plan,
                 );
                 // P2l: the shell keeps its own level's light; the planets keep theirs.
-                let shell_light = std::mem::replace(&mut v.lighting.light, planets_light);
+                let mut shell_light =
+                    std::mem::replace(&mut v.lighting.light, planets_light.clone());
+                if v.lighting.lbp {
+                    // P2r: the RSX capture shows every lit Pod draw, shell included, with
+                    // the planets' preset 0 constants; the shell keeps its own direction.
+                    shell_light = lighting::PreviewLight {
+                        toward_light: shell_light.toward_light,
+                        ..planets_light
+                    };
+                }
                 v.lighting.shell = Some((first, shell_light));
                 for (i, (entity, ..)) in v.scene[first..].iter().enumerate() {
                     let parent = if tent_flags.get(i).copied().unwrap_or(false) {
