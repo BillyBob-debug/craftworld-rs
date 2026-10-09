@@ -459,6 +459,10 @@ fn options() -> Result<Viewer, String> {
             // Read by level_play.rs.
             continue;
         }
+        if flag == "--play-sackboy" {
+            // Read by sackboy_play.rs.
+            continue;
+        }
         if flag == "--shape-bevels" {
             v.level.shape_bevels = true;
             continue;
@@ -568,13 +572,15 @@ fn options() -> Result<Viewer, String> {
                 v.capture = Some(parent.join(path.file_name().ok_or("Capture filename required")?));
                 v.qa = true;
             }
-            // Read by puter.rs, pod_menu.rs and level_play.rs.
+            // Read by puter.rs, pod_menu.rs, level_play.rs and sackboy_play.rs.
             "--puter-screen"
             | "--puter-function"
             | "--puter-at"
             | "--pod-menu"
             | "--ui-script-function"
-            | "--level-scripts-flags" => {}
+            | "--level-scripts-flags"
+            | "--play-sackboy-at"
+            | "--play-sackboy-input" => {}
             _ => return Err(format!("Unknown option {flag}")),
         }
     }
