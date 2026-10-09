@@ -6,7 +6,9 @@ use bevy::time::TimeUpdateStrategy;
 use lbp_level::parts::{Body, Joint, JointParams, Pos, Shape, ShapeColor};
 use lbp_level::serial::Descriptor;
 use lbp_level::thing::ThingRecord;
-use lbp_sim::scene::{build_scene, build_scene_with, Endpoint, JointKind, PhysicsScene, DENSITY};
+use lbp_sim::scene::{
+    build_scene, build_scene_with, Endpoint, JointKind, MaterialRule, PhysicsScene, DENSITY,
+};
 use lbp_sim::{spawn_scene, to_level, SimPlugin, ThingIndex, TICK_HZ};
 use std::time::Duration;
 
@@ -508,7 +510,13 @@ fn dark_matter_and_world_bodies_are_static() {
         // end, so it must be rejected).
         joint_with(4, 7, 0, [0.; 3], 3, [0.; 3], 0., JointParams::default()),
     ];
-    let scene = build_scene_with(&things, &|d| d.guid == Some(DARK));
+    let scene = build_scene_with(&things, &|d| {
+        if d.guid == Some(DARK) {
+            MaterialRule::Fixed
+        } else {
+            MaterialRule::Normal
+        }
+    });
     let r = &scene.report;
     assert_eq!(
         (r.dynamic, r.static_, r.fixed_bodies, r.nested_bodies),
@@ -575,5 +583,32 @@ fn frozen_bodies_sleep_until_touched_and_pickups_hang() {
     assert!(
         (after[3].1[1] - 300.).abs() < 0.01 && (after[3].1[0] - 600.).abs() < 0.01,
         "pick-up hangs: {after:?}"
+    );
+}
+
+#[test]
+fn no_collide_material_is_not_a_collider() {
+    const HOLO: u32 = 0x40;
+    let mut holo = rect(100., 100., 7);
+    holo.material = Some(Descriptor {
+        flags: None,
+        kind_byte: 2,
+        guid: Some(HOLO),
+        sha1: None,
+    });
+    let things = vec![
+        floor(),
+        thing(1, matrix(0., 300., 0., 0., 1., 1.), Some(holo), true),
+    ];
+    let s = build_scene_with(&things, &|d| {
+        if d.guid == Some(HOLO) {
+            MaterialRule::NoCollide
+        } else {
+            MaterialRule::Normal
+        }
+    });
+    assert_eq!(
+        (s.report.not_collidable, s.colliders.len(), s.bodies.len()),
+        (1, 1, 0)
     );
 }

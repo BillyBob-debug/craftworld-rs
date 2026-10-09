@@ -14,6 +14,8 @@
 //!   shapes uses a physical material the caller marks fixed (PUBLIC behaviour: dark matter
 //!   is immovable and anything glued to it stays put; which descriptor is dark matter comes
 //!   from the caller, see [`build_scene_with`]). INFERRED until a PC run confirms it.
+//! - A shape whose material rule is [`MaterialRule::NoCollide`] (hologram) is not a collider
+//!   (PUBLIC behaviour: hologram has no physical presence; INFERRED mapping).
 //! - A body with GAMEPLAY_DATA (score bubbles, pick-ups) is fixed: it is collected through
 //!   its trigger, not pushed (INFERRED; the Rookie run had 71 of them falling).
 //! - A dynamic body with PBody.frozen != 0 starts asleep and wakes when touched or pulled
@@ -164,17 +166,28 @@ fn is_pickup(t: &ThingRecord) -> bool {
     t.parts.contains(&"GAMEPLAY_DATA")
 }
 
-/// Builds the physics description of a level (`things[i]` must be Thing index `i`) with no
-/// fixed materials: only WORLD-owned bodies are static.
-pub fn build_scene(things: &[ThingRecord]) -> PhysicsScene {
-    build_scene_with(things, &|_| false)
+/// How a physical material behaves in the sandbox (the caller decides per descriptor until
+/// RMaterial is read).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum MaterialRule {
+    #[default]
+    Normal,
+    /// Immovable: the whole glue tree is static (dark matter, infinite mass).
+    Fixed,
+    /// No physical presence: the shape is not a collider (hologram).
+    NoCollide,
 }
 
-/// Builds the physics description of a level; a body with any shape whose physical
-/// material satisfies `fixed_material` is static.
+/// Builds the physics description of a level (`things[i]` must be Thing index `i`) with every
+/// material normal: only WORLD-owned and pick-up bodies are static.
+pub fn build_scene(things: &[ThingRecord]) -> PhysicsScene {
+    build_scene_with(things, &|_| MaterialRule::Normal)
+}
+
+/// Builds the physics description of a level with a rule per physical material.
 pub fn build_scene_with(
     things: &[ThingRecord],
-    fixed_material: &dyn Fn(&Descriptor) -> bool,
+    material_rule: &dyn Fn(&Descriptor) -> MaterialRule,
 ) -> PhysicsScene {
     let mut scene = PhysicsScene::default();
     let mut body_of = BTreeMap::<usize, Option<usize>>::new();
@@ -186,7 +199,11 @@ pub fn build_scene_with(
         };
         scene.report.shapes += 1;
         let mut reject = |why| *scene.report.rejected.entry(why).or_default() += 1;
-        if shape.flags & COLLIDABLE_GAME == 0 {
+        let rule = shape
+            .material
+            .as_ref()
+            .map_or(MaterialRule::Normal, material_rule);
+        if shape.flags & COLLIDABLE_GAME == 0 || rule == MaterialRule::NoCollide {
             scene.report.not_collidable += 1;
             continue;
         }
@@ -258,7 +275,7 @@ pub fn build_scene_with(
             reject("no triangles");
             continue;
         }
-        fixed_shape.push(shape.material.as_ref().is_some_and(fixed_material));
+        fixed_shape.push(rule == MaterialRule::Fixed);
         scene.colliders.push(SceneCollider {
             thing: i,
             body,

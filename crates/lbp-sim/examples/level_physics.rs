@@ -17,7 +17,8 @@ use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_sim::{
-    build_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin, ThingIndex, TICK_HZ,
+    build_scene_with, scene::MaterialRule, spawn_scene, to_level, PhysicsScene, SimPlugin,
+    ThingIndex, TICK_HZ,
 };
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -129,16 +130,43 @@ fn run() -> Result<(), String> {
             paths.entry(g).or_insert_with(|| r.map_row.path.clone());
         }
     }
-    let fixed_guids: std::collections::BTreeSet<u32> = paths
+    // Material rules by MAP path (INFERRED until RMaterial is read): dark matter and
+    // infinite-mass materials are fixed, hologram does not collide.
+    let rule_of_path = |p: &str| {
+        let p = p.to_ascii_lowercase().replace(' ', "_");
+        if !p.ends_with(".mat") {
+            MaterialRule::Normal
+        } else if p.contains("dark_matter")
+            || p.contains("darkmatter")
+            || p.contains("infinite_mass")
+        {
+            MaterialRule::Fixed
+        } else if p.contains("hologram") {
+            MaterialRule::NoCollide
+        } else {
+            MaterialRule::Normal
+        }
+    };
+    let rules: BTreeMap<u32, MaterialRule> = paths
         .iter()
-        .filter(|(_, p)| {
-            let p = p.to_ascii_lowercase().replace(' ', "_");
-            p.ends_with(".mat") && (p.contains("dark_matter") || p.contains("darkmatter"))
-        })
+        .map(|(g, p)| (*g, rule_of_path(p)))
+        .filter(|(_, r)| *r != MaterialRule::Normal)
+        .collect();
+    let fixed_guids: std::collections::BTreeSet<u32> = rules
+        .iter()
+        .filter(|(_, r)| **r == MaterialRule::Fixed)
         .map(|(g, _)| *g)
         .collect();
-    let fixed =
-        |d: &lbp_level::serial::Descriptor| d.guid.is_some_and(|g| fixed_guids.contains(&g));
+    let no_collide_guids: Vec<u32> = rules
+        .iter()
+        .filter(|(_, r)| **r == MaterialRule::NoCollide)
+        .map(|(g, _)| *g)
+        .collect();
+    let fixed = |d: &lbp_level::serial::Descriptor| {
+        d.guid
+            .and_then(|g| rules.get(&g).copied())
+            .unwrap_or_default()
+    };
     let material_name = |d: &lbp_level::serial::Descriptor| match d.guid {
         Some(g) => paths.get(&g).cloned().unwrap_or_else(|| format!("g{g:x}")),
         None => "by hash".to_string(),
@@ -295,6 +323,7 @@ fn run() -> Result<(), String> {
         "joints": joints, "rejected_joints": rejected_joints,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,
+        "no_collide_material_paths": no_collide_guids.iter().filter_map(|g| paths.get(g)).collect::<Vec<_>>(),
         "levels_panicked": panicked,
         "why_moved": why.iter().map(|(k, (all, moved))| {
             let top = |m: &BTreeMap<String, usize>| {
@@ -321,7 +350,7 @@ fn run() -> Result<(), String> {
     println!(
         "levels {} (not read {not_read}, panicked {}); shapes {shapes}: dynamic {dynamic}, static {static_}, \
          not collidable {not_collidable}, rejected {}; joints {joints} (rejected {}); \
-         fixed bodies {fixed_bodies} ({} dark-matter materials), nested bodies {nested_bodies}; \
+         fixed bodies {fixed_bodies} ({} fixed materials), nested bodies {nested_bodies}; \
          after {ticks} ticks: bodies {}, moved >1 {}, >100 {}, non-finite {}, max move {:.1}",
         levels.len(),
         panicked.len(),

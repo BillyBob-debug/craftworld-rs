@@ -139,6 +139,17 @@ the level-loader stack (`--all` overflowed the main stack in the recursive level
 and prints `level N/M: path` to stderr before each level. Not tested: any level after
 these fixes.
 
+## Part 2c: material rules (2026-10-09)
+
+PC `d183` runs (#58 at 7bc777f): Rookie Test 0 bodies moved; `--all` 378 levels, 0 panics,
+12,462 of 57,971 dynamic bodies moved more than 100 (10,645 straight down). Largest movers
+by material: hologram 3,970 of 21,260, metal 3,255, `general_infinite_mass` 814 of 1,308.
+`build_scene_with` now takes a `MaterialRule` per material: `Fixed` (glue tree static) or
+`NoCollide` (shape skipped). `level_physics` maps MAP paths: dark matter and
+`infinite_mass` -> Fixed, `hologram` -> NoCollide (INFERRED from names and public material
+behaviour until RMaterial is read); it reports `no_collide_material_paths`. Test
+`no_collide_material_is_not_a_collider`. Not tested: levels after the change.
+
 ## Next
 
 - Joint animation (motion patterns, winch and piston targets), strength and breaking.
