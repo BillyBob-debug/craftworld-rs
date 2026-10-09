@@ -198,7 +198,9 @@ impl PreviewLight {
     #[allow(dead_code)] // shader mirror, exercised by tests
     pub fn lbp_factor(&self, normal: Vec3, to_view: Vec3) -> Vec3 {
         let up = (normal.y + 1.) / 2.;
-        let rim = (normal.dot(-to_view) + 0.9).clamp(0., 1.).powi(2);
+        // P2m: V toward the eye (INFERRED from D199: RPCS3's globe edge is darker than
+        // its core), so the term is full facing the viewer and 0.81 at grazing.
+        let rim = (normal.dot(to_view) + 0.9).clamp(0., 1.).powi(2);
         self.ambient * (normal.y * 0.15 + 0.5)
             + self.key * normal.dot(self.toward_light).max(0.)
             + self.rim[0].lerp(self.rim[1], up) * rim
@@ -345,15 +347,19 @@ mod tests {
         // Unfitted: sun colour x multiplier 2.
         assert_eq!(light.key, Vec3::new(2., 1., 0.5));
         let up = Vec3::Y;
-        // Facing the viewer straight on: no rim; sun overhead lights fully.
+        // Facing the viewer straight on: full rim term (upper colour for an upward
+        // normal); sun overhead lights fully.
+        let rim_high = Vec3::new(0.0, 0.1, 0.4);
         let f = light.lbp_factor(up, up);
-        assert!((f - (Vec3::splat(0.5 * 0.65) + Vec3::new(2., 1., 0.5))).length() < 1e-5);
-        // Grazing view: rim (0.9^2) with the upper colour for an upward normal.
+        assert!(
+            (f - (Vec3::splat(0.5 * 0.65) + Vec3::new(2., 1., 0.5) + rim_high)).length() < 1e-5
+        );
+        // Grazing view: the rim term falls to 0.9^2, so edges darken.
         let g = light.lbp_factor(up, Vec3::X);
-        assert!((g - f - Vec3::new(0.0, 0.1, 0.4) * 0.81).length() < 1e-5);
-        // Downward normal: lower ambient (0.35) and no sun.
+        assert!((f - g - rim_high * 0.19).length() < 1e-5);
+        // Downward normal: lower ambient (0.35), no sun, lower rim colour.
         let d = light.lbp_factor(-up, -up);
-        assert!((d - Vec3::splat(0.5 * 0.35)).length() < 1e-5);
+        assert!((d - Vec3::splat(0.5 * 0.35) - Vec3::new(0.2, 0.1, 0.0)).length() < 1e-5);
         // The turn moves the light with the scene.
         let t = PreviewLight::from_settings(&s, Vec3::ZERO, 1.)
             .lbp_shaped(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));

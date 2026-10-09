@@ -167,8 +167,9 @@ fn preview_light(shading: vec3<f32>, face: vec3<f32>, to_view: vec3<f32>) -> vec
     let n = facing_normal(shading, face, to_view);
     if light_dir.w > 1.5 {
         // P2l (mirrors lighting::PreviewLight::lbp_factor): hemisphere ambient, sun,
-        // grazing rim lerped by N.y; squared for the game's square-then-sqrt combine.
-        let rim = pow(clamp(dot(n, -to_view) + 0.9, 0.0, 1.0), 2.0);
+        // rim lerped by N.y (full facing the eye, 0.81 at grazing; P2m); squared for the
+        // game's square-then-sqrt combine.
+        let rim = pow(clamp(dot(n, to_view) + 0.9, 0.0, 1.0), 2.0);
         let f = light_ambient.rgb * (n.y * 0.15 + 0.5)
             + light_key.rgb * max(dot(n, light_dir.xyz), 0.0)
             + mix(rim_low.rgb, rim_high.rgb, (n.y + 1.0) * 0.5) * rim;
