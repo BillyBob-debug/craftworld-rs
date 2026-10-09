@@ -64,6 +64,22 @@ pub struct LevelSceneOptions {
     /// P2m `--per-bone-placement`: POS models with boneThings place each vertex by its
     /// bone's Thing (docs/p2m-per-bone-placement.md). Default off (bone 0 rule, D120).
     pub per_bone: bool,
+    /// D191 (docs/d191-level-thing-defaults.md): `instance_white` gives each RENDER_MESH
+    /// Thing (and decoration) its own `PRenderMesh.editorColor` as the instance colour
+    /// (link to THING_COLOR inferred) and the backdrop the D188 white; `animation_base`
+    /// draws every level material at its animation base values. Explicit
+    /// [`PreviewOptions`] win. Default on; `StandaloneDefaults::OFF` restores the old
+    /// source-only scene.
+    pub defaults: crate::StandaloneDefaults,
+}
+
+/// D191: `PRenderMesh.editorColor` (packed ARGB, -1 = opaque white) as an RGBA tint.
+pub const EDITOR_COLOR_WHITE: u32 = 0xffff_ffff;
+pub fn editor_color_tint(argb: u32) -> crate::DiffuseTint {
+    let channel = |shift: u32| (((argb >> shift) & 0xff) as f32 / 255.).to_bits();
+    crate::DiffuseTint {
+        bits: [channel(16), channel(8), channel(0), channel(24)],
+    }
 }
 
 /// Parsed bevels by descriptor identity (GUID, SHA-1).
@@ -222,6 +238,10 @@ pub struct SceneCounts {
     pub per_bone_unweighted_vertices: usize,
     /// Drawn Things whose mesh has neutral (unsupported material) groups.
     pub drawn_with_neutral_groups: usize,
+    /// D191: drawn Things and decorations whose mesh uses the instance colour and whose
+    /// editorColor is not white, and the extra mesh loads (one per mesh and colour).
+    pub drawn_editor_colored: usize,
+    pub editor_color_variants: usize,
     pub meshes_loaded: usize,
     pub meshes_failed: usize,
     /// Shape Things (SHAPE part present) and their extrusion outcomes.
@@ -284,6 +304,10 @@ impl SceneCounts {
         out.push(format!(
             "Drawn with neutral (unsupported material) groups: {} Things",
             self.drawn_with_neutral_groups
+        ));
+        out.push(format!(
+            "Drawn with a non-white editorColor instance colour: {} Things/decorations, {} mesh+colour variants (editorColor to THING_COLOR inferred, D191)",
+            self.drawn_editor_colored, self.editor_color_variants
         ));
         out.push(format!(
             "Drawn bone-attached at own POS (approximation): {} Things",
@@ -1117,8 +1141,32 @@ pub fn build_scene<T>(
     bind_poses: impl Fn(&T) -> Vec<BindPose>,
     placement: PosPlacement,
 ) -> LevelScene<T> {
+    build_scene_with_colors(
+        things,
+        |source, _| load(source),
+        local_bounds,
+        neutral_groups,
+        bind_poses,
+        |_| false,
+        placement,
+    )
+}
+
+/// D191: [`build_scene`] where `load(source, Some(editorColor))` loads a mesh for one
+/// Thing colour. Each source first loads with `None` (the base inputs); a Thing with a
+/// non-white editorColor gets its own (mesh, colour) load only when `uses_instance` says
+/// the base load actually used the instance colour, so colour-blind meshes stay shared.
+pub fn build_scene_with_colors<T>(
+    things: &[ThingRecord],
+    mut load: impl FnMut(&MeshSource, Option<u32>) -> Result<T, String>,
+    local_bounds: impl Fn(&T) -> Option<[[f32; 3]; 2]>,
+    neutral_groups: impl Fn(&T) -> bool,
+    bind_poses: impl Fn(&T) -> Vec<BindPose>,
+    uses_instance: impl Fn(&T) -> bool,
+    placement: PosPlacement,
+) -> LevelScene<T> {
     let mut scene = LevelScene::<T>::default();
-    let mut by_source: HashMap<MeshSource, Result<usize, String>> = HashMap::new();
+    let mut by_source: MeshCache = HashMap::new();
     let c = &mut scene.counts;
     c.things_total = things.len();
     c.pos_placement = placement;
@@ -1131,6 +1179,7 @@ pub fn build_scene<T>(
             &local_bounds,
             &neutral_groups,
             &bind_poses,
+            &uses_instance,
             placement,
             t,
         );
@@ -1172,10 +1221,12 @@ pub fn build_scene<T>(
             &mut load,
             &local_bounds,
             &neutral_groups,
+            &uses_instance,
             &source,
+            rm.editor_color,
         );
         let c = &mut scene.counts;
-        let mesh = match index {
+        let (mesh, colored) = match index {
             Ok(i) => i,
             Err(e) => {
                 skip(c, format!("mesh unavailable: {e}"));
@@ -1246,6 +1297,7 @@ pub fn build_scene<T>(
         };
         c.drawn += 1;
         c.drawn_with_neutral_groups += usize::from(scene.meshes[mesh].neutral_groups);
+        c.drawn_editor_colored += usize::from(colored);
         scene.items.push(SceneItem {
             mesh,
             world,
@@ -1269,21 +1321,65 @@ fn descriptor_source(d: &lbp_level::serial::Descriptor) -> Option<MeshSource> {
 }
 
 /// Loads (once per source) a mesh into the scene; Err carries the unavailable reason.
+/// Loaded scene meshes by (source, editorColor variant); `None` is the base load.
+type MeshCache = HashMap<(MeshSource, Option<u32>), Result<usize, String>>;
+
+/// D191: the scene mesh for a Thing with `editor_color`, and whether it is a non-white
+/// colour variant (see [`build_scene_with_colors`]).
+#[allow(clippy::too_many_arguments)]
 fn scene_mesh_index<T>(
     scene: &mut LevelScene<T>,
-    by_source: &mut HashMap<MeshSource, Result<usize, String>>,
-    load: &mut impl FnMut(&MeshSource) -> Result<T, String>,
+    by_source: &mut MeshCache,
+    load: &mut impl FnMut(&MeshSource, Option<u32>) -> Result<T, String>,
+    local_bounds: &impl Fn(&T) -> Option<[[f32; 3]; 2]>,
+    neutral_groups: &impl Fn(&T) -> bool,
+    uses_instance: &impl Fn(&T) -> bool,
+    source: &MeshSource,
+    editor_color: u32,
+) -> Result<(usize, bool), String> {
+    let base = cached_mesh(
+        scene,
+        by_source,
+        load,
+        local_bounds,
+        neutral_groups,
+        source,
+        None,
+    )?;
+    if editor_color == EDITOR_COLOR_WHITE || !uses_instance(&scene.meshes[base].payload) {
+        return Ok((base, false));
+    }
+    let loaded_before = scene.counts.meshes_loaded;
+    let variant = cached_mesh(
+        scene,
+        by_source,
+        load,
+        local_bounds,
+        neutral_groups,
+        source,
+        Some(editor_color),
+    )?;
+    scene.counts.editor_color_variants += scene.counts.meshes_loaded - loaded_before;
+    Ok((variant, true))
+}
+
+fn cached_mesh<T>(
+    scene: &mut LevelScene<T>,
+    by_source: &mut MeshCache,
+    load: &mut impl FnMut(&MeshSource, Option<u32>) -> Result<T, String>,
     local_bounds: &impl Fn(&T) -> Option<[[f32; 3]; 2]>,
     neutral_groups: &impl Fn(&T) -> bool,
     source: &MeshSource,
+    color: Option<u32>,
 ) -> Result<usize, String> {
-    if let Some(r) = by_source.get(source) {
+    let key = (source.clone(), color);
+    if let Some(r) = by_source.get(&key) {
         return r.clone();
     }
     let r = if scene.meshes.len() >= MAX_LEVEL_MESHES {
         Err("Unsupported: level distinct-mesh budget".to_string())
     } else {
-        load(source).map(|payload| {
+        load(source, color).map(|payload| {
             scene.meshes.push(SceneMesh {
                 source: source.clone(),
                 bounds: local_bounds(&payload),
@@ -1298,7 +1394,7 @@ fn scene_mesh_index<T>(
     } else {
         scene.counts.meshes_failed += 1;
     }
-    by_source.insert(source.clone(), r.clone());
+    by_source.insert(key, r.clone());
     r
 }
 
@@ -1309,11 +1405,12 @@ fn scene_mesh_index<T>(
 #[allow(clippy::too_many_arguments)]
 fn add_decorations<T>(
     scene: &mut LevelScene<T>,
-    by_source: &mut HashMap<MeshSource, Result<usize, String>>,
-    load: &mut impl FnMut(&MeshSource) -> Result<T, String>,
+    by_source: &mut MeshCache,
+    load: &mut impl FnMut(&MeshSource, Option<u32>) -> Result<T, String>,
     local_bounds: &impl Fn(&T) -> Option<[[f32; 3]; 2]>,
     neutral_groups: &impl Fn(&T) -> bool,
     bind_poses: &impl Fn(&T) -> Vec<BindPose>,
+    uses_instance: &impl Fn(&T) -> bool,
     placement: PosPlacement,
     t: &ThingRecord,
 ) {
@@ -1345,13 +1442,15 @@ fn add_decorations<T>(
             );
             continue;
         }
-        let mesh = match scene_mesh_index(
+        let (mesh, colored) = match scene_mesh_index(
             scene,
             by_source,
             load,
             local_bounds,
             neutral_groups,
+            uses_instance,
             &source,
+            rm.editor_color,
         ) {
             Ok(i) => i,
             Err(e) => {
@@ -1375,6 +1474,7 @@ fn add_decorations<T>(
         }
         scene.counts.decorations_drawn += 1;
         scene.counts.decorations_drawn_neutral += usize::from(scene.meshes[mesh].neutral_groups);
+        scene.counts.drawn_editor_colored += usize::from(colored);
         scene.items.push(SceneItem {
             mesh,
             world,
@@ -1861,6 +1961,14 @@ fn points_bounds(points: &[[f32; 3]]) -> Option<[[f32; 3]; 2]> {
     (lo[0] <= hi[0]).then_some([lo, hi])
 }
 
+/// D191: some group's material took the supplied instance colour.
+fn uses_instance_color(g: &GroupedMesh) -> bool {
+    g.bindings
+        .iter()
+        .flatten()
+        .any(|b| b.instance_projection().is_some())
+}
+
 fn grouped_neutral(g: &GroupedMesh) -> bool {
     g.geometry
         .primitive_triangles
@@ -1983,9 +2091,18 @@ pub fn load_level_scene_with_options(
         .iter()
         .map(|r| (*r, Default::default()))
         .collect();
-    let mut scene = build_scene(
+    // D191: explicit inputs win; shapes keep the explicit colour only (PShape.color is
+    // not wired here), the backdrop takes the standalone white.
+    let explicit_color = options.instance_color;
+    let (options, _) = scene_options.defaults.apply(options);
+    let thing_colors = scene_options.defaults.instance_white && explicit_color.is_none();
+    let shape_options = PreviewOptions {
+        instance_color: explicit_color,
+        ..options
+    };
+    let mut scene = build_scene_with_colors(
         &report.things,
-        |src| {
+        |src, editor_color| {
             control.check()?;
             let key = match src {
                 MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
@@ -1996,6 +2113,10 @@ pub fn load_level_scene_with_options(
                 | MeshSource::JointSkin { .. }
                 | MeshSource::BoneSkin { .. } => return Err("Invalid: shape source".into()),
             };
+            let mut options = options;
+            if let Some(c) = editor_color.filter(|_| thing_colors) {
+                options.instance_color = Some(editor_color_tint(c));
+            }
             let mut mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
             if let MeshSource::Guid(g) = src {
                 apply_runtime_textures(
@@ -2016,6 +2137,7 @@ pub fn load_level_scene_with_options(
         payload_bounds,
         |p| matches!(p, ScenePayload::Model(m) if grouped_neutral(m)),
         model_bind_poses,
+        |p| thing_colors && matches!(p, ScenePayload::Model(m) if uses_instance_color(m)),
         scene_options.placement,
     );
     scene.counts.runtime_textures = runtime_counts;
@@ -2112,7 +2234,7 @@ pub fn load_level_scene_with_options(
                     batch.positions.len(),
                     crate::linked::UvInput::Generated(&batch.uv0),
                     control,
-                    options,
+                    shape_options,
                 )?;
                 charge(asset.retained_bytes())?;
                 Ok(std::sync::Arc::new(asset))
@@ -3439,5 +3561,95 @@ mod tests {
             found.iter().map(|c| (c.0, c.1[12])).collect::<Vec<_>>(),
             [(1, 2.), (4, 5.)]
         );
+    }
+
+    #[test]
+    fn d191_editor_color_variants_only_for_instance_meshes() {
+        let colored = |i, mesh, color| {
+            let mut t = thing(i, Some(mesh), Some(identity_at(i as f32)));
+            t.data.render_mesh.as_mut().unwrap().editor_color = color;
+            t
+        };
+        let things = [
+            colored(0, 0x10, EDITOR_COLOR_WHITE),
+            colored(1, 0x10, 0xffff_0000),
+            colored(2, 0x10, 0xffff_0000),
+            colored(3, 0x10, 0x8000_00ff),
+            colored(4, 0x20, 0xffff_0000), // colour-blind mesh: stays shared
+        ];
+        let mut calls = Vec::new();
+        let scene = build_scene_with_colors(
+            &things,
+            |s, c| {
+                calls.push((s.clone(), c));
+                match s {
+                    MeshSource::Guid(g) => Ok((*g, c)),
+                    _ => unreachable!(),
+                }
+            },
+            |_| None,
+            |_| false,
+            |_| Vec::new(),
+            |&(g, _)| g == 0x10,
+            PosPlacement::PosOnly,
+        );
+        assert_eq!(
+            calls,
+            [
+                (MeshSource::Guid(0x10), None),
+                (MeshSource::Guid(0x10), Some(0xffff_0000)),
+                (MeshSource::Guid(0x10), Some(0x8000_00ff)),
+                (MeshSource::Guid(0x20), None),
+            ]
+        );
+        let payloads: Vec<_> = scene
+            .items
+            .iter()
+            .map(|i| scene.meshes[i.mesh].payload)
+            .collect();
+        assert_eq!(
+            payloads,
+            [
+                (0x10, None),
+                (0x10, Some(0xffff_0000)),
+                (0x10, Some(0xffff_0000)),
+                (0x10, Some(0x8000_00ff)),
+                (0x20, None),
+            ]
+        );
+        let c = &scene.counts;
+        assert_eq!((c.drawn_editor_colored, c.editor_color_variants), (3, 2));
+        assert_eq!(c.meshes_loaded, 4);
+        // The plain build_scene ignores colours (one load per source).
+        let plain = build_scene(
+            &things,
+            |s| match s {
+                MeshSource::Guid(g) => Ok(*g),
+                _ => unreachable!(),
+            },
+            |_| None,
+            |_| false,
+            |_| Vec::new(),
+            PosPlacement::PosOnly,
+        );
+        assert_eq!(
+            (
+                plain.counts.meshes_loaded,
+                plain.counts.drawn_editor_colored
+            ),
+            (2, 0)
+        );
+    }
+
+    #[test]
+    fn d191_editor_color_is_packed_argb() {
+        assert_eq!(editor_color_tint(EDITOR_COLOR_WHITE).values(), [1.; 4]);
+        assert_eq!(
+            editor_color_tint(0x80ff_0000).values(),
+            [1., 0., 0., 128. / 255.]
+        );
+        assert_eq!(editor_color_tint(0xff00_ff00).values(), [0., 1., 0., 1.]);
+        assert_eq!(editor_color_tint(0xff00_00ff).values(), [0., 0., 1., 1.]);
+        assert!(editor_color_tint(0x1234_5678).validate().is_ok());
     }
 }
