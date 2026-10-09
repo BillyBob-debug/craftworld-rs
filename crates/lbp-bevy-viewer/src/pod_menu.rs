@@ -271,18 +271,25 @@ fn spin(time: Res<Time>, mut globes: Query<&mut Transform, With<Globe>>) {
     }
 }
 
-fn keys(input: Res<ButtonInput<KeyCode>>, mut menu: ResMut<Menu>) {
+/// Keyboard arrows/Enter or gamepad D-pad/Cross; with the Pod shell only while open.
+fn keys(
+    input: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    puter: Option<Res<PuterState>>,
+    mut menu: ResMut<Menu>,
+) {
     let n = menu.menu.pills.len();
-    if n == 0 {
+    if n == 0 || puter.is_some_and(|p| p.t < 0.99) {
         return;
     }
-    if input.just_pressed(KeyCode::ArrowDown) {
+    let pad = |b| pads.iter().any(|g| g.just_pressed(b));
+    if input.just_pressed(KeyCode::ArrowDown) || pad(GamepadButton::DPadDown) {
         menu.focused = (menu.focused + 1) % n;
     }
-    if input.just_pressed(KeyCode::ArrowUp) {
+    if input.just_pressed(KeyCode::ArrowUp) || pad(GamepadButton::DPadUp) {
         menu.focused = (menu.focused + n - 1) % n;
     }
-    if input.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) {
+    if input.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) || pad(GamepadButton::South) {
         println!("Pod menu: chose {}", menu.menu.pills[menu.focused].label);
     }
 }
@@ -350,6 +357,11 @@ pub const PAD_CLOSED: ([f32; 2], f32) = ([0.50, 0.70], 0.15);
 pub const PAD_OPEN: ([f32; 2], f32) = ([0.50, 0.86], 0.17);
 /// Opening the Puter takes about a second (RPCS3).
 pub const DOLLY_SECONDS: f32 = 1.0;
+/// Sackboy standing in the closed view: head top and feet as fractions of the 16:9
+/// height, centred at 0.50 of the width (RPCS3, about 0.02).
+pub const SACKBOY_CLOSED: [f32; 2] = [0.56, 0.82];
+/// Sackboy holding the controller, seen from behind, Puter open: centre (RPCS3, 0.02).
+pub const SACKBOY_OPEN: [f32; 2] = [0.50, 0.90];
 
 /// Two layers as the game appears to draw them: the Pod shell (tent, DualShock) over the
 /// planets view through its window, each seen by its own camera. The viewer has one
@@ -362,6 +374,7 @@ pub struct PodRig {
     pub globe_z: f32,
     pub shell: [Vec3; 2],
     pub scale: f32,
+    pub fov: f32,
 }
 
 impl PodRig {
@@ -387,6 +400,7 @@ impl PodRig {
             globe_z: g.z,
             shell,
             scale,
+            fov,
         }
     }
 
@@ -398,6 +412,23 @@ impl PodRig {
     /// The planets eye at opening progress `t` (0 closed, 1 open, eased).
     pub fn planet_eye(&self, t: f32) -> Vec3 {
         Self::at(self.planet, t)
+    }
+
+    /// Where a shell display-space point appears at `t`, as 16:9 frame fractions.
+    pub fn shell_frac(&self, t: f32, q: Vec3) -> [f32; 2] {
+        let c = Mat4::perspective_rh(self.fov, ASPECT, 0.001, 1000.)
+            .project_point3(q - Self::at(self.shell, t));
+        [(c.x + 1.) / 2., (1. - c.y) / 2.]
+    }
+
+    /// Feet position (shell display space) for an upright figure `h` display units tall
+    /// that the closed shell eye sees centred in x with head top and feet at
+    /// `SACKBOY_CLOSED`. Solves depth from the projected height, then height from the feet.
+    pub fn fit_figure(&self, h: f32) -> Vec3 {
+        let tan = (self.fov / 2.).tan();
+        let [top, feet] = SACKBOY_CLOSED;
+        let depth = h / ((feet - top) * 2. * tan);
+        self.shell[0] + Vec3::new(0., (0.5 - feet) * 2. * tan * depth, -depth)
     }
 
     /// The shell root transform at `t`.
@@ -486,6 +517,14 @@ mod tests {
             // ... and in front of the globe.
             assert!(placed.z > globe.0.z);
         }
+        let closed = rig.shell_frac(0., pad.0);
+        assert!((closed[0] - PAD_CLOSED.0[0]).abs() < 1e-3);
+        assert!((closed[1] - PAD_CLOSED.0[1]).abs() < 1e-3);
+        let feet = rig.fit_figure(0.05);
+        let [x, low] = rig.shell_frac(0., feet);
+        let top = rig.shell_frac(0., feet + Vec3::Y * 0.05)[1];
+        assert!((x - 0.5).abs() < 1e-4 && (low - SACKBOY_CLOSED[1]).abs() < 1e-4);
+        assert!((top - SACKBOY_CLOSED[0]).abs() < 1e-4, "{top}");
         let far = rig.shell_root(0.).transform_point(Vec3::new(0., 0., -0.4));
         assert!(far.z > globe.0.z);
     }
