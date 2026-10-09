@@ -150,6 +150,25 @@ by material: hologram 3,970 of 21,260, metal 3,255, `general_infinite_mass` 814 
 behaviour until RMaterial is read); it reports `no_collide_material_paths`. Test
 `no_collide_material_is_not_a_collider`. Not tested: levels after the change.
 
+## Part 2d: crossing outlines filled, wake census (2026-10-09)
+
+PC `d189` `--all` on D175: 5,868 of 52,657 bodies moved more than 100 (5,280 down; 5,858
+of them frozen = 1, so woken rather than never asleep). 8,228 shapes rejected: no triangles
+4,405, self_intersecting 3,680, loop_too_small 58, zero_area_loop 57, no_loops 26,
+hole_outside_outer 2. A rejected terrain shape is a missing floor.
+
+`lbp_level::shape_mesh::outline_triangles_lenient` keeps the strict outline when it passes
+and otherwise (self-intersecting, loops intersecting, hole outside or nested, failed ear
+clip, area mismatch) fills the loops by the even-odd rule: slabs cut at every vertex and
+crossing height, each slab's spans become trapezoids. INFERRED: the game evidently fills
+such outlines (they stand in shipped levels); even-odd versus nonzero differs only where a
+loop overlaps itself. The renderer still uses the strict path. `SceneReport::filled` counts
+the shapes kept this way by reason; "no triangles" is split into flat transform, tiny
+outline and other. `level_physics` adds `filled`, a `first_moved_tick` key to `why_moved`
+(1, 2-5, 6-30, 31+, never) and `levels_most_moved_top15`. Tests:
+`lenient_outline_fills_crossing_loops_by_even_odd` (lbp-level),
+`crossing_outline_is_filled_and_holds_a_box` (lbp-sim). Not tested: levels after the change.
+
 ## Part 3: Sackboy movement rules (2026-10-09)
 
 `lbp_sim::sackboy`: a Bevy-free per-tick controller. The caller supplies the pad state,
