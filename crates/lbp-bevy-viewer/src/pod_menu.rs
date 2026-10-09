@@ -357,6 +357,67 @@ pub const PAD_CLOSED: ([f32; 2], f32) = ([0.50, 0.70], 0.15);
 pub const PAD_OPEN: ([f32; 2], f32) = ([0.50, 0.86], 0.17);
 /// Opening the Puter takes about a second (RPCS3).
 pub const DOLLY_SECONDS: f32 = 1.0;
+
+/// P2k: one PlanetsView (PlanetsWorld script): pitch, yaw (radians) and offset (level
+/// units). CONFIRMED_FROM_LOCAL_DATA: view 0 from the D180/D174 VM trace, view 1 (main
+/// menu) matches the RPCS3 World matrix read (docs/p2k-pod-game-camera.md).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlanetsView {
+    pub pitch: f32,
+    pub yaw: f32,
+    pub offset: Vec3,
+}
+/// Puter not in use (view 0) and the main menu (view 1).
+pub const VIEW_CLOSED: PlanetsView = PlanetsView {
+    pitch: 0.15,
+    yaw: -0.07,
+    offset: Vec3::new(0., 0., -15000.),
+};
+pub const VIEW_MENU: PlanetsView = PlanetsView {
+    pitch: 0.35,
+    yaw: -0.07,
+    offset: Vec3::new(-700., 400., -5000.),
+};
+/// The game's camera presets (`from`, `to`; level units, up +Y), not in use then in use
+/// (D169 script trace; RPCS3 view rotation confirms the in-use pitch).
+pub const CAMERA_PRESETS: [[Vec3; 2]; 2] = [
+    [Vec3::new(0., -250., 1130.), Vec3::new(0., 100., -1500.)],
+    [Vec3::new(0., -300., 900.), Vec3::new(0., 500., -1500.)],
+];
+/// Vertical field of view from RPCS3's projection block (16:9, horizontal scale 1.0296):
+/// 2 atan(1 / 1.8305) = 57.3 degrees. CONFIRMED_FROM_LOCAL_DATA (in-use menu only).
+pub const GAME_FOV: f32 = 0.999_994;
+/// Earth and Moon placement in the main menu, in World (Thing 0) space: translation and
+/// uniform scale (RPCS3 world matrices / World; their stored POS differ).
+pub const EARTH_MENU: (Vec3, f32) = (Vec3::new(-1250., 0., 0.), 1.3505);
+pub const MOON_MENU: (Vec3, f32) = (Vec3::new(2000., 0., 0.), 1.5444);
+/// pod_planets Thing 4, the Moon (Thing 1 is the Earth, `--pod-camera 1`).
+pub const MOON_THING: usize = 4;
+
+/// P2k: World (pod_planets Thing 0) matrix for view `v` with the camera at `eye` (level
+/// units, column vectors): scale 2 about the eye, then pitch, offset and yaw:
+/// `T(eye) S(2) T(-eye) Rx(pitch) T(offset) Ry(yaw)`.
+pub fn planets_world(v: PlanetsView, eye: Vec3) -> Mat4 {
+    Mat4::from_translation(eye)
+        * Mat4::from_scale(Vec3::splat(2.))
+        * Mat4::from_translation(-eye)
+        * Mat4::from_rotation_x(v.pitch)
+        * Mat4::from_translation(v.offset)
+        * Mat4::from_rotation_y(v.yaw)
+}
+
+/// P2k: the view and camera eye at opening progress `t` (eased like the dolly; the game
+/// blends the view and the camera separately, so mid-dolly frames are approximate).
+pub fn planets_world_at(t: f32) -> Mat4 {
+    let e = PodRig::ease_pub(t);
+    let lerp = |a: f32, b: f32| a + (b - a) * e;
+    let v = PlanetsView {
+        pitch: lerp(VIEW_CLOSED.pitch, VIEW_MENU.pitch),
+        yaw: lerp(VIEW_CLOSED.yaw, VIEW_MENU.yaw),
+        offset: VIEW_CLOSED.offset.lerp(VIEW_MENU.offset, e),
+    };
+    planets_world(v, CAMERA_PRESETS[0][0].lerp(CAMERA_PRESETS[1][0], e))
+}
 /// Sackboy standing in the closed view: head top and feet as fractions of the 16:9
 /// height, centred at 0.50 of the width (RPCS3, about 0.02).
 pub const SACKBOY_CLOSED: [f32; 2] = [0.56, 0.82];
@@ -395,6 +456,11 @@ pub struct PodRig {
     pub tent_rot: [Quat; 2],
     pub scale: f32,
     pub fov: f32,
+    /// P2k: the planets camera turn, closed then open (identity = looking -Z; the fitted
+    /// eyes). `with_planets_camera` sets it from the game's presets.
+    pub planet_rot: [Quat; 2],
+    /// P2k: distance along the view from the closed planets eye to the globe (orbit target).
+    pub focus: f32,
 }
 
 impl PodRig {
@@ -428,7 +494,32 @@ impl PodRig {
             tent_rot: [Quat::from_rotation_x(tilt), Quat::IDENTITY],
             scale,
             fov,
+            planet_rot: [Quat::IDENTITY; 2],
+            focus: planet[0].z - g.z,
         }
+    }
+
+    /// P2k: the planets eyes from the game's camera presets (`from`/`to` pairs, closed then
+    /// open, display space, up +Y) instead of the globe fit. `globe` is where the globe
+    /// shows when closed (display, after the World transform); `scale` is reset so the
+    /// shell's far side stays at half the closed view distance to it.
+    pub fn with_planets_camera(mut self, presets: [[Vec3; 2]; 2], globe: Vec3) -> Self {
+        for (i, [from, to]) in presets.into_iter().enumerate() {
+            self.planet[i] = from;
+            self.planet_rot[i] = Transform::from_translation(from)
+                .looking_at(to, Vec3::Y)
+                .rotation;
+        }
+        let forward = self.planet_rot[0] * Vec3::NEG_Z;
+        let old = self.focus;
+        self.focus = (globe - self.planet[0]).dot(forward).max(1e-6);
+        self.scale *= self.focus / old;
+        self
+    }
+
+    /// P2k: the planets camera turn at `t`.
+    pub fn planet_turn(&self, t: f32) -> Quat {
+        self.planet_rot[0].slerp(self.planet_rot[1], Self::ease(t))
     }
 
     /// P2f: the closed shell eye from the game's camera preset (`from` looking at `to`, up
@@ -454,8 +545,12 @@ impl PodRig {
         // The preset replaces the fitted tilt too.
         self.tent[0] = from;
         self.tent_rot[0] = rot;
-        self.scale = 0.5 * (self.planet[0].z - self.globe_z) / depth;
+        self.scale = 0.5 * self.focus / depth;
         self
+    }
+
+    pub fn ease_pub(t: f32) -> f32 {
+        Self::ease(t)
     }
 
     fn ease(t: f32) -> f32 {
@@ -472,12 +567,13 @@ impl PodRig {
     }
 
     /// `X -> P + scale R^-1 (X - S)` for a layer whose eye is `s` turned by `rot`.
+    /// P2k: with a turned planets camera `Rp`, `X -> P + scale Rp R^-1 (X - S)`.
     fn layer(&self, t: f32, s: Vec3, rot: Quat) -> Transform {
         let p = self.planet_eye(t);
-        let inv = rot.inverse();
+        let turn = self.planet_turn(t) * rot.inverse();
         Transform {
-            translation: p - inv * (s * self.scale),
-            rotation: inv,
+            translation: p - turn * (s * self.scale),
+            rotation: turn,
             scale: Vec3::splat(self.scale),
         }
     }
@@ -588,6 +684,73 @@ pub fn install_overlay(app: &mut App) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn p2k_planets_world_matches_the_game_and_frames_the_globe_and_moon() {
+        // RPCS3 in-use main menu World matrix (translation at 12..14).
+        let game = Mat4::from_cols_array(&[
+            1.995, -0.04797, 0.1314, 0., 0., 1.879, 0.6858, 0., -0.1399, -0.6841, 1.874, 0.,
+            -1400., 4480., -10020., 1.,
+        ]);
+        let ours = planets_world(VIEW_MENU, CAMERA_PRESETS[1][0]);
+        assert!(ours.abs_diff_eq(game, 1.5), "{ours:?}");
+        assert_eq!(planets_world_at(1.), ours);
+        // Through the game camera: Earth and Moon centres where RPCS3 shows them (open,
+        // 16:9 frame fractions) and the Earth where the closed reference has it.
+        let frac = |t: f32, local: Vec3| {
+            let [from, to] = CAMERA_PRESETS[usize::from(t > 0.5)];
+            let view = Mat4::look_at_rh(from, to, Vec3::Y);
+            let c = Mat4::perspective_rh(GAME_FOV, ASPECT, 10., 100000.)
+                .project_point3(view.transform_point3(planets_world_at(t).transform_point3(local)));
+            [(c.x + 1.) / 2., (1. - c.y) / 2.]
+        };
+        let near =
+            |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 0.03 && (a[1] - b[1]).abs() < 0.03;
+        assert!(
+            near(frac(1., EARTH_MENU.0), [0.35, 0.40]),
+            "{:?}",
+            frac(1., EARTH_MENU.0)
+        );
+        assert!(
+            near(frac(1., MOON_MENU.0), [0.605, 0.417]),
+            "{:?}",
+            frac(1., MOON_MENU.0)
+        );
+        assert!(
+            near(frac(0., EARTH_MENU.0), GLOBE_CLOSED.0),
+            "{:?}",
+            frac(0., EARTH_MENU.0)
+        );
+    }
+
+    #[test]
+    fn p2k_turned_planets_camera_keeps_the_shell_projection() {
+        let fov = GAME_FOV;
+        let globe = (Vec3::new(-0.3, 0.2, 0.0), 0.25);
+        let pad = (Vec3::new(0.01, -0.2, -0.1), 0.12);
+        let presets = [
+            [Vec3::new(0., -0.1, 1.), Vec3::new(0., 0.2, -1.)],
+            [Vec3::new(0., -0.12, 0.8), Vec3::new(0., 0.5, -1.)],
+        ];
+        let plain = PodRig::new(globe, pad, -0.4, fov);
+        let rig = plain.with_planets_camera(presets, globe.0);
+        let projection = Mat4::perspective_rh(fov, ASPECT, 0.001, 1000.);
+        for t in [0., 0.5, 1.] {
+            let q = Vec3::new(0.05, -0.15, -0.2);
+            // Seen from the planets camera, the placed shell point projects where the
+            // shell eye sees it.
+            let placed = rig.shell_root(t).transform_point(q);
+            let local = rig.planet_turn(t).inverse() * (placed - rig.planet_eye(t));
+            let c = projection.project_point3(local);
+            let got = [(c.x + 1.) / 2., (1. - c.y) / 2.];
+            let want = rig.shell_frac(t, q);
+            assert!((got[0] - want[0]).abs() < 1e-4 && (got[1] - want[1]).abs() < 1e-4);
+        }
+        // Half the closed view distance to the globe, as before.
+        let far = rig.shell_root(0.).transform_point(Vec3::new(0., 0., -0.4));
+        let forward = rig.planet_rot[0] * Vec3::NEG_Z;
+        assert!(((far - rig.planet[0]).dot(forward) / rig.focus - 0.5).abs() < 0.05);
+    }
 
     #[test]
     fn p2b_rig_keeps_each_layer_where_its_reference_puts_it() {
