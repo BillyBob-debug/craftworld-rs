@@ -1,5 +1,8 @@
 # Development log
 
+## 2026-10-09 — B179 PC verification of D192
+- STATUS.md B179: #95 checks, Bravery Test 35 -> 22 neutral, census unchanged, captures.
+
 ## 2026-10-09 — D192 material-less primitives hidden
 
 The game skips primitives that have no material (Ghidra, confirmed), so the viewer now hides

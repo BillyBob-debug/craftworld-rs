@@ -3932,3 +3932,17 @@ levels, baseline D149 0) / +0 newly Complete.**
 - Cloud: lbp-preview lib tests 116 pass, lbp-catalog tests pass, fmt clean. No game data.
 - Not tested here: level report after the change, close-camera capture (PC).
 **+0 newly viewable / +0 newly Complete.**
+
+## B179 — PC verification of D192 (PR #95) (2026-10-09)
+- Head c1e201e vs main 9c69018, rustc 1.99.0: fmt clean; CI-crate tests 430 pass; Clippy
+  -D warnings pass (CI crates plus both viewers).
+- Bravery Test (main_04_bravery_test.bin; GUID 0001e795): neutral Things 35 -> 22, all
+  00019e98 (material-less + folded-sampler nested-tint group); draw entities 2112 -> 2093;
+  meshes 65/0 failed, placements unchanged. tutorial_23 (0001db4f): 1 neutral, unchanged.
+- Corpus mesh census (default): 4,261 / 4,259 viewable / 4,239 all-diffuse, identical to
+  b177 per GUID (0 lost). local-analysis/pr95/.
+- Gameplay-distance captures (eye target + (296,168,1218), vfov 60; local env-var camera
+  patch, not in git): crane 000150dc slabs and 00018d2b frames gone, no holes. A grey square
+  on the central beam still draws; likely shape batches gfx 00012ba7/00018401 (INFERRED).
+- Not done: Pod planets 0001d050 vs RPCS3 (no frame on hand).
+**+0 newly viewable / +0 newly Complete.**
