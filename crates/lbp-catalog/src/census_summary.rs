@@ -684,7 +684,7 @@ impl CorpusCounts {
                 push(
                     LineKind::Note,
                     format!(
-                        "Material-less groups excluded from all-diffuse: {} (no material descriptor; game draw UNKNOWN; drawn neutral).",
+                        "Material-less groups excluded from all-diffuse: {} (no material descriptor; the game skips their colour draw, D192; not drawn).",
                         group(n)
                     ),
                 );

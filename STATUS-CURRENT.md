@@ -110,6 +110,7 @@ more story levels on screen; Toolkit spot-check for U4 slot lists (not done).
   `docs/route-census.md` (D64), `docs/unwired-diffuse-preview.md` (D63).
 - Format evidence: `docs/formats.md` (grep headings). Rules: `AGENTS.md`.
 
-Latest (2026-10-09): D175 merged (lbp-sim physics; Rookie Test 0 moved). Pod: closed window,
+Latest (2026-10-09): D192 material-less primitives hidden (game skips them; PR #95);
+D191 level Things use editorColor (PR #93). Earlier: D175 merged (lbp-sim physics; Rookie Test 0 moved). Pod: closed window,
 wall-art side panels, in-use camera match RPCS3; FOV hfov 88.3 deg; menu uses PlanetsView 1.
 Script VM 512/513; threads (D171); viewer --level-scripts (D172). STATUS.md D160-D175.

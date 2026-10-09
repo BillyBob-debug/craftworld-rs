@@ -226,7 +226,7 @@ pub fn load_mesh_groups_with_options(
 
 /// D188: neutral reason for a material-less primitive (see [`is_materialless`]).
 pub const MATERIALLESS_REASON: &str =
-    "Material-less: no material descriptor (game draw UNKNOWN; drawn neutral, no diffuse invented)";
+    "Material-less: no material descriptor (game skips its colour draw, D192; not drawn, no diffuse invented)";
 
 /// D188: a primitive whose material and alternatives descriptors are both entirely
 /// absent (no GUID, no hash, kind 0, flags 0). Descriptor shape

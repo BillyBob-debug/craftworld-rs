@@ -3905,3 +3905,30 @@ levels, baseline D149 0) / +0 newly Complete.**
   b177-davinci-level.png; screenshot page v21 (Assets section).
 - Verification comment: https://github.com/chilladept/lbp2-asset-explorer/pull/91#issuecomment-6088230961
 **+0 newly viewable / +0 newly Complete; all-diffuse 3,798 -> 4,239 by default.**
+
+## D191 — level scenes use the asset defaults (PR #93) (2026-10-09)
+- Level scenes now apply the D188 preview defaults (animation base values, white instance colour)
+  and tint each Thing by its editorColor as THING_COLOR (mapping inferred).
+- PC check at 527f6a8 (rustc 1.99): fmt, lbp-preview tests (114 + 6), Clippy -D warnings clean.
+- --level-report, new vs old (--no-instance-default --no-animation-base): Bravery Test neutral
+  Things 195 -> 35, 9 editorColor Things (4 mesh+colour variants), meshes 61 -> 65 loaded, 0
+  failed, backdrop flat-fallback primitives 4 -> 0; tutorial_23 (0001db4f) neutral 2 -> 1.
+  No error, memory or budget lines.
+- Captures local-analysis/b178-bravery-{before,after}[-detail].png: overview differs in 615
+  pixels, mean luma unchanged, no dark or black tints seen. editorColor tint values are not
+  visually proven (most changed Things are off-frame or small at the default camera).
+- Verification: https://github.com/chilladept/lbp2-asset-explorer/pull/93#issuecomment-6088926155
+**+0 newly viewable / +0 newly Complete (level fidelity: 160 fewer neutral Things in Bravery Test).**
+
+## D192 — material-less primitives hidden (PR #95) (2026-10-09)
+- PC Ghidra (01.33 EBOOT): the per-primitive draw loop skips a null-material primitive (no
+  bind, no draw; 0x33c814, test 0x33ca88), CONFIRMED. A whole-mesh depth/shadow use is
+  INFERRED. docs/d192-materialless-hidden.md.
+- Viewer no longer draws material-less groups (single mesh and levels); level neutral count
+  ignores them. --level-report lists the binding error per neutral group.
+- PC report at ea55c1e (before): Bravery Test 35 neutral Things, every one with a
+  material-less group; 00019e98 (22) also has a folded-sampler nested-tint group.
+- Folds in #94's D191 STATUS/MODLOG entries.
+- Cloud: lbp-preview lib tests 116 pass, lbp-catalog tests pass, fmt clean. No game data.
+- Not tested here: level report after the change, close-camera capture (PC).
+**+0 newly viewable / +0 newly Complete.**
