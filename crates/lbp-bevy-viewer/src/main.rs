@@ -100,6 +100,9 @@ struct LevelMode {
     /// P2f `--pod-shell-camera FX,FY,FZ,TX,TY,TZ`: the closed shell eye from the game's
     /// camera preset (shell level units, up +Y) instead of the DualShock fit.
     shell_camera: Option<[f32; 6]>,
+    /// P2i `--glass MESH:SLOT:ALPHA` (repeatable): groups of MESH whose material lists
+    /// SLOT as unrendered draw alpha blended at ALPHA (inferred; docs/p2i-pod-glass.md).
+    glass: Vec<Glass>,
     lines: Vec<String>,
     home: Option<Orbit>,
 }
@@ -458,7 +461,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-open: start open; --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-open: start open; --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--glass MESH:SLOT:ALPHA (hex GUID, slot 0-7, alpha 0-1, repeatable): with a level (and --pod-shell), draw groups of that mesh whose material lists SLOT as unrendered alpha blended at ALPHA, so what is behind shows through (inferred: Pod side panels, window_glassy)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -498,6 +501,20 @@ fn options() -> Result<Viewer, String> {
             "--level-path" => v.level.path = Some(value),
             "--level-placement" => v.level.placement = level_scene::PosPlacement::parse(&value)?,
             "--runtime-texture" => push_runtime_texture(&mut v.level.runtime_textures, &value)?,
+            "--glass" => {
+                let rule = Glass::parse(&value)?;
+                if v.level
+                    .glass
+                    .iter()
+                    .any(|g| (g.mesh, g.slot) == (rule.mesh, rule.slot))
+                {
+                    return Err("--glass: MESH:SLOT given twice".into());
+                }
+                if v.level.glass.len() >= MAX_GLASS {
+                    return Err(format!("--glass: at most {MAX_GLASS} rules"));
+                }
+                v.level.glass.push(rule);
+            }
             "--pod-t" => {
                 let t = value
                     .parse::<f32>()
@@ -839,8 +856,14 @@ fn load(
         v.context = Some(done.context);
         if let Some(level) = done.level {
             let level = level?;
-            let plan = plan_level(&level.scene, v.level.focus, v.level.pod)?;
-            let rig = match (&level.shell, v.level.pod) {
+            let mut plan = plan_level(&level.scene, v.level.focus, v.level.pod)?;
+            let mut glass_lines = vec![mark_glass(
+                "Main level",
+                &level.scene,
+                &mut plan,
+                &v.level.glass,
+            )];
+            let mut rig = match (&level.shell, v.level.pod) {
                 (Some(shell), Some(globe)) => Some(pod_shell(
                     &level.scene,
                     &plan,
@@ -850,6 +873,10 @@ fn load(
                 )?),
                 _ => None,
             };
+            if let (Some(shell), Some((_, shell_plan, _))) = (&level.shell, &mut rig) {
+                glass_lines.push(mark_glass("Shell", shell, shell_plan, &v.level.glass));
+            }
+            glass_lines.retain(|l| !l.is_empty());
             spawn_level(
                 &mut v,
                 &mut commands,
@@ -927,6 +954,7 @@ fn load(
                     hold: t0 > 0. && t0 < 1.,
                 });
                 v.level.lines.push(rig_line);
+                v.level.lines.extend(glass_lines.iter().cloned());
                 let line = match done.preview {
                     Ok(Some(preview)) => spawn_figure(
                         &mut v,
@@ -1060,6 +1088,10 @@ struct Prepared {
     decal: bool,
     /// D121: generated normals usable for preview lighting.
     normals_trusted: bool,
+    /// P2i: the bucket material's unrendered texture slots (for `--glass`).
+    unrendered_slots: Vec<usize>,
+    /// P2i: `--glass` alpha (alpha blended, untextured surfaces only see the colour alpha).
+    translucent: Option<f32>,
 }
 fn prepare(
     preview: &lbp_preview::GroupedMesh,
@@ -1138,6 +1170,9 @@ fn prepare_buckets(
             Err(e) => return Err(e),
         };
         let normals_trusted = adapter::mesh_normals_trusted(&mesh);
+        let unrendered_slots = asset
+            .as_deref()
+            .map_or(Vec::new(), |a| a.additional_texture_slots().to_vec());
         let alpha_mix = asset
             .as_ref()
             .and_then(|a| a.texture())
@@ -1221,6 +1256,8 @@ fn prepare_buckets(
             alpha_mix,
             decal: false,
             normals_trusted,
+            unrendered_slots,
+            translucent: None,
         });
     }
     if prepared.is_empty() {
@@ -1236,11 +1273,11 @@ fn upload(
 ) -> (Handle<Mesh>, Handle<ViewerMaterial>, Option<Handle<Image>>) {
     let image = p.image.map(|i| images.add(i));
     let mut surface = dual::material(StandardMaterial {
-        base_color: p.color,
+        base_color: p.translucent.map_or(p.color, |a| p.color.with_alpha(a)),
         base_color_texture: image.clone(),
         unlit: true,
         cull_mode: None,
-        alpha_mode: if p.decal {
+        alpha_mode: if p.decal || p.translucent.is_some() {
             AlphaMode::Blend
         } else {
             AlphaMode::Opaque
@@ -1894,6 +1931,68 @@ fn spawn_level(
     v.level.lines = plan.lines;
     v.level.home = Some(plan.home);
     v.lighting.light = plan.light;
+}
+/// P2i: one `--glass MESH:SLOT:ALPHA` rule.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Glass {
+    mesh: u32,
+    slot: usize,
+    alpha: f32,
+}
+const MAX_GLASS: usize = 16;
+impl Glass {
+    fn parse(value: &str) -> Result<Self, String> {
+        const USAGE: &str = "--glass expects MESH:SLOT:ALPHA (8 hex digits, slot 0-7, alpha 0-1)";
+        let parts: Vec<&str> = value.trim().split(':').collect();
+        let [mesh, slot, alpha] = parts[..] else {
+            return Err(USAGE.into());
+        };
+        let mesh = u32::from_str_radix(mesh, 16)
+            .ok()
+            .filter(|m| mesh.len() == 8 && *m != 0)
+            .ok_or(USAGE)?;
+        let slot = slot
+            .parse::<usize>()
+            .ok()
+            .filter(|s| *s < lbp_preview::runtime_texture::MAX_TEXTURE_SLOTS)
+            .ok_or(USAGE)?;
+        let alpha = alpha
+            .parse::<f32>()
+            .ok()
+            .filter(|a| (0. ..=1.).contains(a))
+            .ok_or(USAGE)?;
+        Ok(Self { mesh, slot, alpha })
+    }
+}
+/// P2i: marks the `--glass` buckets of `plan` translucent; one count line per scene
+/// (empty without rules).
+fn mark_glass(label: &str, scene: &LevelScene, plan: &mut LevelPlan, rules: &[Glass]) -> String {
+    if rules.is_empty() {
+        return String::new();
+    }
+    let mut counts = vec![0usize; rules.len()];
+    for (mesh, prepared) in scene.meshes.iter().zip(plan.prepared.iter_mut()) {
+        let level_scene::MeshSource::Guid(guid) = mesh.source else {
+            continue;
+        };
+        let Ok(prepared) = prepared else { continue };
+        for p in prepared.iter_mut() {
+            if let Some((i, rule)) = rules
+                .iter()
+                .enumerate()
+                .find(|(_, r)| r.mesh == guid && p.unrendered_slots.contains(&r.slot))
+            {
+                p.translucent = Some(rule.alpha);
+                counts[i] += 1;
+            }
+        }
+    }
+    let parts: Vec<String> = rules
+        .iter()
+        .zip(&counts)
+        .map(|(r, n)| format!("{:08x}:{}:{} {n} buckets", r.mesh, r.slot, r.alpha))
+        .collect();
+    format!("{label}: glass (inferred) {}", parts.join(", "))
 }
 /// P2e: one `--runtime-texture` value; repeatable, conflicts and the rule cap refused.
 fn push_runtime_texture(
@@ -2697,6 +2796,21 @@ mod tests {
             app.world().get::<Window>(window).unwrap().position,
             bevy::window::WindowPosition::At(IVec2::new(20, 30))
         );
+    }
+    #[test]
+    fn p2i_glass_rule_parses_and_refuses_bad_values() {
+        let g = Glass::parse("00002f6c:0:0.35").unwrap();
+        assert_eq!((g.mesh, g.slot, g.alpha), (0x2f6c, 0, 0.35));
+        for bad in [
+            "2f6c:0:0.5",
+            "00000000:0:0.5",
+            "00002f6c:8:0.5",
+            "00002f6c:0:1.5",
+            "00002f6c:0:nan",
+            "00002f6c:0",
+        ] {
+            assert!(Glass::parse(bad).is_err(), "{bad}");
+        }
     }
     #[test]
     fn level_placement_normalizes_frames_side_on_and_counts_display_skips() {
