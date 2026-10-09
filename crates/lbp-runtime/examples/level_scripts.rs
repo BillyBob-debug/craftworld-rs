@@ -45,6 +45,7 @@ struct Totals {
     fields_matched: usize,
     fields_missing_in_class: usize,
     unconverted: usize,
+    objects_built: usize,
     classes: BTreeSet<lbp_script_vm::ClassId>,
 }
 
@@ -179,7 +180,8 @@ fn run() -> Result<(), String> {
                 continue;
             }
         };
-        let world = LevelWorld::from_things(&report.things);
+        let mut world = LevelWorld::from_things(&report.things);
+        totals.objects_built += world.bind_objects(&mut vm);
         let mut row = add_level(&vm, &world, &mut totals);
         row["level"] = serde_json::json!(label);
         row["stopped"] = serde_json::json!(report.stop.is_some());
@@ -354,6 +356,7 @@ fn run() -> Result<(), String> {
         "fields_matched": totals.fields_matched,
         "fields_missing_in_class": totals.fields_missing_in_class,
         "unconverted_values": totals.unconverted,
+        "objects_built": totals.objects_built,
         "function_names": ranked,
         "per_level": levels,
         "runs": runs,
@@ -368,7 +371,7 @@ fn run() -> Result<(), String> {
     println!(
         "scripts {scripts_loaded} (with GUID {with_guid}, not read {scripts_not_read}); \
          levels {} (not read {}); scripted things {} resolved {} (classes {}), unresolved \
-         GUIDs {}; fields matched {} missing in class {}; unconverted values {}",
+         GUIDs {}; fields matched {} missing in class {}; unconverted values {}; objects built {}",
         totals.levels,
         totals.levels_not_read,
         totals.scripted,
@@ -377,7 +380,8 @@ fn run() -> Result<(), String> {
         totals.unresolved.len(),
         totals.fields_matched,
         totals.fields_missing_in_class,
-        totals.unconverted
+        totals.unconverted,
+        totals.objects_built
     );
     for (entry, r) in &runs {
         if entry != "unbound_natives" && entry != "written" {

@@ -442,6 +442,28 @@ impl Vm {
         }
     }
 
+    /// Mutable elements of a script array (for hosts that load stored objects).
+    pub fn array_mut(&mut self, object: ObjectId) -> Option<&mut Vec<Value>> {
+        match self.heap.get_mut(object.0 as usize)? {
+            HeapObject::Array(v) => Some(v),
+            HeapObject::Instance { .. } => None,
+        }
+    }
+
+    /// Mutable fields of a script instance, including fields its class does not declare
+    /// (for hosts that load stored objects).
+    pub fn fields_mut(&mut self, object: ObjectId) -> Option<&mut BTreeMap<String, Value>> {
+        match self.heap.get_mut(object.0 as usize)? {
+            HeapObject::Instance { fields, .. } => Some(fields),
+            HeapObject::Array(_) => None,
+        }
+    }
+
+    /// Creates a script array holding `items`.
+    pub fn new_array(&mut self, items: Vec<Value>) -> Result<ObjectId, Fault> {
+        self.alloc(HeapObject::Array(items))
+    }
+
     /// Creates an instance of a loaded class with default field values.
     pub fn instantiate(&mut self, class: ClassId) -> Result<ObjectId, Fault> {
         let fields = self.field_defaults(class)?;
