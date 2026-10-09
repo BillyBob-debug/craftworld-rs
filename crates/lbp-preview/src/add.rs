@@ -390,9 +390,15 @@ mod tests {
             .is_some());
         let mut g = base.clone();
         g.boxes[2].parameters_raw[4] = 1;
-        assert!(crate::select_diffuse(&g)
-            .unwrap_err()
-            .contains("outside a separable product"));
+        // D189: a cross-channel ADD is evaluated per fragment.
+        assert!(matches!(
+            crate::select_diffuse(&g)
+                .unwrap()
+                .grid_graph
+                .unwrap()
+                .off_grid,
+            Some(crate::OffGrid::Fragment { .. })
+        ));
         // D104: UV channel word 2 samples UV0, so the grid sum still applies; an
         // unobserved word stays unsupported.
         let mut g = base.clone();

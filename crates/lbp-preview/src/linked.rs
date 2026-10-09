@@ -42,6 +42,9 @@ pub struct Asset {
     pub runtime_texture: Option<crate::runtime_texture::RuntimeOverride>,
     /// P2q opt-in bump/gloss extras (docs/p2q-bump-gloss.md).
     pub surface: Option<std::sync::Arc<crate::surface::Surface>>,
+    /// D189 per-fragment graph (docs/d189-mixed-uv-graphs.md): Bevy only; `sampling_uv`
+    /// is then raw UV0 and the primary texture is graph texture 0.
+    pub fragment: Option<Box<crate::FragmentGraph>>,
 }
 pub struct SharedSampleAsset {
     pub texture: lbp_texture::Texture,
@@ -203,6 +206,13 @@ impl MaterialAsset {
                 .map_or(0, |d| d.texture.rgba.len() + uv(&d.sampling_uv))
             + a.third.as_ref().map_or(0, |t| t.texture.rgba.len())
             + a.fourth.as_ref().map_or(0, |t| t.texture.rgba.len())
+            + a.fragment.as_ref().map_or(0, |f| {
+                f.textures
+                    .iter()
+                    .map(|t| t.texture.rgba.len())
+                    .sum::<usize>()
+                    + uv(&f.uv1)
+            })
             + surface
     }
     pub fn surface(&self) -> Option<&crate::surface::Surface> {
@@ -1865,6 +1875,7 @@ fn load_diffuse_material(
         wrap,
         selection,
         runtime_texture: None,
+        fragment: None,
     })))
 }
 
@@ -2413,7 +2424,11 @@ mod tests {
         assert!(select_diffuse(&graph).unwrap().grid_graph.is_some());
         graph.wires.pop();
         graph.boxes[3].parameters_raw[4] = 1;
-        assert!(select_diffuse(&graph).is_err());
+        // D189: MIX of COLOR and a UV0 × UV1 product is evaluated per fragment.
+        assert!(matches!(
+            select_diffuse(&graph).unwrap().grid_graph.unwrap().off_grid,
+            Some(crate::OffGrid::Fragment { .. })
+        ));
         graph.boxes[3].parameters_raw[4] = 0;
         graph.boxes[1].animations[0].component_value_count = 1;
         assert!(select_diffuse(&graph).is_err());
@@ -3188,9 +3203,11 @@ mod tests {
         let dual = select_diffuse(&graph).unwrap();
         assert!(!uses_grid(dual) && dual.texture_alpha_mix.unwrap().factor_port == 1);
         graph.wires[2].box_from = 1;
-        assert!(select_diffuse(&graph)
-            .unwrap_err()
-            .contains("port-1 sample"));
+        // D189: the port-0 factor off the grid is evaluated per fragment instead.
+        assert!(matches!(
+            select_diffuse(&graph).unwrap().grid_graph.unwrap().off_grid,
+            Some(crate::OffGrid::Fragment { .. })
+        ));
         graph.wires[2].box_from = 2;
         graph.boxes[2].parameters_raw[4] = 0;
         graph.boxes[2].parameters_raw[0] = 70f32.to_bits();
@@ -3408,11 +3425,18 @@ mod tests {
         assert_eq!((b.mask_texture, b.mask_red), (1, false));
         assert_eq!((s.sample_index, s.color_index), (4, None));
         assert_eq!((s.ignored_nodes, s.ignored_wires), (1, 0));
-        // Non-grid second sampler: another UV channel is refused; a fractional scale
-        // is a D103 resampled approximation (docs/d103-offgrid-bake.md).
+        // Non-grid second sampler: another UV channel is a D189 per-fragment graph
+        // (docs/d189-mixed-uv-graphs.md); a fractional scale is a D103 resampled
+        // approximation (docs/d103-offgrid-bake.md).
+        let fragment = |h: &GraphMetadata| {
+            matches!(
+                select_diffuse(h).unwrap().grid_graph.unwrap().off_grid,
+                Some(crate::OffGrid::Fragment { .. })
+            )
+        };
         let mut h = g.clone();
         h.boxes[4].parameters_raw[4] = 1;
-        assert!(reason(&h).contains("two-texture BLEND requires"));
+        assert!(fragment(&h));
         let mut h = g.clone();
         h.boxes[4].parameters_raw[0] = 0.5f32.to_bits();
         assert!(select_diffuse(&h)
@@ -3430,7 +3454,7 @@ mod tests {
         h.wires[3].box_from = 5;
         assert_eq!(evaluated(&h), 3);
         h.boxes[5].parameters_raw[4] = 1;
-        assert!(reason(&h).contains("three distinct texture samples"));
+        assert!(fragment(&h));
         let mut h = base.clone();
         h.boxes[3] = node(3, 0);
         h.wires[3].box_from = 4;

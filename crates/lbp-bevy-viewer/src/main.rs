@@ -1267,6 +1267,8 @@ struct Prepared {
     bump: Option<(Image, f32)>,
     /// P2q: static gloss colour and CosinePower.
     gloss: Option<([f32; 3], f32)>,
+    /// D189: graph textures 1.. (texture 0 is `image`) and the encoded steps.
+    graph: Option<(Vec<Image>, Vec<lbp_preview::FragmentStep>)>,
 }
 fn prepare(
     preview: &lbp_preview::GroupedMesh,
@@ -1351,6 +1353,30 @@ fn prepare_buckets(
             .as_ref()
             .and_then(|a| a.texture())
             .is_some_and(|a| a.dual.is_some() && a.selection.texture_alpha_mix.is_some());
+        // D189: per-fragment graph on raw UV0 (mesh UV) and raw UV1 (docs/d189-mixed-uv-graphs.md).
+        let graph = match asset
+            .as_ref()
+            .and_then(|a| a.texture())
+            .and_then(|a| a.fragment.as_ref())
+        {
+            Some(f) => {
+                adapter::secondary_uv(&mut mesh, &f.uv1)?;
+                let images = f
+                    .textures
+                    .iter()
+                    .map(|t| {
+                        adapter::image_axes(
+                            t.texture.header.width,
+                            t.texture.header.height,
+                            t.texture.rgba.clone(),
+                            t.wrap,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                Some((images, f.steps.clone()))
+            }
+            None => None,
+        };
         let second_image = if let Some(second) = asset
             .as_ref()
             .and_then(|a| a.texture())
@@ -1422,7 +1448,7 @@ fn prepare_buckets(
             .transpose()?;
         // P2q: the bump map takes UV1 when the diffuse route leaves it free.
         let bump = match surface.and_then(|s| s.bump.as_deref().map(|b| (b, s.bump_level))) {
-            Some((b, level)) if second_image.is_none() => {
+            Some((b, level)) if second_image.is_none() && graph.is_none() => {
                 adapter::secondary_uv(&mut mesh, &b.sampling_uv)?;
                 Some((
                     adapter::linear_image(
@@ -1453,6 +1479,7 @@ fn prepare_buckets(
             normals_trusted,
             bump,
             gloss,
+            graph,
         });
     }
     if prepared.is_empty() {
@@ -1494,6 +1521,14 @@ fn upload(
     }
     if let Some((bump, level)) = p.bump {
         dual::enable_bump(&mut surface, images.add(bump), level);
+    }
+    if let (Some((extra, steps)), Some(primary)) = (p.graph, image.clone()) {
+        let mut handles = vec![primary];
+        handles.extend(extra.into_iter().map(|i| images.add(i)));
+        if let Err(e) = dual::enable_graph(&mut surface, handles, &steps) {
+            // Budgets are checked on the CPU side; a refusal here keeps the base texture.
+            eprintln!("D189: {e}");
+        }
     }
     if let Some((color, power)) = p.gloss {
         dual::enable_gloss(&mut surface, color, power);
@@ -3001,6 +3036,7 @@ fn synthetic_groups(
             wrap: lbp_preview::TextureWrapping::uniform(false),
             selection: lbp_preview::DiffuseSelection::default(),
             runtime_texture: None,
+            fragment: None,
         })
     };
     let red = asset(vec![255, 0, 0, 255]);
