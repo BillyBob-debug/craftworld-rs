@@ -1,6 +1,8 @@
 //! Rt on authored synthetic data (no game bytes): a three-Thing level and a small script
 //! class with a superclass. docs/level-scripts.md.
-use lbp_level::parts::{Pos, ScriptField, ScriptPart, ScriptValue, World as WorldPart};
+use lbp_level::parts::{
+    Pos, ScriptField, ScriptObject, ScriptPart, ScriptValue, World as WorldPart,
+};
 use lbp_level::script::{FieldDef, FunctionDef, MemberRef, Script, Span, TypeRef};
 use lbp_level::serial::Descriptor;
 use lbp_level::thing::ThingRecord;
@@ -161,7 +163,8 @@ fn level() -> Vec<ThingRecord> {
                 machine_type: 0xb,
                 value: ScriptValue::Object {
                     kind: 16,
-                    text: Some("hi".into()),
+                    id: Some(0),
+                    body: Some(Box::new(ScriptObject::Text("hi".into()))),
                 },
             },
             ScriptField {
@@ -295,6 +298,23 @@ fn class_defaults_inherited_natives_and_parts() {
 }
 
 #[test]
+fn part4_anim_speed_tint_camera_tweak_and_player_numbers() {
+    let mut things = level();
+    things[1].parts.push("CAMERA_TWEAK");
+    let mut world = LevelWorld::from_things(&things);
+    assert_eq!(world.has_part(1, "PCameraTweak"), Ok(true));
+    assert_eq!(world.has_part(2, "PCameraTweak"), Ok(false));
+    world.set_anim_speed(1, 0.).unwrap();
+    world.set_render_mesh_tint(2, [1., 0.5, 0., 1.]).unwrap();
+    assert_eq!(world.things[1].anim_speed, Some(0.));
+    assert_eq!(world.things[2].render_mesh_tint, Some([1., 0.5, 0., 1.]));
+    assert!(world.set_anim_speed(99, 1.).is_err());
+    assert_eq!(world.player_number(0), Ok(0));
+    assert!(world.player_number(1).is_err());
+    assert!(world.player_number(-1).is_err());
+}
+
+#[test]
 fn schedule_creates_then_updates_and_resumes_suspended_scripts() {
     // Lamp with `Tick` renamed to `Update__` and no `OnCreate__`.
     let mut ticker = lamp();
@@ -323,4 +343,102 @@ fn schedule_creates_then_updates_and_resumes_suspended_scripts() {
     assert_eq!(count(&mut host), Ok(Value::Int(43)));
     assert_eq!((level.ticks, level.pending()), (3, 1));
     assert!(level.stopped.is_empty());
+}
+
+fn object(kind: u32, id: usize, body: Option<ScriptObject>) -> ScriptValue {
+    ScriptValue::Object {
+        kind,
+        id: Some(id),
+        body: body.map(Box::new),
+    }
+}
+
+fn field(name: &str, value: ScriptValue) -> ScriptField {
+    ScriptField {
+        name: name.into(),
+        machine_type: 0xb,
+        value,
+    }
+}
+
+#[test]
+fn stored_objects_become_shared_heap_objects() {
+    let mut vm = Vm::default();
+    vm.load(base(), Some(BASE));
+    let mut things = level();
+    // An object array holding a back-reference to the `label` string, an instance of
+    // `Base` and a second reference to that instance; a Thing array; a resource; and on
+    // Thing 2 a reference to the same object array.
+    let instance = ScriptPart {
+        script: Some(desc(BASE)),
+        fields: vec![ScriptField {
+            name: "count".into(),
+            machine_type: 3,
+            value: ScriptValue::Int(5),
+        }],
+    };
+    let items = vec![
+        object(16, 0, None),
+        object(13, 2, Some(ScriptObject::Instance(instance))),
+        object(13, 2, None),
+        ScriptValue::Object {
+            kind: 0,
+            id: None,
+            body: None,
+        },
+    ];
+    let part = things[1].data.script.as_mut().unwrap();
+    part.fields.push(field(
+        "items",
+        object(11, 1, Some(ScriptObject::Objects(items))),
+    ));
+    part.fields.push(field(
+        "targets",
+        object(10, 3, Some(ScriptObject::Things(vec![Some(2), None]))),
+    ));
+    part.fields.push(field(
+        "mesh",
+        object(
+            12,
+            4,
+            Some(ScriptObject::Resource {
+                kind: 2,
+                resource: None,
+            }),
+        ),
+    ));
+    things[2].data.script = Some(ScriptPart {
+        script: Some(desc(GUID)),
+        fields: vec![field("same", object(11, 1, None))],
+    });
+    let mut world = LevelWorld::from_things(&things);
+    assert_eq!(world.unconverted, 4);
+    assert_eq!(world.bind_objects(&mut vm), 3);
+    assert_eq!(world.unconverted, 1, "the resource stays null");
+    let get = |w: &mut LevelWorld, t: u32, f| {
+        w.get_member(MemberKind::Thing, &Value::Thing(Some(t)), "Lamp", f)
+    };
+    let Ok(Value::Object(Some(items))) = get(&mut world, 1, "items") else {
+        panic!("items is not an object");
+    };
+    assert_eq!(get(&mut world, 2, "same"), Ok(Value::Object(Some(items))));
+    let a = vm.array(items).unwrap().to_vec();
+    assert_eq!(a[0], Value::Str("hi".into()));
+    let Value::Object(Some(inst)) = a[1] else {
+        panic!("instance expected");
+    };
+    assert_eq!(
+        (&a[2], &a[3]),
+        (&Value::Object(Some(inst)), &Value::Object(None))
+    );
+    assert_eq!(vm.field(inst, "count"), Some(&Value::Int(5)));
+    assert_eq!(vm.field(inst, "tweaking"), Some(&Value::Bool(false)));
+    let Ok(Value::Object(Some(targets))) = get(&mut world, 1, "targets") else {
+        panic!("targets is not an object");
+    };
+    assert_eq!(
+        vm.array(targets),
+        Some(&[Value::Thing(Some(2)), Value::Thing(None)][..])
+    );
+    assert_eq!(get(&mut world, 1, "mesh"), Ok(Value::Object(None)));
 }

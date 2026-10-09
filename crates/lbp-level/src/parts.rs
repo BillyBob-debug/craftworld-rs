@@ -119,7 +119,9 @@
 //!   type, res when nonzero), INSTANCE ScriptInstance, STRINGW wstr, STRINGA str,
 //!   AUDIOHANDLE nothing; other types stop.
 //!   Kept as `PartData::script` (Rt, docs/level-scripts.md): resource, field names, machine
-//!   types and values; object references keep their kind and string text only.
+//!   types and values; object references keep their kind, a level-wide object number
+//!   (first-occurrence order, shared by back-references) and, on first occurrence, the
+//!   contents (`ScriptObject`).
 //! - MATERIAL_TWEAK (PMaterialTweak): hideInPlayMode bool, restitution f32, frictionScale
 //!   f32, grabbability i8, grabFilter i8 (> 0x3bc), stickiness i8, noAutoDestruct bool,
 //!   disablePhysicsAudio bool, hasShadow bool (> 0x3ec); (two u8 below 0x343).
@@ -325,14 +327,44 @@ pub enum ScriptValue {
     M44([f32; 16]),
     /// Thing index in the level's Thing list; None = null.
     Thing(Option<usize>),
-    /// ScriptObjectUID: `kind` 0 = null. Text for STRINGW (14) / STRINGA (16) on first
-    /// occurrence; other contents are read but not kept yet.
+    /// ScriptObjectUID: `kind` 0 = null. `id` numbers the level's script objects in
+    /// first-occurrence order (the shared reference table), so a back-reference carries
+    /// the same `id` as the first occurrence; only the first occurrence has a `body`.
     Object {
         kind: u32,
-        text: Option<String>,
+        id: Option<usize>,
+        body: Option<Box<ScriptObject>>,
     },
     /// DIVERGENT field the instance does not serialize.
     NotStored,
+}
+
+/// Contents of a script object (ScriptObjectUID body), by object type.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub enum ScriptObject {
+    /// ARRAY_BOOL (1).
+    Bools(Vec<bool>),
+    /// ARRAY_S32 (3).
+    Ints(Vec<i32>),
+    /// ARRAY_F32 (4).
+    Floats(Vec<f32>),
+    /// ARRAY_VECTOR4 (5).
+    Vectors(Vec<[f32; 4]>),
+    /// ARRAY_SAFE_PTR (10): Thing indices, None = null.
+    Things(Vec<Option<usize>>),
+    /// ARRAY_OBJECT_REF (11): each element an `Object` (or null) value.
+    Objects(Vec<ScriptValue>),
+    /// RESOURCE (12): resource type and descriptor (None when the type is 0).
+    Resource {
+        kind: u32,
+        resource: Option<Descriptor>,
+    },
+    /// INSTANCE (13): a nested script instance.
+    Instance(ScriptPart),
+    /// STRINGW (14) / STRINGA (16).
+    Text(String),
+    /// AUDIOHANDLE (15): nothing stored.
+    AudioHandle,
 }
 
 /// D121: LevelSettings lighting/fog fields as stored (in-band LBP2 layout, see module
@@ -1780,55 +1812,83 @@ fn script_instance(r: &mut Reader, things: &mut Things) -> Result<ScriptPart> {
 
 fn script_object(r: &mut Reader, things: &mut Things) -> Result<ScriptValue> {
     let kind = r.u32()?;
-    let mut text = None;
     if kind == 0 {
-        return Ok(ScriptValue::Object { kind, text });
+        return Ok(ScriptValue::Object {
+            kind,
+            id: None,
+            body: None,
+        });
     }
-    let tag = r.tag("ScriptObject", |r| Ok(r.next_other("ScriptObject")))?;
+    let mut new_id = None;
+    let tag = r.tag("ScriptObject", |r| {
+        let o = r.next_other("ScriptObject");
+        if let crate::serial::Obj::Other(_, i) = o {
+            new_id = Some(i);
+        }
+        Ok(o)
+    })?;
+    let id = match tag {
+        Tag::Null => None,
+        Tag::Seen(crate::serial::Obj::Other(_, i)) => Some(i),
+        Tag::Seen(_) => return r.invalid("script object tag is not a script object"),
+        Tag::New(_) => new_id,
+    };
     if !matches!(tag, Tag::New(_)) {
-        return Ok(ScriptValue::Object { kind, text });
+        return Ok(ScriptValue::Object {
+            kind,
+            id,
+            body: None,
+        });
     }
     r.enter()?;
-    match kind {
+    let body = match kind {
         1 => {
             let n = r.count(1)?;
-            r.bytes(n)?;
+            ScriptObject::Bools(r.bytes(n)?.iter().map(|&b| b != 0).collect())
         }
-        3 => {
-            r.int_vector()?;
-        }
+        3 => ScriptObject::Ints(r.int_vector()?.into_iter().map(|v| v as i32).collect()),
         4 => {
             let n = r.count(4)?;
-            r.bytes(n * 4)?;
+            let mut v = Vec::with_capacity(n);
+            for _ in 0..n {
+                v.push(r.f32()?);
+            }
+            ScriptObject::Floats(v)
         }
         5 => {
             let n = r.count(16)?;
-            r.bytes(n * 16)?;
+            let mut v = Vec::with_capacity(n);
+            for _ in 0..n {
+                v.push(r.v4()?);
+            }
+            ScriptObject::Vectors(v)
         }
-        10 => {
-            thing_array(r, things)?;
-        }
+        10 => ScriptObject::Things(thing_array(r, things)?),
         11 => {
             let n = r.count(1)?;
+            let mut v = Vec::with_capacity(n.min(4096));
             for _ in 0..n {
-                script_object(r, things)?;
+                v.push(script_object(r, things)?);
             }
+            ScriptObject::Objects(v)
         }
         12 => {
-            if r.u32()? != 0 {
-                r.resource(false)?;
-            }
+            let kind = r.u32()?;
+            let resource = if kind != 0 { r.resource(false)? } else { None };
+            ScriptObject::Resource { kind, resource }
         }
-        13 => {
-            script_instance(r, things)?;
-        }
-        14 => text = Some(r.wstring()?),
-        15 => {}
-        16 => text = Some(r.string8()?),
+        13 => ScriptObject::Instance(script_instance(r, things)?),
+        14 => ScriptObject::Text(r.wstring()?),
+        15 => ScriptObject::AudioHandle,
+        16 => ScriptObject::Text(r.string8()?),
         other => return r.unsupported(format!("script object type {other}")),
-    }
+    };
     r.leave();
-    Ok(ScriptValue::Object { kind, text })
+    Ok(ScriptValue::Object {
+        kind,
+        id,
+        body: Some(Box::new(body)),
+    })
 }
 
 fn render_mesh(r: &mut Reader, things: &mut Things) -> Result<RenderMesh> {

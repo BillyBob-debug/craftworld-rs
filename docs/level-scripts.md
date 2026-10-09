@@ -10,8 +10,8 @@ level bytes or engine code was used or is committed.
 - **`lbp-level`**: the PScript part now keeps its data (`PartData::script`): the script
   resource and, when the instance has a layout, one `ScriptField` per serialized layout
   field (name, machine type, value). Values: bool, char, s32, f32, v4, m44, Thing
-  reference (Thing index), object reference (kind, and the text of a STRINGW/STRINGA on
-  its first occurrence), and `NotStored` for a DIVERGENT field the instance does not
+  reference (Thing index), object reference (kind, object number and, on its first
+  occurrence, the contents; part 5), and `NotStored` for a DIVERGENT field the instance does not
   serialize. The read order is unchanged (the module doc's SCRIPT rule). A PScript shared
   by back-reference is not repeated.
 - **New crate `lbp-runtime`** (runtime only; the parsing crates do not depend on it):
@@ -43,7 +43,7 @@ INFERRED (each is a place the PC run or RPCS3 can disagree):
 | Thing handle | Thing index in the level's list | Internal choice; never shown to scripts except through natives |
 | Children order | Thing-list order | Scripts that walk children (`GetFirstChild`/`GetNextSibling`) |
 | World position | POS world matrix translation, w as stored | RPCS3 comparison |
-| Object references | Strings become string values; other kinds (arrays, instances, resources) are null for now and counted as `unconverted_values` | The PC count says whether they matter |
+| Object references | Strings become string values; arrays and instances become VM heap objects (part 5); resources and audio handles are null and counted as `unconverted_values` | The PC count says whether they matter |
 
 Entry names (settled, PC D152 `level_scripts --all`, unit: distinct class, 49 classes in
 use over 378 levels): `OnCreate__` 24 classes, `Update__` 11. The other frequent names are
@@ -149,9 +149,97 @@ PC check: `cargo run -q -p lbp-runtime --example level_scripts -- <snapshot> "<g
 <Rookie Test path> local-analysis/<new>.json --play=300` (10 s). Report the printed play
 line, `faults_by_kind` and the top unbound natives.
 
+## Part 4: the next four natives (2026-10-08)
+
+Bound the four natives behind the Rookie Test create faults left after part 2. Evidence:
+the declaring script type tables and how the local listings (ignored `local-analysis/`)
+use each result; Toolkit d6a2ef80 has none of these names. Nothing from them is committed.
+
+| Native | Finding (label) | Binding |
+|---|---|---|
+| `Native.SetAnimSpeed__Q5Thingf` | Static, (Thing, f32) -> void; scripts pass their own Thing and 0 (stop), 1, or a tweak value x 4 | `World::set_anim_speed`; LevelWorld records `ThingState::anim_speed` (INFERRED: a rate multiplier; nothing animates by it yet) |
+| `PartList.HasPCameraTweak__Q5Thing` | Static, Thing -> bool, like the other `HasP*` | Part check on `CAMERA_TWEAK` |
+| `Game.GetPlayerNumber__i` | Static, s32 -> `Game.EPlayerNumber` (s32); every caller loops the index over `0..GetNumPlayers()` | `World::player_number`; LevelWorld: index -> same value (INFERRED, the tables carry no enum values), outside the range an error |
+| `Thing.SetRenderMeshEditorColourTint__Q5Thingr` | Static, (Thing, v4) -> void; called right after `SetShapeEditorColour` with a colour | `World::set_render_mesh_tint`; LevelWorld records `ThingState::render_mesh_tint` (any Thing; nothing draws it yet) |
+
+Results (PC, 01.33 + d133 edat overlay, `--play=300`, unit = scripted Thing):
+
+| Level | Create done / faults / no_function | Ticks | First faults (`faults_by_kind`) |
+|---|---|---|---|
+| Rookie Test (`d165-play-rookie-0133.json`) | 189 / 23 / 9 (D159 same counts) | 0 faults; all 198 running Things have no `Update__` | `Native.SetAnimPos__Q5Thingf` 12, `LAMS.MakeLamsKeyID__Q6String` 9 (both Trigger_Speech_Bubble), `Game.SetPlayerScoreMultiplierTimer__Q18Game.EPlayerNumberi` 1 (World), `Gooey.CreateGooey__i` 1 |
+| Pod planets (`d165-play-pod-planets-0133.json`) | 2 / 1 / 0 | 0 faults | `PodComputer.GetPodComputer__` 1 (PlanetsWorld via `PlanetsView.SetPlanetsView__i`) |
+| Pod (`d165-play-pod-0133.json`) | 0 / 1 / 1 | 0 faults | `Native.DebugPrint__i` 1 (Pod.OnCreate__) |
+
+The counts did not move on Rookie Test: each Thing now faults later in the same function.
+The 21 Things with an `Update__` (Trigger_Speech_Bubble) are among the 23 stopped in create.
+
+What PlanetsWorld and OrbitingMoon need next (names and counts of call sites, from the
+listings). OrbitingMoon has only `GetPosition__` and calls no natives; PlanetsWorld drives
+the camera and has no `Update__` (its per-frame entry is unknown: `UpdateState__`,
+`OnEnterPod__` and `OnExitPod__` are candidates). PlanetsWorld calls 34 unbound natives
+(44 sites): `Audio.SetInteractiveMusicStereoPairVolume__giff` 6, `PodComputer.GetPodComputer__` 3,
+`Math.lerp__frr` 3, `Math.Smooth3D__rrrff` 2, `Cam.SetCameraFromToUp__rrrffff`,
+`Cam.SetDOFAndFog__fff`, `Cam.ClearMotionBlur__`, `Thing.SetWorldPosition__m`, `Math.Smooth__fffff`,
+`Math.SmoothStep__fff`, `PodComputer.GetPodComputerInUse__/GetCrashZoom__/GetLoadingBadgeMat__`,
+`HUD.GetCinemaModeCount__`, `Video.IsVideoPlaying__`, `Input.IsInAttractionLoop__i`,
+`Profile.IsLBP2GameProgressionFlagSet__i`, `Game.GetPreviousLevelSlotID__/IsPreviousLevelValid__/
+GetLocalLeadersPlayerNumber__/IsNonInteractive__/GetNumPendingLinks__/GetNumAvatars__/
+GetPoppetPos|Mode|SubModeFromTemporaryIndex__i`, `PlanetsWorld.CanStartEndOfLevelSequence__`,
+a `GetType__`, and the other `Audio` music natives (1 each). PlanetsView (its helper class)
+adds `System.Is4to3__` 3, `Planets.GetCrafteroid__i` 2, `GetThing__` 2,
+`PodComputer.GetPlanets__` 1, and an unnamed native member (field 12, raw_ptr) read 11 times
+before `GET_RP_MEMBER WorldPosition` (INFERRED: the PPos part). World members: object
+members of script instances (`GET_OBJ_MEMBER` 124 x `Offset`, `Yaw`, `FocusPlanetType`, ...)
+need object-reference values (Next).
+
+Tests: `lbp-runtime` `part4_anim_speed_tint_camera_tweak_and_player_numbers`.
+`script_tests` (`d165-script-tests-0133.json`): 47 functions done, 512 passed / 1 failed.
+
+Counts: +0 newly viewable, +0 newly Complete (no asset change).
+
+## Part 5: object-reference members (2026-10-09)
+
+The Pod planets run showed PlanetsView reading about 124 object-reference members the
+VM did not model. Stored script objects now reach the VM:
+
+- **`lbp-level`**: `ScriptValue::Object { kind, id, body }`. `id` numbers the level's
+  script objects in first-occurrence order (the per-class sequence of the shared
+  reference table), so a back-reference carries the `id` of its first occurrence; only
+  the first occurrence has a `body` (`ScriptObject`): bool / s32 / f32 / v4 arrays, Thing
+  arrays (Thing indices), object arrays (nested values), a resource (type and
+  descriptor), a nested instance (`ScriptPart`), text (STRINGW and STRINGA), audio handle.
+  The read order is the module doc's ScriptObjectUID rule, unchanged.
+- **`lbp-script-vm`**: `Vm::new_array`, `Vm::array_mut`, `Vm::fields_mut` for hosts that
+  load stored objects.
+- **`lbp-runtime`**: `LevelWorld::from_things` collects every object body by number
+  (members, array elements, instance fields). `LevelWorld::bind_objects(&mut vm)`
+  allocates one heap object per number (so shared references stay one object, cycles
+  included), fills object arrays and instance fields, then points members at them. An
+  instance gets the class with its script GUID, class defaults first, stored fields on
+  top. Strings stay string values. Resources, audio handles and instances of classes the
+  VM has not loaded stay null and are counted in `unconverted`. Returns the number of
+  heap objects built; `level_scripts` reports it as `objects_built`.
+
+| Rule | Evidence | Applicability |
+| --- | --- | --- |
+| Object numbers follow the shared tag table (a back-reference is the same object) | INFERRED from the ScriptObjectUID layout (module doc of `parts.rs`) | Instances in levels read by `lbp-level` |
+| An instance object starts from class defaults, stored fields override | INFERRED, the same rule as a scripted Thing's members (part 2) | Classes the VM has loaded |
+| Resource objects are null | Not modelled: the VM has no resource value yet | Counted, so the PC count shows whether it matters |
+
+Tests: `lbp-level` `script_objects_keep_contents_and_shared_identity` (string, f32
+array, object array with a back-reference, a null and a nested instance);
+`lbp-runtime` `stored_objects_become_shared_heap_objects`.
+
+Not tested: real levels (cloud has no game data). PC check: `level_scripts` on
+pod_planets (00018fdb) with `--play`, reporting `unconverted_values`, `objects_built`
+and the PlanetsView faults.
+
+Counts: +0 newly viewable, +0 newly Complete (no asset change).
+
 ## Next
 
 - Call the scripts from the 30 Hz fixed update of the level viewer once Rookie Test
   creates and updates without faults.
-- Bind the natives step 2 reports, in call-count order.
-- Object-reference values (arrays and instances) as VM heap objects.
+- Bind the natives part 4 reports, in call-count order; for the Pod camera, PodComputer,
+  Cam and the PPos `WorldPosition` member first.
+- Resource object values, if the PC count shows scripts reading them.

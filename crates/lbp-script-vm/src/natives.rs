@@ -99,6 +99,21 @@ pub trait World {
     fn set_shape_editor_colour(&mut self, _thing: u32, _colour: [f32; 4]) -> Result<(), String> {
         Err(not_available("shape colours"))
     }
+    /// Tint of a Thing's render mesh in the editor colour (`SetRenderMeshEditorColourTint`,
+    /// called next to `SetShapeEditorColour` with a colour vector).
+    fn set_render_mesh_tint(&mut self, _thing: u32, _colour: [f32; 4]) -> Result<(), String> {
+        Err(not_available("render mesh tints"))
+    }
+    /// Playback rate of a Thing's animation (`Native.SetAnimSpeed`; scripts pass 0 to stop
+    /// and 1 to run, INFERRED multiplier of the normal rate).
+    fn set_anim_speed(&mut self, _thing: u32, _speed: f32) -> Result<(), String> {
+        Err(not_available("animation speeds"))
+    }
+    /// `Game.EPlayerNumber` of the `index`-th player, for `0 <= index < num_players()`
+    /// (scripts loop over that range).
+    fn player_number(&mut self, _index: i32) -> Result<i32, String> {
+        Err(not_available("players"))
+    }
     /// Outcome of a `Test.Check*` / `Test.Fail` native in the game's own test scripts.
     fn test_check(&mut self, _passed: bool, _message: &str, _line: i32) {}
     /// Uniform in [0, 1); only `NonDeterministic*` natives use it.
@@ -568,6 +583,24 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     ("Thing", "SetShapeEditorColour__Q5Thingr", |w, c| {
         w.set_shape_editor_colour(subject(c)?, vec4(param(c, 1)?)?)?;
         Ok(Value::Void)
+    }),
+    (
+        "Thing",
+        "SetRenderMeshEditorColourTint__Q5Thingr",
+        |w, c| {
+            w.set_render_mesh_tint(subject(c)?, vec4(param(c, 1)?)?)?;
+            Ok(Value::Void)
+        },
+    ),
+    ("Native", "SetAnimSpeed__Q5Thingf", |w, c| {
+        w.set_anim_speed(subject(c)?, float(param(c, 1)?)?)?;
+        Ok(Value::Void)
+    }),
+    ("PartList", "HasPCameraTweak__Q5Thing", |w, c| {
+        Ok(Value::Bool(w.has_part(subject(c)?, "PCameraTweak")?))
+    }),
+    ("Game", "GetPlayerNumber__i", |w, c| {
+        Ok(Value::Int(w.player_number(int(param(c, 0)?)?)?))
     }),
     // ---- the game's own test scripts ----
     ("Test", "Check__bQ7StringAi", |w, c| {
