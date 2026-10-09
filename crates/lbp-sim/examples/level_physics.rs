@@ -13,7 +13,7 @@ use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
-use lbp_sim::{build_scene, spawn_scene, PhysicsScene, SimPlugin, ThingIndex, TICK_HZ};
+use lbp_sim::{build_scene, spawn_scene, to_level, PhysicsScene, SimPlugin, ThingIndex, TICK_HZ};
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::Duration;
@@ -68,7 +68,8 @@ fn simulate(scene: &PhysicsScene, ticks: usize) -> Motion {
             continue;
         };
         m.bodies += 1;
-        let d = ((p.x - s[0]).powi(2) + (p.y - s[1]).powi(2)).sqrt();
+        let p = to_level(p.0);
+        let d = ((p[0] - s[0]).powi(2) + (p[1] - s[1]).powi(2)).sqrt();
         if !d.is_finite() {
             m.non_finite += 1;
             continue;
@@ -126,6 +127,7 @@ fn run() -> Result<(), String> {
     let mut total = Motion::default();
     let (mut shapes, mut dynamic, mut static_, mut not_collidable, mut not_read) = (0, 0, 0, 0, 0);
     let mut rejected = BTreeMap::<&str, usize>::new();
+    let (mut joints, mut rejected_joints) = (0, BTreeMap::<&str, usize>::new());
     for (key, label) in keys {
         let read =
             lbp_preview::level_scene::read_level_bytes(&source, &key, &control).and_then(|b| {
@@ -145,6 +147,10 @@ fn run() -> Result<(), String> {
         for (k, n) in &r.rejected {
             *rejected.entry(k).or_default() += n;
         }
+        joints += r.joints;
+        for (k, n) in &r.rejected_joints {
+            *rejected_joints.entry(k).or_default() += n;
+        }
         let m = simulate(&scene, ticks);
         total.bodies += m.bodies;
         total.moved_1 += m.moved_1;
@@ -156,6 +162,7 @@ fn run() -> Result<(), String> {
             "stopped": report.stop.is_some(),
             "shapes": r.shapes, "dynamic": r.dynamic, "static": r.static_,
             "not_collidable": r.not_collidable, "rejected": r.rejected,
+            "joints": r.joints, "rejected_joints": r.rejected_joints,
             "bodies": m.bodies, "moved_over_1": m.moved_1, "moved_over_100": m.moved_100,
             "non_finite": m.non_finite, "max_move": m.max_move,
         }));
@@ -169,6 +176,7 @@ fn run() -> Result<(), String> {
         "levels_not_read": not_read,
         "shapes": shapes, "dynamic": dynamic, "static": static_,
         "not_collidable": not_collidable, "rejected": rejected,
+        "joints": joints, "rejected_joints": rejected_joints,
         "bodies": total.bodies, "moved_over_1": total.moved_1,
         "moved_over_100": total.moved_100, "non_finite": total.non_finite,
         "max_move": total.max_move,
@@ -183,10 +191,11 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     println!(
         "levels {} (not read {not_read}); shapes {shapes}: dynamic {dynamic}, static {static_}, \
-         not collidable {not_collidable}, rejected {}; after {ticks} ticks: bodies {}, moved >1 {}, \
+         not collidable {not_collidable}, rejected {}; joints {joints} (rejected {}); after {ticks} ticks: bodies {}, moved >1 {}, \
          >100 {}, non-finite {}, max move {:.1}",
         levels.len(),
         rejected.values().sum::<usize>(),
+        rejected_joints.values().sum::<usize>(),
         total.bodies,
         total.moved_1,
         total.moved_100,

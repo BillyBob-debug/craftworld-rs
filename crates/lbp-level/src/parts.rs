@@ -68,7 +68,7 @@
 //!   f32, stiff bool, slideDir v3, animationPattern i32, ten f32 (range, time, phase, speed,
 //!   pause, a/b angle offsets, modStartFrames, modDeltaFrames, modScale), renderScale f32,
 //!   jointSoundEnum i32, tweakTargetMax/MinLength f32, currentlyEditing bool,
-//!   hideInPlayMode bool, behaviour i32.
+//!   hideInPlayMode bool, behaviour i32. Drive fields kept as `Joint::params`.
 //! - CHECKPOINT (PCheckpoint): activeFlags bool (subVersion <= 0x101), activationFrame i32,
 //!   spawnsLeft s32, maxSpawnsLeft s32, instanceInfiniteSpawns bool, spawningList
 //!   thingarray, spawningDelay i32, lifeMultiplier i32, teamFilter i32.
@@ -440,6 +440,24 @@ pub struct Joint {
     pub joint_type: i32,
     pub render_scale: f32,
     pub hide_in_play_mode: bool,
+    /// Strength, motion and piston settings (lbp-sim joints).
+    pub params: JointParams,
+}
+
+/// PJoint fields that drive the joint, as stored (units UNVERIFIED).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct JointParams {
+    pub offset_time: f32,
+    pub invert_angle: bool,
+    pub strength: f32,
+    pub stiff: bool,
+    pub slide_dir: [f32; 3],
+    pub animation_pattern: i32,
+    /// range, time, phase, speed, pause, aAngleOffset, bAngleOffset, modStartFrames,
+    /// modDeltaFrames, modScale.
+    pub motion: [f32; 10],
+    pub tweak_target_max_length: f32,
+    pub tweak_target_min_length: f32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -739,20 +757,24 @@ fn part_body(
             let b_contact = r.v3()?;
             let length = r.f32()?;
             let angle = r.f32()?;
-            r.f32()?;
-            r.bool()?;
+            let offset_time = r.f32()?;
+            let invert_angle = r.bool()?;
             let settings = r.resource(false)?;
             let bone_idx = r.int_array()?;
             let bone_lengths = r.v4()?;
             let joint_type = r.i32()?;
-            r.f32()?;
-            r.bool()?;
-            r.v3()?;
-            r.i32()?;
-            r.skip_f32(10)?;
+            let strength = r.f32()?;
+            let stiff = r.bool()?;
+            let slide_dir = r.v3()?;
+            let animation_pattern = r.i32()?;
+            let mut motion = [0.; 10];
+            for m in &mut motion {
+                *m = r.f32()?;
+            }
             let render_scale = r.f32()?;
             r.i32()?;
-            r.skip_f32(2)?;
+            let tweak_target_max_length = r.f32()?;
+            let tweak_target_min_length = r.f32()?;
             r.bool()?;
             let hide_in_play_mode = r.bool()?;
             r.i32()?;
@@ -769,6 +791,17 @@ fn part_body(
                 joint_type,
                 render_scale,
                 hide_in_play_mode,
+                params: JointParams {
+                    offset_time,
+                    invert_angle,
+                    strength,
+                    stiff,
+                    slide_dir,
+                    animation_pattern,
+                    motion,
+                    tweak_target_max_length,
+                    tweak_target_min_length,
+                },
             });
         }
         "CHECKPOINT" => {

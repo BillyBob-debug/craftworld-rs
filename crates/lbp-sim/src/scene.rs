@@ -11,6 +11,9 @@
 //!   no BODY on the chain is static.
 //! - Collision is 2D; a shape's slab is world z ± thickness (INFERRED, A3/A4).
 //! - A shape without the COLLIDABLE_GAME flag (0x1) does not collide (COMMUNITY, ShapeFlags).
+//! - PJoints join the entities their endpoint Things belong to (a body, or a static
+//!   shape); contact points are in each endpoint Thing's POS frame (COMMUNITY field
+//!   names; frame INFERRED). The type mapping is [`JointKind`].
 //! - Mass = area × massDepth × density (INFERRED, A2); density is [`DENSITY`] until RMaterial
 //!   is read (PLACEHOLDER).
 use lbp_level::shape_mesh::outline_triangles;
@@ -101,12 +104,16 @@ pub struct SceneReport {
     pub not_collidable: usize,
     /// Shapes left out, by reason.
     pub rejected: BTreeMap<&'static str, usize>,
+    pub joints: usize,
+    /// PJoints left out, by reason.
+    pub rejected_joints: BTreeMap<&'static str, usize>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PhysicsScene {
     pub bodies: Vec<SceneBody>,
     pub colliders: Vec<SceneCollider>,
+    pub joints: Vec<SceneJoint>,
     pub report: SceneReport,
 }
 
@@ -219,5 +226,180 @@ pub fn build_scene(things: &[ThingRecord]) -> PhysicsScene {
             density: shape.mass_depth.max(0.) * DENSITY,
         });
     }
+    scene.add_joints(things);
     scene
+}
+
+/// PJoint type as the sandbox maps it (docs/runtime-research.md §4 joint table).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum JointKind {
+    /// ELASTIC (1): pulls back towards its length, never pushes.
+    Elastic,
+    /// SPRING (2): holds its length, compliant.
+    Spring,
+    /// CHAIN (3, winch INFERRED): fixed length for now (animation not modelled).
+    Chain,
+    /// PISTON (4): slides along the contact line between its min and max length.
+    Piston,
+    /// STRING (5): at most its length.
+    String,
+    /// ROD (6): exactly its length.
+    Rod,
+    /// BOLT (7): shared pivot.
+    Bolt,
+    /// SPRING_ANGULAR (8) and QUANTIZED (10, wobble bolt INFERRED): pivot pulled back to
+    /// its rest angle.
+    SpringAngular,
+    /// MOTOR (9): pivot turning at the stored speed.
+    Motor,
+}
+
+impl JointKind {
+    /// None for LEGACY (0) and unknown types.
+    pub fn of(joint_type: i32) -> Option<Self> {
+        Some(match joint_type {
+            1 => Self::Elastic,
+            2 => Self::Spring,
+            3 => Self::Chain,
+            4 => Self::Piston,
+            5 => Self::String,
+            6 => Self::Rod,
+            7 => Self::Bolt,
+            8 | 10 => Self::SpringAngular,
+            9 => Self::Motor,
+            _ => return None,
+        })
+    }
+}
+
+/// What a joint end is attached to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Endpoint {
+    /// Index in [`PhysicsScene::bodies`].
+    Body(usize),
+    /// Index in [`PhysicsScene::colliders`] of a static shape.
+    Static(usize),
+}
+
+/// One PJoint between two scene entities.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SceneJoint {
+    pub thing: usize,
+    pub kind: JointKind,
+    pub a: Endpoint,
+    pub b: Endpoint,
+    /// Contact points in world xy and in each endpoint's frame.
+    pub world_a: [f32; 2],
+    pub world_b: [f32; 2],
+    pub local_a: [f32; 2],
+    pub local_b: [f32; 2],
+    /// Rest length (PJoint.length; the contact distance when that is not usable).
+    pub length: f32,
+    /// Piston travel (tweakTargetMin/MaxLength when usable, else the rest length).
+    pub min_length: f32,
+    pub max_length: f32,
+    pub params: lbp_level::parts::JointParams,
+}
+
+/// World xy of a point given in a Thing's local frame (its POS matrix).
+fn world_point(t: &ThingRecord, p: [f32; 3]) -> Option<[f32; 2]> {
+    let m = &t.data.pos.as_ref()?.world;
+    let w = [
+        m[0] * p[0] + m[4] * p[1] + m[8] * p[2] + m[12],
+        m[1] * p[0] + m[5] * p[1] + m[9] * p[2] + m[13],
+    ];
+    w.iter().all(|v| v.is_finite()).then_some(w)
+}
+
+impl PhysicsScene {
+    fn frame_of(&self, e: Endpoint) -> Frame {
+        match e {
+            Endpoint::Body(i) => self.bodies[i].frame,
+            Endpoint::Static(i) => self.colliders[i].frame,
+        }
+    }
+
+    fn endpoint(&self, things: &[ThingRecord], t: usize) -> Option<Endpoint> {
+        if let Some(owner) = body_owner(things, t) {
+            if let Some(i) = self.bodies.iter().position(|b| b.thing == owner) {
+                return Some(Endpoint::Body(i));
+            }
+        }
+        self.colliders
+            .iter()
+            .position(|c| c.thing == t && c.body.is_none())
+            .map(Endpoint::Static)
+    }
+
+    /// Adds the level's PJoints between scene entities ([`build_scene`] calls it).
+    /// Counted in the report: `joints` added, `rejected_joints` by reason.
+    fn add_joints(&mut self, things: &[ThingRecord]) {
+        for (i, t) in things.iter().enumerate() {
+            let Some(j) = &t.data.joint else {
+                continue;
+            };
+            match self.joint(things, i, j) {
+                Ok(joint) => {
+                    self.report.joints += 1;
+                    self.joints.push(joint);
+                }
+                Err(why) => *self.report.rejected_joints.entry(why).or_default() += 1,
+            }
+        }
+    }
+
+    fn joint(
+        &self,
+        things: &[ThingRecord],
+        thing: usize,
+        j: &lbp_level::parts::Joint,
+    ) -> Result<SceneJoint, &'static str> {
+        let kind = JointKind::of(j.joint_type).ok_or("legacy or unknown type")?;
+        let (Some(ta), Some(tb)) = (j.a, j.b) else {
+            return Err("missing endpoint");
+        };
+        let (Some(a), Some(b)) = (self.endpoint(things, ta), self.endpoint(things, tb)) else {
+            return Err("endpoint without a collider");
+        };
+        if a == b {
+            return Err("both ends on one body");
+        }
+        if matches!((a, b), (Endpoint::Static(_), Endpoint::Static(_))) {
+            return Err("both ends static");
+        }
+        let (Some(world_a), Some(world_b)) = (
+            things.get(ta).and_then(|t| world_point(t, j.a_contact)),
+            things.get(tb).and_then(|t| world_point(t, j.b_contact)),
+        ) else {
+            return Err("endpoint without POS");
+        };
+        let gap = ((world_b[0] - world_a[0]).powi(2) + (world_b[1] - world_a[1]).powi(2)).sqrt();
+        let length = if j.length.is_finite() && j.length > 0. {
+            j.length
+        } else {
+            gap
+        };
+        let p = &j.params;
+        let (lo, hi) = (p.tweak_target_min_length, p.tweak_target_max_length);
+        let (min_length, max_length) =
+            if lo.is_finite() && hi.is_finite() && 0. <= lo && lo <= hi && hi > 0. {
+                (lo, hi)
+            } else {
+                (length, length)
+            };
+        Ok(SceneJoint {
+            thing,
+            kind,
+            a,
+            b,
+            world_a,
+            world_b,
+            local_a: self.frame_of(a).to_local(world_a),
+            local_b: self.frame_of(b).to_local(world_b),
+            length,
+            min_length,
+            max_length,
+            params: *p,
+        })
+    }
 }

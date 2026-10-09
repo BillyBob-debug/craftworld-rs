@@ -34,9 +34,10 @@ layers. Written in the cloud with synthetic shapes only; the level check needs t
 
 Placeholders (each a named constant): density 20, sliding friction 0.8, restitution
 0.3 (Toolkit RMaterial defaults, used for every shape until RMaterial is read);
-gravity 3000 units/s² (until the S9 jump measurement); avian length unit 100; 6 substeps
-(our choice). `PBody.frozen` is kept but unused (meaning UNVERIFIED). Not modelled yet:
-joints, PWorld maxVel/maxAVel clamps, materials, movers, lethal shapes.
+gravity 3000 units/s² (until the S9 jump measurement); 6 substeps (our choice). The
+solver works in units of 100 world units (`UNIT_SCALE` 0.01, part 2); read positions
+back with `to_level`. `PBody.frozen` is kept but unused (meaning UNVERIFIED). Not modelled yet:
+PWorld maxVel/maxAVel clamps, materials, movers, lethal shapes.
 
 ## Verification (cloud)
 
@@ -65,9 +66,55 @@ Then `--all`.
 
 Counts: +0 newly viewable, +0 newly Complete (no asset change).
 
+## Part 2: joints (2026-10-09)
+
+`lbp-level` keeps the PJoint drive fields as `Joint::params` (`JointParams`: offsetTime,
+invertAngle, strength, stiff, slideDir, animationPattern, the ten motion floats, tweak
+target min/max length); the read order is unchanged. `build_scene` now adds a
+`SceneJoint` per PJoint whose ends resolve to scene entities: each end Thing belongs to
+its body (nearest BODY on the parent chain) or is a static shape. Contact points are in
+the end Thing's POS frame. Rejected joints are counted by reason (legacy or unknown
+type, missing endpoint, endpoint without a collider, both ends on one body, both ends
+static, endpoint without POS). `spawn_scene` returns `Spawned { bodies, colliders,
+joints }`.
+
+| PJoint type | avian2d | Notes |
+| --- | --- | --- |
+| BOLT 7 | `RevoluteJoint` at a's contact | |
+| MOTOR 9 | revolute + velocity motor, target = motion speed × `MOTOR_SPEED_SCALE` | speed unit UNVERIFIED (PLACEHOLDER scale 1 = rad/s) |
+| SPRING_ANGULAR 8, QUANTIZED 10 | revolute + spring motor to the stored pose | `SPRING_FREQUENCY` 2 Hz, damping 0.5: PLACEHOLDER; patterns not animated |
+| PISTON 4 | `PrismaticJoint` along the contact line, travel = tweak target min..max (else the rest length) | not animated |
+| ROD 6, CHAIN 3 | `DistanceJoint` min = max = length | winch not animated |
+| STRING 5 | `DistanceJoint` 0..length | |
+| ELASTIC 1 | `DistanceJoint` 0..length, compliant | `SPRING_COMPLIANCE`: PLACEHOLDER |
+| SPRING 2 | `DistanceJoint` length, compliant | same |
+| LEGACY 0 | not made | counted |
+
+Rest length = PJoint.length when positive and finite, else the contact distance
+(INFERRED). Jointed pieces do not collide with each other (INFERRED). Angular bases are
+global at spawn, so a spring's rest angle is the stored pose. Motors use avian's
+`AccelerationBased` model with `MOTOR_DAMPING` 0.5 (the share of the speed error
+removed per substep; avian adds it unscaled, so above 1 it overshoots). Motor strength
+is not modelled.
+
+Failed experiment: in world units a 100-unit box has an angular inertia near 1e8, and
+avian skips a motor whose inverse inertia is below f32 epsilon; the wheel never turned.
+Everything spawned is now scaled by `UNIT_SCALE` (0.01). A first motor gain of 20 spun
+the wheel at -132 rad/s; 0.5 holds the target.
+
+Tests: `joint_scene_rules` (endpoints, world and local anchors on a turned body, rest
+length, same-body and legacy rejections); `rod_pendulum_keeps_its_length`;
+`string_stops_a_falling_box_at_its_length`; `motor_turns_a_bolted_wheel_in_place`
+(3 rad/s, centre within 2 units); `piston_slides_to_its_limit_and_holds_its_line`.
+`cargo +1.99.0 clippy -p lbp-sim -p lbp-level -p lbp-preview --all-targets -- -D warnings`
+clean; `cargo test -p lbp-level -p lbp-sim -p lbp-preview` pass.
+
+PC check: `level_physics` now also reports joints and rejected joints by reason; same
+command as part 1. A level with bolted wheels or pistons shows whether the frames and
+endpoints resolve (rejections) and whether jointed bodies stay put (moves).
+
 ## Next
 
-- PJoint mapping (bolt, motor, piston, winch, rod, string, springs) from the table in
-  docs/runtime-research.md §4.
+- Joint animation (motion patterns, winch and piston targets), strength and breaking.
 - RMaterial reads (density, friction, restitution, collide masks, gravity multiplier).
 - Dev "play" toggle in the level scene of the viewer.

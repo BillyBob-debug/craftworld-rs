@@ -3,10 +3,10 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use lbp_level::parts::{Body, Pos, Shape, ShapeColor};
+use lbp_level::parts::{Body, Joint, JointParams, Pos, Shape, ShapeColor};
 use lbp_level::thing::ThingRecord;
-use lbp_sim::scene::{build_scene, PhysicsScene, DENSITY};
-use lbp_sim::{spawn_scene, SimPlugin, ThingIndex, TICK_HZ};
+use lbp_sim::scene::{build_scene, Endpoint, JointKind, PhysicsScene, DENSITY};
+use lbp_sim::{spawn_scene, to_level, SimPlugin, ThingIndex, TICK_HZ};
 use std::time::Duration;
 
 /// Column-major matrix: rotation `angle` about z, scale (sx, sy), translation.
@@ -180,7 +180,7 @@ fn run(things: &[ThingRecord], ticks: usize) -> Vec<(usize, [f32; 2], f32)> {
         .query_filtered::<(&ThingIndex, &Position, &Rotation), With<RigidBody>>();
     let mut out: Vec<_> = q
         .iter(app.world())
-        .map(|(t, p, r)| (t.0, [p.x, p.y], r.as_radians()))
+        .map(|(t, p, r)| (t.0, to_level(p.0), r.as_radians()))
         .collect();
     out.sort_by_key(|o| o.0);
     out
@@ -212,7 +212,11 @@ fn box_falls_onto_the_floor_and_rests() {
     // The bounce (restitution 0.3) resolves one corner first and slides the box a little:
     // about 6 units here, none with restitution 0.
     assert!(p[0].abs() < 10. && angle.abs() < 0.05, "{p:?} {angle}");
-    assert_eq!(out[0].1, [0., -50.], "the floor does not move");
+    let floor = out[0].1;
+    assert!(
+        floor[0].abs() < 1e-3 && (floor[1] + 50.).abs() < 1e-3,
+        "the floor does not move"
+    );
 }
 
 #[test]
@@ -251,4 +255,214 @@ fn stack_of_boxes_stays_put() {
             "box {i}: {p:?} {angle}"
         );
     }
+}
+
+/// A JOINT Thing from `a` (contact `ca` in a's frame) to `b` (contact `cb`).
+fn joint(
+    index: usize,
+    kind: i32,
+    a: usize,
+    ca: [f32; 3],
+    b: usize,
+    cb: [f32; 3],
+    length: f32,
+) -> ThingRecord {
+    joint_with(index, kind, a, ca, b, cb, length, JointParams::default())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn joint_with(
+    index: usize,
+    kind: i32,
+    a: usize,
+    ca: [f32; 3],
+    b: usize,
+    cb: [f32; 3],
+    length: f32,
+    params: JointParams,
+) -> ThingRecord {
+    let mut t = ThingRecord {
+        index,
+        ..Default::default()
+    };
+    t.data.joint = Some(Joint {
+        a: Some(a),
+        b: Some(b),
+        a_contact: ca,
+        b_contact: cb,
+        length,
+        angle: 0.,
+        settings: None,
+        bone_idx: vec![],
+        bone_lengths: [0.; 4],
+        joint_type: kind,
+        render_scale: 1.,
+        hide_in_play_mode: false,
+        params,
+    });
+    t
+}
+
+/// Static ceiling block at (0, 1000).
+fn ceiling() -> ThingRecord {
+    thing(
+        0,
+        matrix(0., 1000., 0., 0., 1., 1.),
+        Some(rect(200., 50., 7)),
+        false,
+    )
+}
+
+#[test]
+fn joint_scene_rules() {
+    let mut things = vec![
+        ceiling(),
+        thing(
+            1,
+            matrix(300., 1000., 0., std::f32::consts::FRAC_PI_2, 1., 1.),
+            Some(rect(50., 50., 7)),
+            true,
+        ),
+        thing(
+            2,
+            matrix(0., 500., 0., 0., 1., 1.),
+            Some(rect(50., 50., 7)),
+            true,
+        ),
+        thing(
+            3,
+            matrix(0., 500., 0., 0., 1., 1.),
+            Some(rect(10., 10., 7)),
+            false,
+        ),
+        // 4: rod from the ceiling centre to body 1, contact 10 units along body 1's local x.
+        joint(4, 6, 0, [0.; 3], 1, [10., 0., 0.], 0.),
+        // 5: bolt between two bodies.
+        joint(5, 7, 1, [0.; 3], 2, [0.; 3], 0.),
+        // 6: both ends on body 2 (Thing 3 is glued under it).
+        joint(6, 7, 2, [0.; 3], 3, [0.; 3], 0.),
+        // 7: legacy.
+        joint(7, 0, 1, [0.; 3], 2, [0.; 3], 0.),
+    ];
+    things[3].parent = Some(2);
+    let s = build_scene(&things);
+    assert_eq!(s.report.joints, 2);
+    assert_eq!(
+        s.report.rejected_joints.get("both ends on one body"),
+        Some(&1)
+    );
+    assert_eq!(
+        s.report.rejected_joints.get("legacy or unknown type"),
+        Some(&1)
+    );
+    let rod = &s.joints[0];
+    assert_eq!(
+        (rod.kind, rod.a, rod.b),
+        (JointKind::Rod, Endpoint::Static(0), Endpoint::Body(0))
+    );
+    // Body 1 is turned 90°: its local x points along world +y.
+    let close = |p: [f32; 2], q: [f32; 2]| (p[0] - q[0]).abs() < 1e-3 && (p[1] - q[1]).abs() < 1e-3;
+    assert!(close(rod.world_b, [300., 1010.]), "{:?}", rod.world_b);
+    assert!(close(rod.local_b, [10., 0.]), "{:?}", rod.local_b);
+    assert!((rod.length - (300f32.powi(2) + 10f32.powi(2)).sqrt()).abs() < 1e-2);
+    assert_eq!(s.joints[1].kind, JointKind::Bolt);
+}
+
+fn distance(p: [f32; 2], q: [f32; 2]) -> f32 {
+    ((p[0] - q[0]).powi(2) + (p[1] - q[1]).powi(2)).sqrt()
+}
+
+#[test]
+fn rod_pendulum_keeps_its_length() {
+    let things = vec![
+        ceiling(),
+        thing(
+            1,
+            matrix(300., 1000., 0., 0., 1., 1.),
+            Some(rect(50., 50., 7)),
+            true,
+        ),
+        joint(2, 6, 0, [0.; 3], 1, [0.; 3], 0.),
+    ];
+    let out = run(&things, 20);
+    let p = out[1].1;
+    assert!((distance(p, [0., 1000.]) - 300.).abs() < 5., "{p:?}");
+    assert!(p[1] < 900., "swung down: {p:?}");
+}
+
+#[test]
+fn string_stops_a_falling_box_at_its_length() {
+    let things = vec![
+        ceiling(),
+        thing(
+            1,
+            matrix(0., 900., 0., 0., 1., 1.),
+            Some(rect(50., 50., 7)),
+            true,
+        ),
+        joint(2, 5, 0, [0.; 3], 1, [0.; 3], 300.),
+    ];
+    let out = run(&things, 90);
+    let p = out[1].1;
+    assert!((p[1] - 700.).abs() < 10. && p[0].abs() < 5., "{p:?}");
+}
+
+#[test]
+fn motor_turns_a_bolted_wheel_in_place() {
+    let params = JointParams {
+        motion: [0., 0., 0., 3., 0., 0., 0., 0., 0., 0.],
+        ..Default::default()
+    };
+    let things = vec![
+        thing(
+            0,
+            matrix(0., 0., 0., 0., 1., 1.),
+            Some(rect(20., 20., 7)),
+            false,
+        ),
+        thing(
+            1,
+            matrix(0., 0., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        joint_with(2, 9, 0, [0.; 3], 1, [0.; 3], 0., params),
+    ];
+    let mut app = app(build_scene(&things));
+    for _ in 0..30 {
+        app.update();
+    }
+    let mut q = app
+        .world_mut()
+        .query::<(&ThingIndex, &Position, &AngularVelocity, Option<&RigidBody>)>();
+    let (_, p, w, _) = q.iter(app.world()).find(|(t, ..)| t.0 == 1).expect("wheel");
+    assert!(distance(to_level(p.0), [0., 0.]) < 2., "{p:?}");
+    assert!(
+        (w.0 - 3.).abs() < 0.5,
+        "turning at the motor speed: {}",
+        w.0
+    );
+}
+
+#[test]
+fn piston_slides_to_its_limit_and_holds_its_line() {
+    let params = JointParams {
+        tweak_target_min_length: 100.,
+        tweak_target_max_length: 200.,
+        ..Default::default()
+    };
+    let things = vec![
+        ceiling(),
+        thing(
+            1,
+            matrix(0., 850., 0., 0., 1., 1.),
+            Some(rect(50., 50., 7)),
+            true,
+        ),
+        joint_with(2, 4, 0, [0.; 3], 1, [0.; 3], 150., params),
+    ];
+    let out = run(&things, 60);
+    let p = out[1].1;
+    assert!((p[1] - 800.).abs() < 5. && p[0].abs() < 2., "{p:?}");
+    assert!(out[1].2.abs() < 0.01, "does not turn: {}", out[1].2);
 }
