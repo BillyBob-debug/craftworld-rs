@@ -3,13 +3,16 @@
 //! caller (the physics world says whether Sackboy stands on something and which lanes have
 //! floor); this module holds only the rules measured in RPCS3.
 //!
-//! Evidence: RPCS3 frame-by-frame reads of Sackboy's position in Rookie Test (01.33, PC runs
-//! S9 and d190, 2026-10-09): CONFIRMED_FROM_LOCAL_DATA (emulated) for every constant below
-//! unless a comment says otherwise. Units are LBP world units and game ticks. Not modelled
+//! Evidence: RPCS3 frame-by-frame reads of Sackboy's position (01.33): first in Rookie Test
+//! (PC runs S9 and d190), then repeated in the owner's blank Moon level with the default
+//! camera (PC run d211, 2026-10-09; repeats agree within about 1 unit), which is the
+//! reference: CONFIRMED_FROM_LOCAL_DATA (emulated) for every constant below unless a
+//! comment says otherwise. Units are LBP world units and game ticks. Not modelled
 //! yet: the crouch/landing dips (about 35 units for 1-2 and 8 ticks; visual only), slopes,
 //! grabbing, swimming, terminal velocity, the 10 u/tick plateau seen once after landing.
 
-/// Gravity per tick² (2,424 u/s²).
+/// Gravity per tick² (2,424 u/s²). Rookie descent fit 2.693, Moon full jump 2.697 (0.15%
+/// apart; the Moon apex 260.1 and 30-tick air time match either).
 pub const GRAVITY_TICK: f32 = 2.693;
 /// Ground acceleration and deceleration per tick² (linear: 3, 6, ... 30).
 pub const WALK_ACCEL: f32 = 3.0;
@@ -18,14 +21,15 @@ pub const WALK_SPEED: f32 = 30.0;
 /// Air acceleration per tick² while the stick is held.
 pub const AIR_ACCEL: f32 = 2.4;
 /// The stick cannot push past this in the air (speed carried from the ground is kept).
-pub const AIR_SPEED: f32 = 22.0;
+/// Moon level 22.5 (Rookie Test read 22).
+pub const AIR_SPEED: f32 = 22.5;
 /// Upward speed per tick for each tick the jump button is held (index 0 = take-off tick).
 /// The first three ticks always play; after the button is released, or after the table,
 /// gravity takes over. A tap peaks at 143 units, a full hold at 260 (saturates by tick 10).
 pub const JUMP_PROFILE: [f32; 10] = [12.0, 19.3, 23.3, 25.1, 25.5, 24.8, 23.5, 21.8, 19.7, 17.4];
 /// Ticks of the jump profile that play even on a tap.
 pub const JUMP_MIN_TICKS: usize = 3;
-/// Distance between lanes (Rookie Test lanes at z -400, -200, 0).
+/// Distance between lanes (Moon and Rookie Test lanes at z -400, -200, 0).
 pub const LANE_SPACING: f32 = 200.0;
 /// Lane change speed per tick (linear slide, about 6 ticks per lane).
 pub const LANE_SPEED: f32 = 35.0;
@@ -213,7 +217,7 @@ mod tests {
 
     #[test]
     fn air_control_is_capped_but_ground_speed_carries() {
-        // Standing jump, then right held in the air: 2.4 per tick up to 22.
+        // Standing jump, then right held in the air: 2.4 per tick up to 22.5.
         let path = run(
             |t| Input {
                 jump: (1..=19).contains(&t),
@@ -224,7 +228,7 @@ mod tests {
         );
         let speed = |t: usize| path[t][0] - path[t - 1][0];
         assert!(
-            (speed(4) - 4.8).abs() < 1e-4 && speed(19) == 22.,
+            (speed(4) - 4.8).abs() < 1e-4 && speed(19) == 22.5,
             "{path:?}"
         );
         // Running jump: top speed 30 kept in the air.

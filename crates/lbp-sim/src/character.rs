@@ -9,11 +9,21 @@ use avian2d::math::Vector;
 use avian2d::prelude::*;
 use bevy::prelude::*;
 
-/// Capsule radius and half segment in world units. INFERRED: Sackboy's position rests 69
-/// units above the floor in Rookie Test (floor y 5905, standing y 5973.8), so the capsule
-/// spans 69 below its centre; the width is a PLACEHOLDER.
+/// How far Sackboy's position rests above the floor: 69.9 in the owner's blank Moon level
+/// (RPCS3 memory read, PC run d208, idle; Rookie Test gave 68.8). CONFIRMED_FROM_LOCAL_DATA
+/// (emulated).
+pub const FLOOR_REST: f32 = 69.9;
+/// Standing height: his skinned mesh in the Moon level is about 200 tall (max 205; d208), and
+/// the game data has no Sackboy collision shape, so the capsule takes the mesh height
+/// (INFERRED: the game's own collision size is not known).
+pub const HEIGHT: f32 = 200.0;
+/// Capsule radius (half width): PLACEHOLDER.
 pub const RADIUS: f32 = 35.0;
-pub const HALF_SEGMENT: f32 = 34.0;
+/// Half the capsule's straight part, so it spans [`HEIGHT`].
+pub const HALF_SEGMENT: f32 = HEIGHT / 2. - RADIUS;
+/// The capsule's centre above Sackboy's position: the capsule spans [`FLOOR_REST`] below
+/// the position and the rest of [`HEIGHT`] above it.
+pub const CENTRE_ABOVE: f32 = HEIGHT / 2. - FLOOR_REST;
 /// Half depth of Sackboy's slab: thin, so he only meets the lane he is in. PLACEHOLDER.
 pub const HALF_THICKNESS: f32 = 5.0;
 /// Gap kept from surfaces after a move, and how far below the feet counts as standing.
@@ -32,7 +42,8 @@ pub struct SackboyBody {
     next: Option<Vector>,
 }
 
-/// Spawns Sackboy standing at `position` (world units, capsule centre) in lane `z`.
+/// Spawns Sackboy at `position` (world units; his position, [`FLOOR_REST`] above his feet)
+/// in lane `z`.
 pub fn spawn_sackboy(commands: &mut Commands, position: [f32; 2], z: f32) -> Entity {
     let p = sv(position);
     commands
@@ -42,7 +53,11 @@ pub fn spawn_sackboy(commands: &mut Commands, position: [f32; 2], z: f32) -> Ent
                 ..Default::default()
             },
             RigidBody::Kinematic,
-            Collider::capsule(RADIUS * UNIT_SCALE, 2. * HALF_SEGMENT * UNIT_SCALE),
+            Collider::compound(vec![(
+                Position::from_xy(0., CENTRE_ABOVE * UNIT_SCALE),
+                Rotation::default(),
+                Collider::capsule(RADIUS * UNIT_SCALE, 2. * HALF_SEGMENT * UNIT_SCALE),
+            )]),
             ZSlab {
                 z,
                 half_thickness: HALF_THICKNESS,

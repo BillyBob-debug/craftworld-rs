@@ -2,12 +2,12 @@
 //! avian world (lbp-sim, material rules by MAP path) and Sackboy as the kinematic capsule
 //! driven by the RPCS3-measured movement rules at 30 Hz. Arrow keys or the left stick walk
 //! and change lanes (Up = lane behind, Down = lane in front), Space or the South button
-//! jumps; the camera follows him. With `--select-guid` naming the Sackboy mesh he is drawn
+//! jumps; the camera follows him as the game's default camera does (Moon level measurement). With `--select-guid` naming the Sackboy mesh he is drawn
 //! as that mesh standing on the capsule (feet at its bottom), turned to the walk direction,
 //! and `--play-animation` (a walk clip) cycles at the walk speed; otherwise as a placeholder
 //! capsule. The level's own dynamic objects are simulated but not redrawn.
 //!
-//! `--play-sackboy-at X,Y,Z` sets the spawn (level units, capsule centre); otherwise the
+//! `--play-sackboy-at X,Y,Z` sets the spawn (level units, his position: 69.9 above the feet); otherwise the
 //! first CHECKPOINT's POS plus [`SPAWN_OFFSET`]. `--play-sackboy-input STEPS` replaces the pad with a script of
 //! `keys:ticks` steps (keys from `l r j b f`, `-` for none; e.g. `r:40,rj:12,-:30`) and prints
 //! Sackboy's position every tick, for comparing paths against RPCS3.
@@ -15,10 +15,15 @@ use bevy::prelude::*;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::level_scene;
 use lbp_sim::avian2d::prelude::*;
-use lbp_sim::character::{spawn_sackboy, SackboyBody, SackboyPlugin, HALF_SEGMENT, RADIUS};
+use lbp_sim::character::{
+    spawn_sackboy, SackboyBody, SackboyPlugin, CENTRE_ABOVE, FLOOR_REST, HALF_SEGMENT, HEIGHT,
+    RADIUS,
+};
 use lbp_sim::sackboy::{Input, WALK_SPEED};
 use lbp_sim::scene::{material_rule_for_path, MaterialRule};
-use lbp_sim::{build_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin};
+use lbp_sim::{
+    build_scene_with, build_spawn_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin,
+};
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -113,7 +118,7 @@ pub(crate) fn spawn_figure(
     let mut line = format!(
         "Play figure: model height {:.0} level units (capsule {:.0})",
         hi[2] - lo[2],
-        2. * (HALF_SEGMENT + RADIUS)
+        HEIGHT
     );
     let scene: Vec<_> = v.scene[first..]
         .iter()
@@ -177,10 +182,38 @@ fn walk_phase(phase: f32, dt: f32, fps: f32, vx: f32, grounded: bool) -> f32 {
 /// Sackboy's start relative to the first CHECKPOINT POS. RPCS3, Rookie Test (PC, d-run
 /// 2026-10-09): checkpoint (-13335, 6971, -250), Sackboy appears at (-13335.7, 6763, 0) and
 /// lands at y 5974. One level only: INFERRED for other levels.
-const SPAWN_OFFSET: [f32; 3] = [0., -208., 250.];
+pub(crate) const SPAWN_OFFSET: [f32; 3] = [0., -208., 250.];
 
-/// Camera distance from Sackboy in level units. PLACEHOLDER (not measured in RPCS3).
-const FOLLOW_DISTANCE: f32 = 1500.;
+/// Sackboy's x relative to the first CHECKPOINT POS when he spawns there; he appears at the
+/// checkpoint's height and falls to the floor below. RPCS3, Moon level play-mode spawn (PC,
+/// 2026-10-09, local-analysis/results/2026-10-09-moon-movement.md, "Addendum: play-mode
+/// checkpoint spawn"): checkpoint (-18904.74, 1798.11, -470), first sample at +(-0.36,
+/// +0.07), settles at +(-1.11, -73.82) after 23 ticks. The Pod (shell 000027b9,
+/// local-analysis/results/2026-10-09-pod-spawn-memory.md): checkpoint (-3.05, 540.76, -50),
+/// Sackboy at (-5.37, -477.97) in lane 0, 1018 below it, so only x and the drop carry over,
+/// not the Moon's y. INFERRED for other levels.
+pub(crate) const DATA_SPAWN_X: f32 = -1.11;
+
+/// Lane centres (world z): front 0, middle -200, back -400 (Moon level, same results file).
+const LANES: [f32; 3] = [0., -200., -400.];
+
+/// The lane Sackboy spawns in for a checkpoint at depth `z`: the nearest lane centre. Moon:
+/// checkpoint z -470 -> back lane -400. INFERRED (one checkpoint; Rookie Test's z 0 from a
+/// -250 checkpoint does not fit this rule and was not taken in play mode).
+pub(crate) fn spawn_lane(z: f32) -> f32 {
+    LANES
+        .into_iter()
+        .min_by(|a, b| (a - z).abs().total_cmp(&(b - z).abs()))
+        .unwrap_or(0.)
+}
+
+/// The default game camera's eye relative to Sackboy's position (level units), looking
+/// straight down -z (no pitch), vertical FOV [`FOLLOW_FOV_DEG`]. RPCS3 memory read in the
+/// owner's blank Moon level (PC run d208, idle, one pose): CONFIRMED_FROM_LOCAL_DATA
+/// (emulated) for that pose; whether the x lead follows his facing or lags while walking is
+/// not measured (INFERRED: held constant).
+const FOLLOW_EYE: [f32; 3] = [296., 168., 1218.];
+const FOLLOW_FOV_DEG: f32 = 60.;
 
 fn value(all: &[String], flag: &str) -> Option<String> {
     all.iter()
@@ -214,6 +247,57 @@ fn parse_script(text: &str) -> Result<Vec<(Input, usize)>, String> {
             Ok((input, ticks))
         })
         .collect()
+}
+
+/// Non-normal material rules by descriptor GUID, from the MAP paths.
+fn material_rules(catalog: &lbp_catalog::Catalog) -> BTreeMap<u32, MaterialRule> {
+    let mut rules = BTreeMap::new();
+    for r in &catalog.snapshot.resources {
+        if let Ok(g) = u32::from_str_radix(r.map_row.guid.trim(), 16) {
+            let rule = material_rule_for_path(&r.map_row.path);
+            if rule != MaterialRule::Normal {
+                rules.entry(g).or_insert(rule);
+            }
+        }
+    }
+    rules
+}
+
+/// Where a level puts Sackboy's feet, from its data alone: the first CHECKPOINT's POS
+/// moved by [`DATA_SPAWN_X`] into the [`spawn_lane`] lane, dropped from the checkpoint's
+/// height to the highest collider top below in that slab (the Pod figure, in place of the
+/// screenshot fit). Pod: feet at y -547, i.e. the measured position row -478 less the 69
+/// from feet to Sackboy's position (`lbp_sim::character`). Level units; and a line for the status. Runs on the
+/// level worker (deep reader stack).
+pub(crate) fn level_spawn_feet(
+    source: &AttachedSource,
+    catalog: &lbp_catalog::Catalog,
+    key: &lbp_catalog::attachment::LocationKey,
+    control: &LoadControl,
+) -> Result<([f32; 3], String), String> {
+    let bytes = level_scene::read_level_bytes(source, key, control)?;
+    let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
+        .map_err(|e| e.to_string())?;
+    let (thing, m) = *level_scene::checkpoints(&report.things)
+        .first()
+        .ok_or("no CHECKPOINT")?;
+    let rules = material_rules(catalog);
+    let scene = build_spawn_scene_with(&report.things, &|d| {
+        d.guid
+            .and_then(|g| rules.get(&g).copied())
+            .unwrap_or_default()
+    });
+    let [x, y, z] = [m[12] + DATA_SPAWN_X, m[13], spawn_lane(m[14])];
+    let floor = scene
+        .floor_below([x, y], z)
+        .ok_or_else(|| format!("no floor below ({x:.0}, {y:.0}) in slab z {z:.0}"))?;
+    Ok((
+        [x, floor, z],
+        format!(
+            "data spawn: checkpoint Thing {thing} ({:.0}, {:.0}, {:.0}) x {DATA_SPAWN_X:+.2}, dropped in lane z {z:.0} to floor y {floor:.0}",
+            m[12], m[13], m[14]
+        ),
+    ))
 }
 
 /// Reads the level and adds physics and Sackboy when `--play-sackboy` is given.
@@ -251,15 +335,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             let control = LoadControl::default();
             let catalog = lbp_catalog::load(Path::new(&snapshot), &control)?;
             let source = AttachedSource::attach(Path::new(&game), &catalog, &control)?;
-            let mut rules = BTreeMap::<u32, MaterialRule>::new();
-            for r in &catalog.snapshot.resources {
-                if let Ok(g) = u32::from_str_radix(r.map_row.guid.trim(), 16) {
-                    let rule = material_rule_for_path(&r.map_row.path);
-                    if rule != MaterialRule::Normal {
-                        rules.entry(g).or_insert(rule);
-                    }
-                }
-            }
+            let rules = material_rules(&catalog);
             let (key, identity) = level_scene::resolve_level(&catalog, guid, path.as_deref())?;
             let bytes = level_scene::read_level_bytes(&source, &key, &control)?;
             let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
@@ -408,6 +484,7 @@ fn show_sackboy(
     mut marker: Query<&mut Transform, (With<Marker>, Without<Figure>)>,
     mut figure: Query<(&mut Transform, &mut Figure)>,
     mut orbit: ResMut<crate::Orbit>,
+    mut cameras: Query<&mut Projection, With<Camera3d>>,
     mut framed: Local<bool>,
 ) {
     let (Some(display), Ok((body, pos, slab))) = (display, sackboy.single()) else {
@@ -423,10 +500,9 @@ fn show_sackboy(
         } else if vx < -0.5 {
             f.facing = FACE_LEFT;
         }
-        let feet =
-            display
-                .0
-                .transform_point3(Vec3::new(p[0], p[1] - (HALF_SEGMENT + RADIUS), slab.z));
+        let feet = display
+            .0
+            .transform_point3(Vec3::new(p[0], p[1] - FLOOR_REST, slab.z));
         *t = Transform::from_matrix(
             Mat4::from_translation(feet) * Mat4::from_rotation_y(f.facing) * f.upright,
         );
@@ -439,7 +515,7 @@ fn show_sackboy(
             v.animation_frame = Some(f.phase as i64);
         }
     } else if let Ok(mut t) = marker.single_mut() {
-        t.translation = at;
+        t.translation = at + Vec3::Y * CENTRE_ABOVE * s;
     } else {
         commands.spawn((
             Marker,
@@ -449,15 +525,26 @@ fn show_sackboy(
                 unlit: true,
                 ..default()
             })),
-            Transform::from_translation(at),
+            Transform::from_translation(at + Vec3::Y * CENTRE_ABOVE * s),
         ));
     }
+    let [ex, ey, ez] = FOLLOW_EYE;
     if !*framed {
         *framed = true;
-        // Close in on him once. PLACEHOLDER: the game camera's distance is not measured.
-        orbit.distance = FOLLOW_DISTANCE * s;
+        // The game's default camera: straight on, at its distance and FOV (orbit and zoom
+        // stay free afterwards).
+        orbit.yaw = 0.;
+        orbit.pitch = 0.;
+        orbit.distance = ez * s;
+        for mut projection in &mut cameras {
+            if let Projection::Perspective(p) = projection.as_mut() {
+                p.fov = FOLLOW_FOV_DEG.to_radians();
+            }
+        }
     }
-    orbit.target = at;
+    orbit.target = display
+        .0
+        .transform_point3(Vec3::new(p[0] + ex, p[1] + ey, slab.z));
 }
 
 #[cfg(test)]
@@ -482,5 +569,14 @@ mod tests {
         assert_eq!(walk_phase(4., 0.5, 30., -WALK_SPEED / 2., true), 11.5);
         assert_eq!(walk_phase(4., 0.5, 30., WALK_SPEED, false), 0.);
         assert_eq!(walk_phase(4., 0.5, 30., 0., true), 0.);
+    }
+
+    #[test]
+    fn spawn_lane_is_the_nearest_lane() {
+        // Moon level: checkpoint z -470 spawns in the back lane.
+        assert_eq!(spawn_lane(-470.), -400.);
+        assert_eq!(spawn_lane(-50.), 0.);
+        assert_eq!(spawn_lane(-180.), -200.);
+        assert_eq!(spawn_lane(300.), 0.);
     }
 }

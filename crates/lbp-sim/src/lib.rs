@@ -17,7 +17,7 @@ pub mod sackboy;
 pub mod scene;
 
 pub use avian2d;
-pub use scene::{build_scene, build_scene_with, PhysicsScene};
+pub use scene::{build_scene, build_scene_with, build_spawn_scene_with, PhysicsScene};
 
 /// Game ticks per second (X1, CONFIRMED_FROM_LOCAL_DATA, emulated; docs/runtime-research.md).
 pub const TICK_HZ: f64 = 30.0;

@@ -2,13 +2,13 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use lbp_sim::character::{spawn_sackboy, SackboyBody, SackboyPlugin, HALF_SEGMENT, RADIUS};
+use lbp_sim::character::{spawn_sackboy, SackboyBody, SackboyPlugin, FLOOR_REST, RADIUS};
 use lbp_sim::sackboy::Input;
 use lbp_sim::{to_level, SimPlugin, ZSlab, TICK_HZ, UNIT_SCALE};
 use std::time::Duration;
 
 /// Standing height of the capsule centre above a floor.
-const STAND: f32 = RADIUS + HALF_SEGMENT;
+const STAND: f32 = FLOOR_REST;
 
 /// A static box (world units: centre, size) in the slab z ± 90.
 fn block(commands: &mut Commands, centre: [f32; 2], size: [f32; 2], z: f32) {
