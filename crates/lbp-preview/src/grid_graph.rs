@@ -876,6 +876,7 @@ pub(crate) fn load(
         texture_key,
         wrap,
         selection,
+        runtime_texture: None,
     })))
 }
 

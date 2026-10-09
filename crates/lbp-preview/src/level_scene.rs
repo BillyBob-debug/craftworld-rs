@@ -52,12 +52,15 @@ pub const SHAPE_BEVEL_LABEL: &str = shape_mesh::BEVEL_LABEL;
 pub const MAX_LEVEL_BEVELS: usize = 1024;
 
 /// Level-scene options beyond the material preview options.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LevelSceneOptions {
     /// D122: extrude shapes with their bevel profile (inferred, unverified). Default off.
     pub shape_bevels: bool,
     /// D120: POS placement rule (default inverse bind of bone 0).
     pub placement: PosPlacement,
+    /// P2e `--runtime-texture MESH:SLOT:TEXTURE` rules (docs/p2e-runtime-texture.md).
+    /// Empty (default): materials draw as loaded.
+    pub runtime_textures: Vec<crate::runtime_texture::RuntimeTexture>,
 }
 
 /// Parsed bevels by descriptor identity (GUID, SHA-1).
@@ -221,6 +224,9 @@ pub struct SceneCounts {
     pub reader_stop: Option<String>,
     /// D119 backdrop (static mesh + plan Things).
     pub backdrop: crate::level_backdrop::BackdropCounts,
+    /// P2e opt-in runtime texture rules: per rule, primitive groups of distinct loaded
+    /// model meshes drawn with the rule's texture, and those left by reason.
+    pub runtime_textures: crate::runtime_texture::RuntimeCounts,
 }
 
 impl SceneCounts {
@@ -337,6 +343,7 @@ impl SceneCounts {
             self.sticker_decals_not_drawn
         ));
         out.extend(self.backdrop.lines());
+        out.extend(crate::runtime_texture::lines(&self.runtime_textures));
         out.push(match &self.reader_stop {
             None => "Level reader: complete".into(),
             Some(s) => format!("Level reader stopped: {s}"),
@@ -1644,6 +1651,12 @@ pub fn load_level_scene_with_options(
             .ok_or("Unsupported: level material memory budget (1536 MiB retained)")?;
         Ok(())
     };
+    crate::runtime_texture::validate(&scene_options.runtime_textures)?;
+    let mut runtime_counts: crate::runtime_texture::RuntimeCounts = scene_options
+        .runtime_textures
+        .iter()
+        .map(|r| (*r, Default::default()))
+        .collect();
     let mut scene = build_scene(
         &report.things,
         |src| {
@@ -1655,7 +1668,20 @@ pub fn load_level_scene_with_options(
                 | MeshSource::Backdrop { .. }
                 | MeshSource::JointSkin { .. } => return Err("Invalid: shape source".into()),
             };
-            let mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
+            let mut mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
+            if let MeshSource::Guid(g) = src {
+                apply_runtime_textures(
+                    *g,
+                    &mut mesh,
+                    &scene_options.runtime_textures,
+                    &mut runtime_counts,
+                    source,
+                    catalog,
+                    &key,
+                    control,
+                );
+                control.check()?;
+            }
             charge(retained(&mesh))?;
             Ok(ScenePayload::Model(Box::new(mesh)))
         },
@@ -1664,6 +1690,7 @@ pub fn load_level_scene_with_options(
         model_bind_poses,
         scene_options.placement,
     );
+    scene.counts.runtime_textures = runtime_counts;
     control.check()?;
     skin_span_joints(
         &mut scene,
@@ -1751,6 +1778,55 @@ pub fn load_level_scene_with_options(
     scene.settings = LevelSettings::find(&report.things).map(|(_, s)| *s);
     scene.checkpoints = checkpoints(&report.things);
     Ok(scene)
+}
+
+/// P2e: applies `--runtime-texture` rules to one loaded model mesh. The mesh bytes are
+/// re-read (UV0) and the texture decoded only when a group matches.
+#[allow(clippy::too_many_arguments)]
+fn apply_runtime_textures(
+    guid: u32,
+    mesh: &mut GroupedMesh,
+    rules: &[crate::runtime_texture::RuntimeTexture],
+    counts: &mut crate::runtime_texture::RuntimeCounts,
+    source: &AttachedSource,
+    catalog: &Catalog,
+    key: &LocationKey,
+    control: &LoadControl,
+) {
+    let vertices = mesh.geometry.positions.len();
+    crate::runtime_texture::apply(
+        guid,
+        crate::runtime_texture::Groups {
+            ranges: &mesh.geometry.primitive_triangles,
+            vertices,
+            bindings: &mut mesh.bindings,
+        },
+        rules,
+        counts,
+        || {
+            let (_, data) = crate::read_mesh(source, key, control)?;
+            let coords = lbp_mesh::decode_uvs(&data, || control.check().is_err())
+                .map_err(|e| e.to_string())?;
+            let uv = crate::linked::selected_uv(&coords, 0, vertices)?;
+            Ok((uv, coords.metadata))
+        },
+        |texture| {
+            control.check()?;
+            let texture_key = resolve(catalog, Some(texture), None)?;
+            let decoded = lbp_texture::decode_reader(
+                texture_key.size,
+                |offset, count| {
+                    source
+                        .read_hex_checked(&texture_key, offset, count, control)
+                        .map(|p| p.bytes)
+                        .map_err(lbp_texture::Error::Input)
+                },
+                || control.check().is_err(),
+            )
+            .map_err(|e| e.to_string())?;
+            Ok((decoded, texture_key))
+        },
+    );
 }
 
 /// P2c: CHECKPOINT Things with a usable POS world matrix (spawn candidates).
