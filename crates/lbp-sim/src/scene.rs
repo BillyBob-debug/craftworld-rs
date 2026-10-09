@@ -29,7 +29,7 @@
 //! - Mass = area × massDepth × density (INFERRED, A2); density is [`DENSITY`] until RMaterial
 //!   is read (PLACEHOLDER).
 use lbp_level::serial::Descriptor;
-use lbp_level::shape_mesh::outline_triangles;
+use lbp_level::shape_mesh::outline_triangles_lenient;
 use lbp_level::thing::ThingRecord;
 use std::collections::BTreeMap;
 
@@ -123,6 +123,8 @@ pub struct SceneReport {
     pub nested_bodies: usize,
     /// Shapes left out, by reason.
     pub rejected: BTreeMap<&'static str, usize>,
+    /// Shapes kept by the even-odd fill, by the reason the strict outline refused them.
+    pub filled: BTreeMap<&'static str, usize>,
     pub joints: usize,
     /// PJoints left out, by reason.
     pub rejected_joints: BTreeMap<&'static str, usize>,
@@ -231,8 +233,13 @@ pub fn build_scene_with(
             reject("bad transform");
             continue;
         };
-        let outline = match outline_triangles(shape) {
-            Ok(v) => v,
+        let outline = match outline_triangles_lenient(shape) {
+            Ok((v, why)) => {
+                if let Some(why) = why {
+                    *scene.report.filled.entry(why.reason()).or_default() += 1;
+                }
+                v
+            }
             Err(e) => {
                 reject(e.reason());
                 continue;
@@ -288,7 +295,17 @@ pub fn build_scene_with(
             triangles.push(if area > 0. { [a, b, c] } else { [a, c, b] });
         }
         if triangles.is_empty() {
-            reject("no triangles");
+            // Split by cause: a world matrix that flattens the xy plane (seen edge-on, or
+            // scaled to nothing), a tiny outline, or neither.
+            let det = m[0] * m[5] - m[1] * m[4];
+            let scale = m[0].abs().max(m[1].abs()).max(m[4].abs()).max(m[5].abs());
+            reject(if det.abs() <= 1e-6 * scale * scale {
+                "no triangles: flat transform"
+            } else if outline.area.abs() * f64::from(det.abs()) < 1e-3 {
+                "no triangles: tiny outline"
+            } else {
+                "no triangles: other"
+            });
             continue;
         }
         fixed_shape.push(rule == MaterialRule::Fixed);

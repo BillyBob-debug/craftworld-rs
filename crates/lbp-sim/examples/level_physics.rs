@@ -52,6 +52,8 @@ struct Motion {
     max_move: f32,
     /// Bodies that moved more than 100: Thing and displacement.
     moved: Vec<(usize, [f32; 2])>,
+    /// First tick (1-based) each body was more than 1 unit from its start.
+    first_moved: BTreeMap<usize, usize>,
 }
 
 fn simulate(scene: &PhysicsScene, ticks: usize) -> Motion {
@@ -76,10 +78,24 @@ fn simulate(scene: &PhysicsScene, ticks: usize) -> Motion {
             spawn_scene(&mut commands, &owned);
         });
     app.finish();
-    for _ in 0..ticks {
-        app.update();
-    }
     let mut m = Motion::default();
+    for tick in 1..=ticks {
+        app.update();
+        let mut q = app
+            .world_mut()
+            .query_filtered::<(&ThingIndex, &Position), With<RigidBody>>();
+        for (t, p) in q.iter(app.world()) {
+            if m.first_moved.contains_key(&t.0) {
+                continue;
+            }
+            if let Some(s) = start.get(&t.0) {
+                let p = to_level(p.0);
+                if (p[0] - s[0]).powi(2) + (p[1] - s[1]).powi(2) > 1. {
+                    m.first_moved.insert(t.0, tick);
+                }
+            }
+        }
+    }
     let mut q = app
         .world_mut()
         .query_filtered::<(&ThingIndex, &Position), With<RigidBody>>();
@@ -199,6 +215,7 @@ fn run() -> Result<(), String> {
     let mut total = Motion::default();
     let (mut shapes, mut dynamic, mut static_, mut not_collidable, mut not_read) = (0, 0, 0, 0, 0);
     let mut rejected = BTreeMap::<&str, usize>::new();
+    let mut filled = BTreeMap::<&str, usize>::new();
     let (mut joints, mut rejected_joints) = (0, BTreeMap::<&str, usize>::new());
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
@@ -231,6 +248,9 @@ fn run() -> Result<(), String> {
         not_collidable += r.not_collidable;
         for (k, n) in &r.rejected {
             *rejected.entry(k).or_default() += n;
+        }
+        for (k, n) in &r.filled {
+            *filled.entry(k).or_default() += n;
         }
         joints += r.joints;
         for (k, n) in &r.rejected_joints {
@@ -266,7 +286,15 @@ fn run() -> Result<(), String> {
                 .joints
                 .iter()
                 .any(|j| [j.a, j.b].contains(&lbp_sim::scene::Endpoint::Body(bi)));
+            let first = match m.first_moved.get(&b.thing) {
+                None => "never",
+                Some(1) => "1",
+                Some(2..=5) => "2-5",
+                Some(6..=30) => "6-30",
+                Some(_) => "31+",
+            };
             let keys = [
+                ("first_moved_tick", first.to_string()),
                 ("frozen", b.frozen.to_string()),
                 ("material", material),
                 ("parts", t.parts.join("+")),
@@ -300,7 +328,7 @@ fn run() -> Result<(), String> {
             "level": label,
             "stopped": report.stop.is_some(),
             "shapes": r.shapes, "dynamic": r.dynamic, "static": r.static_,
-            "not_collidable": r.not_collidable, "rejected": r.rejected,
+            "not_collidable": r.not_collidable, "rejected": r.rejected, "filled": r.filled,
             "joints": r.joints, "rejected_joints": r.rejected_joints,
             "fixed_bodies": r.fixed_bodies, "nested_bodies": r.nested_bodies,
             "bodies": m.bodies, "moved_over_1": m.moved_1, "moved_over_100": m.moved_100,
@@ -311,7 +339,15 @@ fn run() -> Result<(), String> {
     top.sort_by(|a, b| b.1.cmp(a.1).then(a.0.cmp(b.0)));
     top.truncate(40);
     let fixed_paths: Vec<&String> = fixed_guids.iter().filter_map(|g| paths.get(g)).collect();
+    let mut most_moved: Vec<(&str, u64)> = levels
+        .iter()
+        .filter_map(|l| Some((l["level"].as_str()?, l["moved_over_100"].as_u64()?)))
+        .filter(|l| l.1 > 0)
+        .collect();
+    most_moved.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(b.0)));
+    most_moved.truncate(15);
     let doc = serde_json::json!({
+        "levels_most_moved_top15": most_moved,
         "schema_version": 1,
         "unit": "SHAPE Thing (scene); BODY Thing with a collider (motion), world units",
         "ticks": ticks,
@@ -319,7 +355,7 @@ fn run() -> Result<(), String> {
         "levels": levels.len(),
         "levels_not_read": not_read,
         "shapes": shapes, "dynamic": dynamic, "static": static_,
-        "not_collidable": not_collidable, "rejected": rejected,
+        "not_collidable": not_collidable, "rejected": rejected, "filled": filled,
         "joints": joints, "rejected_joints": rejected_joints,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,
@@ -349,12 +385,13 @@ fn run() -> Result<(), String> {
         .map_err(|e| e.to_string())?;
     println!(
         "levels {} (not read {not_read}, panicked {}); shapes {shapes}: dynamic {dynamic}, static {static_}, \
-         not collidable {not_collidable}, rejected {}; joints {joints} (rejected {}); \
+         not collidable {not_collidable}, rejected {}, filled {}; joints {joints} (rejected {}); \
          fixed bodies {fixed_bodies} ({} fixed materials), nested bodies {nested_bodies}; \
          after {ticks} ticks: bodies {}, moved >1 {}, >100 {}, non-finite {}, max move {:.1}",
         levels.len(),
         panicked.len(),
         rejected.values().sum::<usize>(),
+        filled.values().sum::<usize>(),
         rejected_joints.values().sum::<usize>(),
         fixed_paths.len(),
         total.bodies,

@@ -1,7 +1,9 @@
 //! D114 synthetic recipes for SHAPE extrusion v1 (no game bytes).
 use lbp_level::parts::{GeneratedMesh, Shape, ShapeColor};
 use lbp_level::serial::Descriptor;
-use lbp_level::shape_mesh::{extrude, ShapeMesh, ShapeReject, IDENTITY, PREVIEW_LABEL};
+use lbp_level::shape_mesh::{
+    extrude, outline_triangles_lenient, ShapeMesh, ShapeReject, IDENTITY, PREVIEW_LABEL,
+};
 use std::collections::HashMap;
 
 fn shape(loops: &[&[[f32; 2]]], thickness: f32) -> Shape {
@@ -353,4 +355,53 @@ fn many_sided_concave_star_with_hole() {
     }
     let area = area / 2.0 - 10_000.0;
     check_solid(&m, area, 90.0, 1.0);
+}
+
+/// Area of an outline's triangles, checking they are all counter-clockwise.
+fn filled_area(s: &Shape) -> (f64, Option<&'static str>) {
+    let (o, why) = outline_triangles_lenient(s).unwrap();
+    let mut sum = 0.0;
+    for t in &o.triangles {
+        let [a, b, c] = t.map(|k| o.points[k].map(f64::from));
+        let x = 0.5 * ((b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]));
+        assert!(x > 0.0);
+        sum += x;
+    }
+    assert!((sum - o.area).abs() < 1e-6 * sum);
+    (sum, why.map(|w| w.reason()))
+}
+
+#[test]
+fn lenient_outline_fills_crossing_loops_by_even_odd() {
+    // Valid shapes take the strict path.
+    assert_eq!(filled_area(&shape(&[&L_SHAPE], 10.0)).1, None);
+    let (a, why) = filled_area(&shape(&[&SQUARE, &HOLE_CW], 10.0));
+    assert_eq!((a, why), (7_500.0, None));
+    // Bow tie: two lobes meeting at (100/3, 100/3), 2,500/3 + 10,000/3.
+    let bow = [[0.0, 0.0], [100.0, 100.0], [100.0, 0.0], [0.0, 50.0]];
+    let (a, why) = filled_area(&shape(&[&bow], 10.0));
+    assert_eq!(why, Some("self_intersecting"));
+    assert!((a - 12_500.0 / 3.0).abs() < 1e-3, "{a}");
+    // A "hole" crossing the outer edge: the overlap is empty, the rest filled.
+    let cut = [[50.0, 50.0], [50.0, 150.0], [150.0, 150.0], [150.0, 50.0]];
+    let (a, why) = filled_area(&shape(&[&SQUARE, &cut], 10.0));
+    assert_eq!(why, Some("loops_intersect"));
+    assert!((a - 15_000.0).abs() < 1e-3, "{a}");
+    // A hole outside the outer loop becomes a second solid.
+    let far = [
+        [500.0, 500.0],
+        [500.0, 550.0],
+        [550.0, 550.0],
+        [550.0, 500.0],
+    ];
+    let (a, _) = filled_area(&shape(&[&SQUARE, &far], 10.0));
+    assert!((a - 12_500.0).abs() < 1e-3, "{a}");
+    // Shapes with no area are still refused.
+    let line = [[0.0, 0.0], [50.0, 0.0], [100.0, 0.0]];
+    assert_eq!(
+        outline_triangles_lenient(&shape(&[&line], 10.0))
+            .unwrap_err()
+            .reason(),
+        "zero_area_loop"
+    );
 }
