@@ -24,6 +24,7 @@ pub mod census;
 pub mod level_backdrop;
 pub mod level_scene;
 pub mod popit;
+pub mod runtime_texture;
 pub mod story;
 pub mod text;
 pub use blend::DiffuseBlend;

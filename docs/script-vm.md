@@ -39,7 +39,7 @@ INFERRED (no executable or Toolkit statement; each is a place a real script can 
 | Receiver | Member functions take the receiver as an argument; virtual dispatch uses the lowest staged address | Listings: argument row typed as the own class |
 | Branch target | `pc + offset` (`Rules::branch_from_current`), alternative `pc + 1 + offset` | Settled by D133: all 15,866 branches in the 426 scripts land in range under `pc + offset` (15,399 under the alternative) |
 | `LCv4` | Four consecutive f32 constants from `index` | Constant-table sizes vs `LCv4` indices |
-| m44 layout | Row-major; `GET_M44_XY` = row X, column Y; `rX` row, `cX` column | RPCS3 comparison of a scripted transform |
+| m44 layout | Column-major like the engine (element (row, col) at col * 4 + row, translation at 12..14); `MULm44` A * B is the engine's product (out[col*4+row] = sum a[k*4+row] * b[col*4+k]). `GET_M44_XY` reads element index X*4+Y, so in engine terms column X, row Y | CONFIRMED_FROM_LOCAL_DATA (emulated): the Pod World matrix read in RPCS3 is the transpose of the earlier row-major product (Pod thread, D180 trace, 2026-10-09). Test `m44_product_is_column_major_a_times_b` |
 | Comparisons and casts | C semantics: wrapping int arithmetic, truncating division, `f as i32` | Script behaviour vs RPCS3 |
 | `ARRAY_FIND` | Index of the first equal element or -1 | Script behaviour |
 | Function lookup | By name through the superclass chain; first definition wins and repeats are counted (`ambiguous_calls`) | Census of duplicate names per class |
@@ -53,6 +53,7 @@ INFERRED (no executable or Toolkit statement; each is a place a real script can 
 | `ARRAY_INSERT` index | Clamped to [0, len]: -1 inserts at the front, past the end appends | D145 TestArray: three appends, then inserts at 1, -1 and 100; the length and first two element checks fit only this rule (appending at -1 or at 100 alone broke them in D140/D144) |
 | Array element type | Array instructions carry the element machine type; a Void element read, value written or resize fill becomes that type's default | D146 TestArray: an int element read back as Void faulted the following `EQi` (an empty array resized had no element to copy a zero from) |
 | `LCs64` constants | Compressed long vectors hold zigzag values, `(n >> 1) ^ -(n & 1)`, decoded by the `lbp-level` reader; uncompressed u64 is two's complement | D143: with zigzag, TestS64 1551 (`1 << 63` = i64::MIN) and 1562 (AND of two constants) pass; without it no decode makes 1562 pass |
+| Script threads | `Thread.StartImpl__(this)` is handled by the VM: it records the thread object (`Vm::take_started_threads`). The level schedule runs `ThreadMain__` on it at the end of the step that started it, until its first `System.Yield`, then resumes it once per tick after the Things' suspended scripts and before the updates | PC D167 listings: `Start__` asserts `!Running`, sets it and passes only `this`; `ThreadMain__` runs OnStart/Run/OnFinish and clears `Running`; waits are script loops over `Yield__`. Start timing and order INFERRED; RPCS3 (Pod intro) can settle them |
 
 UNKNOWN: native function semantics (they live in the executable). Each one gets a host
 binding from recorded findings, in call-count order (items Rr/Rs).

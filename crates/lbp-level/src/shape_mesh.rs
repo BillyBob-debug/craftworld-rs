@@ -415,6 +415,44 @@ impl BevelOutcome {
 }
 
 /// Selection plus extrusion for one parsed Thing (SHAPE + GENERATED_MESH + POS).
+/// D160: the drawn front cap of a SHAPE Thing in local coordinates: the validated polygon
+/// points, its triangles, the front-face local z (= +thickness) and the POS world matrix.
+/// Same selection as [`extrude_thing`] (SHAPE + play-visible GENERATED_MESH + POS).
+#[derive(Debug, Clone, PartialEq)]
+pub struct FrontFace {
+    pub points: Vec<[f64; 2]>,
+    pub triangles: Vec<[usize; 3]>,
+    pub z: f64,
+    pub world: [f32; 16],
+}
+
+/// See [`FrontFace`].
+pub fn front_face(thing: &ThingRecord) -> Result<FrontFace, ShapeReject> {
+    let shape = thing.data.shape.as_ref().ok_or(ShapeReject::NoShape)?;
+    let gm = thing
+        .data
+        .generated_mesh
+        .as_ref()
+        .ok_or(ShapeReject::NoGeneratedMesh)?;
+    let pos = thing.data.pos.as_ref().ok_or(ShapeReject::NoPos)?;
+    if !gm.play_mode_visible {
+        return Err(ShapeReject::EditOnly);
+    }
+    let t = f64::from(shape.thickness);
+    if !t.is_finite() || t <= 0.0 || t > MAX_THICKNESS {
+        return Err(ShapeReject::BadThickness);
+    }
+    Xform::new(&pos.world)?;
+    let poly = validate(shape)?;
+    let triangles = triangulate(&poly)?;
+    Ok(FrontFace {
+        points: poly.pts,
+        triangles,
+        z: t,
+        world: pos.world,
+    })
+}
+
 pub fn extrude_thing(thing: &ThingRecord) -> Result<ShapeMesh, ShapeReject> {
     let shape = thing.data.shape.as_ref().ok_or(ShapeReject::NoShape)?;
     let gm = thing

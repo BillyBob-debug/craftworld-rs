@@ -9,6 +9,7 @@ mod text_browser;
 mod ui_script;
 use dual::ViewerMaterial;
 mod browser;
+mod level_play;
 mod lighting;
 use bevy::{
     input::mouse::{AccumulatedMouseMotion, AccumulatedMouseScroll},
@@ -41,8 +42,13 @@ struct Completed {
     identity: String,
     guid: String,
     level: Option<Result<LevelLoaded, String>>,
-    clip: Option<Result<lbp_preview::skinned::SkinnedClip, String>>,
+    clip: Option<ClipResult>,
+    /// P2d `--pod-hold-animation`: the figure's clip while the Puter is open.
+    hold_clip: Option<ClipResult>,
 }
+type ClipResult = Result<lbp_preview::skinned::SkinnedClip, String>;
+/// A shell CHECKPOINT Thing and its world matrix (`LevelScene::checkpoints`).
+type Checkpoint = (usize, [f32; 16]);
 /// Rd: CPU-skinned playback of one animation on the displayed mesh.
 struct Playing {
     clip: lbp_preview::skinned::SkinnedClip,
@@ -50,6 +56,10 @@ struct Playing {
     started: f32,
     shown: Option<i64>,
     gpu: Option<GpuRig>,
+    /// The meshes the clip poses (CPU positions and morphs).
+    meshes: Vec<Handle<Mesh>>,
+    /// P2d: the other Pod figure clip (standing / holding), swapped in by `pod_figure`.
+    alt: Option<lbp_preview::skinned::SkinnedClip>,
 }
 /// Re: joint entities under a root carrying the display normalisation; the standard
 /// vertex shader skins. Mesh positions stay in display space (see `gpu_rig`).
@@ -63,6 +73,8 @@ type LevelScene = level_scene::LevelScene<level_scene::ScenePayload>;
 struct LevelLoaded {
     scene: LevelScene,
     identity: String,
+    /// P2b `--pod-shell HEX`: the Pod shell level drawn over this one.
+    shell: Option<LevelScene>,
 }
 /// D113 level mode (docs/d113-level-scene.md). Empty target = single-mesh mode.
 #[derive(Default)]
@@ -79,6 +91,16 @@ struct LevelMode {
     /// P2 `--pod-camera N`: home view placing Thing N (the Pod globe) where the RPCS3
     /// reference shows it (pod_menu::pod_camera).
     pod: Option<usize>,
+    /// P2b `--pod-shell HEX`: the Pod shell level (000027b9) as a layer over the view.
+    shell: Option<u32>,
+    /// P2d `--pod-open` (1) / P2h `--pod-t T`: Puter opening progress to start at, for
+    /// QA captures of the open and mid-dolly views.
+    t0: Option<f32>,
+    /// P2e `--runtime-texture MESH:SLOT:TEXTURE` (repeatable; docs/p2e-runtime-texture.md).
+    runtime_textures: Vec<lbp_preview::runtime_texture::RuntimeTexture>,
+    /// P2f `--pod-shell-camera FX,FY,FZ,TX,TY,TZ`: the closed shell eye from the game's
+    /// camera preset (shell level units, up +Y) instead of the DualShock fit.
+    shell_camera: Option<[f32; 6]>,
     lines: Vec<String>,
     home: Option<Orbit>,
 }
@@ -109,6 +131,8 @@ struct Viewer {
     instance_rgba: [f32; 4],
     animation_base: bool,
     animation_guid: String,
+    /// P2d `--pod-hold-animation HEX`.
+    hold_animation_guid: String,
     animation_frame: Option<i64>,
     cpu_skinning: bool,
     /// D148: single-mesh model space is Z-up (default) or Y-up (`--model-up`).
@@ -159,8 +183,8 @@ impl Viewer {
         let cached = (paths == self.context_paths)
             .then(|| self.context.clone())
             .flatten();
-        // Level mode ignores the single-mesh GUID.
-        let guid = if self.level.active() {
+        // Level mode ignores the single-mesh GUID, except as the Pod figure (P2c).
+        let guid = if self.level.active() && self.level.shell.is_none() {
             String::new()
         } else {
             self.guid.clone()
@@ -169,12 +193,15 @@ impl Viewer {
             .level
             .active()
             .then(|| (self.level.guid, self.level.path.clone()));
+        let shell_guid = self.level.shell;
         let scene_options = level_scene::LevelSceneOptions {
             shape_bevels: self.level.shape_bevels,
             placement: self.level.placement,
+            runtime_textures: self.level.runtime_textures.clone(),
         };
         let options = self.preview_options();
         let animation_guid = self.animation_guid.trim().to_ascii_lowercase();
+        let hold_guid = self.hold_animation_guid.trim().to_ascii_lowercase();
         self.playing = None;
         let control = LoadControl::default();
         let worker = control.clone();
@@ -234,21 +261,43 @@ impl Viewer {
                             &key,
                             &worker,
                             options,
-                            scene_options,
+                            scene_options.clone(),
                         )?;
-                        Ok(LevelLoaded { scene, identity })
+                        let shell = shell_guid
+                            .map(|g| {
+                                let (key, _) = level_scene::resolve_level(&catalog, Some(g), None)?;
+                                level_scene::load_level_scene_with_options(
+                                    &source,
+                                    &catalog,
+                                    &key,
+                                    &worker,
+                                    options,
+                                    scene_options,
+                                )
+                            })
+                            .transpose()?;
+                        Ok(LevelLoaded {
+                            scene,
+                            identity,
+                            shell,
+                        })
                     });
-                    let clip = (preview.as_ref().is_ok_and(Option::is_some)
-                        && !animation_guid.is_empty())
-                    .then(|| {
-                        let number = u32::from_str_radix(&animation_guid, 16)
-                            .ok()
-                            .filter(|_| animation_guid.len() == 8)
-                            .ok_or("Animation GUID must be eight hexadecimal digits")?;
-                        let key = lbp_preview::skinned::resolve_animation(&catalog, number)?;
-                        let mesh_key = mesh_key.as_ref().ok_or("No mesh key")?;
-                        lbp_preview::skinned::load_clip(&source, mesh_key, &key, &worker)
-                    });
+                    let load_clip = |guid: &str| {
+                        (preview.as_ref().is_ok_and(Option::is_some) && !guid.is_empty()).then(
+                            || {
+                                let number = u32::from_str_radix(guid, 16)
+                                    .ok()
+                                    .filter(|_| guid.len() == 8)
+                                    .ok_or("Animation GUID must be eight hexadecimal digits")?;
+                                let key =
+                                    lbp_preview::skinned::resolve_animation(&catalog, number)?;
+                                let mesh_key = mesh_key.as_ref().ok_or("No mesh key")?;
+                                lbp_preview::skinned::load_clip(&source, mesh_key, &key, &worker)
+                            },
+                        )
+                    };
+                    let clip = load_clip(&animation_guid);
+                    let hold_clip = load_clip(&hold_guid);
                     worker.check()?;
                     Ok(Completed {
                         context: (catalog, source),
@@ -257,6 +306,7 @@ impl Viewer {
                         guid,
                         level,
                         clip,
+                        hold_clip,
                     })
                 };
                 let _ = tx.send(run());
@@ -308,6 +358,7 @@ fn options() -> Result<Viewer, String> {
         instance_rgba: [1.; 4],
         animation_base: false,
         animation_guid: String::new(),
+        hold_animation_guid: String::new(),
         animation_frame: None,
         cpu_skinning: false,
         model_z_up: true,
@@ -332,6 +383,7 @@ fn options() -> Result<Viewer, String> {
         lighting: lighting::LightingState::default(),
     };
     let mut print_census = false;
+    let mut pod_wall = true;
     let mut args = std::env::args().skip(1);
     while let Some(flag) = args.next() {
         if flag == "--instance-rgba" {
@@ -379,12 +431,24 @@ fn options() -> Result<Viewer, String> {
             v.lighting.enabled = true;
             continue;
         }
+        if flag == "--no-pod-wall" {
+            pod_wall = false;
+            continue;
+        }
+        if flag == "--pod-open" {
+            v.level.t0 = Some(1.);
+            continue;
+        }
         if flag == "--qa-hide-ui" {
             v.hide_ui = true;
             continue;
         }
         if flag == "--level-report" {
             v.level.report = true;
+            continue;
+        }
+        if flag == "--level-scripts" {
+            // Read by level_play.rs.
             continue;
         }
         if flag == "--shape-bevels" {
@@ -404,7 +468,7 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: opt-in local animation base-row snapshot (not game time)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit
---qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -413,6 +477,7 @@ fn options() -> Result<Viewer, String> {
             "--game-dir" => v.game = value,
             "--select-guid" => v.guid = value,
             "--play-animation" => v.animation_guid = value,
+            "--pod-hold-animation" => v.hold_animation_guid = value,
             "--animation-frame" => {
                 v.animation_frame = Some(value.parse().map_err(|_| "invalid animation frame")?)
             }
@@ -442,6 +507,39 @@ fn options() -> Result<Viewer, String> {
             }
             "--level-path" => v.level.path = Some(value),
             "--level-placement" => v.level.placement = level_scene::PosPlacement::parse(&value)?,
+            "--runtime-texture" => push_runtime_texture(&mut v.level.runtime_textures, &value)?,
+            "--pod-t" => {
+                let t = value
+                    .parse::<f32>()
+                    .ok()
+                    .filter(|t| (0. ..=1.).contains(t))
+                    .ok_or("--pod-t takes a number from 0 (closed) to 1 (open)")?;
+                v.level.t0 = Some(t);
+            }
+            "--pod-shell-camera" => {
+                let n: Vec<f32> = value
+                    .split(',')
+                    .map(|x| x.trim().parse::<f32>())
+                    .collect::<Result<_, _>>()
+                    .map_err(|_| "--pod-shell-camera takes six numbers FX,FY,FZ,TX,TY,TZ")?;
+                let n: [f32; 6] = n
+                    .try_into()
+                    .ok()
+                    .filter(|n: &[f32; 6]| n.iter().all(|x| x.is_finite()))
+                    .ok_or("--pod-shell-camera takes six finite numbers FX,FY,FZ,TX,TY,TZ")?;
+                if n[..3] == n[3..] {
+                    return Err("--pod-shell-camera: from and to are the same point".into());
+                }
+                v.level.shell_camera = Some(n);
+            }
+            "--pod-shell" => {
+                v.level.shell = Some(
+                    u32::from_str_radix(&value, 16)
+                        .ok()
+                        .filter(|_| value.len() == 8)
+                        .ok_or("--pod-shell requires eight hexadecimal digits")?,
+                )
+            }
             "--pod-camera" => {
                 v.level.pod = Some(value.parse().map_err(|_| "invalid --pod-camera")?)
             }
@@ -462,12 +560,13 @@ fn options() -> Result<Viewer, String> {
                 v.capture = Some(parent.join(path.file_name().ok_or("Capture filename required")?));
                 v.qa = true;
             }
-            // Read by puter.rs.
+            // Read by puter.rs, pod_menu.rs and level_play.rs.
             "--puter-screen"
             | "--puter-function"
             | "--puter-at"
             | "--pod-menu"
-            | "--ui-script-function" => {}
+            | "--ui-script-function"
+            | "--level-scripts-flags" => {}
             _ => return Err(format!("Unknown option {flag}")),
         }
     }
@@ -494,11 +593,17 @@ fn options() -> Result<Viewer, String> {
     if v.level.guid.is_some() && v.level.path.is_some() {
         return Err("Give --level-guid or --level-path, not both".into());
     }
+    if pod_wall && v.level.shell.is_some() {
+        pod_wall_default(&mut v.level.runtime_textures)?;
+    }
     if v.level.report && !v.level.active() {
         return Err("--level-report requires --level-guid or --level-path".into());
     }
     if v.level.shape_bevels && !v.level.active() {
         return Err("--shape-bevels requires --level-guid or --level-path".into());
+    }
+    if !v.level.runtime_textures.is_empty() && !v.level.active() {
+        return Err("--runtime-texture requires --level-guid or --level-path".into());
     }
     if !v.synthetic && (v.snapshot.is_empty() || v.game.is_empty()) {
         return Err(
@@ -583,16 +688,22 @@ fn main() {
             Update,
             (
                 place_on_second_monitor,
+                clear_pod_shell,
                 load,
                 animate,
                 apply_lighting,
+                pod_dolly,
+                pod_figure,
                 camera,
                 capture,
             )
                 .chain(),
         )
         .add_systems(EguiPrimaryContextPass, panel);
-    if let Err(e) = puter::install(&mut app).and_then(|()| pod_menu::install_overlay(&mut app)) {
+    if let Err(e) = puter::install(&mut app)
+        .and_then(|()| pod_menu::install_overlay(&mut app))
+        .and_then(|()| level_play::install(&mut app))
+    {
         eprintln!("{e}");
         std::process::exit(1);
     }
@@ -736,6 +847,7 @@ fn load(
     let attempted_guid = result
         .as_ref()
         .ok()
+        .filter(|done| done.level.is_none())
         .map(|done| done.guid.trim().to_ascii_lowercase());
     let mut evidence = browser::PreviewEvidence::default();
     v.lighting.dirty = true;
@@ -745,6 +857,16 @@ fn load(
         if let Some(level) = done.level {
             let level = level?;
             let plan = plan_level(&level.scene, v.level.focus, v.level.pod)?;
+            let rig = match (&level.shell, v.level.pod) {
+                (Some(shell), Some(globe)) => Some(pod_shell(
+                    &level.scene,
+                    &plan,
+                    globe,
+                    shell,
+                    v.level.shell_camera,
+                )?),
+                _ => None,
+            };
             spawn_level(
                 &mut v,
                 &mut commands,
@@ -754,6 +876,90 @@ fn load(
                 plan,
             );
             *orbit = v.level.home.unwrap_or_default();
+            if let Some((rig, shell_plan, rig_line)) = rig {
+                let checkpoint = level
+                    .shell
+                    .as_ref()
+                    .and_then(|s| s.checkpoints.first().copied());
+                let normalize = shell_plan.normalize;
+                let t0 = v.level.t0.unwrap_or(0.);
+                let root = commands
+                    .spawn((rig.shell_root(t0), Visibility::default(), PodShellRoot))
+                    .id();
+                // P2g: pod.mol (the tent) on its own root; the DualShock, cords and the
+                // figure stay on the shell root.
+                let tent = commands
+                    .spawn((
+                        rig.tent_root(t0),
+                        Visibility::default(),
+                        PodShellRoot,
+                        PodTentRoot,
+                    ))
+                    .id();
+                let tent_flags: Vec<bool> = level.shell.as_ref().map_or(Vec::new(), |shell| {
+                    shell_plan
+                        .placed
+                        .iter()
+                        .flat_map(|(mesh, _)| {
+                            let n = shell_plan.prepared[*mesh].as_ref().map_or(0, Vec::len);
+                            let is_tent = matches!(
+                                shell.meshes[*mesh].source,
+                                level_scene::MeshSource::Guid(POD_TENT_MESH)
+                            );
+                            std::iter::repeat_n(is_tent, n)
+                        })
+                        .collect()
+                });
+                let first = v.scene.len();
+                spawn_level(
+                    &mut v,
+                    &mut commands,
+                    &mut meshes,
+                    &mut materials,
+                    &mut images,
+                    shell_plan,
+                );
+                for (i, (entity, ..)) in v.scene[first..].iter().enumerate() {
+                    let parent = if tent_flags.get(i).copied().unwrap_or(false) {
+                        tent
+                    } else {
+                        root
+                    };
+                    commands.entity(parent).add_child(*entity);
+                }
+                // The shell plan's lines replace the level's; keep P2e rule lines for both.
+                v.level.lines.extend(
+                    lbp_preview::runtime_texture::lines(&level.scene.counts.runtime_textures)
+                        .into_iter()
+                        .map(|l| format!("Main level: {l}")),
+                );
+                // Home (R) stays the closed view.
+                v.level.home = Some(pod_orbit(rig.planet_eye(0.), rig.globe_z));
+                *orbit = pod_orbit(rig.planet_eye(t0), rig.globe_z);
+                commands.insert_resource(PodRigRes(rig));
+                commands.insert_resource(pod_menu::PuterState {
+                    t: t0,
+                    open: t0 >= 1.,
+                    // Mid-dolly starts stay put (QA); Space then opens or closes.
+                    hold: t0 > 0. && t0 < 1.,
+                });
+                v.level.lines.push(rig_line);
+                let line = match done.preview {
+                    Ok(Some(preview)) => spawn_figure(
+                        &mut v,
+                        (&mut commands, &mut meshes, &mut materials, &mut images),
+                        &mut bindposes,
+                        (root, &rig, normalize, checkpoint),
+                        &preview,
+                        (done.clip, done.hold_clip),
+                    )?,
+                    Err(e) => format!("Figure not loaded: {e}"),
+                    Ok(None) => String::new(),
+                };
+                if !line.is_empty() {
+                    v.level.lines.push(line);
+                }
+            }
             v.status = format!(
                 "Loaded level {}\n{}",
                 level.identity,
@@ -827,6 +1033,8 @@ fn load(
                     started: -1.,
                     shown: None,
                     gpu,
+                    meshes: v.scene.iter().map(|s| s.1.clone()).collect(),
+                    alt: None,
                 });
                 format!("{text} • skinning: {path}")
             }
@@ -865,6 +1073,8 @@ struct Prepared {
     fourth_image: Option<(Image, lbp_preview::RelativeSampling)>,
     color: Color,
     alpha_mix: bool,
+    /// D160: sticker decal overlay (alpha blended, drawn in front of its surface).
+    decal: bool,
     /// D121: generated normals usable for preview lighting.
     normals_trusted: bool,
 }
@@ -1026,6 +1236,7 @@ fn prepare_buckets(
             fourth_image,
             color,
             alpha_mix,
+            decal: false,
             normals_trusted,
         });
     }
@@ -1046,7 +1257,12 @@ fn upload(
         base_color_texture: image.clone(),
         unlit: true,
         cull_mode: None,
-        alpha_mode: AlphaMode::Opaque,
+        alpha_mode: if p.decal {
+            AlphaMode::Blend
+        } else {
+            AlphaMode::Opaque
+        },
+        depth_bias: if p.decal { 8.0 } else { 0.0 },
         ..default()
     });
     if let Some(second) = p.second_image {
@@ -1072,6 +1288,8 @@ struct LevelPlan {
     placed: Vec<(usize, Transform)>,
     lines: Vec<String>,
     home: Orbit,
+    /// Level units to display units (centre and unit-size scale).
+    normalize: Mat4,
     /// D121: level-settings preview light (generic when absent or unusable).
     light: lighting::PreviewLight,
 }
@@ -1106,6 +1324,20 @@ fn plan_level(
                     &mut evidence,
                     &mut details,
                 ),
+                // D160 sticker decal overlays (world space, alpha blended).
+                level_scene::ScenePayload::Decals { batch, material } => prepare_buckets(
+                    &batch.positions,
+                    vec![(Some(material.clone()), batch.triangles.clone())],
+                    false,
+                    &mut evidence,
+                    &mut details,
+                )
+                .map(|mut v| {
+                    for p in &mut v {
+                        p.decal = true;
+                    }
+                    v
+                }),
             }
         })
         .collect();
@@ -1113,7 +1345,7 @@ fn plan_level(
         .iter()
         .map(|p| p.as_ref().map(Vec::len).map_err(Clone::clone))
         .collect();
-    let (placed, home, display) = place_items(scene, &buckets, focus, pod)?;
+    let (placed, home, display, normalize) = place_items(scene, &buckets, focus, pod)?;
     let mut lines = scene.counts.lines();
     lines.extend(display);
     let light = level_light(scene, &buckets);
@@ -1122,6 +1354,7 @@ fn plan_level(
         placed,
         lines,
         home,
+        normalize,
         light,
     })
 }
@@ -1174,7 +1407,7 @@ fn level_home(lo: Vec3, hi: Vec3) -> Result<(Mat4, Orbit), String> {
     ))
 }
 /// Items whose mesh has display buckets get a Transform; others are counted by reason.
-type Placement = (Vec<(usize, Transform)>, Orbit, Vec<String>);
+type Placement = (Vec<(usize, Transform)>, Orbit, Vec<String>, Mat4);
 fn place_items<T>(
     scene: &level_scene::LevelScene<T>,
     buckets: &[Result<usize, String>],
@@ -1292,7 +1525,354 @@ fn place_items<T>(
             ));
         }
     }
-    Ok((placed, home, lines))
+    Ok((placed, home, lines, normalize))
+}
+/// P2b: the shell level planned on its own, and the rig that places it over the view
+/// (pod_menu::PodRig). The DualShock (mesh 000042af, PC d155) anchors the shell camera.
+fn pod_shell(
+    scene: &LevelScene,
+    plan: &LevelPlan,
+    globe: usize,
+    shell: &LevelScene,
+    camera: Option<[f32; 6]>,
+) -> Result<(pod_menu::PodRig, LevelPlan, String), String> {
+    const DUALSHOCK: u32 = 0x0000_42af;
+    let display = |m: &Mat4, [a, b]: [[f32; 3]; 2]| {
+        let (a, b) = (
+            m.transform_point3(Vec3::from(a)),
+            m.transform_point3(Vec3::from(b)),
+        );
+        ((a + b) / 2., b - a)
+    };
+    let g = scene
+        .bounds_where(|i| i.thing == globe)
+        .ok_or("--pod-camera: Thing not drawn")?;
+    let (g_centre, g_size) = display(&plan.normalize, g);
+    let shell_plan = plan_level(shell, None, None)?;
+    let pad = shell
+        .bounds_where(|i| {
+            matches!(
+                shell.meshes[i.mesh].source,
+                level_scene::MeshSource::Guid(DUALSHOCK)
+            )
+        })
+        .ok_or("--pod-shell: no DualShock (mesh 000042af) in the shell level")?;
+    let (p_centre, p_size) = display(&shell_plan.normalize, pad);
+    let [lo, hi] = shell.bounds().ok_or("--pod-shell: empty shell level")?;
+    let n = shell_plan.normalize;
+    let near = n.transform_point3(Vec3::from(lo)).z;
+    let mut rig = pod_menu::PodRig::new(
+        (g_centre, g_size.max_element() / 2.),
+        (p_centre, p_size.x),
+        near,
+        PerspectiveProjection::default().fov,
+    );
+    if let Some(c) = camera {
+        let [from, to] = [
+            n.transform_point3(Vec3::new(c[0], c[1], c[2])),
+            n.transform_point3(Vec3::new(c[3], c[4], c[5])),
+        ];
+        let bounds = [
+            n.transform_point3(Vec3::from(lo)),
+            n.transform_point3(Vec3::from(hi)),
+        ];
+        rig = rig.with_game_camera(from, to, bounds);
+    }
+    let level = |p: Vec3| n.inverse().transform_point3(p);
+    let [closed, open] = rig.shell.map(level);
+    let line = format!(
+        "Shell eyes (shell level units): closed ({:.0}, {:.0}, {:.0}) {}, open ({:.0}, {:.0}, {:.0}) fitted to the DualShock",
+        closed.x,
+        closed.y,
+        closed.z,
+        if camera.is_some() {
+            "from --pod-shell-camera"
+        } else {
+            "fitted to the DualShock, looking -Z"
+        },
+        open.x,
+        open.y,
+        open.z
+    );
+    Ok((rig, shell_plan, line))
+}
+/// P2c: the `--select-guid` mesh (Sackboy) standing in the Pod shell at model scale
+/// (level units = model units), upright (D148 rotation), feet centred on the solved spot.
+/// The spot is fitted so the closed view matches RPCS3 (`pod_menu::SACKBOY_CLOSED`):
+/// the shell's checkpoint POS put him above the frame (PC run of #52), so the game's own
+/// spawn offset is UNKNOWN and the checkpoint is reported, not used. `--play-animation`
+/// plays on him; `--pod-hold-animation` while the Puter is open (P2d).
+fn spawn_figure(
+    v: &mut Viewer,
+    (commands, meshes, materials, images): (
+        &mut Commands,
+        &mut Assets<Mesh>,
+        &mut Assets<ViewerMaterial>,
+        &mut Assets<Image>,
+    ),
+    bindposes: &mut Assets<SkinnedMeshInverseBindposes>,
+    (root, rig, normalize, checkpoint): (Entity, &pod_menu::PodRig, Mat4, Option<Checkpoint>),
+    preview: &lbp_preview::GroupedMesh,
+    (clip, hold): (Option<ClipResult>, Option<ClipResult>),
+) -> Result<String, String> {
+    let bounds @ [lo, hi] =
+        adapter_bounds(&preview.geometry.positions).ok_or("Unsupported: empty figure")?;
+    let k = normalize.x_axis.truncate().length();
+    let feet = rig.fit_figure(k * (hi[2] - lo[2]));
+    // Raw Z-up model: feet are the lowest z, centred in x and y (depth).
+    let origin = Mat4::from_translation(Vec3::new(
+        -(lo[0] + hi[0]) / 2.,
+        -(lo[1] + hi[1]) / 2.,
+        -lo[2],
+    ));
+    let upright = Mat4::from_scale(Vec3::splat(k)) * Mat4::from_quat(model_up(true)) * origin;
+    let place = Mat4::from_translation(feet) * upright;
+    // P2d: holding the controller he is seen from behind: half a turn about the level's
+    // up axis (Y), P2f: at his own spot, fitted so his centre shows where RPCS3 has it.
+    let open_feet = rig.fit_figure_open(k * (hi[2] - lo[2]));
+    let back =
+        Mat4::from_translation(open_feet) * Mat4::from_rotation_y(std::f32::consts::PI) * upright;
+    let figure = commands
+        .spawn((
+            Transform::from_matrix(place),
+            Visibility::default(),
+            ChildOf(root),
+            PodFigure {
+                front: Transform::from_matrix(place),
+                back: Transform::from_matrix(back),
+                holding: false,
+            },
+        ))
+        .id();
+    let mut evidence = browser::PreviewEvidence::default();
+    let mut details = Vec::new();
+    let first = v.scene.len();
+    for p in prepare(preview, false, &mut evidence, &mut details)? {
+        let (mesh, material, image) = upload(p, meshes, materials, images);
+        let entity = commands
+            .spawn((
+                Mesh3d(mesh.clone()),
+                MeshMaterial3d(material.clone()),
+                Transform::IDENTITY,
+                ChildOf(figure),
+            ))
+            .id();
+        v.scene.push((entity, mesh, material, image));
+    }
+    let level = normalize.inverse().transform_point3(feet);
+    let ([x0, x1], top, low) = figure_frac(rig, 0., place, bounds);
+    let ([o0, o1], o_top, o_low) = figure_frac(rig, 1., back, bounds);
+    let mut line = format!(
+        "Figure fitted to the RPCS3 closed view at model scale: feet at level ({:.0}, {:.0}, {:.0}); closed x {x0:.2}..{x1:.2} w, {top:.2}..{low:.2} h; open (from behind) x {o0:.2}..{o1:.2} w, centre {:.2} h (RPCS3 {:.2} h)",
+        level.x,
+        level.y,
+        level.z,
+        (o_top + o_low) / 2.,
+        pod_menu::SACKBOY_OPEN[1]
+    );
+    line += &match checkpoint {
+        Some((thing, w)) => format!(
+            "; shell checkpoint Thing {thing} at ({:.0}, {:.0}, {:.0})",
+            w[12], w[13], w[14]
+        ),
+        None => "; no shell checkpoint".into(),
+    };
+    let hold = match hold {
+        None => None,
+        Some(Err(e)) => {
+            line += &format!("; hold animation not played: {e}");
+            None
+        }
+        Some(Ok(clip)) => Some(clip),
+    };
+    let scene: Vec<_> = v.scene[first..]
+        .iter()
+        .map(|s| (s.0, s.1.clone()))
+        .collect();
+    match clip {
+        None => {}
+        Some(Err(e)) => line += &format!("; animation not played: {e}"),
+        Some(Ok(clip)) => {
+            // Raw model units: the identity display frame.
+            let frame = ([0.; 3], 1.);
+            let gpu = if v.cpu_skinning {
+                None
+            } else {
+                let rig = gpu_rig(
+                    commands,
+                    meshes,
+                    bindposes,
+                    &clip.rig,
+                    (&clip.skin.joints, &clip.skin.weights),
+                    (frame, Quat::IDENTITY),
+                    &scene,
+                )?;
+                commands.entity(rig.root).insert(ChildOf(figure));
+                Some(GpuRig {
+                    morphs: !clip.skin.morphs.is_empty() && clip.report.animation_morphs > 0,
+                    ..rig
+                })
+            };
+            line += &format!("; animation {} frames", clip.report.frames);
+            if let Some(h) = &hold {
+                line += &format!("; hold animation {} frames", h.report.frames);
+            }
+            v.playing = Some(Playing {
+                clip,
+                frame,
+                started: -1.,
+                shown: None,
+                gpu,
+                meshes: scene.into_iter().map(|s| s.1).collect(),
+                alt: hold,
+            });
+        }
+    }
+    Ok(line)
+}
+/// Where a figure with raw `bounds`, placed by `place` in shell display space, appears at
+/// Puter progress `t`: x range, head top and feet as 16:9 frame fractions.
+fn figure_frac(
+    rig: &pod_menu::PodRig,
+    t: f32,
+    place: Mat4,
+    [lo, hi]: [[f32; 3]; 2],
+) -> ([f32; 2], f32, f32) {
+    let (mut x, mut top, mut feet) = ([f32::MAX, f32::MIN], f32::MAX, f32::MIN);
+    for c in 0..8 {
+        let p = Vec3::new(
+            if c & 1 == 0 { lo[0] } else { hi[0] },
+            if c & 2 == 0 { lo[1] } else { hi[1] },
+            if c & 4 == 0 { lo[2] } else { hi[2] },
+        );
+        let [fx, fy] = rig.shell_frac(t, place.transform_point3(p));
+        x = [x[0].min(fx), x[1].max(fx)];
+        top = top.min(fy);
+        feet = feet.max(fy);
+    }
+    (x, top, feet)
+}
+/// P2d: the Pod figure's two placements; `pod_figure` switches at half-open.
+#[derive(Component)]
+struct PodFigure {
+    front: Transform,
+    back: Transform,
+    holding: bool,
+}
+/// P2d: past half-open the figure turns its back (holding the controller) and the hold
+/// clip, when given, replaces the standing one; closing reverses both. The game's switch
+/// point during the dolly is UNKNOWN (RPCS3 shows only the end states).
+fn pod_figure(
+    state: Option<Res<pod_menu::PuterState>>,
+    mut v: ResMut<Viewer>,
+    mut figures: Query<(&mut PodFigure, &mut Transform)>,
+) {
+    let Some(state) = state else { return };
+    let holding = state.t > 0.5;
+    for (mut figure, mut transform) in &mut figures {
+        if figure.holding == holding {
+            continue;
+        }
+        figure.holding = holding;
+        *transform = if holding { figure.back } else { figure.front };
+        if let Some(playing) = v.playing.as_mut() {
+            if let Some(mut other) = playing.alt.take() {
+                std::mem::swap(&mut playing.clip, &mut other);
+                playing.alt = Some(other);
+                playing.started = -1.;
+                playing.shown = None;
+            }
+        }
+    }
+}
+/// Raw axis-aligned bounds; None when empty or nonfinite.
+fn adapter_bounds(positions: &[[f32; 3]]) -> Option<[[f32; 3]; 2]> {
+    let mut lo = [f32::INFINITY; 3];
+    let mut hi = [f32::NEG_INFINITY; 3];
+    for p in positions {
+        for i in 0..3 {
+            lo[i] = lo[i].min(p[i]);
+            hi[i] = hi[i].max(p[i]);
+        }
+    }
+    lo.iter()
+        .chain(&hi)
+        .all(|v| v.is_finite())
+        .then_some([lo, hi])
+}
+#[derive(Component)]
+struct PodShellRoot;
+/// P2g: the root carrying the tent mesh (pod.mol), placed by `PodRig::tent_root`.
+#[derive(Component)]
+struct PodTentRoot;
+/// pod.mol, the Pod tent (shell level 000027b9 Thing 2).
+const POD_TENT_MESH: u32 = 0x0000_2f6c;
+/// Runs before `load`: a new load request drops the previous Pod shell (and its figure).
+fn clear_pod_shell(
+    mut commands: Commands,
+    v: Res<Viewer>,
+    roots: Query<Entity, With<PodShellRoot>>,
+) {
+    if v.requested {
+        for root in &roots {
+            commands.entity(root).despawn();
+        }
+    }
+}
+#[derive(Resource)]
+struct PodRigRes(pod_menu::PodRig);
+fn pod_orbit(eye: Vec3, globe_z: f32) -> Orbit {
+    Orbit {
+        yaw: 0.,
+        pitch: 0.,
+        distance: eye.z - globe_z,
+        target: Vec3::new(eye.x, eye.y, globe_z),
+    }
+}
+/// P2b: Space opens or closes the Puter: the view dollies through the Pod window in
+/// `DOLLY_SECONDS` while the shell layer follows its own camera.
+fn pod_dolly(
+    time: Res<Time>,
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+    rig: Option<Res<PodRigRes>>,
+    state: Option<ResMut<pod_menu::PuterState>>,
+    mut orbit: ResMut<Orbit>,
+    mut roots: Query<(&mut Transform, Has<PodTentRoot>), With<PodShellRoot>>,
+) {
+    let (Some(rig), Some(mut state)) = (rig, state) else {
+        return;
+    };
+    let pad = |b| pads.iter().any(|g| g.just_pressed(b));
+    if keys.just_pressed(KeyCode::Space) || pad(GamepadButton::West) {
+        state.open = !state.open;
+        state.hold = false;
+    }
+    if keys.any_just_pressed([KeyCode::Escape, KeyCode::Backspace]) || pad(GamepadButton::East) {
+        state.open = false;
+        state.hold = false;
+    }
+    if state.hold {
+        return;
+    }
+    let target = if state.open { 1. } else { 0. };
+    if state.t == target {
+        return;
+    }
+    let step = time.delta_secs() / pod_menu::DOLLY_SECONDS;
+    state.t = if state.open {
+        (state.t + step).min(1.)
+    } else {
+        (state.t - step).max(0.)
+    };
+    *orbit = pod_orbit(rig.0.planet_eye(state.t), rig.0.globe_z);
+    for (mut root, tent) in &mut roots {
+        *root = if tent {
+            rig.0.tent_root(state.t)
+        } else {
+            rig.0.shell_root(state.t)
+        };
+    }
 }
 fn spawn_level(
     v: &mut Viewer,
@@ -1332,6 +1912,39 @@ fn spawn_level(
     v.level.home = Some(plan.home);
     v.lighting.light = plan.light;
 }
+/// P2j: the Pod side panels (pod.mol slot 0, window_glassy) show the room wall art
+/// default_wall_diffuse 0001f3b9 unless a `--runtime-texture` rule names that slot or
+/// `--no-pod-wall` is given. Matched to RPCS3 by eye (D184); the game's binding is
+/// unconfirmed (docs/p2j-pod-wall.md).
+const POD_WALL_TEXTURE: u32 = 0x0001_f3b9;
+fn pod_wall_default(
+    rules: &mut Vec<lbp_preview::runtime_texture::RuntimeTexture>,
+) -> Result<(), String> {
+    if rules.iter().any(|r| r.mesh == POD_TENT_MESH && r.slot == 0) {
+        return Ok(());
+    }
+    rules.push(lbp_preview::runtime_texture::RuntimeTexture {
+        mesh: POD_TENT_MESH,
+        slot: 0,
+        texture: POD_WALL_TEXTURE,
+    });
+    lbp_preview::runtime_texture::validate(rules).inspect_err(|_| {
+        rules.pop();
+    })
+}
+/// P2e: one `--runtime-texture` value; repeatable, conflicts and the rule cap refused.
+fn push_runtime_texture(
+    rules: &mut Vec<lbp_preview::runtime_texture::RuntimeTexture>,
+    value: &str,
+) -> Result<(), String> {
+    let rule = lbp_preview::runtime_texture::RuntimeTexture::parse(value)?;
+    if !rules.contains(&rule) {
+        rules.push(rule);
+    }
+    lbp_preview::runtime_texture::validate(rules).inspect_err(|_| {
+        rules.pop();
+    })
+}
 /// `--level-report`: builds the same scene and display plan without a window.
 fn level_report(v: &Viewer) -> Result<(), String> {
     let (snapshot, game) = (PathBuf::from(&v.snapshot), PathBuf::from(&v.game));
@@ -1344,6 +1957,7 @@ fn level_report(v: &Viewer) -> Result<(), String> {
     let scene_options = level_scene::LevelSceneOptions {
         shape_bevels: v.level.shape_bevels,
         placement,
+        runtime_textures: v.level.runtime_textures.clone(),
     };
     let lines = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
@@ -1484,7 +2098,6 @@ fn animate(
     mut transforms: Query<&mut Transform>,
 ) {
     let held = v.animation_frame;
-    let handles: Vec<Handle<Mesh>> = v.scene.iter().map(|s| s.1.clone()).collect();
     let Some(playing) = v.playing.as_mut() else {
         return;
     };
@@ -1522,8 +2135,8 @@ fn animate(
         posed
     };
     let display = adapter::to_display(&posed, playing.frame);
-    for handle in handles {
-        if let Some(mut mesh) = meshes.get_mut(&handle) {
+    for handle in &playing.meshes {
+        if let Some(mut mesh) = meshes.get_mut(handle) {
             mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, display.clone());
         }
     }
@@ -1932,6 +2545,7 @@ fn synthetic_groups(
             },
             wrap: lbp_preview::TextureWrapping::uniform(false),
             selection: lbp_preview::DiffuseSelection::default(),
+            runtime_texture: None,
         })
     };
     let red = asset(vec![255, 0, 0, 255]);
@@ -1981,6 +2595,17 @@ fn synthetic_groups(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn runtime_texture_flag_is_repeatable_and_refuses_conflicts() {
+        let mut rules = Vec::new();
+        super::push_runtime_texture(&mut rules, "00002f6c:0:000027fb").unwrap();
+        super::push_runtime_texture(&mut rules, "00002f6c:0:000027fb").unwrap();
+        super::push_runtime_texture(&mut rules, "00002f6c:1:00004277").unwrap();
+        assert_eq!(rules.len(), 2);
+        assert!(super::push_runtime_texture(&mut rules, "00002f6c:0:00004277").is_err());
+        assert!(super::push_runtime_texture(&mut rules, "00002f6c:0").is_err());
+        assert_eq!(rules.len(), 2);
+    }
     use super::*;
     /// Re: the joint hierarchy spawned for GPU skinning gives, after transform
     /// propagation, joint global × inverse bind = N × CPU skin matrix × N⁻¹.
@@ -2111,6 +2736,28 @@ mod tests {
         );
     }
     #[test]
+    fn p2j_pod_wall_default_yields_to_an_explicit_slot_rule() {
+        use lbp_preview::runtime_texture::RuntimeTexture;
+        let mut rules = Vec::new();
+        pod_wall_default(&mut rules).unwrap();
+        assert_eq!(
+            rules,
+            [RuntimeTexture {
+                mesh: POD_TENT_MESH,
+                slot: 0,
+                texture: POD_WALL_TEXTURE
+            }]
+        );
+        let mine = RuntimeTexture {
+            mesh: POD_TENT_MESH,
+            slot: 0,
+            texture: 0x27fb,
+        };
+        let mut rules = vec![mine];
+        pod_wall_default(&mut rules).unwrap();
+        assert_eq!(rules, [mine]);
+    }
+    #[test]
     fn level_placement_normalizes_frames_side_on_and_counts_display_skips() {
         let mut scene = level_scene::LevelScene::<u8>::default();
         for (source, bounds) in [
@@ -2139,7 +2786,7 @@ mod tests {
                 })
                 .unwrap();
         }
-        let (placed, home, lines) = place_items(
+        let (placed, home, lines, _) = place_items(
             &scene,
             &[Ok(2), Err("Unavailable: test".into())],
             None,
@@ -2193,6 +2840,7 @@ mod tests {
             instance_rgba: [1.; 4],
             animation_base: false,
             animation_guid: String::new(),
+            hold_animation_guid: String::new(),
             animation_frame: None,
             cpu_skinning: false,
             model_z_up: true,

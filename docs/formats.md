@@ -667,3 +667,16 @@ reads with the shared Thing reader; plans at 0x335..0x340 use the pre-0x341 Thin
 `CONFIRMED_FROM_COMMUNITY_CODE` + `CONFIRMED_FROM_LOCAL_DATA` (27/27 SMH consistent,
 42/42 backdrop plans equal to a Toolkit oracle). Details:
 [d119-level-backdrop.md](d119-level-backdrop.md).
+
+## D160 STICKERS decal frame on shapes
+
+- Decal fields (texture, u, v, xvec, yvec, colour i16, type i8, metadata, placedBy,
+  playModeFrame, scorch, plan) are read in Toolkit order (pin d6a2ef80, `Decal`
+  serializer, field order only). CONFIRMED_FROM_COMMUNITY_CODE.
+- Quad corners `centre -/+ xvec -/+ yvec` with texture (0,0) at `-x -y` and (1,1) at
+  `+x +y` (Toolkit `DecalBaker`, behaviour only). COMMUNITY_BEHAVIOUR.
+- SHAPE owner frame `u = x |sx| / 500`, `v = 1 - y |sy| / 500` (local polygon x, y; POS
+  column lengths). STRONG_INFERENCE from local data: decal centres inside the owner's
+  local box (+5%) 502/641, 355/374, 83/85 on the three tutorial levels versus 339/240/59
+  for `v = 1 + y`. Not checked against the game. Detail:
+  docs/d160-globe-material-and-stickers.md.

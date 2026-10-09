@@ -16,8 +16,8 @@
 //! 24 and `Update__` by 11; the remaining names are UI, switch and enter/leave handlers).
 use lbp_level::parts::{ScriptObject, ScriptPart, ScriptValue, ShapeColor};
 use lbp_level::thing::ThingRecord;
-use lbp_script_vm::natives::World;
-use lbp_script_vm::{ClassId, Host, MemberKind, Step, Task, Value, Vm};
+use lbp_script_vm::natives::{Bindings, CameraFromToUp, ResourceKind, World};
+use lbp_script_vm::{ClassId, Host, MemberKind, ObjectId, Step, Task, Value, Vm};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One Thing as the runtime sees it.
@@ -40,6 +40,19 @@ pub struct ThingState {
     pub render_mesh_tint: Option<[f32; 4]>,
     /// Animation playback rate a script set (`Native.SetAnimSpeed`, INFERRED multiplier).
     pub anim_speed: Option<f32>,
+    /// Animation position a script set (`Native.SetAnimPos`, INFERRED time or fraction).
+    pub anim_pos: Option<f32>,
+}
+
+/// Camera state scripts set through `Cam.*` natives, for the viewer to read.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CameraState {
+    /// The last `Cam.SetCameraFromToUp__rrrffff`.
+    pub from_to_up: Option<CameraFromToUp>,
+    pub from_to_up_calls: u64,
+    /// The last `Cam.SetDOFAndFog__fff` (as passed).
+    pub dof_and_fog: Option<[f32; 3]>,
+    pub motion_blur_clears: u64,
 }
 
 /// An engine part a script reached through a native member (`thing.SpriteLight`), with
@@ -77,6 +90,27 @@ pub struct LevelWorld {
     pub object_members: Vec<(u32, String, usize)>,
     /// Parts handed to scripts; a part handle is its index + 1 (`Raw(0)` is null).
     pub part_handles: Vec<PartState>,
+    pub camera: CameraState,
+    /// The PodComputer script object `GetPodComputer__` returns (see [`add_engine_objects`]).
+    pub pod_computer: Option<ObjectId>,
+    /// Gooey objects made ahead for `CreateGooey__i` (the host cannot allocate VM objects
+    /// during a native call); each call hands out the next one.
+    pub gooey_pool: Vec<ObjectId>,
+    pub gooeys_created: usize,
+    /// Interactive-music commands scripts sent, by name.
+    pub audio_commands: BTreeMap<String, u64>,
+    /// LBP2 game progression flags set on the profile (`IsLBP2GameProgressionFlagSet__i`).
+    /// Empty = a fresh profile, on which PlanetsWorld starts its intro cutscene thread.
+    pub progression_flags: BTreeSet<i32>,
+    /// `PodComputer.GetPodComputerInUse__`: a player is at the pod computer ("PuterInUse").
+    /// False by default (INFERRED: nobody at the computer when the Pod loads).
+    pub pod_computer_in_use: bool,
+    /// The Planets object `PodComputer.GetPlanets__` returns.
+    pub planets: Option<ObjectId>,
+    /// Planet objects by `GetCrafteroid__i` index - 1, with their Thing.
+    pub crafteroids: Vec<(ObjectId, Option<u32>)>,
+    /// `Game.SetPlayerScoreMultiplierTimer` by player number.
+    pub score_multiplier_timers: BTreeMap<i32, i32>,
 }
 
 /// VM value for a stored script field; `None` for a field the instance does not store.
@@ -532,11 +566,221 @@ impl World for LevelWorld {
             Err(format!("player index {index} outside 0..{n}"))
         }
     }
+    /// The handle is the GUID itself (INFERRED stand-in: nothing is loaded; scripts only
+    /// keep the handle and pass it back to natives).
+    fn load_resource(&mut self, _kind: ResourceKind, guid: u32) -> Result<u32, String> {
+        Ok(guid)
+    }
+    fn set_world_transform(&mut self, thing: u32, m: [f32; 16]) -> Result<(), String> {
+        self.thing_mut(thing)?.world_matrix = Some(m);
+        Ok(())
+    }
+    fn set_anim_pos(&mut self, thing: u32, pos: f32) -> Result<(), String> {
+        self.thing_mut(thing)?.anim_pos = Some(pos);
+        Ok(())
+    }
+    fn pod_computer(&mut self) -> Result<Value, String> {
+        self.pod_computer
+            .map(|o| Value::Object(Some(o)))
+            .ok_or_else(|| "no PodComputer object (class not loaded)".into())
+    }
+    fn planets(&mut self) -> Result<Value, String> {
+        self.planets
+            .map(|o| Value::Object(Some(o)))
+            .ok_or_else(|| "no Planets object (class not loaded)".into())
+    }
+    fn crafteroid(&mut self, index: i32) -> Result<Value, String> {
+        usize::try_from(index)
+            .ok()
+            .and_then(|i| i.checked_sub(1))
+            .and_then(|i| self.crafteroids.get(i))
+            .map(|(o, _)| Value::Object(Some(*o)))
+            .ok_or_else(|| format!("no crafteroid {index}"))
+    }
+    fn planet_thing(&mut self, planet: &Value) -> Result<Option<u32>, String> {
+        match planet {
+            Value::Object(Some(o)) => self
+                .crafteroids
+                .iter()
+                .find(|(p, _)| p == o)
+                .map(|(_, t)| *t)
+                .ok_or_else(|| format!("object {o:?} is not a planet")),
+            other => Err(format!("expected a Planet, got {other:?}")),
+        }
+    }
+    /// INFERRED defaults for the PC run: interactive, no pending links, no avatars spawned
+    /// (there is no Sackboy yet), no video, a 16:9 screen, player 0 leads, no music track
+    /// (GUID 0), no user music (stopped, not paused), interactive music audible, no
+    /// attraction (demo) loop.
+    fn state_query(&mut self, native: &str) -> Result<Value, String> {
+        Ok(match native {
+            "Game.IsNonInteractive__"
+            | "Video.IsVideoPlaying__"
+            | "System.Is4to3__"
+            | "Audio.UserMusicIsPaused__"
+            | "Input.IsInAttractionLoop__i" => Value::Bool(false),
+            "Audio.UserMusicIsStopped__" | "Audio.IsInteractiveMusicAudible__" => Value::Bool(true),
+            "Game.GetNumPendingLinks__"
+            | "Game.GetNumAvatars__"
+            | "Game.GetLocalLeadersPlayerNumber__"
+            | "Audio.GetCurrMusicGuid__" => Value::Int(0),
+            _ => return Err(format!("world does not provide {native}")),
+        })
+    }
+    /// Counted by name; nothing plays.
+    fn audio_command(&mut self, name: &str, _args: &[Value]) -> Result<(), String> {
+        *self.audio_commands.entry(name.to_owned()).or_default() += 1;
+        Ok(())
+    }
+    /// Flags in [`LevelWorld::progression_flags`]; empty is a fresh profile (default).
+    fn progression_flag(&mut self, flag: i32) -> Result<bool, String> {
+        Ok(self.progression_flags.contains(&flag))
+    }
+    /// [`LevelWorld::pod_computer_in_use`].
+    fn pod_computer_in_use(&mut self) -> Result<bool, String> {
+        Ok(self.pod_computer_in_use)
+    }
+    /// No crash zoom in the PC run (INFERRED default).
+    fn crash_zoom(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn create_gooey(&mut self, _arg: i32) -> Result<Value, String> {
+        let o = self
+            .gooey_pool
+            .get(self.gooeys_created)
+            .copied()
+            .ok_or_else(|| format!("Gooey pool of {} used up", self.gooey_pool.len()))?;
+        self.gooeys_created += 1;
+        Ok(Value::Object(Some(o)))
+    }
+    fn set_camera(&mut self, camera: CameraFromToUp) -> Result<(), String> {
+        self.camera.from_to_up = Some(camera);
+        self.camera.from_to_up_calls += 1;
+        Ok(())
+    }
+    fn set_dof_and_fog(&mut self, values: [f32; 3]) -> Result<(), String> {
+        self.camera.dof_and_fog = Some(values);
+        Ok(())
+    }
+    fn clear_motion_blur(&mut self) -> Result<(), String> {
+        self.camera.motion_blur_clears += 1;
+        Ok(())
+    }
+    /// No cinema mode in the PC run (INFERRED default).
+    fn cinema_mode_count(&mut self) -> Result<i32, String> {
+        Ok(0)
+    }
+    fn set_score_multiplier_timer(&mut self, player: i32, timer: i32) -> Result<(), String> {
+        let n = self.num_players()?;
+        if !(0..n).contains(&player) {
+            return Err(format!("player {player} outside 0..{n}"));
+        }
+        self.score_multiplier_timers.insert(player, timer);
+        Ok(())
+    }
     fn write(&mut self, text: &str) {
         if self.written.len() < 1000 {
             self.written.push(text.to_owned());
         }
     }
+}
+
+/// Gooey objects made ahead for `Gooey.CreateGooey__i`.
+pub const GOOEY_POOL: usize = 16;
+
+/// Runs `function` (`.init__`, `.ctor__`) on a heap object with it as `this` in register 0;
+/// a fault comes back as text with its site.
+fn run_on_object(
+    vm: &mut Vm,
+    host: &mut dyn Host,
+    class: ClassId,
+    object: ObjectId,
+    function: &str,
+    budget: u64,
+) -> Result<(), String> {
+    if !vm.has_code(class, function) {
+        return Ok(());
+    }
+    let mut b = budget;
+    let regs = [(0, Value::Object(Some(object)))];
+    match vm.start_registers(host, class, function, &regs, &mut b) {
+        Ok(Step::Done(_)) => Ok(()),
+        Ok(Step::Yielded(_)) => Err(format!("{function} yielded")),
+        Err(f) => {
+            let site = vm.last_site().map_or(String::new(), |s| s.to_string());
+            Err(format!("{function}: {f:?} at {site}"))
+        }
+    }
+}
+
+/// Makes the engine-owned script objects natives hand out: [`GOOEY_POOL`] Gooey objects
+/// (`.init__`) and the PodComputer (`.init__`, then `.ctor__`). INFERRED: the engine holds
+/// one PodComputer and creates Gooeys on demand. The PodComputer is registered before its
+/// `.init__` runs, because that code already asks for it (`GetPodComputer__`). Returns the
+/// faults, if any; objects whose `.init__`/`.ctor__` faulted are still kept.
+pub fn add_engine_objects(
+    vm: &mut Vm,
+    host: &mut Bindings<LevelWorld>,
+    budget: u64,
+) -> Vec<String> {
+    let mut faults = Vec::new();
+    let make = |vm: &mut Vm, host: &mut Bindings<LevelWorld>, class, pod: bool| {
+        let o = vm.instantiate(class).map_err(|f| format!("{f:?}"))?;
+        if pod {
+            host.world.pod_computer = Some(o);
+        } else {
+            host.world.gooey_pool.push(o);
+        }
+        run_on_object(vm, host, class, o, ".init__", budget)?;
+        if pod {
+            run_on_object(vm, host, class, o, ".ctor__", budget)?;
+        }
+        Ok::<(), String>(())
+    };
+    if let Some(class) = vm.class_by_name("Gooey") {
+        for _ in 0..GOOEY_POOL {
+            if let Err(e) = make(vm, host, class, false) {
+                faults.push(format!("Gooey {e}"));
+            }
+        }
+    }
+    // Planets and its crafteroids: INFERRED index 1 = the level's Earth (a PlanetThing),
+    // 2 = its OrbitingMoon, from PlanetsView, which reads crafteroids 1 and 2 and returns
+    // early when either Thing is null.
+    if let Some(class) = vm.class_by_name("Planets") {
+        match vm.instantiate(class) {
+            Ok(o) => {
+                host.world.planets = Some(o);
+                if let Err(e) = run_on_object(vm, host, class, o, ".init__", budget) {
+                    faults.push(format!("Planets {e}"));
+                }
+            }
+            Err(f) => faults.push(format!("Planets {f:?}")),
+        }
+    }
+    if let Some(class) = vm.class_by_name("Planet") {
+        for name in ["Earth", "OrbitingMoon"] {
+            let thing = host.world.things.iter().position(|t| {
+                t.script_guid
+                    .and_then(|g| vm.class_by_guid(g))
+                    .is_some_and(|c| vm.class_name(c) == name)
+            });
+            match vm.instantiate(class) {
+                Ok(o) => host
+                    .world
+                    .crafteroids
+                    .push((o, thing.and_then(|t| u32::try_from(t).ok()))),
+                Err(f) => faults.push(format!("Planet {f:?}")),
+            }
+        }
+    }
+    if let Some(class) = vm.class_by_name("PodComputer") {
+        if let Err(e) = make(vm, host, class, true) {
+            faults.push(format!("PodComputer {e}"));
+        }
+    }
+    faults.dedup();
+    faults
 }
 
 /// A scripted Thing and its class, when the class is loaded.
@@ -602,19 +846,28 @@ impl Runner {
         function: &str,
         budget: &mut u64,
     ) -> Outcome {
+        self.start_with(vm, host, inst, function, &[], budget)
+    }
+
+    /// [`Runner::start`] with argument registers (byte offsets) staged after `this`.
+    pub fn start_with(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut dyn Host,
+        inst: Instance,
+        function: &str,
+        args: &[(u16, Value)],
+        budget: &mut u64,
+    ) -> Outcome {
         let Some(class) = inst.class else {
             return Outcome::NoClass;
         };
         if !vm.has_code(class, function) {
             return Outcome::NoFunction;
         }
-        let step = vm.start_registers(
-            host,
-            class,
-            function,
-            &[(0, Value::Thing(Some(inst.thing)))],
-            budget,
-        );
+        let mut regs = vec![(0, Value::Thing(Some(inst.thing)))];
+        regs.extend_from_slice(args);
+        let step = vm.start_registers(host, class, function, &regs, budget);
         self.settle(vm, inst.thing, step)
     }
 
@@ -653,8 +906,68 @@ impl Runner {
 pub const CREATE: &str = "OnCreate__";
 /// Function the game runs on every scripted Thing each tick.
 pub const UPDATE: &str = "Update__";
+/// What a started script thread runs (`Thread.ThreadMain__`: OnStart, Run, OnFinish).
+pub const THREAD_MAIN: &str = "ThreadMain__";
+/// Thread starts handled in one step (threads can start threads).
+pub const MAX_THREAD_STARTS: usize = 256;
 /// Game logic rate (X1, CONFIRMED_FROM_LOCAL_DATA in RPCS3: 30 ticks per second).
 pub const TICK_HZ: u32 = 30;
+
+/// What a [`FrameEntry`] builds its arguments from.
+pub struct FrameContext<'a> {
+    pub vm: &'a Vm,
+    pub instances: &'a [Instance],
+    /// Ticks run before this one.
+    pub tick: u64,
+}
+
+/// A per-tick function the engine calls with arguments on instances of one class, in
+/// place of [`UPDATE`] (an `export` entry no script calls).
+pub struct FrameEntry {
+    /// Exact script class name of the instance.
+    pub class: &'static str,
+    pub function: &'static str,
+    /// Argument registers (byte offsets) and values; `this` is register 0.
+    pub args: fn(&FrameContext<'_>) -> Vec<(u16, Value)>,
+}
+
+/// PlanetsWorld (the Pod's planet view): no script calls the export
+/// `UpdatePlanetsView__bQ11PlanetThingQ11PlanetThingbb`, and it is the only caller of
+/// `UpdateState__` (private), `UpdatePodCamera__Q11PlanetThingbb` and
+/// `UpdateInteractiveMusic__`, so the engine calls it each frame (INFERRED from the
+/// listings; `OnEnterPod__`/`OnExitPod__` are called by PodComputer on pod entry/exit).
+/// Arguments (INFERRED from how the function uses them): +4 bool, passed on to
+/// `UpdatePodCamera` (false); +8 the Earth (a PlanetThing; it gets `EarthSpinOffset`); +12 the
+/// moon (`MoonSpinOffset`); +16 bool "snap the view" (true on the first tick only); +17
+/// bool "take the zoom from the pod computer's state" (true).
+fn planets_view_args(cx: &FrameContext<'_>) -> Vec<(u16, Value)> {
+    let find = |name: &str| {
+        cx.instances
+            .iter()
+            .find(|i| i.class.is_some_and(|c| cx.vm.class_name(c) == name))
+            .map(|i| i.thing)
+    };
+    vec![
+        (4, Value::Bool(false)),
+        (8, Value::Thing(find("Earth"))),
+        (12, Value::Thing(find("OrbitingMoon"))),
+        (16, Value::Bool(cx.tick == 0)),
+        (17, Value::Bool(true)),
+    ]
+}
+
+/// Per-tick entries other than [`UPDATE`], by class (docs/level-scripts.md "Part 6").
+pub const FRAME_ENTRIES: &[FrameEntry] = &[FrameEntry {
+    class: "PlanetsWorld",
+    function: "UpdatePlanetsView__bQ11PlanetThingQ11PlanetThingbb",
+    args: planets_view_args,
+}];
+
+/// The per-tick entry for a class, if it has one other than [`UPDATE`].
+pub fn frame_entry(vm: &Vm, class: ClassId) -> Option<&'static FrameEntry> {
+    let name = vm.class_name(class);
+    FRAME_ENTRIES.iter().find(|e| e.class == name)
+}
 
 /// Outcomes of one schedule step, by kind, with the faults.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -665,6 +978,10 @@ pub struct StepReport {
     pub no_function: usize,
     pub no_class: usize,
     pub faults: Vec<(u32, String)>,
+    /// Script threads started, finished (`ThreadMain__` returned) and faulted this step.
+    pub threads_started: usize,
+    pub threads_done: usize,
+    pub thread_faults: Vec<String>,
 }
 
 impl StepReport {
@@ -685,9 +1002,19 @@ impl StepReport {
 /// order; each `tick` first resumes scripts suspended by `System.Yield` (in the order
 /// they yielded), then runs [`UPDATE`] on every instance that was not suspended at the
 /// start of the tick, in Thing order. A Thing whose script faults is not run again.
+/// A class listed in [`FRAME_ENTRIES`] runs that entry with its arguments instead of
+/// [`UPDATE`].
+///
+/// Script threads (`Thread.Start__` -> `Thread.StartImpl__(this)`, docs/script-vm.md):
+/// a thread started during a step runs `ThreadMain__` on the thread object at the end of
+/// that step, until its first `System.Yield`; each later tick resumes it once, after the
+/// Things' suspended scripts and before the updates (order INFERRED). A faulted thread
+/// is dropped.
 pub struct LevelScripts {
     pub instances: Vec<Instance>,
     runner: Runner,
+    /// Suspended script threads, in start order.
+    threads: Vec<(ObjectId, Task)>,
     /// Things stopped by a fault.
     pub stopped: BTreeSet<u32>,
     /// Ticks run so far.
@@ -699,6 +1026,7 @@ impl LevelScripts {
         Self {
             instances: instances(vm, world),
             runner: Runner::default(),
+            threads: Vec::new(),
             stopped: BTreeSet::new(),
             ticks: 0,
         }
@@ -709,9 +1037,79 @@ impl LevelScripts {
         self.runner.pending()
     }
 
+    /// Script threads waiting for the next tick.
+    pub fn threads(&self) -> usize {
+        self.threads.len()
+    }
+
     /// Runs [`CREATE`] on every instance; `budget` is per call.
     pub fn create(&mut self, vm: &mut Vm, host: &mut dyn Host, budget: u64) -> StepReport {
-        self.run_all(vm, host, CREATE, budget, &BTreeSet::new())
+        let mut report = self.run_all(vm, host, Some(CREATE), budget, &BTreeSet::new());
+        self.start_threads(vm, host, budget, &mut report);
+        report
+    }
+
+    fn settle_thread(
+        &mut self,
+        vm: &Vm,
+        id: ObjectId,
+        step: Result<Step, lbp_script_vm::Fault>,
+        report: &mut StepReport,
+    ) {
+        match step {
+            Ok(Step::Done(_)) => report.threads_done += 1,
+            Ok(Step::Yielded(task)) => self.threads.push((id, task)),
+            Err(f) => {
+                let class = vm.class_of(id).map_or("?", |c| vm.class_name(c));
+                let site = vm.last_site().map_or(String::new(), |s| s.to_string());
+                report
+                    .thread_faults
+                    .push(format!("thread {class}: {f:?} at {site}"));
+            }
+        }
+    }
+
+    /// Runs threads started since the last step until their first yield; threads they
+    /// start run too, up to [`MAX_THREAD_STARTS`] per step.
+    fn start_threads(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut dyn Host,
+        budget: u64,
+        report: &mut StepReport,
+    ) {
+        let mut started = 0;
+        loop {
+            let new = vm.take_started_threads();
+            if new.is_empty() {
+                break;
+            }
+            for id in new {
+                started += 1;
+                if started > MAX_THREAD_STARTS {
+                    report
+                        .thread_faults
+                        .push("thread start limit reached".into());
+                    return;
+                }
+                report.threads_started += 1;
+                let Some(class) = vm.class_of(id) else {
+                    report
+                        .thread_faults
+                        .push(format!("thread object {} has no class", id.0));
+                    continue;
+                };
+                let mut b = budget;
+                let step = vm.start_registers(
+                    host,
+                    class,
+                    THREAD_MAIN,
+                    &[(0, Value::Object(Some(id)))],
+                    &mut b,
+                );
+                self.settle_thread(vm, id, step, report);
+            }
+        }
     }
 
     /// One game tick; `budget` is per call or resume.
@@ -729,12 +1127,18 @@ impl LevelScripts {
                 report.add(thing, o);
             }
         }
-        let update = self.run_all(vm, host, UPDATE, budget, &busy);
+        for (id, task) in std::mem::take(&mut self.threads) {
+            let mut b = budget;
+            let step = vm.resume(host, task, &mut b);
+            self.settle_thread(vm, id, step, &mut report);
+        }
+        let update = self.run_all(vm, host, None, budget, &busy);
         report.done += update.done;
         report.yielded += update.yielded;
         report.no_function += update.no_function;
         report.no_class += update.no_class;
         report.faults.extend(update.faults);
+        self.start_threads(vm, host, budget, &mut report);
         self.ticks += 1;
         report
     }
@@ -743,7 +1147,7 @@ impl LevelScripts {
         &mut self,
         vm: &mut Vm,
         host: &mut dyn Host,
-        function: &str,
+        function: Option<&str>,
         budget: u64,
         skip: &BTreeSet<u32>,
     ) -> StepReport {
@@ -753,7 +1157,26 @@ impl LevelScripts {
                 continue;
             }
             let mut b = budget;
-            let o = self.runner.start(vm, host, inst, function, &mut b);
+            // `None`: the tick's entry, a frame entry or `Update__`.
+            let entry = match function {
+                Some(_) => None,
+                None => inst.class.and_then(|c| frame_entry(vm, c)),
+            };
+            let o = match entry {
+                Some(e) => {
+                    let args = (e.args)(&FrameContext {
+                        vm,
+                        instances: &self.instances,
+                        tick: self.ticks,
+                    });
+                    self.runner
+                        .start_with(vm, host, inst, e.function, &args, &mut b)
+                }
+                None => {
+                    let f = function.unwrap_or(UPDATE);
+                    self.runner.start(vm, host, inst, f, &mut b)
+                }
+            };
             if matches!(o, Outcome::Fault(_)) {
                 self.stopped.insert(inst.thing);
             }

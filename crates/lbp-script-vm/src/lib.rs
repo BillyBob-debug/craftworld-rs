@@ -271,6 +271,9 @@ pub struct Vm {
     pub ambiguous_calls: usize,
     /// (class, function, absolute pc) of the instruction being executed.
     at: Option<(ClassId, usize, usize)>,
+    /// Thread objects passed to `Thread.StartImpl__`, for the host's scheduler
+    /// ([`Vm::take_started_threads`]).
+    started_threads: Vec<ObjectId>,
 }
 
 impl Default for Vm {
@@ -290,6 +293,7 @@ impl Vm {
             heap: Vec::new(),
             ambiguous_calls: 0,
             at: None,
+            started_threads: Vec::new(),
         }
     }
 
@@ -433,6 +437,19 @@ impl Vm {
             at = self.super_class(c);
         }
         out
+    }
+
+    /// Thread objects started since the last call, in start order.
+    pub fn take_started_threads(&mut self) -> Vec<ObjectId> {
+        std::mem::take(&mut self.started_threads)
+    }
+
+    /// Class of a script instance (None for arrays and unknown objects).
+    pub fn class_of(&self, object: ObjectId) -> Option<ClassId> {
+        match self.heap.get(object.0 as usize)? {
+            HeapObject::Instance { class, .. } => Some(*class),
+            HeapObject::Array(_) => None,
+        }
     }
 
     pub fn array(&self, object: ObjectId) -> Option<&[Value]> {
@@ -1216,9 +1233,18 @@ impl Vm {
                             let owner = owner_class
                                 .and_then(|c| self.native_owner(c, &function))
                                 .map_or(owner, |c| self.classes[c.0 as usize].name.clone());
-                            let v = host
-                                .call_native(&owner, &function, &values)
-                                .map_err(Fault::Native)?;
+                            // Script threads (docs/script-vm.md): `Thread.Start__` passes
+                            // only `this`; the scheduler runs `ThreadMain__` on it.
+                            let v = if owner == "Thread" && function == "StartImpl__" {
+                                match values.first() {
+                                    Some(Value::Object(Some(o))) => self.started_threads.push(*o),
+                                    _ => return Err(Fault::NullObject { pc }),
+                                }
+                                Value::Void
+                            } else {
+                                host.call_native(&owner, &function, &values)
+                                    .map_err(Fault::Native)?
+                            };
                             // A host that returns nothing for a typed call (stubs) gets the
                             // default of the instruction's return machine type.
                             let v = if v == Value::Void && ty != 0 {
@@ -1425,9 +1451,12 @@ fn binary(op: u8, a: Value, b: Value) -> BinaryResult {
             a[0] * b[1] - a[1] * b[0],
             0.,
         ])),
+        // Column-major storage (element (row, col) at col * 4 + row, translation at 12..14)
+        // and A * B in the engine's sense: the Pod World matrix read in RPCS3 is the
+        // transpose of the row-major product (D180 trace, 2026-10-09).
         (0x51, Mat44(a), Mat44(b)) => ok(Mat44(std::array::from_fn(|i| {
-            let (r, c) = (i / 4, i % 4);
-            (0..4).map(|k| a[r * 4 + k] * b[k * 4 + c]).sum()
+            let (col, row) = (i / 4, i % 4);
+            (0..4).map(|k| a[k * 4 + row] * b[col * 4 + k]).sum()
         }))),
         // Pointer/object/s64 equality: EQrp EQo EQsp EQs64 and their NE forms.
         (0x54 | 0x56 | 0x58 | 0xc6, a, b) => ok(Bool(a == b)),
@@ -1527,4 +1556,32 @@ fn set_builtin(op: u8, base: Value, src: Value) -> Option<Value> {
         }
         _ => return None,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn m44_product_is_column_major_a_times_b() {
+        // A = translation (10, 0, 0), B = 90 degrees about z, both column-major.
+        let mut a = [0.; 16];
+        for d in 0..4 {
+            a[d * 5] = 1.;
+        }
+        a[12] = 10.;
+        let mut b = [0.; 16];
+        b[1] = 1.; // column 0 = +y
+        b[4] = -1.; // column 1 = -x
+        b[10] = 1.;
+        b[15] = 1.;
+        let Ok(Ok(Value::Mat44(m))) = binary(0x51, Value::Mat44(a), Value::Mat44(b)) else {
+            panic!("MULm44");
+        };
+        // A * B rotates first, then translates: the translation stays (10, 0, 0) and the
+        // rotation is B's (B * A would give translation (0, 10, 0)).
+        assert_eq!(&m[12..16], &[10., 0., 0., 1.]);
+        assert_eq!(&m[0..2], &[0., 1.]);
+        assert_eq!(&m[4..6], &[-1., 0.]);
+    }
 }

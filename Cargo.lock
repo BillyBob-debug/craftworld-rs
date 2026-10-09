@@ -3407,8 +3407,10 @@ dependencies = [
  "bevy_egui",
  "lbp-catalog",
  "lbp-gooey",
+ "lbp-level",
  "lbp-mesh",
  "lbp-preview",
+ "lbp-runtime",
  "lbp-script-vm",
  "lbp-texture",
  "lbp-ui-script",
@@ -3529,6 +3531,7 @@ name = "lbp-script-vm"
 version = "0.1.0"
 dependencies = [
  "lbp-level",
+ "lbp-resource",
  "serde_json",
 ]
 

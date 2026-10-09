@@ -236,10 +236,151 @@ and the PlanetsView faults.
 
 Counts: +0 newly viewable, +0 newly Complete (no asset change).
 
+## Part 6: the Pod camera and the next Rookie natives (2026-10-08)
+
+Built on part 5 (object members). Evidence: the declaring script type tables and how the
+local listings (ignored `local-analysis/d133-script-listings-0133`) use each name and
+result; Toolkit d6a2ef80 only for `makeLamsKeyID` (docs/u1-translation.md). Nothing derived
+from bytecode is committed. Bindings are listed in docs/script-natives.md.
+
+**Per-frame entry (general mechanism).** `LevelScripts::tick` runs, for a class listed in
+`lbp_runtime::FRAME_ENTRIES`, that entry with argument registers built by the entry's
+`args` function instead of `Update__` (`Runner::start_with` stages them after `this`).
+PlanetsWorld has no `Update__`. Its per-frame entry is neither `UpdateState__` (private,
+called only from the export below) nor `OnEnterPod__`/`OnExitPod__` (PodComputer calls
+them on pod entry and exit). It is the export `UpdatePlanetsView__bQ11PlanetThingQ11PlanetThingbb`,
+which no script calls and which is the only caller of `UpdateState__`,
+`UpdatePodCamera__Q11PlanetThingbb` and `UpdateInteractiveMusic__` (INFERRED: the engine
+calls it each frame). Arguments, INFERRED from how the function uses them: +4 bool passed
+on to `UpdatePodCamera` (false); +8 the Earth (it gets `EarthSpinOffset`); +12 the
+OrbitingMoon (`MoonSpinOffset`); +16 "snap the view" (true on the first tick only; it
+skips the transition and the camera smoothing); +17 "take the zoom from the pod
+computer's state" (true).
+
+**Engine objects.** `add_engine_objects(vm, host, budget)` makes, before create: 16 Gooey
+objects for `CreateGooey__i` (natives cannot allocate VM objects mid-call, so a pool is
+handed out), a Planets object with two Planet crafteroids (INFERRED: index 1 = the
+level's Earth, 2 = its OrbitingMoon; PlanetsView reads crafteroids 1 and 2 and returns
+early if either Thing is null), and the PodComputer, registered before its `.init__` runs
+because that code already calls `GetPodComputer__`. Its `.ctor__` stops at the unbound
+`Gooey.SetLastNavSelectionMode__b` (last call before its return; reported).
+
+| Finding | Label |
+|---|---|
+| `Smooth*(pos, vel, target, max_acc, max_vel)`: PlanetThing passes its `MaxAcc` then `MaxVel` (defaults 0.01, 10); result = new velocity (2D/3D, caller adds it) or (new value, new velocity) (scalar `Smooth__fffff`, the caller reads x and y). The step rule (head for the target at most `max_vel`, velocity change at most `max_acc` per tick) | order: INFERRED from use; rule: INFERRED |
+| `lerp(t, a, b)`, `SmoothStep(e0, e1, x)` | INFERRED, vector-library conventions |
+| `Cam.*`, `SetWorldPosition__m`, `SetAnimPos`, `SetPlayerScoreMultiplierTimer` record state on `LevelWorld` (`camera`, `world_matrix`, `anim_pos`, `score_multiplier_timers`); the viewer can read `LevelWorld::camera` | recorded, nothing renders it yet |
+| PC-run defaults: pod computer not in use, no crash zoom, no cinema mode, no avatars, no video, 16:9, player 0 leads, no music, interactive music audible, no attraction loop, interactive, no pending links | INFERRED defaults (`state_query`) |
+| `IsLBP2GameProgressionFlagSet__i`: `LevelWorld::progression_flags` (empty = fresh profile; `level_scripts --flags=2,..`). On a fresh profile PlanetsWorld starts its intro cutscene (`SetState(1)` -> a Thread) | flag 2 meaning: INFERRED |
+| `MakeLamsKeyID`: Toolkit `makeLamsKeyID` as s32 | CONFIRMED_FROM_COMMUNITY_CODE |
+| Resource handles: `LevelWorld::load_resource` returns the GUID (Gooey `.init__` loads a texture) | INFERRED stand-in |
+
+Results (PC, 01.33 + d133 edat overlay, `--play=300`, unit = scripted Thing):
+
+| Level | Create done / faults / no_function | Ticks | Faults |
+|---|---|---|---|
+| Pod planets, fresh profile (`d166-play-pod-planets-0133.json`) | 3 / 0 / 0 (D165: 2 / 1 / 0) | tick 1: PlanetsWorld stops | `Thread.StartImpl__` 1 (`Thread.Start__`, the intro cutscene thread) |
+| Pod planets, `--flags=2` (`d166-play-pod-planets-flag2-0133.json`) | 3 / 0 / 0 | 300 x UpdatePlanetsView done, 0 faults | none |
+| Pod (`d166-play-pod-0133.json`) | 0 / 1 / 1 (D165 same counts) | 0 faults | `Thing.FindThing__Q7StringA` 1 (Pod.OnCreate__, after `DebugPrint` wrote "19") |
+| Rookie Test (`d166-play-rookie-0133.json`) | 189 / 23 / 9 (D165 same counts) | 0 faults | `LAMS.IsInLams__i` 20, `MakeLamsKeyID` on a null string 1 (Trigger_Speech_Bubble), `Game.SetPlayerScoreMultiplierCounter__Q18Game.EPlayerNumberi` 1 (World), `Gooey.SetStylesheetScalingFactor__f` 1 |
+
+Camera after 300 ticks (`--flags=2`): from (0, -250, 1130, 1), to (0, 100, -1500, 1),
+up (0, 1, 0, 0), floats (10, 100000, 0, 1); 300 `SetCameraFromToUp` calls; DOF and fog
+(80000, 100000, 20000); motion blur cleared once (the snap tick). From and to are the
+function's constant preset for "pod computer not in use"; they do not move with the
+defaults above. Earth and OrbitingMoon have `Update__rb` (an export with a vector and a
+bool) instead of `Update__`, so they still count as no_function each tick.
+
+Tests: `lbp-script-vm` `part6_math_and_lams_keys`; `lbp-runtime`
+`part6_frame_entry_gets_its_arguments_each_tick`,
+`part6_camera_world_position_and_engine_state`, `part6_engine_objects_and_pod_computer`.
+`script_tests` (`d166-script-tests-0133.json`): 47 functions done, 512 passed / 1 failed.
+
+Not tested: the camera drawn in the viewer; any value against the game (the INFERRED
+defaults and the Smooth rule are not checked in RPCS3).
+
+Counts: +0 newly viewable, +0 newly Complete (no asset change).
+
+## Part 7b: pod computer in use (2026-10-09)
+
+`LevelWorld::pod_computer_in_use` backs `PodComputer.GetPodComputerInUse__` (default
+false, INFERRED: nobody at the computer when the Pod loads). `level_scripts --play=N
+--puter-in-use=TICK` makes it true from that tick (0 = from `OnCreate__`) and reports
+`camera_before_in_use` next to the final `camera`, so one run gives both presets for the
+RPCS3 comparison. `SetCameraFromToUp` floats (10, 100000, 0, 1): INFERRED near 10 and far
+100000 (the PC reading); the last two are UNKNOWN. Test: `lbp-runtime`
+`part6_camera_world_position_and_engine_state` (flag on and off). Counts: +0 newly
+viewable, +0 newly Complete (no asset change).
+
+## Part 8: script threads (2026-10-09)
+
+Fresh-profile Pod planets stopped at `Thread.StartImpl__`: PlanetsWorld.SetState starts
+the intro cutscene as a thread (PodIntroductionThread : PodThread : Thread). PC findings
+(behaviour only): Thread is abstract with a private `Running` bool; `Start__` asserts
+`!Running`, sets it and calls the native `StartImpl__(this)`; `ThreadMain__` asserts
+`Running`, makes three virtual calls on `this` (most likely OnStart, Run, OnFinish) and
+clears `Running`; `.get.Finished__` = `!Running`. No stop, sleep or is-running native:
+waiting is a script loop over `System.Yield__` (PodThread `Wait__i`,
+`WaitUntilStartPressed__i`, `PlayAudioAndWait__`). `Thread.Start__` is called from 15
+classes (PodComputer 9, Race_End 3, Score_Board 3, PodState menus, PlanetsWorld 2, ...).
+
+Implementation: the VM records the object passed to `Thread.StartImpl__` (null faults the
+caller). `LevelScripts` runs `ThreadMain__` on each new thread at the end of the step
+that started it (create or tick) until it yields, and resumes suspended threads once per
+tick after the Things' suspended scripts and before the updates. Threads that start
+threads run in the same step (at most `MAX_THREAD_STARTS`, 256). A faulted thread is
+dropped and reported. `StepReport` gains `threads_started`, `threads_done` and
+`thread_faults`; `level_scripts --play` reports them and `threads_running_at_end`.
+
+| Rule | Label |
+| --- | --- |
+| A started thread runs `ThreadMain__` with the thread object as `this` | INFERRED from the listings (PC) |
+| It first runs at the end of the starting step, then once per tick | INFERRED; the Pod intro timing in RPCS3 can check it |
+| Threads resume after suspended Thing scripts, before updates | INFERRED |
+
+Test: `lbp-runtime` `script_thread_runs_until_yield_then_resumes_each_tick` (a synthetic
+Thread and a Thing script that starts it: writes 1 at create, 2 on the next tick; a
+null thread faults the starting script). `cargo +1.99.0 clippy -p lbp-script-vm -p
+lbp-runtime --all-targets -- -D warnings` clean; tests pass.
+
+PC check: `level_scripts` on Pod planets with `--play=300` and no flags (fresh profile).
+Expect `threads_started` 1 and the intro thread's next blockers in `thread_faults` (video
+and voice-over natives: `StartVideo__g`, `IsPlayingVideo__`, `RequestVoiceOver__Q7StringAbb`,
+`IsVoiceOverPlaying__`). Then compare with RPCS3: what the fresh-profile Pod shows first
+and for how many ticks.
+
+## Part 7: level scripts in the viewer (2026-10-09)
+
+`lbp-bevy-viewer --level-guid HEX|--level-path PATH --level-scripts
+[--level-scripts-flags N,..]` (module `level_play.rs`) runs the level's scripts inside the
+viewer, at the game tick: `Time<Fixed>` at `lbp_runtime::TICK_HZ` (30), one
+`LevelScripts` step per `FixedUpdate`. The first step is `OnCreate__`; every later one
+is a tick (resume, then `Update__` or the class's frame entry). The setup is the same as
+`level_scripts --play`: load every script with its GUID, read the level,
+`bind_objects`, `add_class_defaults`, the progression flags, `add_engine_objects`. A
+"Level scripts" window shows the tick, create and tick counts, ticks with faults, the
+first fault lines, the most-called unbound natives, the last camera set through
+`Cam.SetCameraFromToUp` and the last `WRITE` lines. `--qa-hide-ui` hides it.
+
+Nothing the scripts change is drawn yet (camera, positions, tints): this part is the
+clock and the counts. Built and linted in the cloud (`cargo +1.99.0 clippy -p
+lbp-bevy-viewer --all-targets -- -D warnings`, viewer tests pass); not run, as the cloud
+has no game data or display.
+
+PC check: the viewer on Pod planets (00018fdb) with `--level-scripts
+--level-scripts-flags 2` on the second monitor. After a few seconds the window should
+show ticks rising at 30 per second, 0 faults and the camera from (0, -250, 1130) to
+(0, 100, -1500), as `level_scripts --play` reported in part 6. Then Rookie Test, where
+the counts should match part 6 (create 189 / 23 / 9).
+
+Counts: +0 newly viewable, +0 newly Complete (no asset change).
+
 ## Next
 
-- Call the scripts from the 30 Hz fixed update of the level viewer once Rookie Test
-  creates and updates without faults.
-- Bind the natives part 4 reports, in call-count order; for the Pod camera, PodComputer,
-  Cam and the PPos `WorldPosition` member first.
+- Drive the viewer camera from `LevelWorld::camera` (part 7 runs the scripts and shows
+  the camera values; the level-unit to display-unit mapping needs a PC capture).
+- Script threads (`Thread.Start__` -> `Thread.StartImpl__`) for the Pod intro cutscene.
+- PlanetThing `Update__rb` as a frame entry (its arguments are still unknown).
+- Rookie Test: `LAMS.IsInLams__i` (needs the translation table), then
+  `SetPlayerScoreMultiplierCounter`, Gooey members; Pod: `Thing.FindThing__Q7StringA`.
 - Resource object values, if the PC count shows scripts reading them.
