@@ -15,10 +15,20 @@
 //! `blocking_materials` ranking: for each material key, the catalog GUIDs of meshes it
 //! blocks and of meshes it alone blocks (fixing it alone makes them all-diffuse).
 //! Ranking only; not an asset count. Without the flag the output is unchanged.
+//! D188 (schema 3): standalone defaults apply unless opted out: white instance colour
+//! (`--no-instance-default` opts out; `--instance-rgba` overrides) and animation base
+//! values (`--no-animation-base` opts out). Scope suffixes name defaults separately
+//! (`+animation_base_default`, `+instance_white_default`); `preview_options` records
+//! the source of each input and `evidence` the labels. Material-less groups
+//! (`lbp_preview::is_materialless`) are tallied in `materialless_groups` and excluded
+//! from the all-diffuse denominator; they are never listed as blockers.
+//! `--no-instance-default --no-animation-base --materialless-blocking` reproduces the
+//! pre-D188 classification and options (scope suffix `+materialless_blocking`).
+//! Schema: docs/d188-absent-material-primitives.md.
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::census::{
     apply_preview_flag, coverage, geometry_available, preview_scope_suffix, CorpusTally,
-    MeshOutcome,
+    GroupBinding, MeshOutcome, PreviewFlags, DEFAULTS_EVIDENCE,
 };
 use serde_json::{json, Value};
 use std::{
@@ -37,18 +47,21 @@ fn run() -> Result<(), String> {
     let args: Vec<_> = std::env::args().collect();
     if args.len() < 4 {
         return Err(
-            "corpus_mesh_census SNAPSHOT GAME-DIR NEW-JSON [--hashes MANIFEST] [--max-seconds N] [--animation-base] [--instance-rgba R,G,B,A] [--blockers]"
+            "corpus_mesh_census SNAPSHOT GAME-DIR NEW-JSON [--hashes MANIFEST] [--max-seconds N] [--animation-base | --no-animation-base] [--instance-rgba R,G,B,A | --no-instance-default] [--materialless-blocking] [--blockers]"
                 .into(),
         );
     }
     let output = Path::new(&args[3]);
     let mut cohort: Option<(String, BTreeSet<String>)> = None;
     let mut max_seconds = 7200u64;
-    let mut options = lbp_preview::PreviewOptions::default();
+    let mut preview_flags = PreviewFlags::default();
     let mut blockers = false;
+    let mut materialless_blocking = false;
     let mut flags = args[4..].iter();
     while let Some(flag) = flags.next() {
-        if apply_preview_flag(&mut options, flag, || flags.next().map(String::as_str))? {
+        if apply_preview_flag(&mut preview_flags, flag, || {
+            flags.next().map(String::as_str)
+        })? {
             continue;
         }
         match flag.as_str() {
@@ -75,6 +88,12 @@ fn run() -> Result<(), String> {
                 cohort = Some((name, set));
             }
             "--blockers" => blockers = true,
+            "--materialless-blocking" => {
+                if materialless_blocking {
+                    return Err("repeated --materialless-blocking".into());
+                }
+                materialless_blocking = true;
+            }
             "--max-seconds" => {
                 max_seconds = flags
                     .next()
@@ -101,6 +120,7 @@ fn run() -> Result<(), String> {
     {
         return Err("new ignored output required".into());
     }
+    let (options, applied) = preview_flags.resolve();
     let started = Instant::now();
     let deadline = Duration::from_secs(max_seconds);
     let control = LoadControl::default();
@@ -174,15 +194,18 @@ fn run() -> Result<(), String> {
                     Ok(preview) => {
                         let g = &preview.geometry;
                         if blockers {
-                            mesh_blocked = blocked_groups(&preview);
+                            mesh_blocked = blocked_groups(&preview, materialless_blocking);
                         }
                         let (coverage, neutral_reasons) = coverage(
                             geometry_available(&g.positions, &g.triangles),
-                            g.primitive_triangles.iter().zip(&preview.bindings).map(
-                                |(range, b)| {
-                                    (range.len(), b.as_ref().map(|_| ()).map_err(String::as_str))
-                                },
-                            ),
+                            g.primitive_triangles
+                                .iter()
+                                .zip(&preview.bindings)
+                                .enumerate()
+                                .map(|(i, (range, b))| {
+                                    let ml = !materialless_blocking && preview.materialless(i);
+                                    (range.len(), GroupBinding::of(b, ml))
+                                }),
                         );
                         MeshOutcome::Loaded {
                             coverage,
@@ -201,7 +224,7 @@ fn run() -> Result<(), String> {
                 coverage: c,
                 neutral_reasons,
             } => {
-                json!({"sha1":sha,"guids":guids,"status":if !c.geometry_available {"no_geometry"} else if c.all_diffuse() {"all_diffuse"} else {"viewable"},"nonempty_groups":c.nonempty_groups,"supported_groups":c.supported_groups,"neutral_reasons":neutral_reasons})
+                json!({"sha1":sha,"guids":guids,"status":if !c.geometry_available {"no_geometry"} else if c.all_diffuse() {"all_diffuse"} else {"viewable"},"nonempty_groups":c.nonempty_groups,"supported_groups":c.supported_groups,"materialless_groups":c.materialless_groups,"neutral_reasons":neutral_reasons})
             }
         };
         if blockers {
@@ -215,23 +238,40 @@ fn run() -> Result<(), String> {
         rows.push(row);
     }
     source.check_stable()?;
-    let suffix = preview_scope_suffix(&options);
+    let mut suffix = preview_scope_suffix(&options, applied);
+    if materialless_blocking {
+        suffix.push_str("+materialless_blocking");
+    }
     let scope = match &cohort {
         Some((name, _)) => format!("cohort_manifest:{name}{suffix}"),
         None => format!("corpus_all_mesh_map_rows{suffix}"),
     };
-    let opt_in = !suffix.is_empty();
+    let source_of = |on: bool, default: bool| match (on, default) {
+        (false, _) => "off",
+        (true, true) => "default",
+        (true, false) => "flag",
+    };
     let mut report = json!({
-        "schema_version": if opt_in { 2 } else { 1 },
+        "schema_version": 3,
         "tool": "corpus_mesh_census",
         "scope": scope,
-        "scope_note": if opt_in {
-            "MAP rows with confirmed type mesh (snapshot), one load per content hash, opt-in PreviewOptions recorded in preview_options (supplied values, not verified game instances)"
-        } else {
-            "MAP rows with confirmed type mesh (snapshot), one load per content hash, default PreviewOptions (no animation base, no supplied instance color)"
-        },
+        "scope_note": format!(
+            "MAP rows with confirmed type mesh (snapshot), one load per content hash; {}; {}",
+            if applied.any() {
+                "D188 standalone defaults applied where no flag supplied the input (preview_options records each source; white instance colour and animation base values are preview inputs, not verified game instances)"
+            } else if options.animation_base || options.instance_color.is_some() {
+                "inputs supplied by flags (recorded in preview_options; not verified game instances)"
+            } else {
+                "D188 defaults opted out (no animation base, no instance color: pre-D188 options)"
+            },
+            if materialless_blocking {
+                "material-less groups count as blocking (pre-D188 classification)"
+            } else {
+                "material-less groups excluded from all-diffuse"
+            }
+        ),
         "asset_unit": "distinct_catalog_guid",
-        "definitions": {"viewable":"mesh loads and has a nonzero-area triangle (geometry availability, not visual fidelity)","all_diffuse":"viewable and every nonempty primitive group has a loaded diffuse binding (binding coverage, not visual verification)","complete":"not certified; requires manual visual check"},
+        "definitions": {"viewable":"mesh loads and has a nonzero-area triangle (geometry availability, not visual fidelity)","all_diffuse":"viewable, at least one nonempty primitive group needs a diffuse binding, and every such group has one; material-less groups are excluded (binding coverage, not visual verification)","materialless_group":"nonempty primitive group with no material GUID/hash and all-zero material and alternatives descriptors; drawn neutral, no diffuse invented, not a blocker","complete":"not certified; requires manual visual check"},
         "budgets": {"max_mesh_hashes": MAX_MESH_HASHES, "max_aggregate_mesh_bytes": MAX_AGGREGATE_MESH_BYTES, "per_mesh_input_bytes": lbp_mesh::MAX_INPUT, "max_seconds": max_seconds},
         "snapshot_mesh_type_rows": type_rows,
         "corpus_mesh_hashes": corpus_hashes,
@@ -247,8 +287,11 @@ fn run() -> Result<(), String> {
             "failed_hashes": tally.failed_by_reason.values().sum::<usize>(),
             "no_geometry_hashes": tally.no_geometry_hashes,
             "viewable_without_groups_hashes": tally.viewable_without_groups,
+            "viewable_only_materialless_hashes": tally.viewable_only_materialless,
             "nonempty_groups": tally.nonempty_groups,
             "supported_groups": tally.supported_groups,
+            "materialless_groups": tally.materialless_groups,
+            "materialless_hashes": tally.materialless_hashes,
             "mesh_input_bytes": mesh_bytes
         },
         "failed_by_reason": tally.failed_by_reason,
@@ -257,15 +300,25 @@ fn run() -> Result<(), String> {
         "all_diffuse_guid_list": tally.all_diffuse_guids,
         "meshes": rows
     });
-    if opt_in {
-        report["preview_options"] = json!({
-            "animation_base_enabled": options.animation_base,
-            "animation_time": null,
-            "supplied_instance_color_bits": options.instance_color.map(|c| c.bits),
-            "supplied_instance_rgba": options.instance_color.map(|c| c.values()),
-            "verified_game_instance": false
-        });
-    }
+    report["preview_options"] = json!({
+        "animation_base_enabled": options.animation_base,
+        "animation_base_source": source_of(options.animation_base, applied.animation_base),
+        "animation_time": null,
+        "supplied_instance_color_bits": options.instance_color.map(|c| c.bits),
+        "supplied_instance_rgba": options.instance_color.map(|c| c.values()),
+        "instance_color_source": source_of(options.instance_color.is_some(), applied.instance_white),
+        "verified_game_instance": false
+    });
+    report["materialless_policy"] = json!(if materialless_blocking {
+        "blocking (pre-D188: material-less groups count in the all-diffuse denominator)"
+    } else {
+        "excluded (D188)"
+    });
+    report["evidence"] = DEFAULTS_EVIDENCE
+        .iter()
+        .map(|(k, v)| (k.to_string(), json!(v)))
+        .collect::<serde_json::Map<_, _>>()
+        .into();
     if blockers {
         report["blockers_scope"] = json!(
             "ranking of material keys by meshes they keep from all-diffuse; not an asset count"
@@ -280,13 +333,14 @@ fn run() -> Result<(), String> {
     serde_json::to_writer_pretty(&mut file, &report).map_err(|e| e.to_string())?;
     file.write_all(b"\n").map_err(|e| e.to_string())?;
     println!(
-        "{scope}: {} mesh hashes / {} GUIDs: {} viewable GUIDs, {} all-diffuse GUIDs, 0 complete; {} failed hashes, {} no-geometry; {} unmapped mesh hashes excluded; {:.0} s",
+        "{scope}: {} mesh hashes / {} GUIDs: {} viewable GUIDs, {} all-diffuse GUIDs, 0 complete; {} failed hashes, {} no-geometry; {} material-less groups excluded from all-diffuse; {} unmapped mesh hashes excluded; {:.0} s",
         tally.mesh_hashes,
         tally.catalog_guids.len(),
         tally.viewable_guids.len(),
         tally.all_diffuse_guids.len(),
         report["totals"]["failed_hashes"],
         tally.no_geometry_hashes,
+        tally.materialless_groups,
         unmapped.len(),
         started.elapsed().as_secs_f64()
     );
@@ -300,7 +354,7 @@ struct Blocker {
 }
 
 /// Nonempty primitive groups without a diffuse binding, in primitive order.
-fn blocked_groups(preview: &lbp_preview::GroupedMesh) -> Vec<Value> {
+fn blocked_groups(preview: &lbp_preview::GroupedMesh, materialless_blocking: bool) -> Vec<Value> {
     let g = &preview.geometry;
     g.metadata
         .primitives
@@ -308,7 +362,7 @@ fn blocked_groups(preview: &lbp_preview::GroupedMesh) -> Vec<Value> {
         .zip(&g.primitive_triangles)
         .zip(&preview.bindings)
         .enumerate()
-        .filter(|(_, ((_, range), _))| !range.is_empty())
+        .filter(|(_, ((p, range), _))| !range.is_empty() && (materialless_blocking || !lbp_preview::is_materialless(p)))
         .filter_map(|(i, ((p, _), b))| {
             b.as_ref().err().map(|reason| {
                 json!({"group":i,"key":material_key(p.material_guid, p.material_hash.as_deref()),"reason":reason})

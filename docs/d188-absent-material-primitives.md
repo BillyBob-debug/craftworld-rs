@@ -1,6 +1,13 @@
-# D188: primitives with an absent material identifier
+# D188: standalone preview defaults and material-less primitives
 
-Date: 2026-10-09 (America/Chicago). Outcome: **findings only, no code change.**
+Date: 2026-10-09 (America/Chicago). Two parts:
+
+- **Part 1 (research, below):** what an absent material identifier means. Outcome:
+  game behaviour `UNKNOWN`; the descriptor shape is now confirmed on local data.
+- **Part 2 (implementation, "D188 implementation" section):** (A) single-mesh preview
+  and mesh censuses default to a white instance colour and animation base values;
+  (B) material-less groups are classified, tallied and excluded from the all-diffuse
+  denominator, without inventing a diffuse binding.
 
 ## Question
 
@@ -61,10 +68,140 @@ Pin for all Toolkit links: `ennuo/toolkit` `d6a2ef80b5a09999f08f23a803b516096055
   diffuse rule: counting these groups as diffuse-bound would raise "all-diffuse" from
   a converter convention, against the Complete definition (all textures showing).
 
-No implementation: existing behaviour (`Unresolved: absent resource identifier`,
-neutral group, mesh stays viewable but not all-diffuse) is unchanged.
+Part 1 alone changed no code. Part 2 below keeps the group neutral (no diffuse is
+invented) but stops counting it against all-diffuse.
 
-## Not tested / open
+## Local descriptor shape (PC, 01.33, all 4,261 mesh GUIDs)
+
+PC probe over the 59 mesh GUIDs whose blocker key was `none` (temporary example,
+deleted; numbers from the PC batch report, not re-measured here): every one has
+exactly one nonempty primitive with no material GUID and no hash, and that primitive
+has `material_flags=0`, `material_kind=0`, `alternatives_flags=0`,
+`alternatives_kind=0`, no alternatives GUID/hash. It is primitive 0 in 58 meshes and
+primitive 1 in `00017471`; index counts 4-1164. All 59 are viewable; 58 have it as
+their only blocked group. Label: **`CONFIRMED_FROM_LOCAL_DATA`** (descriptor shape).
+
+## D188 implementation
+
+### A. Standalone defaults (single-mesh preview and mesh censuses)
+
+When no Thing supplies inputs (single-mesh preview in `lbp-bevy-viewer`,
+`corpus_mesh_census`, `compatibility_census`):
+
+| Input | Default | Evidence |
+|---|---|---|
+| Instance colour (THING_COLOR) | white linear (1, 1, 1, 1) | Value: `CONFIRMED_FROM_LOCAL_DATA`, instance_color_census found editorColor `ffffffff` on 65,746 / 68,618 placed RENDER_MESH Things in levels and 20,753 / 21,571 in plans (docs/instance-color-census.md); `CONFIRMED_FROM_COMMUNITY_CODE`, Toolkit `PRenderMesh.editorColor` default -1 (docs/d80-thing-color.md row E7). Link editorColor -> THING_COLOR shader input: **`INFERRED`** (no capture shows it). |
+| Animated material parameters | stored base values, t = base (existing D61 snapshot) | Preview policy; game animation time `UNKNOWN`. |
+
+- Code: `lbp_preview::StandaloneDefaults::apply` (crates/lbp-preview/src/instance.rs)
+  fills only inputs the caller left unset and returns `AppliedDefaults`.
+  `PreviewOptions::default()` is unchanged (source-only), so level scenes and every
+  other caller keep their output.
+- Flags (`lbp_preview::census::apply_preview_flag`, shared by both censuses):
+  `--instance-rgba R,G,B,A` overrides the white default; `--animation-base` still
+  accepted (explicit); `--no-instance-default` and `--no-animation-base` opt out.
+  Repeats and contradictions (`--instance-rgba` with `--no-instance-default`,
+  `--animation-base` with `--no-animation-base`) are errors.
+- Viewer (`lbp-bevy-viewer`): the same defaults for single-mesh loads only (levels
+  keep explicit inputs). `--no-instance-default` / `--no-animation-base` and two
+  checkboxes turn them off. Defaulted inputs are labelled in the details list
+  ("D188 default: ...") and the review panel; as before, an instance input or an
+  animation snapshot blocks the Complete check. `lbp-viewer` loads a source-only
+  single-primitive slice and has no instance or animation inputs, so it is unchanged
+  (it shows the new census lines through `census_summary`).
+
+### B. Material-less groups
+
+- Predicate `lbp_preview::is_materialless` (crates/lbp-preview/src/lib.rs): material
+  and alternatives descriptors entirely absent (no GUID, no hash, kind 0, flags 0).
+  `load_mesh_groups_with_options` gives such a group the neutral reason
+  `MATERIALLESS_REASON` ("Material-less: no material descriptor (game draw UNKNOWN;
+  drawn neutral, no diffuse invented)") instead of
+  `Unresolved: absent resource identifier`. No binding is invented. Any other
+  unresolved descriptor (GUID/hash not found, nonzero flags or alternatives) is
+  unchanged and still blocks.
+- Census (`lbp_preview::census::GroupBinding::Materialless`): such a group is neither
+  supported nor blocking. `MeshCoverage.nonempty_groups` excludes it;
+  `materialless_groups` counts it. All-diffuse now needs at least one nonempty
+  non-material-less group, all bound; a mesh whose groups are all material-less is
+  counted in `viewable_only_materialless_hashes`, not all-diffuse.
+- Labels: descriptor shape `CONFIRMED_FROM_LOCAL_DATA`; what the game draws
+  `UNKNOWN`; Toolkit exports them with the glTF default white material
+  `CONFIRMED_FROM_COMMUNITY_CODE` (export behaviour only, not adopted as a diffuse).
+- Viewer: drawn neutral (unchanged geometry path), labelled "Neutral: Material-less:
+  ...", counted outside the "diffuse groups supported" total, and Complete stays
+  unconfirmable while any material-less group is present (game draw unknown).
+
+### corpus_mesh_census schema 3
+
+Every run now writes `schema_version` 3 (meaning changed: defaults and material-less
+exclusion). Changes from schema 2:
+
+- `scope` = `corpus_all_mesh_map_rows` or `cohort_manifest:NAME`, then in order:
+  `+animation_base` (flag) or `+animation_base_default`; `+instance_rgba` (flag) or
+  `+instance_white_default`; `+materialless_blocking` (see below). Default run:
+  `corpus_all_mesh_map_rows+animation_base_default+instance_white_default`.
+- `preview_options` is always present: `animation_base_enabled`,
+  `animation_base_source` (`default` / `flag` / `off`), `animation_time` (null),
+  `supplied_instance_color_bits`, `supplied_instance_rgba` (effective value, white
+  when defaulted), `instance_color_source` (`default` / `flag` / `off`),
+  `verified_game_instance` (false).
+- `evidence`: the labels above (`instance_white_value`,
+  `editor_color_to_thing_color`, `animation_base`, `materialless_group`).
+- `materialless_policy`: `excluded (D188)` or `blocking (pre-D188 ...)`.
+- `definitions.all_diffuse` reworded; `definitions.materialless_group` added.
+- `totals` add `materialless_groups`, `materialless_hashes`,
+  `viewable_only_materialless_hashes`; mesh rows add `materialless_groups`;
+  material-less groups are never in `blocked_groups` / `blocking_materials`.
+- `--materialless-blocking` (census only) restores the pre-D188 classification, so
+  `--no-instance-default --no-animation-base --materialless-blocking` reproduces the
+  pre-D188 counts (reason text for those groups is the new one).
+- `lbp_catalog::census_summary` reads schemas 1-3. A schema 3 file with both defaults
+  goes in the new `D188 standalone defaults` slot; an opt-out file with no inputs is
+  the `default options` slot; mixed files go to the slot of their effective inputs
+  and say which input was defaulted. Notes name the white default and its `INFERRED`
+  link, the animation default and the material-less exclusion count.
+
+`compatibility_census` (schema 13 -> 14): same flags and defaults; adds
+`instance_white_default_applied`, `animation_base_default_applied`, `evidence`; group
+status `materialless` with `materialless_groups` per row, excluded from all-diffuse.
+
+### PC commands (01.33)
+
+```powershell
+cargo build -q --release -p lbp-preview --example corpus_mesh_census
+$c = "target\release\examples\corpus_mesh_census.exe"
+$g = "game-data\a1-disc;game-data\a1-update-0133"
+& $c local-analysis\d68-inventory-0133-verified.json $g local-analysis\d188-corpus-default.json --blockers
+& $c local-analysis\d68-inventory-0133-verified.json $g local-analysis\d188-corpus-sourceonly.json --no-instance-default --no-animation-base --blockers
+& $c local-analysis\d68-inventory-0133-verified.json $g local-analysis\d188-corpus-pre-d188.json --no-instance-default --no-animation-base --materialless-blocking
+python scripts\summarize_blockers.py local-analysis\d188-corpus-default.json
+```
+
+Expected (expectations from the PC batch numbers, not measured here):
+
+- `d188-corpus-default.json`: 4,259 viewable; all-diffuse about 4,155 + up to 58
+  (the white + animation-base run gave 4,155, and 58 meshes had the material-less
+  group as their only blocker in the both-opt-in run; the 59th has another blocker),
+  so at most 4,213; `materialless_groups` 59; no `none` key in `blocking_materials`;
+  0 Complete.
+- `d188-corpus-pre-d188.json`: exactly the pre-D188 default, 4,259 viewable /
+  3,798 all-diffuse.
+- `d188-corpus-sourceonly.json`: 3,798 + the meshes whose only source-only blocker
+  was the material-less group (not measured; at most 59).
+
+## Not tested / open (D188 implementation)
+
+- No game data in this container: no PC census, viewer capture or count above was
+  run here. Tests are synthetic (flag parsing, defaults, predicate, coverage, tally,
+  census_summary schema 3, viewer evidence).
+- Whether the game draws material-less primitives, and with what, stays `UNKNOWN`
+  (RPCS3 look not done). If they turn out to be hidden, nothing changes in
+  all-diffuse; if they draw with some material, the exclusion must be revisited.
+- The editorColor -> THING_COLOR link remains `INFERRED`.
+
+## Not tested / open (Part 1)
+
 
 - No game data in this container; the 58 GUIDs and their primitives were not inspected.
 - Not checked whether these primitives share a `region` listed in some costume's
@@ -72,9 +209,9 @@ neutral group, mesh stays viewable but not all-diffuse) is unchanged.
   softbody meshes; any of these could point to a gameplay meaning.
 - RPCS3 observation (whether the region visibly draws in-game) not done.
 
-## PC verification (when the 10 example GUIDs arrive)
+## PC verification (Part 1, superseded by the D188 implementation commands above)
 
-No code changed, so the census must reproduce the baseline exactly:
+Part 1 alone changed no code, so at that point the census had to reproduce the baseline exactly:
 
 ```powershell
 cargo build -q --release -p lbp-preview --example corpus_mesh_census
