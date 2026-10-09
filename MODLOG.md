@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-09 — D194 level shapes take their own PShape.color
+
+Shape batches split per (gfx material, PShape.color) and, under the level defaults, load
+with that colour as the instance colour. Targets the 68 grey shapes in Bravery Test
+(gfx 00012ba7, 00018401). --level-report prints shape-batch reasons and Things.
++0 viewable / +0 Complete expected; PC verifies.
+
 ## 2026-10-09 — D193 sampler port folds under the nested instance tint
 
 Folded sampler ports (D96) and the nested ThingColor tint now combine instead of refusing;
