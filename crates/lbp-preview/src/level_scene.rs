@@ -377,6 +377,8 @@ pub struct LevelScene<T> {
     pub counts: SceneCounts,
     /// D121: stored PLevelSettings (world holder first), for opt-in preview lighting.
     pub settings: Option<LevelSettings>,
+    /// P2l: the same holder's stored presets (for `--lighting-preset`).
+    pub settings_presets: Vec<LevelSettings>,
     /// P2c: Things with a CHECKPOINT part and a valid POS (Thing index, world matrix), in
     /// reader order. The player spawns at a checkpoint.
     pub checkpoints: Vec<(usize, [f32; 16])>,
@@ -389,6 +391,7 @@ impl<T> Default for LevelScene<T> {
             items: Vec::new(),
             counts: SceneCounts::default(),
             settings: None,
+            settings_presets: Vec::new(),
             checkpoints: Vec::new(),
         }
     }
@@ -1981,6 +1984,7 @@ pub fn load_level_scene_with_options(
     source.check_stable()?;
     scene.counts.reader_stop = report.stop.as_ref().map(|s| format!("{s:?}"));
     scene.settings = LevelSettings::find(&report.things).map(|(_, s)| *s);
+    scene.settings_presets = LevelSettings::find_presets(&report.things).to_vec();
     scene.checkpoints = checkpoints(&report.things);
     Ok(scene)
 }

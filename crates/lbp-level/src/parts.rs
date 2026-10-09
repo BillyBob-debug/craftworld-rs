@@ -293,6 +293,10 @@ pub struct PartData {
     /// backdrop mesh tail (D119).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub level_settings: Option<LevelSettings>,
+    /// P2l: the stored preset LevelSettings in order (at most `MAX_KEPT_PRESETS` kept; the
+    /// rest are read through). Field order as the own settings (Toolkit PLevelSettings).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub level_settings_presets: Vec<LevelSettings>,
     /// PScript: script resource and instance field values (Rt). A part shared by
     /// back-reference is not repeated here.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -397,7 +401,20 @@ pub struct LevelSettings {
     pub backdrop_mesh: Option<Descriptor>,
 }
 
+/// P2l: presets kept per PLevelSettings (levels seen store one).
+pub const MAX_KEPT_PRESETS: usize = 16;
+
 impl LevelSettings {
+    /// P2l: the stored presets of the holder `find` picks.
+    pub fn find_presets(things: &[crate::thing::ThingRecord]) -> &[LevelSettings] {
+        match Self::find(things) {
+            Some((at, _)) => things
+                .iter()
+                .find(|t| t.index == at)
+                .map_or(&[], |t| t.data.level_settings_presets.as_slice()),
+            None => &[],
+        }
+    }
     /// The world Thing's (PWorld holder) settings, else the first Thing carrying the
     /// part, with that Thing's index. Several holders are not merged.
     pub fn find(things: &[crate::thing::ThingRecord]) -> Option<(usize, &LevelSettings)> {
@@ -769,10 +786,15 @@ fn part_body(
         "LEVEL_SETTINGS" => {
             let mut own = level_settings(r)?;
             let n = r.count(4)?;
+            let mut kept = Vec::with_capacity(n.min(MAX_KEPT_PRESETS));
             for _ in 0..n {
-                level_settings(r)?;
+                let preset = level_settings(r)?;
+                if kept.len() < MAX_KEPT_PRESETS {
+                    kept.push(preset);
+                }
             }
             own.presets = n;
+            things.list[me].data.level_settings_presets = kept;
             r.str8()?;
             own.backdrop_mesh = r.resource(false)?;
             things.list[me].data.level_settings = Some(own);
