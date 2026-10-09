@@ -203,6 +203,7 @@ fn run() -> Result<(), String> {
     if let (Some(n), Some(mut world)) = (play, last_world.take()) {
         world.add_class_defaults(&vm);
         let mut host = Bindings::new(world);
+        let engine_faults = lbp_runtime::add_engine_objects(&mut vm, &mut host, BUDGET_PER_CALL);
         let mut level = LevelScripts::new(&vm, &host.world);
         let created = level.create(&mut vm, &mut host, BUDGET_PER_CALL);
         let mut sum = StepReport::default();
@@ -257,6 +258,20 @@ fn run() -> Result<(), String> {
                     .map(|(k, n)| serde_json::json!({"native": k, "calls": n}))
                     .collect::<Vec<_>>(),
                 "written": host.world.written.iter().take(40).collect::<Vec<_>>(),
+                "engine_object_faults": engine_faults,
+                "gooeys_created": host.world.gooeys_created,
+                "camera": {
+                    "from_to_up": host.world.camera.from_to_up.map(|c| serde_json::json!({
+                        "from": c.from, "to": c.to, "up": c.up, "params": c.params,
+                    })),
+                    "from_to_up_calls": host.world.camera.from_to_up_calls,
+                    "dof_and_fog": host.world.camera.dof_and_fog,
+                    "motion_blur_clears": host.world.camera.motion_blur_clears,
+                },
+                "frame_entries": level.instances.iter().filter_map(|i| {
+                    let e = lbp_runtime::frame_entry(&vm, i.class?)?;
+                    Some(format!("thing {}: {}.{}", i.thing, e.class, e.function))
+                }).collect::<Vec<_>>(),
             }),
         );
     }

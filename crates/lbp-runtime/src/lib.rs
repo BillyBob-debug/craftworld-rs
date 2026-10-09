@@ -16,8 +16,8 @@
 //! 24 and `Update__` by 11; the remaining names are UI, switch and enter/leave handlers).
 use lbp_level::parts::{ScriptPart, ScriptValue, ShapeColor};
 use lbp_level::thing::ThingRecord;
-use lbp_script_vm::natives::World;
-use lbp_script_vm::{ClassId, Host, MemberKind, Step, Task, Value, Vm};
+use lbp_script_vm::natives::{Bindings, CameraFromToUp, World};
+use lbp_script_vm::{ClassId, Host, MemberKind, ObjectId, Step, Task, Value, Vm};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// One Thing as the runtime sees it.
@@ -40,6 +40,19 @@ pub struct ThingState {
     pub render_mesh_tint: Option<[f32; 4]>,
     /// Animation playback rate a script set (`Native.SetAnimSpeed`, INFERRED multiplier).
     pub anim_speed: Option<f32>,
+    /// Animation position a script set (`Native.SetAnimPos`, INFERRED time or fraction).
+    pub anim_pos: Option<f32>,
+}
+
+/// Camera state scripts set through `Cam.*` natives, for the viewer to read.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct CameraState {
+    /// The last `Cam.SetCameraFromToUp__rrrffff`.
+    pub from_to_up: Option<CameraFromToUp>,
+    pub from_to_up_calls: u64,
+    /// The last `Cam.SetDOFAndFog__fff` (as passed).
+    pub dof_and_fog: Option<[f32; 3]>,
+    pub motion_blur_clears: u64,
 }
 
 /// An engine part a script reached through a native member (`thing.SpriteLight`), with
@@ -70,6 +83,15 @@ pub struct LevelWorld {
     pub unconverted: usize,
     /// Parts handed to scripts; a part handle is its index + 1 (`Raw(0)` is null).
     pub part_handles: Vec<PartState>,
+    pub camera: CameraState,
+    /// The PodComputer script object `GetPodComputer__` returns (see [`add_engine_objects`]).
+    pub pod_computer: Option<ObjectId>,
+    /// Gooey objects made ahead for `CreateGooey__i` (the host cannot allocate VM objects
+    /// during a native call); each call hands out the next one.
+    pub gooey_pool: Vec<ObjectId>,
+    pub gooeys_created: usize,
+    /// `Game.SetPlayerScoreMultiplierTimer` by player number.
+    pub score_multiplier_timers: BTreeMap<i32, i32>,
 }
 
 /// VM value for a stored script field; `None` for a field the instance does not store.
@@ -387,11 +409,112 @@ impl World for LevelWorld {
             Err(format!("player index {index} outside 0..{n}"))
         }
     }
+    fn set_world_transform(&mut self, thing: u32, m: [f32; 16]) -> Result<(), String> {
+        self.thing_mut(thing)?.world_matrix = Some(m);
+        Ok(())
+    }
+    fn set_anim_pos(&mut self, thing: u32, pos: f32) -> Result<(), String> {
+        self.thing_mut(thing)?.anim_pos = Some(pos);
+        Ok(())
+    }
+    fn pod_computer(&mut self) -> Result<Value, String> {
+        self.pod_computer
+            .map(|o| Value::Object(Some(o)))
+            .ok_or_else(|| "no PodComputer object (class not loaded)".into())
+    }
+    /// Nobody is at the pod computer in the PC run (INFERRED default).
+    fn pod_computer_in_use(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+    /// No crash zoom in the PC run (INFERRED default).
+    fn crash_zoom(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
+    fn create_gooey(&mut self, _arg: i32) -> Result<Value, String> {
+        let o = self
+            .gooey_pool
+            .get(self.gooeys_created)
+            .copied()
+            .ok_or_else(|| format!("Gooey pool of {} used up", self.gooey_pool.len()))?;
+        self.gooeys_created += 1;
+        Ok(Value::Object(Some(o)))
+    }
+    fn set_camera(&mut self, camera: CameraFromToUp) -> Result<(), String> {
+        self.camera.from_to_up = Some(camera);
+        self.camera.from_to_up_calls += 1;
+        Ok(())
+    }
+    fn set_dof_and_fog(&mut self, values: [f32; 3]) -> Result<(), String> {
+        self.camera.dof_and_fog = Some(values);
+        Ok(())
+    }
+    fn clear_motion_blur(&mut self) -> Result<(), String> {
+        self.camera.motion_blur_clears += 1;
+        Ok(())
+    }
+    /// No cinema mode in the PC run (INFERRED default).
+    fn cinema_mode_count(&mut self) -> Result<i32, String> {
+        Ok(0)
+    }
+    fn set_score_multiplier_timer(&mut self, player: i32, timer: i32) -> Result<(), String> {
+        let n = self.num_players()?;
+        if !(0..n).contains(&player) {
+            return Err(format!("player {player} outside 0..{n}"));
+        }
+        self.score_multiplier_timers.insert(player, timer);
+        Ok(())
+    }
     fn write(&mut self, text: &str) {
         if self.written.len() < 1000 {
             self.written.push(text.to_owned());
         }
     }
+}
+
+/// Gooey objects made ahead for `Gooey.CreateGooey__i`.
+pub const GOOEY_POOL: usize = 16;
+
+/// Makes the engine-owned script objects natives hand out: the PodComputer (`.init__`, then
+/// `.ctor__`) and [`GOOEY_POOL`] Gooey objects (`.init__`). INFERRED: the engine holds one
+/// PodComputer and creates Gooeys on demand. Returns the faults, if any; a PodComputer
+/// whose `.ctor__` faults is still kept.
+pub fn add_engine_objects(
+    vm: &mut Vm,
+    host: &mut Bindings<LevelWorld>,
+    budget: u64,
+) -> Vec<String> {
+    let mut faults = Vec::new();
+    if let Some(class) = vm.class_by_name("Gooey") {
+        for _ in 0..GOOEY_POOL {
+            let mut b = budget;
+            match vm.construct(host, class, &mut b) {
+                Ok(o) => host.world.gooey_pool.push(o),
+                Err(f) => {
+                    faults.push(format!("Gooey .init__: {f:?}"));
+                    break;
+                }
+            }
+        }
+    }
+    if let Some(class) = vm.class_by_name("PodComputer") {
+        let mut b = budget;
+        match vm.construct(host, class, &mut b) {
+            Ok(o) => {
+                host.world.pod_computer = Some(o);
+                if vm.has_code(class, ".ctor__") {
+                    let mut b = budget;
+                    if let Err(f) =
+                        vm.call(host, class, ".ctor__", &[Value::Object(Some(o))], &mut b)
+                    {
+                        let site = vm.last_site().map_or(String::new(), |s| s.to_string());
+                        faults.push(format!("PodComputer .ctor__: {f:?} at {site}"));
+                    }
+                }
+            }
+            Err(f) => faults.push(format!("PodComputer .init__: {f:?}")),
+        }
+    }
+    faults
 }
 
 /// A scripted Thing and its class, when the class is loaded.
@@ -457,19 +580,28 @@ impl Runner {
         function: &str,
         budget: &mut u64,
     ) -> Outcome {
+        self.start_with(vm, host, inst, function, &[], budget)
+    }
+
+    /// [`Runner::start`] with argument registers (byte offsets) staged after `this`.
+    pub fn start_with(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut dyn Host,
+        inst: Instance,
+        function: &str,
+        args: &[(u16, Value)],
+        budget: &mut u64,
+    ) -> Outcome {
         let Some(class) = inst.class else {
             return Outcome::NoClass;
         };
         if !vm.has_code(class, function) {
             return Outcome::NoFunction;
         }
-        let step = vm.start_registers(
-            host,
-            class,
-            function,
-            &[(0, Value::Thing(Some(inst.thing)))],
-            budget,
-        );
+        let mut regs = vec![(0, Value::Thing(Some(inst.thing)))];
+        regs.extend_from_slice(args);
+        let step = vm.start_registers(host, class, function, &regs, budget);
         self.settle(vm, inst.thing, step)
     }
 
@@ -511,6 +643,62 @@ pub const UPDATE: &str = "Update__";
 /// Game logic rate (X1, CONFIRMED_FROM_LOCAL_DATA in RPCS3: 30 ticks per second).
 pub const TICK_HZ: u32 = 30;
 
+/// What a [`FrameEntry`] builds its arguments from.
+pub struct FrameContext<'a> {
+    pub vm: &'a Vm,
+    pub instances: &'a [Instance],
+    /// Ticks run before this one.
+    pub tick: u64,
+}
+
+/// A per-tick function the engine calls with arguments on instances of one class, in
+/// place of [`UPDATE`] (an `export` entry no script calls).
+pub struct FrameEntry {
+    /// Exact script class name of the instance.
+    pub class: &'static str,
+    pub function: &'static str,
+    /// Argument registers (byte offsets) and values; `this` is register 0.
+    pub args: fn(&FrameContext<'_>) -> Vec<(u16, Value)>,
+}
+
+/// PlanetsWorld (the Pod's planet view): no script calls the export
+/// `UpdatePlanetsView__bQ11PlanetThingQ11PlanetThingbb`, and it is the only caller of
+/// `UpdateState__` (private), `UpdatePodCamera__Q11PlanetThingbb` and
+/// `UpdateInteractiveMusic__`, so the engine calls it each frame (INFERRED from the
+/// listings; `OnEnterPod__`/`OnExitPod__` are called by PodComputer on pod entry/exit).
+/// Arguments (INFERRED from how the function uses them): +4 bool, passed on to
+/// `UpdatePodCamera` (false); +8 the earth PlanetThing (it gets `EarthSpinOffset`); +12 the
+/// moon (`MoonSpinOffset`); +16 bool "snap the view" (true on the first tick only); +17
+/// bool "take the zoom from the pod computer's state" (true).
+fn planets_view_args(cx: &FrameContext<'_>) -> Vec<(u16, Value)> {
+    let find = |name: &str| {
+        cx.instances
+            .iter()
+            .find(|i| i.class.is_some_and(|c| cx.vm.class_name(c) == name))
+            .map(|i| i.thing)
+    };
+    vec![
+        (4, Value::Bool(false)),
+        (8, Value::Thing(find("PlanetThing"))),
+        (12, Value::Thing(find("OrbitingMoon"))),
+        (16, Value::Bool(cx.tick == 0)),
+        (17, Value::Bool(true)),
+    ]
+}
+
+/// Per-tick entries other than [`UPDATE`], by class (docs/level-scripts.md "Part 5").
+pub const FRAME_ENTRIES: &[FrameEntry] = &[FrameEntry {
+    class: "PlanetsWorld",
+    function: "UpdatePlanetsView__bQ11PlanetThingQ11PlanetThingbb",
+    args: planets_view_args,
+}];
+
+/// The per-tick entry for a class, if it has one other than [`UPDATE`].
+pub fn frame_entry(vm: &Vm, class: ClassId) -> Option<&'static FrameEntry> {
+    let name = vm.class_name(class);
+    FRAME_ENTRIES.iter().find(|e| e.class == name)
+}
+
 /// Outcomes of one schedule step, by kind, with the faults.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct StepReport {
@@ -540,6 +728,8 @@ impl StepReport {
 /// order; each `tick` first resumes scripts suspended by `System.Yield` (in the order
 /// they yielded), then runs [`UPDATE`] on every instance that was not suspended at the
 /// start of the tick, in Thing order. A Thing whose script faults is not run again.
+/// A class listed in [`FRAME_ENTRIES`] runs that entry with its arguments instead of
+/// [`UPDATE`].
 pub struct LevelScripts {
     pub instances: Vec<Instance>,
     runner: Runner,
@@ -566,7 +756,7 @@ impl LevelScripts {
 
     /// Runs [`CREATE`] on every instance; `budget` is per call.
     pub fn create(&mut self, vm: &mut Vm, host: &mut dyn Host, budget: u64) -> StepReport {
-        self.run_all(vm, host, CREATE, budget, &BTreeSet::new())
+        self.run_all(vm, host, Some(CREATE), budget, &BTreeSet::new())
     }
 
     /// One game tick; `budget` is per call or resume.
@@ -584,7 +774,7 @@ impl LevelScripts {
                 report.add(thing, o);
             }
         }
-        let update = self.run_all(vm, host, UPDATE, budget, &busy);
+        let update = self.run_all(vm, host, None, budget, &busy);
         report.done += update.done;
         report.yielded += update.yielded;
         report.no_function += update.no_function;
@@ -598,7 +788,7 @@ impl LevelScripts {
         &mut self,
         vm: &mut Vm,
         host: &mut dyn Host,
-        function: &str,
+        function: Option<&str>,
         budget: u64,
         skip: &BTreeSet<u32>,
     ) -> StepReport {
@@ -608,7 +798,26 @@ impl LevelScripts {
                 continue;
             }
             let mut b = budget;
-            let o = self.runner.start(vm, host, inst, function, &mut b);
+            // `None`: the tick's entry, a frame entry or `Update__`.
+            let entry = match function {
+                Some(_) => None,
+                None => inst.class.and_then(|c| frame_entry(vm, c)),
+            };
+            let o = match entry {
+                Some(e) => {
+                    let args = (e.args)(&FrameContext {
+                        vm,
+                        instances: &self.instances,
+                        tick: self.ticks,
+                    });
+                    self.runner
+                        .start_with(vm, host, inst, e.function, &args, &mut b)
+                }
+                None => {
+                    let f = function.unwrap_or(UPDATE);
+                    self.runner.start(vm, host, inst, f, &mut b)
+                }
+            };
             if matches!(o, Outcome::Fault(_)) {
                 self.stopped.insert(inst.thing);
             }
