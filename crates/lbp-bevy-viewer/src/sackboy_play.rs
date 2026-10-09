@@ -2,12 +2,12 @@
 //! avian world (lbp-sim, material rules by MAP path) and Sackboy as the kinematic capsule
 //! driven by the RPCS3-measured movement rules at 30 Hz. Arrow keys or the left stick walk
 //! and change lanes (Up = lane behind, Down = lane in front), Space or the South button
-//! jumps; the camera follows him. With `--select-guid` naming the Sackboy mesh he is drawn
+//! jumps; the camera follows him as the game's default camera does (Moon level measurement). With `--select-guid` naming the Sackboy mesh he is drawn
 //! as that mesh standing on the capsule (feet at its bottom), turned to the walk direction,
 //! and `--play-animation` (a walk clip) cycles at the walk speed; otherwise as a placeholder
 //! capsule. The level's own dynamic objects are simulated but not redrawn.
 //!
-//! `--play-sackboy-at X,Y,Z` sets the spawn (level units, capsule centre); otherwise the
+//! `--play-sackboy-at X,Y,Z` sets the spawn (level units, his position: 69.9 above the feet); otherwise the
 //! first CHECKPOINT's POS plus [`SPAWN_OFFSET`]. `--play-sackboy-input STEPS` replaces the pad with a script of
 //! `keys:ticks` steps (keys from `l r j b f`, `-` for none; e.g. `r:40,rj:12,-:30`) and prints
 //! Sackboy's position every tick, for comparing paths against RPCS3.
@@ -15,7 +15,10 @@ use bevy::prelude::*;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::level_scene;
 use lbp_sim::avian2d::prelude::*;
-use lbp_sim::character::{spawn_sackboy, SackboyBody, SackboyPlugin, HALF_SEGMENT, RADIUS};
+use lbp_sim::character::{
+    spawn_sackboy, SackboyBody, SackboyPlugin, CENTRE_ABOVE, FLOOR_REST, HALF_SEGMENT, HEIGHT,
+    RADIUS,
+};
 use lbp_sim::sackboy::{Input, WALK_SPEED};
 use lbp_sim::scene::{material_rule_for_path, MaterialRule};
 use lbp_sim::{build_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin};
@@ -113,7 +116,7 @@ pub(crate) fn spawn_figure(
     let mut line = format!(
         "Play figure: model height {:.0} level units (capsule {:.0})",
         hi[2] - lo[2],
-        2. * (HALF_SEGMENT + RADIUS)
+        HEIGHT
     );
     let scene: Vec<_> = v.scene[first..]
         .iter()
@@ -202,8 +205,13 @@ pub(crate) fn spawn_lane(z: f32) -> f32 {
         .unwrap_or(0.)
 }
 
-/// Camera distance from Sackboy in level units. PLACEHOLDER (not measured in RPCS3).
-const FOLLOW_DISTANCE: f32 = 1500.;
+/// The default game camera's eye relative to Sackboy's position (level units), looking
+/// straight down -z (no pitch), vertical FOV [`FOLLOW_FOV_DEG`]. RPCS3 memory read in the
+/// owner's blank Moon level (PC run d208, idle, one pose): CONFIRMED_FROM_LOCAL_DATA
+/// (emulated) for that pose; whether the x lead follows his facing or lags while walking is
+/// not measured (INFERRED: held constant).
+const FOLLOW_EYE: [f32; 3] = [296., 168., 1218.];
+const FOLLOW_FOV_DEG: f32 = 60.;
 
 fn value(all: &[String], flag: &str) -> Option<String> {
     all.iter()
@@ -474,6 +482,7 @@ fn show_sackboy(
     mut marker: Query<&mut Transform, (With<Marker>, Without<Figure>)>,
     mut figure: Query<(&mut Transform, &mut Figure)>,
     mut orbit: ResMut<crate::Orbit>,
+    mut cameras: Query<&mut Projection, With<Camera3d>>,
     mut framed: Local<bool>,
 ) {
     let (Some(display), Ok((body, pos, slab))) = (display, sackboy.single()) else {
@@ -489,10 +498,9 @@ fn show_sackboy(
         } else if vx < -0.5 {
             f.facing = FACE_LEFT;
         }
-        let feet =
-            display
-                .0
-                .transform_point3(Vec3::new(p[0], p[1] - (HALF_SEGMENT + RADIUS), slab.z));
+        let feet = display
+            .0
+            .transform_point3(Vec3::new(p[0], p[1] - FLOOR_REST, slab.z));
         *t = Transform::from_matrix(
             Mat4::from_translation(feet) * Mat4::from_rotation_y(f.facing) * f.upright,
         );
@@ -505,7 +513,7 @@ fn show_sackboy(
             v.animation_frame = Some(f.phase as i64);
         }
     } else if let Ok(mut t) = marker.single_mut() {
-        t.translation = at;
+        t.translation = at + Vec3::Y * CENTRE_ABOVE * s;
     } else {
         commands.spawn((
             Marker,
@@ -515,15 +523,26 @@ fn show_sackboy(
                 unlit: true,
                 ..default()
             })),
-            Transform::from_translation(at),
+            Transform::from_translation(at + Vec3::Y * CENTRE_ABOVE * s),
         ));
     }
+    let [ex, ey, ez] = FOLLOW_EYE;
     if !*framed {
         *framed = true;
-        // Close in on him once. PLACEHOLDER: the game camera's distance is not measured.
-        orbit.distance = FOLLOW_DISTANCE * s;
+        // The game's default camera: straight on, at its distance and FOV (orbit and zoom
+        // stay free afterwards).
+        orbit.yaw = 0.;
+        orbit.pitch = 0.;
+        orbit.distance = ez * s;
+        for mut projection in &mut cameras {
+            if let Projection::Perspective(p) = projection.as_mut() {
+                p.fov = FOLLOW_FOV_DEG.to_radians();
+            }
+        }
     }
-    orbit.target = at;
+    orbit.target = display
+        .0
+        .transform_point3(Vec3::new(p[0] + ex, p[1] + ey, slab.z));
 }
 
 #[cfg(test)]
