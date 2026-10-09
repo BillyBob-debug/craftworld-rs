@@ -3885,3 +3885,23 @@ levels, baseline D149 0) / +0 newly Complete.**
 - Next: drive PodStateMainMenu planets view (view 1) in the VM; Earth/Moon bounds; physics
   movers (frozen=1 fallers); Sackboy controller measurements.
 **+0 newly viewable / +0 newly Complete (Pod/runtime fidelity; sticker decals counted in D167).**
+
+## D188-D190 — preview defaults, mixed-UV graphs, small material fixes (PRs #89-#91) (2026-10-09)
+- D188 (PR #91): animation base values and a white instance colour (when none is supplied) are
+  the single-mesh preview defaults; --no-animation-base / --no-instance-default restore the old
+  behaviour. Material-less groups are excluded from the all-diffuse test (counted separately).
+- D189 (PR #90): mixed UV0/UV1 BLEND/MIX graphs evaluated (indianrubble, summergames costumes,
+  knightsofold2 dragon; docs/d189-mixed-uv-graphs.md).
+- D190 (PR #89): small material fixes.
+- PC census on combined head a47631d (= 983e05e content), d68-inventory-0133-verified, a1-disc +
+  a1-update-0133: default --blockers 4,261 GUIDs, 4,259 viewable, 4,239 all-diffuse, 59
+  material-less groups excluded, 0 failed, 2 no-geometry (b177-default.json). Legacy flags
+  (--no-instance-default --no-animation-base --materialless-blocking): 3,814 (b177-legacy.json).
+  Versus b176-blockers-default (3,798): 0 GUIDs lost; default +441, legacy +16.
+- Remaining 22 not all-diffuse: 24 blocking material keys; largest causes Unresolved GUID (5
+  sole-blocked), BORDER alpha MIX (2), animated UV samplers (2), nonfinite mesh UV (2).
+- Level scenes do not apply the new preview defaults yet (Bravery Test: 195 Things neutral).
+- Captures: local-analysis/b177-{cosmos-room,vin-crane,gymnast-hr,tennisgirl-hd}[-crop].png,
+  b177-davinci-level.png; screenshot page v21 (Assets section).
+- Verification comment: https://github.com/chilladept/lbp2-asset-explorer/pull/91#issuecomment-6088230961
+**+0 newly viewable / +0 newly Complete; all-diffuse 3,798 -> 4,239 by default.**

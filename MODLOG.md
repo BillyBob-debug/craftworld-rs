@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-09 — D188-D190 preview defaults, mixed-UV graphs, material fixes
+
+Single-mesh previews now default to animation base values and a white instance colour; mixed
+UV0/UV1 blend graphs and a few small material cases are supported. Corpus all-diffuse 3,798 ->
+4,239 of 4,261 meshes (0 lost). +0 viewable / +0 Complete.
+
 ## 2026-10-09 — D160-D175 Pod vs RPCS3, threads, physics
 
 Pod closed window, side-panel wall art and in-use camera matched to RPCS3; script threads and

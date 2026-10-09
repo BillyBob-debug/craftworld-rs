@@ -56,9 +56,9 @@ branch rule confirmed. X1/S9 measurements need the user at the controls. Script 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - 01.33 (D69): D61 cohort 48/43/0; D65 48/38/0; D66 22/7/0; D64 26/23/0 (= D67 on 01.00).
 - D69 new cohort d68-new-mesh-samples.json (48 post-951 meshes): 48/45/0.
-- Corpus mesh census on 01.33 after D105 (all 4,261 mesh GUIDs): 4,257 viewable, 3,700
-  all-diffuse, 0 Complete (D81 baseline 3,657). Opt-ins: --animation-base 3,767;
-  --instance-rgba 3,971; both 4,055. Files b105-corpus-*.json.
+- Corpus mesh census on 01.33 after D188-D190 (all 4,261 mesh GUIDs): 4,259 viewable, 4,239
+  all-diffuse by default (preview defaults on, 59 material-less groups excluded), 0 Complete.
+  Legacy flags 3,814. Files local-analysis/b177-{default,legacy}.json.
 - Corpus texture census on 01.33 after D98: all 23,247 texture hashes decode (23,477
   GUIDs; top mip, decodability only). b99-texture-census-0133.json.
 - Corpus selection census on 01.33 after D105 (8,094 material locations with MAP rows):
