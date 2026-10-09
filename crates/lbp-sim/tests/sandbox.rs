@@ -663,3 +663,32 @@ fn string_from_a_thing_without_a_collider_holds_a_box() {
     let p = out[1].1;
     assert!((p[1] - 700.).abs() < 10. && p[0].abs() < 5., "{p:?}");
 }
+
+#[test]
+fn tilted_shape_with_vertex_z_collides_in_its_projected_outline() {
+    // The Pod body's layout (shell 000027b9 Thing 2): turned so local z is world up and
+    // local y is world -z; the outline lives in local x/z. Here a 400 x 200 floor block
+    // whose top is 100 above its POS (y -400), so the top is at y -300.
+    let mut shape = rect(400., 10., 1);
+    shape.requires_z = true;
+    shape.vertices = vec![
+        [-200., 0., -100.],
+        [200., 0., -100.],
+        [200., 0., 100.],
+        [-200., 0., 100.],
+    ];
+    let mut m = [0.; 16];
+    m[0] = 1.;
+    m[6] = -1.;
+    m[9] = 1.;
+    m[12] = 0.;
+    m[13] = -400.;
+    m[14] = 0.;
+    m[15] = 1.;
+    let scene = build_scene(&[thing(0, m, Some(shape), false)]);
+    assert_eq!(scene.colliders.len(), 1);
+    let top = scene.floor_below([-5., 500.], 0.).unwrap();
+    assert!((top + 300.).abs() < 1e-3, "top {top}");
+    // Below the block's bottom (y -500) there is nothing.
+    assert_eq!(scene.floor_below([-5., -501.], 0.), None);
+}

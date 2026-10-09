@@ -179,6 +179,29 @@ fn walk_phase(phase: f32, dt: f32, fps: f32, vx: f32, grounded: bool) -> f32 {
 /// lands at y 5974. One level only: INFERRED for other levels.
 pub(crate) const SPAWN_OFFSET: [f32; 3] = [0., -208., 250.];
 
+/// Sackboy's x relative to the first CHECKPOINT POS when he spawns there; he appears at the
+/// checkpoint's height and falls to the floor below. RPCS3, Moon level play-mode spawn (PC,
+/// 2026-10-09, local-analysis/results/2026-10-09-moon-movement.md, "Addendum: play-mode
+/// checkpoint spawn"): checkpoint (-18904.74, 1798.11, -470), first sample at +(-0.36,
+/// +0.07), settles at +(-1.11, -73.82) after 23 ticks. The Pod (shell 000027b9,
+/// local-analysis/results/2026-10-09-pod-spawn-memory.md): checkpoint (-3.05, 540.76, -50),
+/// Sackboy at (-5.37, -477.97) in lane 0, 1018 below it, so only x and the drop carry over,
+/// not the Moon's y. INFERRED for other levels.
+pub(crate) const DATA_SPAWN_X: f32 = -1.11;
+
+/// Lane centres (world z): front 0, middle -200, back -400 (Moon level, same results file).
+const LANES: [f32; 3] = [0., -200., -400.];
+
+/// The lane Sackboy spawns in for a checkpoint at depth `z`: the nearest lane centre. Moon:
+/// checkpoint z -470 -> back lane -400. INFERRED (one checkpoint; Rookie Test's z 0 from a
+/// -250 checkpoint does not fit this rule and was not taken in play mode).
+pub(crate) fn spawn_lane(z: f32) -> f32 {
+    LANES
+        .into_iter()
+        .min_by(|a, b| (a - z).abs().total_cmp(&(b - z).abs()))
+        .unwrap_or(0.)
+}
+
 /// Camera distance from Sackboy in level units. PLACEHOLDER (not measured in RPCS3).
 const FOLLOW_DISTANCE: f32 = 1500.;
 
@@ -230,9 +253,11 @@ fn material_rules(catalog: &lbp_catalog::Catalog) -> BTreeMap<u32, MaterialRule>
     rules
 }
 
-/// Where a level puts Sackboy's feet, from its data alone: the first CHECKPOINT's POS plus
-/// [`SPAWN_OFFSET`], dropped to the highest collider top below in that slab (the Pod figure,
-/// in place of the screenshot fit). Level units; and a line for the status. Runs on the
+/// Where a level puts Sackboy's feet, from its data alone: the first CHECKPOINT's POS
+/// moved by [`DATA_SPAWN_X`] into the [`spawn_lane`] lane, dropped from the checkpoint's
+/// height to the highest collider top below in that slab (the Pod figure, in place of the
+/// screenshot fit). Pod: feet at y -547, i.e. the measured position row -478 less the 69
+/// from feet to Sackboy's position (`lbp_sim::character`). Level units; and a line for the status. Runs on the
 /// level worker (deep reader stack).
 pub(crate) fn level_spawn_feet(
     source: &AttachedSource,
@@ -252,18 +277,14 @@ pub(crate) fn level_spawn_feet(
             .and_then(|g| rules.get(&g).copied())
             .unwrap_or_default()
     });
-    let [x, y, z] = [
-        m[12] + SPAWN_OFFSET[0],
-        m[13] + SPAWN_OFFSET[1],
-        m[14] + SPAWN_OFFSET[2],
-    ];
+    let [x, y, z] = [m[12] + DATA_SPAWN_X, m[13], spawn_lane(m[14])];
     let floor = scene
         .floor_below([x, y], z)
         .ok_or_else(|| format!("no floor below ({x:.0}, {y:.0}) in slab z {z:.0}"))?;
     Ok((
         [x, floor, z],
         format!(
-            "data spawn: checkpoint Thing {thing} ({:.0}, {:.0}, {:.0}) + offset, floor y {floor:.0}",
+            "data spawn: checkpoint Thing {thing} ({:.0}, {:.0}, {:.0}) x {DATA_SPAWN_X:+.2}, dropped in lane z {z:.0} to floor y {floor:.0}",
             m[12], m[13], m[14]
         ),
     ))
@@ -527,5 +548,14 @@ mod tests {
         assert_eq!(walk_phase(4., 0.5, 30., -WALK_SPEED / 2., true), 11.5);
         assert_eq!(walk_phase(4., 0.5, 30., WALK_SPEED, false), 0.);
         assert_eq!(walk_phase(4., 0.5, 30., 0., true), 0.);
+    }
+
+    #[test]
+    fn spawn_lane_is_the_nearest_lane() {
+        // Moon level: checkpoint z -470 spawns in the back lane.
+        assert_eq!(spawn_lane(-470.), -400.);
+        assert_eq!(spawn_lane(-50.), 0.);
+        assert_eq!(spawn_lane(-180.), -200.);
+        assert_eq!(spawn_lane(300.), 0.);
     }
 }

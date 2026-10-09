@@ -1793,8 +1793,8 @@ fn pod_shell(
 /// (level units = model units), upright (D148 rotation), feet centred on the solved spot.
 /// The spot is fitted so the closed view matches RPCS3 (`pod_menu::SACKBOY_CLOSED`):
 /// the shell's checkpoint POS put him above the frame (PC run of #52). D-next: with
-/// `--pod-figure-data` the closed spot comes from the shell's data instead (checkpoint +
-/// the Rookie Test spawn offset, dropped to the floor; `sackboy_play::level_spawn_feet`);
+/// `--pod-figure-data` the closed spot comes from the shell's data instead (checkpoint x +
+/// the Moon spawn x, lane 0, dropped to the Pod floor; `sackboy_play::level_spawn_feet`);
 /// both spots are reported either way. `--play-animation` plays on him;
 /// `--pod-hold-animation` while the Puter is open (P2d).
 fn spawn_figure(

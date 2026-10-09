@@ -28,6 +28,7 @@
 //!   names; frame INFERRED). The type mapping is [`JointKind`].
 //! - Mass = area × massDepth × density (INFERRED, A2); density is [`DENSITY`] until RMaterial
 //!   is read (PLACEHOLDER).
+use lbp_level::parts::Shape;
 use lbp_level::serial::Descriptor;
 use lbp_level::shape_mesh::outline_triangles_lenient;
 use lbp_level::thing::ThingRecord;
@@ -283,7 +284,21 @@ pub fn build_scene_with(
             reject("bad transform");
             continue;
         };
-        let outline = match outline_triangles_lenient(shape) {
+        let m = &pos.world;
+        // A shape whose vertices carry z under a matrix that turns local z into the xy plane
+        // (the Pod body, Thing 2 of shell 000027b9: local z is world up) has its outline in
+        // local x/z, not x/y; the plain x/y outline is a sliver. Such a shape is projected to
+        // world xy through the whole matrix first and triangulated there.
+        let tilted = tilted_outline(shape, m);
+        let projected;
+        let outline_of = match &tilted {
+            Some(p) => {
+                projected = p.clone();
+                &projected
+            }
+            None => shape,
+        };
+        let outline = match outline_triangles_lenient(outline_of) {
             Ok((v, why)) => {
                 if let Some(why) = why {
                     *scene.report.filled.entry(why.reason()).or_default() += 1;
@@ -327,12 +342,12 @@ pub fn build_scene_with(
             }
         };
         let frame = body.map_or(own, |b| scene.bodies[b].frame);
-        let m = &pos.world;
-        let world = |p: [f32; 2]| {
-            [
+        let world = |p: [f32; 2]| match tilted {
+            Some(_) => [p[0] + m[12], p[1] + m[13]],
+            None => [
                 m[0] * p[0] + m[4] * p[1] + m[12],
                 m[1] * p[0] + m[5] * p[1] + m[13],
-            ]
+            ],
         };
         let mut triangles = Vec::with_capacity(outline.triangles.len());
         for t in &outline.triangles {
@@ -396,6 +411,29 @@ pub fn build_scene_with(
     scene.report.nested_bodies = nested.len();
     scene.add_joints(things);
     scene
+}
+
+/// The shape with its vertices projected to world xy (translation left out) when it carries
+/// vertex z and the matrix's local z axis has an xy part; `None` for a plain xy shape, which
+/// keeps the in-plane route. INFERRED from the Pod (RPCS3 memory, D212): Sackboy stands at
+/// y -478 there, 69 above the projected floor edge (y -551..-542), not on the sliver at -152.
+pub fn tilted_outline(shape: &Shape, m: &[f32; 16]) -> Option<Shape> {
+    let scale = (0..3)
+        .map(|c| m[c * 4].hypot(m[c * 4 + 1]))
+        .fold(0f32, f32::max);
+    if !shape.requires_z || !scale.is_finite() || scale <= 0. || m[8].hypot(m[9]) <= 1e-3 * scale {
+        return None;
+    }
+    let mut out = shape.clone();
+    for v in &mut out.vertices {
+        *v = [
+            m[0] * v[0] + m[4] * v[1] + m[8] * v[2],
+            m[1] * v[0] + m[5] * v[1] + m[9] * v[2],
+            0.,
+        ];
+    }
+    out.requires_z = false;
+    Some(out)
 }
 
 /// PJoint type as the sandbox maps it (docs/runtime-research.md §4 joint table).
