@@ -4,12 +4,14 @@
 //! Layers (docs/level-research.md items): `serial` = L3 serializer core, `thing` = L4
 //! Thing header and part flags, `parts` = L5/L6 part readers and the PWorld tail, `level` =
 //! RLevel entry (Lw), `item_details` = U5 InventoryItemDetails + RPlan details tail, `slots` = U4 slot/pin/palette/pack readers, `script` = U10 RScript reader + listing, `shape_mesh` = SHAPE
-//! extrusion v1 (Lx, D114, renderer-independent), `bevel` = RBevel reader (Lv, D122) used
+//! extrusion v1 (Lx, D114, renderer-independent), `instance_color` = B176 per-instance
+//! color census, `bevel` = RBevel reader (Lv, D122) used
 //! by the opt-in bevelled extrusion (Ly, D122).
 //! Rules, evidence labels and limits: docs/d107-level-reader.md. Independent
 //! implementation from specification notes; no community reader code copied.
 pub mod bevel;
 pub mod decal_mesh;
+pub mod instance_color;
 pub mod item_details;
 pub mod level;
 pub mod parts;
