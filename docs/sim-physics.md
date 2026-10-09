@@ -201,13 +201,15 @@ INFERRED: those pieces do not fall in the game. Counted as `anchored_joint_ends`
 `lbp_sim::sackboy`: a Bevy-free per-tick controller. The caller supplies the pad state,
 whether Sackboy stands on something, and which lanes have floor; the controller returns the
 tick's displacement. All constants are CONFIRMED_FROM_LOCAL_DATA (emulated, RPCS3 frame
-reads in Rookie Test, PC runs S9 and d190):
+reads of his position: Rookie Test, PC runs S9 and d190, then repeated in the owner's blank
+Moon level with the default camera, PC run d211, which is the reference; repeats within
+about 1 unit):
 
 | Rule | Value |
 |---|---|
-| Gravity | 2.693 u/tick² (2,424 u/s²) |
+| Gravity | 2.693 u/tick² (2,424 u/s²; Moon full jump fits 2.697) |
 | Walk | accelerates and decelerates linearly at 3 u/tick², top speed 30 u/tick (10 ticks); measured stop distance 158 |
-| Air | stick adds 2.4 u/tick² up to 22 u/tick; speed carried from the ground is kept (drag at most about 0.01/tick); it carries through landing |
+| Air | stick adds 2.4 u/tick² up to 22.5 u/tick (Moon; Rookie read 22); speed carried from the ground is kept (drag at most about 0.01/tick); it carries through landing |
 | Jump | upward speed per held tick 12.0, 19.3, 23.3, 25.1, 25.5, 24.8, 23.5, 21.8, 19.7, 17.4; the first 3 always play; then gravity. Tap apex 143.4 at tick 11, 7-tick hold 244.4, full hold 260.1 |
 | Lanes | 200 apart; W = behind (-z), S = in front (+z); applies on a ground press or a key held on the landing tick; air presses dropped; z slides 35 u/tick; no lane with floor = no change |
 
