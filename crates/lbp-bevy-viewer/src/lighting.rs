@@ -25,6 +25,13 @@ pub struct PreviewLight {
     pub ambient: Vec3,
     pub fog: Option<Fog>,
     pub from_level: bool,
+    /// P2l: level values before the preview fit (key = sun colour x multiplier).
+    pub raw_key: Vec3,
+    pub raw_ambient: Vec3,
+    /// P2l: rim colours (rimColor below, rimColor2 above), zero without level settings.
+    pub rim: [Vec3; 2],
+    /// P2l: LBP-shaped mode (`lbp`); off = D121 Lambert preview.
+    pub lbp: bool,
     /// Values used and every preview choice, for the panel and QA log.
     pub notes: Vec<String>,
 }
@@ -57,6 +64,10 @@ impl PreviewLight {
             ambient: Vec3::splat(0.35),
             fog: None,
             from_level: false,
+            raw_key: Vec3::splat(0.65),
+            raw_ambient: Vec3::splat(0.35),
+            rim: [Vec3::ZERO; 2],
+            lbp: false,
             notes: vec!["generic key (upper left, front) 0.65 + ambient 0.35".into()],
         }
     }
@@ -88,6 +99,11 @@ impl PreviewLight {
             .ok_or("sun multiplier unusable")?;
         let key = finite_rgb(s.sun_color).ok_or("sun colour unusable")? * multiplier;
         let ambient = finite_rgb(s.ambient_color).ok_or("ambient colour unusable")?;
+        let rim = [
+            finite_rgb(s.rim_color).unwrap_or(Vec3::ZERO),
+            finite_rgb(s.rim_color2).unwrap_or(Vec3::ZERO),
+        ];
+        let (raw_key, raw_ambient) = (key, ambient);
         let (key, ambient, fitted) = fit(key, ambient);
         let fog = finite_rgb(s.fog_color)
             .filter(|_| {
@@ -138,6 +154,10 @@ impl PreviewLight {
             ambient,
             fog,
             from_level: true,
+            raw_key,
+            raw_ambient,
+            rim,
+            lbp: false,
             notes,
         })
     }
@@ -150,10 +170,38 @@ impl PreviewLight {
         }
     }
 
+    /// P2l `--lbp-lighting`: the same values in an LBP-shaped model (community brdf.cg
+    /// reconstruction, docs/p2l-lbp-lighting.md): hemisphere ambient, sun, two rim
+    /// colours, unfitted. `turn` rotates the light from level into world space (the Pod
+    /// planets root). The uniform mapping (exposure, tint, rim constants) is INFERRED.
+    pub fn lbp_shaped(&self, turn: Quat) -> Self {
+        let mut light = self.clone();
+        light.lbp = true;
+        light.key = self.raw_key;
+        light.ambient = self.raw_ambient;
+        light.toward_light = (turn * self.toward_light).normalize_or_zero();
+        light.notes.push(format!(
+            "LBP-shaped (inferred): ambient x (N.y 0.15 + 0.5), sun unfitted, rim ({:.3}, {:.3}, {:.3}) below to ({:.3}, {:.3}, {:.3}) above x (N.V + 0.9)^2",
+            self.rim[0].x, self.rim[0].y, self.rim[0].z, self.rim[1].x, self.rim[1].y, self.rim[1].z
+        ));
+        light
+    }
+
     /// CPU mirror of the shader's `preview_light` for an already oriented unit normal.
     #[allow(dead_code)] // shader mirror, exercised by tests
     pub fn factor(&self, normal: Vec3) -> Vec3 {
         self.ambient + self.key * normal.dot(self.toward_light).max(0.)
+    }
+
+    /// CPU mirror of the shader's LBP-shaped light for an oriented unit normal and the
+    /// unit direction from the surface to the viewer.
+    #[allow(dead_code)] // shader mirror, exercised by tests
+    pub fn lbp_factor(&self, normal: Vec3, to_view: Vec3) -> Vec3 {
+        let up = (normal.y + 1.) / 2.;
+        let rim = (normal.dot(-to_view) + 0.9).clamp(0., 1.).powi(2);
+        self.ambient * (normal.y * 0.15 + 0.5)
+            + self.key * normal.dot(self.toward_light).max(0.)
+            + self.rim[0].lerp(self.rim[1], up) * rim
     }
 }
 
@@ -179,6 +227,10 @@ pub fn facing_normal(smooth: Vec3, face: Vec3, to_view: Vec3) -> Vec3 {
 #[derive(Default)]
 pub struct LightingState {
     pub enabled: bool,
+    /// P2l `--lbp-lighting`.
+    pub lbp: bool,
+    /// P2l: the Pod planets root rotation the LBP light was last turned by.
+    pub turn: Quat,
     pub light: PreviewLight,
     /// Set when the toggle or scene changes; `apply` runs once per change.
     pub dirty: bool,
@@ -276,6 +328,31 @@ mod tests {
         s.fog_far = s.fog_near;
         let l = PreviewLight::from_settings(&s, Vec3::ZERO, 1.);
         assert!(l.from_level && l.fog.is_none());
+    }
+
+    #[test]
+    fn p2l_lbp_shape_uses_raw_values_hemisphere_and_grazing_rim() {
+        let mut s = settings();
+        s.rim_color = [0.2, 0.1, 0.0, 1.];
+        s.rim_color2 = [0.0, 0.1, 0.4, 1.];
+        let light = PreviewLight::from_settings(&s, Vec3::ZERO, 1.).lbp_shaped(Quat::IDENTITY);
+        assert!(light.lbp);
+        // Unfitted: sun colour x multiplier 2.
+        assert_eq!(light.key, Vec3::new(2., 1., 0.5));
+        let up = Vec3::Y;
+        // Facing the viewer straight on: no rim; sun overhead lights fully.
+        let f = light.lbp_factor(up, up);
+        assert!((f - (Vec3::splat(0.5 * 0.65) + Vec3::new(2., 1., 0.5))).length() < 1e-5);
+        // Grazing view: rim (0.9^2) with the upper colour for an upward normal.
+        let g = light.lbp_factor(up, Vec3::X);
+        assert!((g - f - Vec3::new(0.0, 0.1, 0.4) * 0.81).length() < 1e-5);
+        // Downward normal: lower ambient (0.35) and no sun.
+        let d = light.lbp_factor(-up, -up);
+        assert!((d - Vec3::splat(0.5 * 0.35)).length() < 1e-5);
+        // The turn moves the light with the scene.
+        let t = PreviewLight::from_settings(&s, Vec3::ZERO, 1.)
+            .lbp_shaped(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
+        assert!((t.toward_light - Vec3::NEG_X).length() < 1e-5);
     }
 
     #[test]
