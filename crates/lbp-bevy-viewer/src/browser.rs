@@ -8,6 +8,11 @@ pub struct PreviewEvidence {
     pub instance_input: bool,
     pub unrendered_texture_groups: usize,
     pub animation_snapshot: bool,
+    /// D188: the instance colour / animation snapshot came from the standalone default.
+    pub instance_default: bool,
+    pub animation_default: bool,
+    /// D188: material-less groups, drawn neutral, outside `total_groups`.
+    pub materialless_groups: usize,
     pub textured_groups: usize,
     pub solid_groups: usize,
     pub total_groups: usize,
@@ -22,6 +27,7 @@ impl PreviewEvidence {
             && !self.skipped_geometry
             && !self.animation_snapshot
             && !self.instance_input
+            && self.materialless_groups == 0
             && self.unrendered_texture_groups == 0
     }
     fn complete(&self) -> bool {
@@ -112,11 +118,18 @@ impl Browser {
         if evidence.unrendered_texture_groups != 0 {
             ui.small(format!("{} groups reference additional textures that are not rendered; Complete cannot be confirmed.", evidence.unrendered_texture_groups));
         }
-        if evidence.instance_input {
+        if evidence.instance_default {
+            ui.small("Default instance color white (1,1,1,1), no Thing supplied one: placement default (local census, Toolkit); link to THING_COLOR inferred; Complete cannot be confirmed.");
+        } else if evidence.instance_input {
             ui.small("Supplied instance color: actual game inputs unverified; Complete cannot be confirmed.");
         }
-        if evidence.animation_snapshot {
+        if evidence.animation_default {
+            ui.small("Animation base values (t = base) by default: game texture placement unverified; Complete cannot be confirmed.");
+        } else if evidence.animation_snapshot {
             ui.small("Animation base-value snapshot: game texture placement unverified; Complete cannot be confirmed.");
+        }
+        if evidence.materialless_groups != 0 {
+            ui.small(format!("{} material-less groups (no material descriptor) drawn neutral; what the game draws is unknown; Complete cannot be confirmed.", evidence.materialless_groups));
         }
         ui.add_enabled_ui(evidence.can_verify(), |ui| {
             ui.checkbox(
@@ -248,6 +261,9 @@ mod tests {
         evidence.instance_input = true;
         assert!(!evidence.can_verify() && !evidence.complete());
         evidence.instance_input = false;
+        evidence.materialless_groups = 1;
+        assert!(!evidence.can_verify() && !evidence.complete());
+        evidence.materialless_groups = 0;
         evidence.unrendered_texture_groups = 1;
         assert!(!evidence.can_verify() && !evidence.complete());
         evidence.unrendered_texture_groups = 0;

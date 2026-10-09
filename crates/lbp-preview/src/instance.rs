@@ -1,4 +1,4 @@
-//! Explicit supplied linear RGBA input, never an inferred game-instance default.
+//! Supplied linear RGBA input; D188 adds an opt-out standalone white default (StandaloneDefaults).
 //! Independent projection policy and pinned operation evidence: docs/instance-preview.md.
 use lbp_resource::material::GraphMetadata;
 
@@ -8,6 +8,61 @@ pub struct PreviewOptions {
     pub instance_color: Option<crate::DiffuseTint>,
     /// P2q: also load bump/gloss extras (docs/p2q-bump-gloss.md).
     pub surface: bool,
+}
+
+/// D188 standalone-preview defaults (docs/d188-absent-material-primitives.md).
+/// Used only where no Thing supplies inputs (single-mesh preview, mesh censuses);
+/// `PreviewOptions::default()` stays source-only for every other caller.
+/// - White instance colour (1,1,1,1): 96% of placed RENDER_MESH Things carry
+///   editorColor `ffffffff` (instance_color_census, `CONFIRMED_FROM_LOCAL_DATA`);
+///   Toolkit `PRenderMesh.editorColor` defaults to -1 = opaque white
+///   (docs/d80-thing-color.md E7, `CONFIRMED_FROM_COMMUNITY_CODE`). That editorColor
+///   feeds the THING_COLOR shader input is `INFERRED` (no capture shows it).
+/// - Animation base values (t = base, no game time): the existing D61 snapshot.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct StandaloneDefaults {
+    pub instance_white: bool,
+    pub animation_base: bool,
+}
+impl Default for StandaloneDefaults {
+    fn default() -> Self {
+        Self::ON
+    }
+}
+/// Which standalone defaults actually filled an input the caller left unset.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct AppliedDefaults {
+    pub instance_white: bool,
+    pub animation_base: bool,
+}
+impl AppliedDefaults {
+    pub fn any(self) -> bool {
+        self.instance_white || self.animation_base
+    }
+}
+impl StandaloneDefaults {
+    pub const ON: Self = Self {
+        instance_white: true,
+        animation_base: true,
+    };
+    pub const OFF: Self = Self {
+        instance_white: false,
+        animation_base: false,
+    };
+    /// Fills unset inputs of `explicit`; explicit values always win.
+    pub fn apply(self, explicit: PreviewOptions) -> (PreviewOptions, AppliedDefaults) {
+        let mut options = explicit;
+        let mut applied = AppliedDefaults::default();
+        if options.instance_color.is_none() && self.instance_white {
+            options.instance_color = Some(crate::DiffuseTint::default());
+            applied.instance_white = true;
+        }
+        if !options.animation_base && self.animation_base {
+            options.animation_base = true;
+            applied.animation_base = true;
+        }
+        (options, applied)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

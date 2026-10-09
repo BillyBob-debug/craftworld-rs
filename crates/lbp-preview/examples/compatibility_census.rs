@@ -1,5 +1,9 @@
 //! Bounded read-only mesh compatibility baseline/delta; output stays ignored.
 //! Asset unit: distinct catalog GUIDs, with content-hash rows preserving aliases.
+//! D188 (schema 14): standalone defaults (white instance colour, animation base
+//! values) unless `--no-instance-default` / `--no-animation-base`; material-less
+//! groups get status `materialless` and leave the all-diffuse denominator
+//! (docs/d188-absent-material-primitives.md).
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use serde_json::{json, Value};
 use std::{collections::BTreeSet, fs::OpenOptions, io::Write, path::Path};
@@ -10,20 +14,17 @@ fn run() -> Result<(), String> {
         return Err("compatibility_census SNAPSHOT GAME-DIR MESH-SAMPLE-MANIFEST NEW-JSON".into());
     }
     let output = Path::new(&args[4]);
-    let mut options = lbp_preview::PreviewOptions::default();
+    let mut preview_flags = lbp_preview::census::PreviewFlags::default();
     let mut flags = args[5..].iter();
     while let Some(flag) = flags.next() {
-        match flag.as_str() {
-            "--animation-base" => options.animation_base = true,
-            "--instance-rgba" => {
-                // Shared with corpus_mesh_census (D85); same values and errors as before.
-                options.instance_color = Some(lbp_preview::census::parse_instance_rgba(
-                    flags.next().ok_or("RGBA required")?,
-                )?);
-            }
-            _ => return Err("unknown option".into()),
+        // Shared with corpus_mesh_census (D85, D188): same values and errors.
+        if !lbp_preview::census::apply_preview_flag(&mut preview_flags, flag, || {
+            flags.next().map(String::as_str)
+        })? {
+            return Err("unknown option".into());
         }
     }
+    let (options, applied) = preview_flags.resolve();
     let animation_base = options.animation_base;
     let allowed = Path::new("local-analysis")
         .canonicalize()
@@ -103,6 +104,7 @@ fn run() -> Result<(), String> {
                 });
                 let mut supported = 0;
                 let mut nonempty = 0;
+                let mut materialless_groups = 0;
                 let mut groups = Vec::new();
                 for (i, (range, binding)) in g
                     .primitive_triangles
@@ -110,7 +112,10 @@ fn run() -> Result<(), String> {
                     .zip(&preview.bindings)
                     .enumerate()
                 {
-                    if !range.is_empty() {
+                    let materialless = binding.is_err() && preview.materialless(i);
+                    if !range.is_empty() && materialless {
+                        materialless_groups += 1;
+                    } else if !range.is_empty() {
                         nonempty += 1;
                         supported += usize::from(binding.is_ok());
                     }
@@ -119,7 +124,7 @@ fn run() -> Result<(), String> {
                             lbp_preview::MaterialAsset::Texture(a) => json!({"primitive":i,"triangles":range.len(),"status":"diffuse_loaded","alpha_mix":a.selection.alpha_mix.map(|m|json!({"mix_index":m.mix_index,"color_bits":m.color.bits,"color_first":m.color_first,"unused_weight_bits":m.unused_weight_bits,"factor":"same_sample_alpha","filter":"nearest"})),"texture_alpha_mix":a.selection.texture_alpha_mix.map(|m|json!({"mix_index":m.mix_index,"factor_port":m.factor_port,"unused_weight_bits":m.unused_weight_bits,"filter":"nearest_grid"})),"animation_base":a.selection.animation_base.map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"global_rows_verified":b.global_rows_verified,"static_matrix_bits":b.static_matrix_bits,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})),"animation_base_more":a.selection.animation_base_more.iter().flatten().map(|b|json!({"subtype_raw":b.subtype_raw,"sample_index":b.sample_index,"global_rows_verified":b.global_rows_verified,"row_bits":b.row_bits,"key_counts":b.key_counts,"time":null})).collect::<Vec<_>>(),"static_mix":a.selection.blend.map(|b|json!({"mix_index":b.mix_index,"weight_bits":b.weight_bits,"color_bits":b.color.bits,"color_first":b.color_first})),"wrap_uv_raw":a.source_wrap_raw(),"display_wrap_uv_raw":a.wrap.raw(),"border_domain":a.border_domain.map(|b|json!({"source_wrap_raw":b.source_wrap_raw,"min_bits":b.min_bits,"max_bits":b.max_bits,"margin_bits":lbp_preview::INTERIOR_MARGIN.to_bits(),"filter":"nearest","scope":"all selected mesh UVs"})),"wrap_frontend":if a.wrap.uniform_axis().is_some(){"Bevy_and_legacy"}else{"Bevy"},"uv_channel":a.selection.uv_channel,"material":{"path":a.material_key.path,"offset":a.material_key.offset,"size":a.material_key.size},"texture":{"path":a.texture_key.path,"offset":a.texture_key.offset,"size":a.texture_key.size},"width":a.texture.header.width,"height":a.texture.header.height,"product":a.product.as_ref().map(|p|json!({"second_texture":{"path":p.texture_key.path,"offset":p.texture_key.offset,"size":p.texture_key.size},"second_extent":[p.texture.header.width,p.texture.header.height],"display_extent":a.display_extent(),"filter":"nearest"}))}),
                             lbp_preview::MaterialAsset::Solid(a) => json!({"primitive":i,"triangles":range.len(),"status":"solid_diffuse_loaded","unwired_diffuse":a.selection.unwired_diffuse,"color_bits":a.selection.color.bits,"material":{"path":a.material_key.path,"offset":a.material_key.offset,"size":a.material_key.size},"texture":null,"uv_channel":null}),
                         },
-                        Err(e) => json!({"primitive":i,"triangles":range.len(),"status":"neutral","reason":e,"material_guid":g.metadata.primitives[i].material_guid,"material_hash":g.metadata.primitives[i].material_hash}),
+                        Err(e) => json!({"primitive":i,"triangles":range.len(),"status":if preview.materialless(i) {"materialless"} else {"neutral"},"reason":e,"material_guid":g.metadata.primitives[i].material_guid,"material_hash":g.metadata.primitives[i].material_hash}),
                     });
                 }
                 for (i, group) in groups.iter_mut().enumerate() {
@@ -150,14 +155,14 @@ fn run() -> Result<(), String> {
                 if geometry_available && nonempty > 0 && supported == nonempty {
                     all_diffuse.extend(guids.iter().cloned());
                 }
-                json!({"sha1":sha,"guids":guids,"geometry_available":geometry_available,"vertices":g.positions.len(),"triangles":g.triangles.len(),"nonempty_groups":nonempty,"supported_groups":supported,"groups":groups})
+                json!({"sha1":sha,"guids":guids,"geometry_available":geometry_available,"vertices":g.positions.len(),"triangles":g.triangles.len(),"nonempty_groups":nonempty,"supported_groups":supported,"materialless_groups":materialless_groups,"groups":groups})
             }
             Err(e) => json!({"sha1":sha,"guids":guids,"geometry_available":false,"reason":e}),
         };
         rows.push(row);
     }
     source.check_stable()?;
-    let report = json!({"schema_version":13,"supplied_instance_color_bits":options.instance_color.map(|c|c.bits),"animation_base_enabled":animation_base,"scope":"bounded_existing_mesh_samples_diffuse_coverage","asset_unit":"distinct_catalog_guid","mesh_hashes":rows.len(),"mesh_input_bytes":mesh_bytes,"viewable_guids":viewable,"all_diffuse_guids":all_diffuse,"complete_verified_guids":[],"complete_scope":"No visual completeness certification; all_diffuse is only binding coverage","samples":rows});
+    let report = json!({"schema_version":14,"supplied_instance_color_bits":options.instance_color.map(|c|c.bits),"animation_base_enabled":animation_base,"instance_white_default_applied":applied.instance_white,"animation_base_default_applied":applied.animation_base,"evidence":lbp_preview::census::DEFAULTS_EVIDENCE.iter().map(|(k,v)|(k.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),"scope":"bounded_existing_mesh_samples_diffuse_coverage","asset_unit":"distinct_catalog_guid","mesh_hashes":rows.len(),"mesh_input_bytes":mesh_bytes,"viewable_guids":viewable,"all_diffuse_guids":all_diffuse,"complete_verified_guids":[],"complete_scope":"No visual completeness certification; all_diffuse is only binding coverage","samples":rows});
     let mut file = OpenOptions::new()
         .write(true)
         .create_new(true)

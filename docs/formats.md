@@ -680,3 +680,16 @@ reads with the shared Thing reader; plans at 0x335..0x340 use the pre-0x341 Thin
   local box (+5%) 502/641, 355/374, 83/85 on the three tutorial levels versus 339/240/59
   for `v = 1 + y`. Not checked against the game. Detail:
   docs/d160-globe-material-and-stickers.md.
+
+## D188 material-less primitives and standalone preview defaults
+
+- Mesh primitive with material and alternatives descriptors entirely absent (no GUID,
+  no hash, kind 0, flags 0): CONFIRMED_FROM_LOCAL_DATA (01.33: 59 meshes, one each).
+  What the game draws for it: UNKNOWN. Toolkit `MeshExporter` emits it with the glTF
+  default white material: CONFIRMED_FROM_COMMUNITY_CODE (export only). Preview draws
+  it neutral; censuses exclude it from the all-diffuse denominator.
+- Default placement colour white: CONFIRMED_FROM_LOCAL_DATA (96% of placed RENDER_MESH
+  Things carry editorColor ffffffff) and CONFIRMED_FROM_COMMUNITY_CODE (Toolkit default
+  -1). editorColor -> THING_COLOR link: INFERRED. Single-mesh preview and censuses use
+  white and animation base values by default. Detail:
+  docs/d188-absent-material-primitives.md.

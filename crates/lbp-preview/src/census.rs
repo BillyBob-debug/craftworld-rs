@@ -5,9 +5,13 @@
 //! confirms geometry availability, not pose or visual fidelity. "All-diffuse" =
 //! viewable and every nonempty primitive group has a loaded diffuse binding; this is
 //! binding coverage, not visual completeness (Complete stays a manual check).
-//! D85: opt-in preview flags (`--animation-base`, `--instance-rgba R,G,B,A`) are parsed
+//! D85: preview flags (`--animation-base`, `--instance-rgba R,G,B,A`) are parsed
 //! here so corpus_mesh_census and compatibility_census accept the same values.
-use crate::{DiffuseTint, PreviewOptions};
+//! D188: standalone defaults (white instance colour, animation base values) apply
+//! unless `--no-instance-default` / `--no-animation-base` opt out; material-less
+//! groups are tallied separately and leave the all-diffuse denominator
+//! (docs/d188-absent-material-primitives.md).
+use crate::{AppliedDefaults, DiffuseTint, PreviewOptions, StandaloneDefaults};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// Longest reason key kept in tallies; longer messages are cut at a char boundary.
@@ -28,48 +32,145 @@ pub fn parse_instance_rgba(text: &str) -> Result<DiffuseTint, String> {
     Ok(color)
 }
 
-/// Applies one opt-in preview flag. Returns `Ok(false)` when `flag` is not a preview
-/// flag (the caller handles it); repeated preview flags are rejected.
+/// Census preview flags: explicit inputs plus the D188 default opt-outs.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PreviewFlags {
+    pub explicit: PreviewOptions,
+    pub no_instance_default: bool,
+    pub no_animation_base: bool,
+}
+impl PreviewFlags {
+    pub fn defaults(&self) -> StandaloneDefaults {
+        StandaloneDefaults {
+            instance_white: !self.no_instance_default,
+            animation_base: !self.no_animation_base,
+        }
+    }
+    /// Effective options and which defaults filled them.
+    pub fn resolve(&self) -> (PreviewOptions, AppliedDefaults) {
+        self.defaults().apply(self.explicit)
+    }
+}
+
+/// Applies one preview flag. Returns `Ok(false)` when `flag` is not a preview flag
+/// (the caller handles it); repeated or contradictory preview flags are rejected.
 pub fn apply_preview_flag<'a>(
-    options: &mut PreviewOptions,
+    flags: &mut PreviewFlags,
     flag: &str,
     next: impl FnOnce() -> Option<&'a str>,
 ) -> Result<bool, String> {
     match flag {
         "--animation-base" => {
-            if options.animation_base {
+            if flags.explicit.animation_base {
                 return Err("repeated --animation-base".into());
             }
-            options.animation_base = true;
+            if flags.no_animation_base {
+                return Err("--animation-base contradicts --no-animation-base".into());
+            }
+            flags.explicit.animation_base = true;
+        }
+        "--no-animation-base" => {
+            if flags.no_animation_base {
+                return Err("repeated --no-animation-base".into());
+            }
+            if flags.explicit.animation_base {
+                return Err("--no-animation-base contradicts --animation-base".into());
+            }
+            flags.no_animation_base = true;
         }
         "--instance-rgba" => {
-            if options.instance_color.is_some() {
+            if flags.explicit.instance_color.is_some() {
                 return Err("repeated --instance-rgba".into());
             }
-            options.instance_color = Some(parse_instance_rgba(next().ok_or("RGBA required")?)?);
+            if flags.no_instance_default {
+                return Err("--instance-rgba contradicts --no-instance-default".into());
+            }
+            flags.explicit.instance_color =
+                Some(parse_instance_rgba(next().ok_or("RGBA required")?)?);
+        }
+        "--no-instance-default" => {
+            if flags.no_instance_default {
+                return Err("repeated --no-instance-default".into());
+            }
+            if flags.explicit.instance_color.is_some() {
+                return Err("--no-instance-default contradicts --instance-rgba".into());
+            }
+            flags.no_instance_default = true;
         }
         _ => return Ok(false),
     }
     Ok(true)
 }
 
-/// Scope suffix naming the enabled opt-ins in a fixed order; empty for defaults.
-pub fn preview_scope_suffix(options: &PreviewOptions) -> String {
+/// Scope suffix naming the active inputs in a fixed order: `+animation_base` (flag)
+/// or `+animation_base_default`, then `+instance_rgba` (flag) or
+/// `+instance_white_default`. Empty when both inputs are off.
+pub fn preview_scope_suffix(options: &PreviewOptions, applied: AppliedDefaults) -> String {
     let mut s = String::new();
     if options.animation_base {
-        s.push_str("+animation_base");
+        s.push_str(if applied.animation_base {
+            "+animation_base_default"
+        } else {
+            "+animation_base"
+        });
     }
     if options.instance_color.is_some() {
-        s.push_str("+instance_rgba");
+        s.push_str(if applied.instance_white {
+            "+instance_white_default"
+        } else {
+            "+instance_rgba"
+        });
     }
     s
+}
+
+/// Evidence labels recorded with every D188 census (labels from docs/formats.md).
+pub const DEFAULTS_EVIDENCE: [(&str, &str); 4] = [
+    (
+        "instance_white_value",
+        "CONFIRMED_FROM_LOCAL_DATA: 96% of placed RENDER_MESH Things carry editorColor ffffffff (instance_color_census, docs/instance-color-census.md); CONFIRMED_FROM_COMMUNITY_CODE: Toolkit PRenderMesh editorColor default -1 = opaque white (docs/d80-thing-color.md E7)",
+    ),
+    (
+        "editor_color_to_thing_color",
+        "INFERRED: editorColor feeding the THING_COLOR shader input is not shown by a capture",
+    ),
+    (
+        "animation_base",
+        "preview policy: stored base values (t = base), no game time (D61 snapshot); game animation time UNKNOWN",
+    ),
+    (
+        "materialless_group",
+        "descriptor shape CONFIRMED_FROM_LOCAL_DATA (all-zero material and alternatives descriptors); game draw UNKNOWN; Toolkit MeshExporter emits a default white material CONFIRMED_FROM_COMMUNITY_CODE (export only); excluded from the all-diffuse denominator, drawn neutral",
+    ),
+];
+
+/// One primitive group's binding outcome for coverage.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum GroupBinding<'a> {
+    Loaded,
+    /// D188 material-less group: neither supported nor blocking.
+    Materialless,
+    Blocked(&'a str),
+}
+impl<'a> GroupBinding<'a> {
+    /// From a binding result plus the D188 material-less classification.
+    pub fn of<T>(binding: &'a Result<T, String>, materialless: bool) -> Self {
+        match binding {
+            Ok(_) => GroupBinding::Loaded,
+            Err(_) if materialless => GroupBinding::Materialless,
+            Err(e) => GroupBinding::Blocked(e),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct MeshCoverage {
     pub geometry_available: bool,
+    /// Nonempty groups that need a diffuse binding (material-less groups excluded).
     pub nonempty_groups: usize,
     pub supported_groups: usize,
+    /// D188: nonempty material-less groups (not counted in `nonempty_groups`).
+    pub materialless_groups: usize,
 }
 impl MeshCoverage {
     pub fn all_diffuse(&self) -> bool {
@@ -103,10 +204,10 @@ pub fn geometry_available(positions: &[[f32; 3]], triangles: &[[u32; 3]]) -> boo
     })
 }
 
-/// Coverage from group triangle ranges paired with binding outcomes (Ok = loaded).
+/// Coverage from group triangle ranges paired with binding outcomes.
 pub fn coverage<'a>(
     geometry_available: bool,
-    groups: impl IntoIterator<Item = (usize, Result<(), &'a str>)>,
+    groups: impl IntoIterator<Item = (usize, GroupBinding<'a>)>,
 ) -> (MeshCoverage, BTreeSet<String>) {
     let mut c = MeshCoverage {
         geometry_available,
@@ -117,10 +218,14 @@ pub fn coverage<'a>(
         if triangles == 0 {
             continue;
         }
-        c.nonempty_groups += 1;
         match binding {
-            Ok(()) => c.supported_groups += 1,
-            Err(e) => {
+            GroupBinding::Materialless => c.materialless_groups += 1,
+            GroupBinding::Loaded => {
+                c.nonempty_groups += 1;
+                c.supported_groups += 1;
+            }
+            GroupBinding::Blocked(e) => {
+                c.nonempty_groups += 1;
                 reasons.insert(reason_key(e));
             }
         }
@@ -159,8 +264,14 @@ pub struct CorpusTally {
     pub partial_by_neutral_reason: BTreeMap<String, usize>,
     /// Viewable meshes with no nonempty primitive group.
     pub viewable_without_groups: usize,
+    /// D188: viewable meshes whose nonempty groups are all material-less.
+    pub viewable_only_materialless: usize,
     pub nonempty_groups: usize,
     pub supported_groups: usize,
+    /// D188: nonempty material-less groups over loaded meshes.
+    pub materialless_groups: usize,
+    /// D188: loaded mesh hashes with at least one material-less group.
+    pub materialless_hashes: usize,
 }
 impl CorpusTally {
     pub fn record(
@@ -190,6 +301,13 @@ impl CorpusTally {
                     .supported_groups
                     .checked_add(coverage.supported_groups)
                     .ok_or("census group overflow")?;
+                self.materialless_groups = self
+                    .materialless_groups
+                    .checked_add(coverage.materialless_groups)
+                    .ok_or("census group overflow")?;
+                if coverage.materialless_groups > 0 {
+                    inc(&mut self.materialless_hashes)?;
+                }
                 if !coverage.geometry_available {
                     return inc(&mut self.no_geometry_hashes);
                 }
@@ -198,6 +316,8 @@ impl CorpusTally {
                 if coverage.all_diffuse() {
                     inc(&mut self.all_diffuse_hashes)?;
                     self.all_diffuse_guids.extend(guids.iter().cloned());
+                } else if coverage.nonempty_groups == 0 && coverage.materialless_groups > 0 {
+                    inc(&mut self.viewable_only_materialless)?;
                 } else if coverage.nonempty_groups == 0 {
                     inc(&mut self.viewable_without_groups)?;
                 } else {
@@ -227,16 +347,21 @@ mod tests {
     }
     #[test]
     fn coverage_ignores_empty_groups_and_collects_reasons() {
+        use GroupBinding::{Blocked, Loaded};
         let (c, r) = coverage(
             true,
-            [(3, Ok(())), (0, Err("ignored")), (2, Err("Unsupported: x"))],
+            [
+                (3, Loaded),
+                (0, Blocked("ignored")),
+                (2, Blocked("Unsupported: x")),
+            ],
         );
         assert_eq!((c.nonempty_groups, c.supported_groups), (2, 1));
         assert!(!c.all_diffuse());
         assert_eq!(r, guids(&["Unsupported: x"]));
-        let (c, _) = coverage(true, [(0, Ok(()))]);
+        let (c, _) = coverage(true, [(0, Loaded)]);
         assert!(!c.all_diffuse()); // no nonempty group
-        let (c, _) = coverage(false, [(1, Ok(()))]);
+        let (c, _) = coverage(false, [(1, Loaded)]);
         assert!(!c.all_diffuse()); // geometry required
         assert_eq!(reason_key(&"a".repeat(500)).len(), MAX_REASON_CHARS);
     }
@@ -247,6 +372,7 @@ mod tests {
             geometry_available: true,
             nonempty_groups: 2,
             supported_groups: 2,
+            materialless_groups: 0,
         };
         let loaded = |coverage, r: &[&str]| MeshOutcome::Loaded {
             coverage,
@@ -300,27 +426,99 @@ mod tests {
         }
     }
     #[test]
-    fn preview_flags_set_options_and_scope_suffix() {
-        let mut o = PreviewOptions::default();
-        assert_eq!(preview_scope_suffix(&o), "");
-        assert!(!apply_preview_flag(&mut o, "--hashes", || None).unwrap());
-        assert!(
-            apply_preview_flag(&mut o, "--instance-rgba", || Some("0.25,0.5,0.75,0.5")).unwrap()
-        );
-        assert_eq!(preview_scope_suffix(&o), "+instance_rgba");
-        assert!(apply_preview_flag(&mut o, "--animation-base", || None).unwrap());
+    fn preview_flags_default_override_and_scope_suffix() {
+        // D188: no flags = white instance + animation base defaults, recorded.
+        let flags = PreviewFlags::default();
+        let (o, applied) = flags.resolve();
         assert!(o.animation_base);
+        assert_eq!(o.instance_color, Some(DiffuseTint::default()));
+        assert_eq!(o.instance_color.unwrap().values(), [1.; 4]);
+        assert!(applied.instance_white && applied.animation_base);
+        assert_eq!(
+            preview_scope_suffix(&o, applied),
+            "+animation_base_default+instance_white_default"
+        );
+        // Both opt-outs reproduce the pre-D188 source-only options.
+        let mut f = PreviewFlags::default();
+        assert!(apply_preview_flag(&mut f, "--no-instance-default", || None).unwrap());
+        assert!(apply_preview_flag(&mut f, "--no-animation-base", || None).unwrap());
+        let (o, applied) = f.resolve();
+        assert!(!o.animation_base && o.instance_color.is_none() && !applied.any());
+        assert_eq!(preview_scope_suffix(&o, applied), "");
+        // Explicit values win and are not labelled as defaults.
+        let mut f = PreviewFlags::default();
+        assert!(!apply_preview_flag(&mut f, "--hashes", || None).unwrap());
+        assert!(
+            apply_preview_flag(&mut f, "--instance-rgba", || Some("0.25,0.5,0.75,0.5")).unwrap()
+        );
+        let (o, applied) = f.resolve();
         assert_eq!(
             o.instance_color.unwrap().bits,
             [0.25f32, 0.5, 0.75, 0.5].map(f32::to_bits)
         );
-        assert_eq!(preview_scope_suffix(&o), "+animation_base+instance_rgba");
-        // Repeats and a missing value are errors, not silent overrides.
-        assert!(apply_preview_flag(&mut o, "--animation-base", || None).is_err());
-        assert!(apply_preview_flag(&mut o, "--instance-rgba", || Some("0,0,0,0")).is_err());
-        let mut fresh = PreviewOptions::default();
+        assert!(!applied.instance_white && applied.animation_base);
+        assert_eq!(
+            preview_scope_suffix(&o, applied),
+            "+animation_base_default+instance_rgba"
+        );
+        assert!(apply_preview_flag(&mut f, "--animation-base", || None).unwrap());
+        let (o, applied) = f.resolve();
+        assert_eq!(
+            preview_scope_suffix(&o, applied),
+            "+animation_base+instance_rgba"
+        );
+        // Repeats, contradictions and a missing value are errors, not overrides.
+        assert!(apply_preview_flag(&mut f, "--animation-base", || None).is_err());
+        assert!(apply_preview_flag(&mut f, "--instance-rgba", || Some("0,0,0,0")).is_err());
+        assert!(apply_preview_flag(&mut f, "--no-animation-base", || None).is_err());
+        assert!(apply_preview_flag(&mut f, "--no-instance-default", || None).is_err());
+        let mut g = PreviewFlags::default();
+        assert!(apply_preview_flag(&mut g, "--no-instance-default", || None).unwrap());
+        assert!(apply_preview_flag(&mut g, "--no-instance-default", || None).is_err());
+        assert!(apply_preview_flag(&mut g, "--instance-rgba", || Some("1,1,1,1")).is_err());
+        assert!(apply_preview_flag(&mut g, "--no-animation-base", || None).unwrap());
+        assert!(apply_preview_flag(&mut g, "--animation-base", || None).is_err());
+        let mut fresh = PreviewFlags::default();
         assert!(apply_preview_flag(&mut fresh, "--instance-rgba", || None).is_err());
         assert!(apply_preview_flag(&mut fresh, "--instance-rgba", || Some("2,0,0,0")).is_err());
-        assert!(fresh.instance_color.is_none());
+        assert!(fresh.explicit.instance_color.is_none());
+    }
+    #[test]
+    fn materialless_groups_leave_the_denominator_and_are_tallied() {
+        use GroupBinding::{Blocked, Loaded, Materialless};
+        let absent: Result<(), String> = Err("Material-less".into());
+        let unresolved: Result<(), String> = Err("Unresolved: GUID".into());
+        assert_eq!(GroupBinding::of(&absent, true), Materialless);
+        assert_eq!(
+            GroupBinding::of(&unresolved, false),
+            Blocked("Unresolved: GUID")
+        );
+        assert_eq!(GroupBinding::of(&Ok::<(), String>(()), true), Loaded);
+        // One material-less group beside loaded groups: all-diffuse.
+        let (c, r) = coverage(true, [(4, Materialless), (6, Loaded), (0, Materialless)]);
+        assert_eq!(
+            (c.nonempty_groups, c.supported_groups, c.materialless_groups),
+            (1, 1, 1)
+        );
+        assert!(c.all_diffuse() && r.is_empty());
+        // Any other unresolved group still blocks.
+        let (c, r) = coverage(true, [(4, Materialless), (6, Blocked("Unresolved: GUID"))]);
+        assert!(!c.all_diffuse());
+        assert_eq!(r, guids(&["Unresolved: GUID"]));
+        // Only material-less groups: not all-diffuse, tallied apart from no-group meshes.
+        let (only, _) = coverage(true, [(4, Materialless)]);
+        assert!(!only.all_diffuse());
+        let mut t = CorpusTally::default();
+        let loaded = |coverage| MeshOutcome::Loaded {
+            coverage,
+            neutral_reasons: BTreeSet::new(),
+        };
+        t.record(&guids(&["a"]), &loaded(only)).unwrap();
+        let mixed = coverage(true, [(4, Materialless), (6, Loaded)]).0;
+        t.record(&guids(&["b"]), &loaded(mixed)).unwrap();
+        assert_eq!(t.viewable_only_materialless, 1);
+        assert_eq!(t.viewable_without_groups, 0);
+        assert_eq!((t.materialless_groups, t.materialless_hashes), (2, 2));
+        assert_eq!(t.all_diffuse_guids, guids(&["b"]));
     }
 }

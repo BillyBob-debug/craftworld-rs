@@ -48,7 +48,9 @@ pub use instance_graph::{instance_graph_refusal, project_instance_graph, select_
 mod instance_sampler;
 pub use instance_sampler::SamplerPortFold;
 mod instance_textured;
-pub use instance::{project_instance_color, InstanceProjection, PreviewOptions};
+pub use instance::{
+    project_instance_color, AppliedDefaults, InstanceProjection, PreviewOptions, StandaloneDefaults,
+};
 pub use instance_textured::select_instance_diffuse;
 mod linked;
 pub mod skinned;
@@ -188,7 +190,9 @@ pub fn load_mesh_groups_with_options(
     let mut bindings = Vec::with_capacity(geometry.metadata.primitives.len());
     for primitive in &geometry.metadata.primitives {
         control.check()?;
-        let result = if primitive.material_flags != 0
+        let result = if is_materialless(primitive) {
+            Err(MATERIALLESS_REASON.into())
+        } else if primitive.material_flags != 0
             || primitive.alternatives_kind != 0
             || primitive.alternatives_flags != 0
         {
@@ -218,6 +222,40 @@ pub fn load_mesh_groups_with_options(
     control.check()?;
     source.check_stable()?;
     Ok(GroupedMesh { geometry, bindings })
+}
+
+/// D188: neutral reason for a material-less primitive (see [`is_materialless`]).
+pub const MATERIALLESS_REASON: &str =
+    "Material-less: no material descriptor (game draw UNKNOWN; drawn neutral, no diffuse invented)";
+
+/// D188: a primitive whose material and alternatives descriptors are both entirely
+/// absent (no GUID, no hash, kind 0, flags 0). Descriptor shape
+/// `CONFIRMED_FROM_LOCAL_DATA` (01.33: 59 meshes, one such primitive each); what the
+/// game draws for it is `UNKNOWN`; Toolkit `MeshExporter` emits such a primitive with
+/// the glTF default (white) material (`CONFIRMED_FROM_COMMUNITY_CODE`, export only).
+/// No diffuse binding is invented; censuses tally these groups separately
+/// (docs/d188-absent-material-primitives.md). Any other unresolved descriptor stays
+/// an ordinary blocking group.
+pub fn is_materialless(p: &lbp_mesh::Primitive) -> bool {
+    p.material_flags == 0
+        && p.material_kind == 0
+        && p.material_guid.is_none()
+        && p.material_hash.is_none()
+        && p.alternatives_flags == 0
+        && p.alternatives_kind == 0
+        && p.alternatives_guid.is_none()
+        && p.alternatives_hash.is_none()
+}
+
+impl GroupedMesh {
+    /// Per primitive: true when the group is material-less (D188).
+    pub fn materialless(&self, index: usize) -> bool {
+        self.geometry
+            .metadata
+            .primitives
+            .get(index)
+            .is_some_and(is_materialless)
+    }
 }
 
 const MAX_MATERIAL_LOADS: usize = 64;
@@ -315,5 +353,75 @@ mod tests {
         );
         assert!(cached_binding(&mut cache, &mut retained, key(1), big, || Ok(10)).is_ok());
         assert_eq!(retained, MAX_RETAINED_BYTES);
+    }
+    #[test]
+    fn materialless_needs_every_descriptor_field_absent() {
+        let none = lbp_mesh::Primitive {
+            material_flags: 0,
+            material_kind: 0,
+            material_guid: None,
+            material_hash: None,
+            alternatives_flags: 0,
+            alternatives_kind: 0,
+            alternatives_guid: None,
+            alternatives_hash: None,
+            min_vertex_raw: 0,
+            max_vertex_raw: 2,
+            first_index: 0,
+            index_count: 3,
+            region: 0,
+        };
+        assert!(is_materialless(&none));
+        let variants = [
+            lbp_mesh::Primitive {
+                material_guid: Some(1),
+                ..none.clone()
+            },
+            lbp_mesh::Primitive {
+                material_hash: Some("00".repeat(20)),
+                ..none.clone()
+            },
+            lbp_mesh::Primitive {
+                material_kind: 2,
+                ..none.clone()
+            },
+            lbp_mesh::Primitive {
+                material_flags: 1,
+                ..none.clone()
+            },
+            lbp_mesh::Primitive {
+                alternatives_kind: 1,
+                ..none.clone()
+            },
+            lbp_mesh::Primitive {
+                alternatives_flags: 1,
+                ..none.clone()
+            },
+            lbp_mesh::Primitive {
+                alternatives_guid: Some(7),
+                ..none.clone()
+            },
+        ];
+        for p in variants {
+            assert!(!is_materialless(&p), "{p:?}");
+        }
+    }
+    #[test]
+    fn standalone_defaults_fill_only_unset_inputs() {
+        let (o, a) = StandaloneDefaults::ON.apply(PreviewOptions::default());
+        assert!(o.animation_base && a.animation_base && a.instance_white);
+        assert_eq!(o.instance_color.unwrap().values(), [1.; 4]);
+        let explicit = PreviewOptions {
+            animation_base: true,
+            instance_color: Some(DiffuseTint {
+                bits: [0.5f32; 4].map(f32::to_bits),
+            }),
+            surface: true,
+        };
+        let (o, a) = StandaloneDefaults::ON.apply(explicit);
+        assert!(!a.any() && o.surface);
+        assert_eq!(o.instance_color, explicit.instance_color);
+        let (o, a) = StandaloneDefaults::OFF.apply(PreviewOptions::default());
+        assert!(!a.any() && !o.animation_base && o.instance_color.is_none());
     }
 }

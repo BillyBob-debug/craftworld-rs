@@ -1,7 +1,8 @@
 //! D93 measured corpus counts for in-app display.
 //!
 //! Reads the versioned summary JSON written by the project's own
-//! `corpus_mesh_census` (schema 1 default options, schema 2 opt-in options) and
+//! `corpus_mesh_census` (schema 1 default options, schema 2 opt-in options,
+//! schema 3 D188 standalone defaults and material-less exclusion) and
 //! `corpus_texture_census` (schema 1) examples in `lbp-preview`. These are
 //! project-authored diagnostic formats, not game formats: no game data is read
 //! here and no counts are built in. Files are opened read-only, size-bounded
@@ -39,14 +40,17 @@ pub enum MeshCensusMode {
     AnimationBase,
     InstanceColor,
     Both,
+    /// D188 schema 3 with both standalone defaults applied (white + animation base).
+    StandaloneDefaults,
 }
 
 impl MeshCensusMode {
-    pub const ALL: [MeshCensusMode; 4] = [
+    pub const ALL: [MeshCensusMode; 5] = [
         MeshCensusMode::Default,
         MeshCensusMode::AnimationBase,
         MeshCensusMode::InstanceColor,
         MeshCensusMode::Both,
+        MeshCensusMode::StandaloneDefaults,
     ];
     pub fn label(self) -> &'static str {
         match self {
@@ -54,6 +58,9 @@ impl MeshCensusMode {
             MeshCensusMode::AnimationBase => "opt-in animation base",
             MeshCensusMode::InstanceColor => "opt-in supplied instance color",
             MeshCensusMode::Both => "opt-in animation base + instance color",
+            MeshCensusMode::StandaloneDefaults => {
+                "D188 standalone defaults (white instance color + animation base)"
+            }
         }
     }
     fn from_suffix(suffix: &str) -> Option<Self> {
@@ -66,10 +73,20 @@ impl MeshCensusMode {
         })
     }
     fn animation_base(self) -> bool {
-        matches!(self, MeshCensusMode::AnimationBase | MeshCensusMode::Both)
+        matches!(
+            self,
+            MeshCensusMode::AnimationBase
+                | MeshCensusMode::Both
+                | MeshCensusMode::StandaloneDefaults
+        )
     }
     fn instance_color(self) -> bool {
-        matches!(self, MeshCensusMode::InstanceColor | MeshCensusMode::Both)
+        matches!(
+            self,
+            MeshCensusMode::InstanceColor
+                | MeshCensusMode::Both
+                | MeshCensusMode::StandaloneDefaults
+        )
     }
 }
 
@@ -83,6 +100,13 @@ pub struct MeshCensusSummary {
     pub cohort: Option<String>,
     pub mode: MeshCensusMode,
     pub supplied_instance_rgba: Option<[f32; 4]>,
+    /// D188 (schema 3): the input came from the standalone default, not a flag.
+    pub animation_base_default: bool,
+    pub instance_white_default: bool,
+    /// D188 (schema 3): material-less groups excluded from all-diffuse.
+    pub materialless_groups: Option<u64>,
+    /// D188 (schema 3) `+materialless_blocking`: pre-D188 classification.
+    pub materialless_blocking: bool,
     pub definitions: BTreeMap<String, String>,
     pub catalog_guids: u64,
     pub viewable_guids: u64,
@@ -158,6 +182,8 @@ struct RawMeshTotals {
     viewable_hashes: u64,
     all_diffuse_hashes: u64,
     failed_hashes: u64,
+    #[serde(default)]
+    materialless_groups: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -165,6 +191,47 @@ struct RawPreviewOptions {
     animation_base_enabled: bool,
     supplied_instance_rgba: Option<[f32; 4]>,
     verified_game_instance: bool,
+    #[serde(default)]
+    animation_base_source: Option<String>,
+    #[serde(default)]
+    instance_color_source: Option<String>,
+}
+
+/// Schema 3 scope suffix: `(animation, instance, materialless_blocking)`; inputs are
+/// `None` (off), `Some(false)` (flag) or `Some(true)` (D188 default).
+type Schema3Inputs = (Option<bool>, Option<bool>, bool);
+
+fn schema3_suffixes() -> Vec<(String, Schema3Inputs)> {
+    let anim = [
+        ("", None),
+        ("+animation_base", Some(false)),
+        ("+animation_base_default", Some(true)),
+    ];
+    let inst = [
+        ("", None),
+        ("+instance_rgba", Some(false)),
+        ("+instance_white_default", Some(true)),
+    ];
+    let mut v: Vec<_> = anim
+        .iter()
+        .flat_map(|(a, ad)| {
+            inst.iter().flat_map(move |(i, id)| {
+                [("", false), ("+materialless_blocking", true)]
+                    .map(|(m, mb)| (format!("{a}{i}{m}"), (*ad, *id, mb)))
+            })
+        })
+        .collect();
+    // Longest first so a cohort name never swallows part of a suffix.
+    v.sort_by_key(|(text, _)| std::cmp::Reverse(text.len()));
+    v
+}
+
+fn source_label(input: Option<bool>) -> &'static str {
+    match input {
+        None => "off",
+        Some(false) => "flag",
+        Some(true) => "default",
+    }
 }
 
 #[derive(Deserialize)]
@@ -243,9 +310,9 @@ pub fn parse_census(name: &str, bytes: &[u8]) -> Result<CensusFile, String> {
 }
 
 fn parse_mesh(name: &str, schema: u64, bytes: &[u8]) -> Result<MeshCensusSummary, String> {
-    if !matches!(schema, 1 | 2) {
+    if !matches!(schema, 1..=3) {
         return Err(format!(
-            "{name}: unsupported {MESH_TOOL} schema_version {schema} (this viewer reads 1 and 2)"
+            "{name}: unsupported {MESH_TOOL} schema_version {schema} (this viewer reads 1 to 3)"
         ));
     }
     let raw: RawMesh = serde_json::from_slice(bytes)
@@ -256,15 +323,26 @@ fn parse_mesh(name: &str, schema: u64, bytes: &[u8]) -> Result<MeshCensusSummary
             raw.asset_unit
         ));
     }
-    let (cohort, rest) = if let Some(rest) = raw.scope.strip_prefix(MESH_COHORT_PREFIX) {
-        let split = [
+    let suffixes: Vec<String> = if schema == 3 {
+        schema3_suffixes().into_iter().map(|(t, _)| t).collect()
+    } else {
+        [
             "+animation_base+instance_rgba",
             "+animation_base",
             "+instance_rgba",
         ]
-        .iter()
-        .find_map(|s| rest.strip_suffix(s).map(|head| (head, &rest[head.len()..])))
-        .unwrap_or((rest, ""));
+        .map(String::from)
+        .to_vec()
+    };
+    let (cohort, rest) = if let Some(rest) = raw.scope.strip_prefix(MESH_COHORT_PREFIX) {
+        let split = suffixes
+            .iter()
+            .filter(|s| !s.is_empty())
+            .find_map(|s| {
+                rest.strip_suffix(s.as_str())
+                    .map(|head| (head, &rest[head.len()..]))
+            })
+            .unwrap_or((rest, ""));
         if split.0.is_empty() {
             return Err(format!("{name}: cohort scope without a manifest name"));
         }
@@ -274,9 +352,46 @@ fn parse_mesh(name: &str, schema: u64, bytes: &[u8]) -> Result<MeshCensusSummary
     } else {
         return Err(format!("{name}: unknown mesh census scope {:?}", raw.scope));
     };
-    let mode = MeshCensusMode::from_suffix(rest)
-        .ok_or_else(|| format!("{name}: unknown mesh census scope {:?}", raw.scope))?;
+    let unknown_scope = || format!("{name}: unknown mesh census scope {:?}", raw.scope);
     let mut rgba = None;
+    let mut defaults = (false, false);
+    let mut materialless_blocking = false;
+    let mode = if schema == 3 {
+        let (anim, inst, blocking) = schema3_suffixes()
+            .into_iter()
+            .find(|(text, _)| text == rest)
+            .map(|(_, inputs)| inputs)
+            .ok_or_else(unknown_scope)?;
+        let options = raw.preview_options.as_ref().ok_or_else(|| {
+            format!("{name}: schema 3 needs preview_options (D188 input sources)")
+        })?;
+        if options.animation_base_enabled != anim.is_some()
+            || options.supplied_instance_rgba.is_some() != inst.is_some()
+            || options.animation_base_source.as_deref() != Some(source_label(anim))
+            || options.instance_color_source.as_deref() != Some(source_label(inst))
+        {
+            return Err(format!(
+                "{name}: preview_options disagree with scope {:?}",
+                raw.scope
+            ));
+        }
+        if inst == Some(true) && options.supplied_instance_rgba != Some([1.; 4]) {
+            return Err(format!(
+                "{name}: default instance color must be white (1, 1, 1, 1)"
+            ));
+        }
+        defaults = (anim == Some(true), inst == Some(true));
+        materialless_blocking = blocking;
+        match (anim, inst) {
+            (Some(true), Some(true)) => MeshCensusMode::StandaloneDefaults,
+            (None, None) => MeshCensusMode::Default,
+            (Some(_), None) => MeshCensusMode::AnimationBase,
+            (None, Some(_)) => MeshCensusMode::InstanceColor,
+            (Some(_), Some(_)) => MeshCensusMode::Both,
+        }
+    } else {
+        MeshCensusMode::from_suffix(rest).ok_or_else(unknown_scope)?
+    };
     match (schema, mode, &raw.preview_options) {
         (1, MeshCensusMode::Default, None) => {}
         (1, _, _) => {
@@ -284,11 +399,12 @@ fn parse_mesh(name: &str, schema: u64, bytes: &[u8]) -> Result<MeshCensusSummary
                 "{name}: schema 1 describes default options only, but scope/options say otherwise"
             ))
         }
-        (_, MeshCensusMode::Default, _) | (_, _, None) => {
+        (2, MeshCensusMode::Default, _) | (2, _, None) => {
             return Err(format!(
                 "{name}: schema 2 needs an opt-in scope suffix and preview_options"
             ))
         }
+        (_, _, None) => {}
         (_, _, Some(options)) => {
             if options.animation_base_enabled != mode.animation_base()
                 || options.supplied_instance_rgba.is_some() != mode.instance_color()
@@ -332,6 +448,14 @@ fn parse_mesh(name: &str, schema: u64, bytes: &[u8]) -> Result<MeshCensusSummary
         cohort,
         mode,
         supplied_instance_rgba: rgba,
+        animation_base_default: defaults.0,
+        instance_white_default: defaults.1,
+        materialless_blocking,
+        materialless_groups: if schema == 3 {
+            t.materialless_groups
+        } else {
+            None
+        },
         definitions: raw.definitions,
         catalog_guids: t.catalog_guids,
         viewable_guids: t.viewable_guids,
@@ -531,12 +655,37 @@ impl CorpusCounts {
                     group(m.complete_verified_guids)
                 ),
             );
-            if let Some(rgba) = m.supplied_instance_rgba {
+            if m.instance_white_default {
+                push(
+                    LineKind::Note,
+                    "Default instance color white (1, 1, 1, 1) where no Thing supplies one: placement default (96% of placed meshes carry editorColor ffffffff, CONFIRMED_FROM_LOCAL_DATA; Toolkit default -1); its link to THING_COLOR is INFERRED.".into(),
+                );
+            } else if let Some(rgba) = m.supplied_instance_rgba {
                 push(
                     LineKind::Note,
                     format!(
                         "Supplied instance color (linear RGBA) {}, {}, {}, {}; not a verified game instance.",
                         rgba[0], rgba[1], rgba[2], rgba[3]
+                    ),
+                );
+            }
+            if m.animation_base_default {
+                push(
+                    LineKind::Note,
+                    "Animation base values (t = base) applied by default; no game time.".into(),
+                );
+            }
+            if m.materialless_blocking {
+                push(
+                    LineKind::Note,
+                    "Material-less groups counted as blocking (pre-D188 classification).".into(),
+                );
+            } else if let Some(n) = m.materialless_groups {
+                push(
+                    LineKind::Note,
+                    format!(
+                        "Material-less groups excluded from all-diffuse: {} (no material descriptor; game draw UNKNOWN; drawn neutral).",
+                        group(n)
                     ),
                 );
             }
@@ -865,9 +1014,9 @@ mod tests {
 
     #[test]
     fn rejects_unknown_schema_tool_scope_and_inconsistent_mesh_totals() {
-        let e = parse(&mesh(MESH_CORPUS_SCOPE, 3, None, 8, 6)).unwrap_err();
+        let e = parse(&mesh(MESH_CORPUS_SCOPE, 4, None, 8, 6)).unwrap_err();
         assert!(
-            e.contains("unsupported corpus_mesh_census schema_version 3"),
+            e.contains("unsupported corpus_mesh_census schema_version 4"),
             "{e}"
         );
         let mut v = mesh(MESH_CORPUS_SCOPE, 1, None, 8, 6);
@@ -929,6 +1078,101 @@ mod tests {
         assert!(parse(&missing).is_err());
         assert!(parse_census("x", b"[1,2]").is_err());
         assert!(parse_census("x", b"{not json").is_err());
+    }
+
+    fn opts3(anim: &str, inst: &str, rgba: Option<[f32; 4]>) -> Option<Value> {
+        let mut o = opts(anim != "off", rgba).unwrap();
+        o["animation_base_source"] = json!(anim);
+        o["instance_color_source"] = json!(inst);
+        Some(o)
+    }
+
+    #[test]
+    fn schema3_records_defaults_and_materialless_groups() {
+        let scope = "corpus_all_mesh_map_rows+animation_base_default+instance_white_default";
+        let mut v = mesh(scope, 3, opts3("default", "default", Some([1.; 4])), 8, 7);
+        v["totals"]["materialless_groups"] = json!(59);
+        let m = parse_mesh_ok(&v);
+        assert_eq!(m.mode, MeshCensusMode::StandaloneDefaults);
+        assert!(m.animation_base_default && m.instance_white_default);
+        assert_eq!(m.materialless_groups, Some(59));
+        let mut c = CorpusCounts::default();
+        c.insert(CensusRole::Mesh, CensusFile::Mesh(m)).unwrap();
+        let old = parse(&mesh(MESH_CORPUS_SCOPE, 1, None, 8, 6)).unwrap();
+        c.insert(CensusRole::Mesh, old).unwrap();
+        let text: Vec<String> = c.lines().into_iter().map(|(_, s)| s).collect();
+        assert!(text.iter().any(|s| s.contains("D188 standalone defaults")));
+        assert!(text
+            .iter()
+            .any(|s| s.contains("Default instance color white")));
+        assert!(text.iter().any(|s| s.contains("INFERRED")));
+        assert!(text
+            .iter()
+            .any(|s| s.contains("Material-less groups excluded")));
+        assert!(text
+            .iter()
+            .any(|s| s.contains("change +0 viewable / +1 all-diffuse")));
+        // Opt-outs: schema 3 with an empty suffix is the default-options slot.
+        let off = parse_mesh_ok(&mesh(
+            "cohort_manifest:d61.json",
+            3,
+            opts3("off", "off", None),
+            8,
+            6,
+        ));
+        assert_eq!(off.mode, MeshCensusMode::Default);
+        assert_eq!(off.cohort.as_deref(), Some("d61.json"));
+        assert!(!off.materialless_blocking);
+        let old = parse_mesh_ok(&mesh(
+            "cohort_manifest:d61.json+materialless_blocking",
+            3,
+            opts3("off", "off", None),
+            8,
+            6,
+        ));
+        assert_eq!(old.mode, MeshCensusMode::Default);
+        assert!(old.materialless_blocking);
+        assert_eq!(old.cohort.as_deref(), Some("d61.json"));
+        // Mixed: flag colour with default animation base.
+        let mixed = parse_mesh_ok(&mesh(
+            "cohort_manifest:d61.json+animation_base_default+instance_rgba",
+            3,
+            opts3("default", "flag", Some([0.5; 4])),
+            8,
+            6,
+        ));
+        assert_eq!(mixed.mode, MeshCensusMode::Both);
+        assert!(mixed.animation_base_default && !mixed.instance_white_default);
+        assert_eq!(mixed.cohort.as_deref(), Some("d61.json"));
+        // Rejections: missing options, wrong sources, non-white default, schema-3-only
+        // suffix in schema 2.
+        assert!(parse(&mesh(scope, 3, None, 8, 6)).is_err());
+        assert!(parse(&mesh(
+            scope,
+            3,
+            opts3("flag", "default", Some([1.; 4])),
+            8,
+            6
+        ))
+        .is_err());
+        assert!(parse(&mesh(
+            scope,
+            3,
+            opts3("default", "default", Some([0.5; 4])),
+            8,
+            6
+        ))
+        .unwrap_err()
+        .contains("white"));
+        assert!(parse(&mesh(scope, 2, opts(true, Some([1.; 4])), 8, 6)).is_err());
+        assert!(parse(&mesh(
+            "corpus_all_mesh_map_rows+instance_white_default+animation_base_default",
+            3,
+            opts3("default", "default", Some([1.; 4])),
+            8,
+            6
+        ))
+        .is_err());
     }
 
     #[test]
