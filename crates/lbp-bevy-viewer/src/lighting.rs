@@ -30,6 +30,8 @@ pub struct PreviewLight {
     pub raw_ambient: Vec3,
     /// P2l: rim colours (rimColor below, rimColor2 above), zero without level settings.
     pub rim: [Vec3; 2],
+    /// P2p: level exposure (1 without level settings or when unusable).
+    pub exposure: f32,
     /// P2l: LBP-shaped mode (`lbp`); off = D121 Lambert preview.
     pub lbp: bool,
     /// Values used and every preview choice, for the panel and QA log.
@@ -67,6 +69,7 @@ impl PreviewLight {
             raw_key: Vec3::splat(0.65),
             raw_ambient: Vec3::splat(0.35),
             rim: [Vec3::ZERO; 2],
+            exposure: 1.,
             lbp: false,
             notes: vec!["generic key (upper left, front) 0.65 + ambient 0.35".into()],
         }
@@ -157,6 +160,9 @@ impl PreviewLight {
             raw_key,
             raw_ambient,
             rim,
+            exposure: Some(s.exposure)
+                .filter(|e| e.is_finite() && *e > 0.)
+                .unwrap_or(1.),
             lbp: false,
             notes,
         })
@@ -176,12 +182,15 @@ impl PreviewLight {
     /// planets root). The uniform mapping (exposure, tint, rim constants) is INFERRED.
     pub fn lbp_shaped(&self, turn: Quat) -> Self {
         let mut light = self.clone();
+        let e = self.exposure;
         light.lbp = true;
-        light.key = self.raw_key;
-        light.ambient = self.raw_ambient;
+        // P2p: the scales the game sends with each colour (D-RSX capture of the Pod).
+        light.key = self.raw_key * GAME_SUN_SCALE * e;
+        light.ambient = self.raw_ambient * GAME_AMBIENT_SCALE * e;
+        light.rim = self.rim.map(|r| r * GAME_RIM_SCALE * e);
         light.toward_light = (turn * self.toward_light).normalize_or_zero();
         light.notes.push(format!(
-            "LBP-shaped (inferred): ambient x (N.y 0.15 + 0.5), sun unfitted, rim ({:.3}, {:.3}, {:.3}) below to ({:.3}, {:.3}, {:.3}) above x (N.V + 0.9)^2",
+            "LBP-shaped: ambient x (N.y 0.15 + 0.5), sun, rim ({:.3}, {:.3}, {:.3}) below to ({:.3}, {:.3}, {:.3}) above x (N.V + 0.9)^2; game scales sun {GAME_SUN_SCALE} x multiplier, ambient {GAME_AMBIENT_SCALE}, rim {GAME_RIM_SCALE}, all x exposure {e:.3} (RSX capture fit)",
             self.rim[0].x, self.rim[0].y, self.rim[0].z, self.rim[1].x, self.rim[1].y, self.rim[1].z
         ));
         light
@@ -224,6 +233,16 @@ pub fn facing_normal(smooth: Vec3, face: Vec3, to_view: Vec3) -> Vec3 {
         n
     }
 }
+
+/// P2p: per-colour scales in the game's Pod shader constants (.w of suncol, ambcol and
+/// both rim colours), fitted to the PC's RenderDoc capture of RPCS3 with pod_planets
+/// preset 0 (multiplier 1.0206, exposure 1.2165): sun 0.372 = 0.3 x 1.0206 x 1.2165,
+/// ambient 0.547 = 0.45 x 1.2165, rim 0.730 = 0.6 x 1.2165 (each within 0.001).
+/// CONFIRMED_FROM_LOCAL_DATA for that frame; the split into constant x exposure (x
+/// multiplier) is INFERRED from one level, as is the shader applying .w to .rgb.
+pub const GAME_SUN_SCALE: f32 = 0.3;
+pub const GAME_AMBIENT_SCALE: f32 = 0.45;
+pub const GAME_RIM_SCALE: f32 = 0.6;
 
 /// Viewer-side toggle state.
 #[derive(Default)]
@@ -342,20 +361,25 @@ mod tests {
         let mut s = settings();
         s.rim_color = [0.2, 0.1, 0.0, 1.];
         s.rim_color2 = [0.0, 0.1, 0.4, 1.];
+        s.exposure = 2.;
         let light = PreviewLight::from_settings(&s, Vec3::ZERO, 1.).lbp_shaped(Quat::IDENTITY);
         assert!(light.lbp);
-        // Unfitted: sun colour x multiplier 2.
-        assert_eq!(light.key, Vec3::new(2., 1., 0.5));
+        // Unfitted, game scales: sun colour x multiplier 2 x 0.3 x exposure 2.
+        let key = Vec3::new(2., 1., 0.5) * 0.6;
+        assert!((light.key - key).length() < 1e-5);
+        // Ambient 0.5 x 0.45 x 2; rims x 0.6 x 2.
+        let ambient = 0.45;
+        let rim_high = Vec3::new(0.0, 0.1, 0.4) * 1.2;
         let up = Vec3::Y;
         // Facing the viewer straight on: no rim; sun overhead lights fully.
         let f = light.lbp_factor(up, up);
-        assert!((f - (Vec3::splat(0.5 * 0.65) + Vec3::new(2., 1., 0.5))).length() < 1e-5);
+        assert!((f - (Vec3::splat(ambient * 0.65) + key)).length() < 1e-5);
         // Grazing view: rim (0.9^2) with the upper colour for an upward normal.
         let g = light.lbp_factor(up, Vec3::X);
-        assert!((g - f - Vec3::new(0.0, 0.1, 0.4) * 0.81).length() < 1e-5);
+        assert!((g - f - rim_high * 0.81).length() < 1e-5);
         // Downward normal: lower ambient (0.35) and no sun.
         let d = light.lbp_factor(-up, -up);
-        assert!((d - Vec3::splat(0.5 * 0.35)).length() < 1e-5);
+        assert!((d - Vec3::splat(ambient * 0.35)).length() < 1e-5);
         // The turn moves the light with the scene.
         let t = PreviewLight::from_settings(&s, Vec3::ZERO, 1.)
             .lbp_shaped(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
