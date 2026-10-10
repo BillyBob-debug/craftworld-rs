@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-10 — P3f gloss weights use the stored colour .w
+
+Sun, ambient, rim and rim2 .w for the gloss term = stored .w x the game factor (rim and rim2
+separately); rgb unchanged. Docs: docs/p3f-gloss-weights.md. Gloss only under --lbp-lighting.
+
 ## 2026-10-10 — P3b Pod lighting from the backdrop plan's settings
 
 Pod `--lbp-lighting` takes preset 0 of the PLevelSettings holder in the backdrop plan
