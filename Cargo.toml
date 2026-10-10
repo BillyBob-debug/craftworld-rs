@@ -31,3 +31,13 @@ lbp-script-vm = { path = "crates/lbp-script-vm" }
 lbp-ui-script = { path = "crates/lbp-ui-script" }
 lbp-runtime = { path = "crates/lbp-runtime" }
 lbp-sim = { path = "crates/lbp-sim" }
+
+# Debug builds of the explorer parse a ~100 MB catalog and decode textures; unoptimized
+# dependencies and workspace crates made a level load 3-6x slower than release.
+[profile.dev]
+opt-level = 1
+# Without this the debug executable passes 2 GB and Windows refuses to load it.
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+opt-level = 3
