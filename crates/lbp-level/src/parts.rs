@@ -589,6 +589,14 @@ pub struct World {
     pub backdrop_new: Option<usize>,
     pub backdrop_plan: Option<Descriptor>,
     pub backdrop_new_plan: Option<Descriptor>,
+    /// P3e: PWorld `lighting`, `colourCorrection`, `fog`, `fogTint`, `darkness` f32 (the
+    /// current values; meaning of each UNKNOWN, read for the preset-selection question).
+    pub lighting: [f32; 5],
+    /// P3e: the `target` and `from` GlobalSettings (5 f32 each) and the blend factor f32
+    /// stored after them (field names and order from community layouts, UNVERIFIED).
+    pub gs_target: [f32; 5],
+    pub gs_from: [f32; 5],
+    pub gs_blend: f32,
 }
 
 /// `reference(P*)` for a present part of Thing `me`.
@@ -1159,6 +1167,10 @@ fn part_body(
                 w.backdrop_new = tail.backdrop_new;
                 w.backdrop_plan = tail.backdrop_plan;
                 w.backdrop_new_plan = tail.backdrop_new_plan;
+                w.lighting = tail.lighting;
+                w.gs_target = tail.gs_target;
+                w.gs_from = tail.gs_from;
+                w.gs_blend = tail.gs_blend;
             }
         }
         _ => return r.unsupported(format!("part reader {name}")),
@@ -1325,7 +1337,9 @@ fn world_tail(r: &mut Reader, things: &mut Things) -> Result<World> {
         r.s32()?;
     }
     r.bool()?;
-    r.skip_f32(5)?;
+    for x in &mut out.lighting {
+        *x = r.f32()?;
+    }
     for _ in 0..3 {
         let n = r.count(2)?;
         for _ in 0..n {
@@ -1355,8 +1369,10 @@ fn world_tail(r: &mut Reader, things: &mut Things) -> Result<World> {
     }
     r.bool()?;
     r.s32()?;
-    r.skip_f32(10)?;
-    r.f32()?;
+    for x in out.gs_target.iter_mut().chain(out.gs_from.iter_mut()) {
+        *x = r.f32()?;
+    }
+    out.gs_blend = r.f32()?;
     r.bool()?;
     r.s32()?;
     if v >= 0x370 {

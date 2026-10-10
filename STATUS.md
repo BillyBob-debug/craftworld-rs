@@ -3955,3 +3955,20 @@ levels, baseline D149 0) / +0 newly Complete.**
 - Cloud (rustc 1.97): lbp-preview tests 117 pass (1 new), Clippy -D warnings pass, fmt clean.
 - Not tested here: level report, corpus census, gameplay-distance capture (PC).
 **+0 newly viewable / +0 newly Complete (expected; PC census decides).**
+
+## D194 — level shapes take their own PShape.color (2026-10-09)
+- PC report at b8331fd (reason line only): Bravery Test (0001e795) mesh Things neutral 0;
+  shape batches gfx 00012ba7 (9 Things) and 00018401 (59) neutral with "diffuse multiply
+  requires two direct textures or one texture and static COLOR"; 68 shapes flat fallback.
+- Shape batches key on (gfx material, PShape.color); under the level defaults each loads
+  with its PShape.color as the instance colour (link INFERRED). docs/d194-shape-color.md.
+- --level-report: neutral reason for shape/backdrop batches, shape Things per batch.
+- PC at 6111561: gfx 00012ba7 fixed (68 -> 59 flat fallback); gfx 00018401 (59 shapes,
+  beam square Thing 3316) refused "several animated samplers under a folded or
+  alpha-subtracted instance input". Graph dump: (s0 x THING) x (s1 x s2), 3 animated
+  samplers. Fix: nested tint over 2-3 animated samplers selects and loads (alpha
+  subtraction and a fourth sample stay refused); material_graph_dump example.
+- Cloud (rustc 1.99): lbp-preview lib tests 120 pass (4 new), workspace Clippy -D warnings
+  pass, fmt clean. No game data.
+- Not tested here: level report, corpus census, gameplay-distance capture (PC).
+**+0 newly viewable / +0 newly Complete (expected; PC census decides).**
