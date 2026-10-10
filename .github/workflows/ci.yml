@@ -51,7 +51,7 @@ jobs:
   # The viewers only compile here (no display). Runs on main pushes only to save
   # Actions minutes; the PC builds both viewers before every merge.
   viewers:
-    if: github.event_name == 'push' || true # TEMP: verify on the PR
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
