@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-09 — P2x level fog from the level's own settings
+
+Under the LBP-shaped lighting a level's fog uses its FogNear/FogFar/FogColor (game formula from
+the PC Ghidra read); the Pod keeps its fitted live-game constants. +0 viewable / +0 Complete;
+PC verifies shots (docs/p2x-level-fog.md).
+
 ## 2026-10-10 — P3f gloss weights use the stored colour .w
 
 Sun, ambient, rim and rim2 .w for the gloss term = stored .w x the game factor (rim and rim2

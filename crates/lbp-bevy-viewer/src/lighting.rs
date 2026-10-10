@@ -17,6 +17,17 @@ pub struct Fog {
     pub end: f32,
 }
 
+/// P2x: the game's output-space fog from a level's settings (level units). The game's
+/// vertex shader makes `f = (depth - (FogNear + bias)) / (FogFar - FogNear)` (PC Ghidra
+/// read, oracles/results/2026-10-09-shading-ghidra.md); the colour is FogColor divided by
+/// its own w when that is non-zero. The bias is script-set (the Pod's SetDOFAndFog), 0 here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameFog {
+    pub color: Vec3,
+    pub near: f32,
+    pub span: f32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreviewLight {
     /// Unit direction toward the light (display space = world space up to scale).
@@ -24,6 +35,11 @@ pub struct PreviewLight {
     pub key: Vec3,
     pub ambient: Vec3,
     pub fog: Option<Fog>,
+    /// P2x: the level's own game fog (None without usable settings).
+    pub game_fog: Option<GameFog>,
+    /// P2x: the Pod scenes use the live game's values (GAME_FOG_*, Puter-driven start)
+    /// because pod_planets.bin's stored settings differ from the live ones.
+    pub pod_fog: bool,
     pub from_level: bool,
     /// P2l: level values before the preview fit (key = sun colour x multiplier).
     pub raw_key: Vec3,
@@ -78,6 +94,8 @@ impl PreviewLight {
             key: Vec3::splat(0.65),
             ambient: Vec3::splat(0.35),
             fog: None,
+            game_fog: None,
+            pod_fog: false,
             from_level: false,
             raw_key: Vec3::splat(0.65),
             raw_ambient: Vec3::splat(0.35),
@@ -176,11 +194,25 @@ impl PreviewLight {
             ),
             None => "fog not used (unusable colour or range)".into(),
         });
+        let game_fog = (s.fog_near.is_finite() && s.fog_far.is_finite() && s.fog_far > s.fog_near)
+            .then(|| {
+                // The game divides the stored colour by its own w when w is non-zero.
+                let w = s.fog_color[3];
+                let divisor = if w.is_finite() && w > 0. { w } else { 1. };
+                finite_rgb(s.fog_color).map(|c| GameFog {
+                    color: c / divisor,
+                    near: s.fog_near,
+                    span: s.fog_far - s.fog_near,
+                })
+            })
+            .flatten();
         Ok(Self {
             toward_light: toward,
             key,
             ambient,
             fog,
+            game_fog,
+            pod_fog: false,
             from_level: true,
             raw_key,
             raw_ambient,
@@ -243,6 +275,15 @@ impl PreviewLight {
         if !self.lbp {
             return Vec4::ZERO;
         }
+        // P2x: a level's own FogNear/FogFar; the Pod keeps the live-game constants.
+        if let (false, Some(f)) = (self.pod_fog, self.game_fog) {
+            return Vec4::new(
+                f.near * self.display_scale,
+                1. / (f.span * self.display_scale),
+                GAME_FOG_CC,
+                1.,
+            );
+        }
         let t = self.pod_t.clamp(0., 1.);
         let start = GAME_FOG_START[0] + (GAME_FOG_START[1] - GAME_FOG_START[0]) * t;
         Vec4::new(
@@ -251,6 +292,14 @@ impl PreviewLight {
             GAME_FOG_CC,
             1.,
         )
+    }
+
+    /// P2x: fog colour in output space (the level's FogColor, or the Pod's live value).
+    pub fn lbp_fog_color(&self) -> Vec3 {
+        match (self.pod_fog, self.game_fog) {
+            (false, Some(f)) => f.color,
+            _ => Vec3::from(GAME_FOG_COLOR),
+        }
     }
 
     /// CPU mirror of the shader's `preview_light` for an already oriented unit normal.
@@ -451,6 +500,7 @@ mod tests {
         let mut fog = light.clone();
         fog.display_scale = 2.;
         fog.pod_t = 1.;
+        fog.pod_fog = true;
         let f = fog.lbp_fog();
         assert!((f.x - 5810. * 2.).abs() < 1e-2 && (f.y - 1. / 52648. / 2.).abs() < 1e-9);
         assert_eq!(PreviewLight::generic().lbp_fog(), Vec4::ZERO);
@@ -483,5 +533,44 @@ mod tests {
             assert!(lines[0].contains("not game"));
             assert!(lines.last().unwrap().contains("2 of 5"));
         }
+    }
+
+    #[test]
+    fn level_fog_uses_its_own_near_far_and_colour_unless_pod() {
+        let mut s = LevelSettings {
+            sun_position: [0., 1., 0.],
+            sun_position_scale: 1000.,
+            sun_color: [1.; 4],
+            ambient_color: [0.5; 4],
+            sun_multiplier: 1.,
+            exposure: 1.,
+            fog_color: [0.4, 0.2, 0.1, 0.5],
+            fog_near: 1000.,
+            fog_far: 5000.,
+            rim_color: [0.; 4],
+            rim_color2: [0.; 4],
+            ..LevelSettings::default()
+        };
+        let base = PreviewLight::from_settings(&s, Vec3::ZERO, 0.01);
+        let lit = PreviewLight {
+            display_scale: 0.01,
+            ..base.lbp_shaped(Quat::IDENTITY)
+        };
+        let f = lit.lbp_fog();
+        assert!((f.x - 10.).abs() < 1e-4, "{f:?}");
+        assert!((f.y - 1. / 40.).abs() < 1e-6, "{f:?}");
+        assert_eq!(f.w, 1.);
+        // Stored colour is divided by its own w (0.5).
+        assert!((lit.lbp_fog_color() - Vec3::new(0.8, 0.4, 0.2)).length() < 1e-6);
+        let pod = PreviewLight {
+            pod_fog: true,
+            ..lit.clone()
+        };
+        assert_eq!(pod.lbp_fog_color(), Vec3::from(GAME_FOG_COLOR));
+        assert!((pod.lbp_fog().x - 25810. * 0.01).abs() < 1e-3);
+        // An unusable range leaves the Pod constants.
+        s.fog_far = s.fog_near;
+        let bad = PreviewLight::from_settings(&s, Vec3::ZERO, 0.01);
+        assert!(bad.game_fog.is_none());
     }
 }

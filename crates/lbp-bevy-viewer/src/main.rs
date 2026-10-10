@@ -2820,10 +2820,13 @@ fn apply_lighting(
     if !on && !v.lighting.applied {
         return;
     }
+    // P2x: Pod scenes (shell layer, game camera, globe view) keep the live-game fog constants.
+    let pod_fog = v.lighting.shell.is_some() || v.level.game_camera || v.level.pod.is_some();
     let light = on.then(|| {
         if v.lighting.lbp {
             let mut l = v.lighting.light.lbp_shaped(turn);
             l.pod_t = pod_t;
+            l.pod_fog = pod_fog;
             l
         } else {
             v.lighting.light.clone()
@@ -2833,6 +2836,7 @@ fn apply_lighting(
         let l = if v.lighting.lbp {
             let mut l = l.lbp_shaped(shell_turn);
             l.pod_t = pod_t;
+            l.pod_fog = pod_fog;
             l
         } else {
             l.clone()
