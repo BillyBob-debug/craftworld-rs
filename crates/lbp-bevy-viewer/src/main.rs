@@ -1023,26 +1023,26 @@ fn load(
                 (false, Some(n)) => Some(n),
                 (false, None) => v.lighting.lbp.then_some(0),
             };
-            if let Some(n) = preset {
-                // P3b: the Pod's live light is the backdrop plan's preset n.
-                let from_plan = v
-                    .level
-                    .pod
-                    .and(level.scene.backdrop_presets.get(n).copied());
-                if let Some(p) = from_plan {
-                    level.scene.settings = Some(p);
-                    if let Some(shell) = level.shell.as_mut() {
-                        shell.settings = Some(p);
-                    }
-                    println!(
-                        "Lighting preset {n} of {} from the backdrop plan (Pod live source)",
-                        level.scene.backdrop_presets.len()
-                    );
-                } else {
-                    println!("{}", use_lighting_preset(&mut level.scene, n));
-                    if let Some(shell) = level.shell.as_mut() {
-                        println!("Shell: {}", use_lighting_preset(shell, n));
-                    }
+            // P3b: the Pod's live light is the backdrop plan's preset (also for the plain
+            // `--preview-lighting`, whose main block would otherwise be the wrong holder).
+            let from_plan = v
+                .level
+                .pod
+                .and(preset.or((!v.level.lighting_main).then_some(0)))
+                .and_then(|n| level.scene.backdrop_presets.get(n).map(|p| (n, *p)));
+            if let Some((n, p)) = from_plan {
+                level.scene.settings = Some(p);
+                if let Some(shell) = level.shell.as_mut() {
+                    shell.settings = Some(p);
+                }
+                println!(
+                    "Lighting preset {n} of {} from the backdrop plan (Pod live source)",
+                    level.scene.backdrop_presets.len()
+                );
+            } else if let Some(n) = preset {
+                println!("{}", use_lighting_preset(&mut level.scene, n));
+                if let Some(shell) = level.shell.as_mut() {
+                    println!("Shell: {}", use_lighting_preset(shell, n));
                 }
             }
             let plan = plan_level(&level.scene, v.level.focus, v.level.pod)?;
@@ -1384,7 +1384,14 @@ fn prepare(
             range.len()
         ));
     }
-    prepare_buckets(&g.positions, buckets, normalize, evidence, details)
+    prepare_buckets(
+        &g.positions,
+        preview.normals.as_deref(),
+        buckets,
+        normalize,
+        evidence,
+        details,
+    )
 }
 /// D192: triangles and primitive ranges without the material-less groups. The game's
 /// per-primitive draw loop skips a primitive whose material is null (no bind, no draw;
@@ -1417,6 +1424,7 @@ fn drop_materialless(preview: &lbp_preview::GroupedMesh) -> Result<TriangleParti
 /// Material buckets over one position array (model mesh or merged shape batch).
 fn prepare_buckets(
     positions: &[[f32; 3]],
+    game_normals: Option<&[[f32; 3]]>,
     buckets: Vec<adapter::Bucket<lbp_preview::MaterialAsset>>,
     normalize: bool,
     evidence: &mut browser::PreviewEvidence,
@@ -1447,7 +1455,18 @@ fn prepare_buckets(
             }
             Err(e) => return Err(e),
         };
-        let normals_trusted = adapter::mesh_normals_trusted(&mesh);
+        let mut normals_trusted = adapter::mesh_normals_trusted(&mesh);
+        // P2v: the game's decoded normals replace ours; the draw is trusted when every
+        // referenced vertex took one.
+        if let Some(game) = game_normals {
+            let (used, total, agree) = adapter::apply_game_normals(&mut mesh, game);
+            if total > 0 {
+                details.push(format!(
+                    "Normals: game (decoded) on {used}/{total} referenced vertices, mean |dot| with generated {agree:.3}"
+                ));
+                normals_trusted = used == total;
+            }
+        }
         let surface = asset.as_ref().and_then(|a| a.surface());
         let gloss = surface.and_then(|s| s.specular.map(|c| (c, s.cosine_power)));
         let alpha_mix = asset
@@ -1501,10 +1520,7 @@ fn prepare_buckets(
                 let mut image =
                     adapter::image_axes(width, height, a.display_pixels().to_vec(), a.wrap)?;
                 if a.nearest_sampling() {
-                    if let bevy::image::ImageSampler::Descriptor(s) = &mut image.sampler {
-                        s.mag_filter = bevy::image::ImageFilterMode::Nearest;
-                        s.min_filter = bevy::image::ImageFilterMode::Nearest;
-                    }
+                    adapter::set_nearest(&mut image);
                 }
                 Ok::<_, String>(image)
             })
@@ -1668,6 +1684,7 @@ fn plan_level(
                 // World-space batch; a material that did not select draws neutral grey.
                 level_scene::ScenePayload::Shapes { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
                     false,
                     &mut evidence,
@@ -1676,6 +1693,7 @@ fn plan_level(
                 // D119 backdrop batch (mesh space; the item matrix places it).
                 level_scene::ScenePayload::Backdrop { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
                     false,
                     &mut evidence,
@@ -1684,6 +1702,7 @@ fn plan_level(
                 // D160 sticker decal overlays (world space, alpha blended).
                 level_scene::ScenePayload::Decals { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(Some(material.clone()), batch.triangles.clone())],
                     false,
                     &mut evidence,
@@ -3042,10 +3061,7 @@ fn synthetic(
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, sampling_uv)
         .with_inserted_indices(bevy::mesh::Indices::U32(vec![0, 2, 1, 0, 3, 2]));
         let mut image = adapter::image(2, 2, rgba.clone(), repeat).unwrap();
-        if let bevy::image::ImageSampler::Descriptor(ref mut s) = image.sampler {
-            s.mag_filter = bevy::image::ImageFilterMode::Nearest;
-            s.min_filter = bevy::image::ImageFilterMode::Nearest;
-        }
+        adapter::set_nearest(&mut image);
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(dual::material(StandardMaterial {
