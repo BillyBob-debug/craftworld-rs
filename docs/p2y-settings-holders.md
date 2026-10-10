@@ -19,3 +19,10 @@ Observations from the repo (no game data in the cloud):
 holder (Thing index, stored preset count, main and preset values) and flags values matching the live ones.
 Run on pod_planets and, if the plan is reachable, the plan's level path. Outcome decides: another holder
 (read it), a script write (model it in the Pod script bindings), or a parse fault (fix the reader).
+
+## Result (PC run on 2be0ae6, PR #104 comment)
+
+pod_planets (0001d050) has one PLevelSettings holder (Thing 5, not the world holder). Main: sun x 0.86667,
+fog 1000..4000. Preset 0: sun x 0.90790, fog 0.9732/0.7641/0.5025, 15,082.99..84,226.81. Neither matches the
+live values, so the reader reports the stored bytes correctly and the live game's values come from elsewhere:
+a PLevelSettings inside a plan (`--plan 0001d054` mode, added after this run) or script/native writes.
