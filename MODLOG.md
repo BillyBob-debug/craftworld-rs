@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-10 — P3f gloss weights use the stored colour .w
+
+Sun, ambient, rim and rim2 .w for the gloss term = stored .w x the game factor (rim and rim2
+separately); rgb unchanged. Docs: docs/p3f-gloss-weights.md. Gloss only under --lbp-lighting.
+
 ## 2026-10-10 — P3d gloss colour maps
 
 Port 2 wired from one sampler (2,132 graphs) multiplies the gloss term under --lbp-lighting;
