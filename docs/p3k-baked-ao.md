@@ -16,14 +16,17 @@ Change (only under `--lbp-lighting`, `--no-baked-ao` turns it off):
 - viewer: R8 texture with a box-filtered mip chain (trilinear, clamped) on binding 129/130,
   `ao_params` (scale, bias, on) on 131; the batch's `uv1` (the unwrap) is written to UV_1 when no
   material feature already took it, else "P3k: baked AO not drawn (UV1 is taken)".
-- shader: `ao = sample(UV1).r * scale + bias` multiplies the ambient and sun terms inside the
-  squared light factor; the rim is not occluded.
+- shader (revised after the PC review of #117): fpdec v0/v3 arithmetic is `ao = aomap.w x scale
+  + bias`; ambient x ao; sun x shadowmap.x x ao; rim x shadowmap.x (CONFIRMED). A B8 texel reads
+  as A = one in RPCS3, so a B8 lightmap on `aomap` would make `ao = scale + bias` constant; the
+  lightmap texel therefore enters as `shadowmap.x`. The first draft used the texel as `aomap.w`
+  and darkened Bravery Test to x0.2-0.45 (PC changed-pixel table).
 
-INFERRED, unconfirmed: ao scaling ambient and sun (not the rim or gloss), the lightmap being the
-raw byte (remap 0xaae4) in the red channel, clamp addressing, the preset whose scale/bias is used
-(the same one that lights the level; the selection rule is still unknown), baked shadow strength
-(bakedShadowAmount/Blur, not drawn). Not rendered in the cloud (no GPU, no game data).
+INFERRED, unconfirmed: the lightmap binding to `shadowmap.x` (u14) rather than `aomap` (u8) (the
+bind is not decoded; needs an RSX capture), the red channel as the texel, clamp addressing, the
+preset whose scale/bias is used (the one that lights the level), baked shadow strength
+(bakedShadowAmount/Blur, not applied), the gloss term following the sun visibility. Not rendered in
+the cloud (no GPU, no game data).
 
-PC verification wanted: fmt/test/clippy on 1.99; `--level-report` backdrop errors empty for
-Bravery Test (0001e795) and tutorial_23 (0001db4f); gameplay-distance before/after (`--no-baked-ao`)
-against the RPCS3 frame: if the backdrop is too dark, try AO on the sun term only.
+PC verification wanted: gameplay-distance before/after (`--no-baked-ao`) on Bravery Test and
+tutorial_23 against the RPCS3 frame; an RSX bind check for which unit the lightmap is on.

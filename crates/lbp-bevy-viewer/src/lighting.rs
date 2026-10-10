@@ -330,19 +330,20 @@ impl PreviewLight {
     /// unit direction from the surface to the viewer.
     #[allow(dead_code)] // shader mirror, exercised by tests
     pub fn lbp_factor(&self, normal: Vec3, to_view: Vec3) -> Vec3 {
-        self.lbp_factor_ao(normal, to_view, 1.)
+        self.lbp_factor_baked(normal, to_view, 1., 1.)
     }
 
-    /// P3k mirror: `ao` (baked AO, INFERRED) scales the ambient and sun terms, not the rim.
+    /// P3k mirror (fpdec v0/v3 arithmetic): ambient x ao, sun x baked x ao, rim x baked, where
+    /// `ao` = bakedAOScale + bakedAOBias and `baked` is the lightmap texel (shadowmap.x).
     #[allow(dead_code)] // shader mirror, exercised by tests
-    pub fn lbp_factor_ao(&self, normal: Vec3, to_view: Vec3, ao: f32) -> Vec3 {
+    pub fn lbp_factor_baked(&self, normal: Vec3, to_view: Vec3, ao: f32, baked: f32) -> Vec3 {
         let up = (normal.y + 1.) / 2.;
         // V from the eye: 0 facing the viewer, 0.81 at grazing. P2m tried V toward the
         // eye; D203 measured the room 2.8x too bright with it, so it was reverted (P2n).
         let rim = (normal.dot(-to_view) + 0.9).clamp(0., 1.).powi(2);
-        (self.ambient * (normal.y * 0.15 + 0.5) + self.key * normal.dot(self.toward_light).max(0.))
-            * ao
-            + self.rim[0].lerp(self.rim[1], up) * rim
+        self.ambient * (normal.y * 0.15 + 0.5) * ao
+            + self.key * (normal.dot(self.toward_light).max(0.) * baked * ao)
+            + self.rim[0].lerp(self.rim[1], up) * rim * baked
     }
 }
 
@@ -445,7 +446,7 @@ mod tests {
     }
 
     #[test]
-    fn baked_ao_tweak_follows_settings_and_scales_ambient_and_sun_only() {
+    fn baked_ao_tweak_follows_settings_and_the_mirror_splits_ao_from_the_texel() {
         let mut st = settings();
         st.baked_ao_scale = 0.5;
         st.baked_ao_bias = 0.25;
@@ -462,12 +463,12 @@ mod tests {
         lit.rim = [Vec3::splat(0.5); 2];
         let (n, v) = (Vec3::Y, Vec3::Z);
         let full = lit.lbp_factor(n, v);
-        assert_eq!(full, lit.lbp_factor_ao(n, v, 1.));
-        let none = lit.lbp_factor_ao(n, v, 0.);
-        assert!(
-            none.x > 0. && none.x < full.x,
-            "rim survives, ambient and sun go"
-        );
+        assert_eq!(full, lit.lbp_factor_baked(n, v, 1., 1.));
+        // ao scales ambient and sun only; the texel scales sun and rim only.
+        let no_ao = lit.lbp_factor_baked(n, v, 0., 1.);
+        assert!(no_ao.x > 0. && no_ao.x < full.x, "rim survives");
+        let dark = lit.lbp_factor_baked(n, v, 1., 0.);
+        assert!(dark.x > 0. && dark.x < full.x, "ambient survives");
     }
 
     #[test]
