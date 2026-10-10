@@ -4,8 +4,8 @@
 
 Materials with a stored AlphaTestLevel discard fragments below it when the LBP surface extras are on
 (docs/p3a-alpha-test.md). +0 viewable / +0 Complete; PC verifies a cut-out level and the Pod.
-## 2026-10-10 — P3e PWorld lighting fields
 
+## 2026-10-10 — P3e PWorld lighting fields
 
 World keeps the lighting/colourCorrection/fog/fogTint/darkness f32 and the GlobalSettings
 target/from + blend; the settings probe prints them. Question: which backdrop preset a level
