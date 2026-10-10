@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-10 — P3c output-port census example
+
+Read-only example counting what feeds each material output port (specular, glow, reflection
+planning). No viewer change. Docs: docs/p3c-output-ports.md. PC runs it on the corpus.
+
 ## 2026-10-09 — P2u mipmaps and anisotropic filtering
 
 Game textures get a CPU box-filtered mip chain (linear-light for colour) and a trilinear
