@@ -33,6 +33,9 @@ pub struct Surface {
     /// GfxMaterial CosinePower (finite, clamped to 1..=4096).
     pub cosine_power: f32,
     pub alpha_mode_raw: u8,
+    /// GfxMaterial AlphaTestLevel (finite, 0..=1; 0 = no cut-out). The decoded shaders write
+    /// alpha 0 below it (oracles/results/2026-10-09-shading-fpdec.md); the viewer discards.
+    pub alpha_test: f32,
     /// Wired surface ports this preview does not draw, with the reason.
     pub skipped: Vec<String>,
 }
@@ -66,6 +69,9 @@ impl Surface {
         }
         parts.extend(self.skipped.iter().cloned());
         parts.push(format!("alpha mode {}", self.alpha_mode_raw));
+        if self.alpha_test > 0. {
+            parts.push(format!("alpha test {:.2}", self.alpha_test));
+        }
         format!("P2q surface: {}", parts.join(" • "))
     }
 }
@@ -182,6 +188,7 @@ pub(crate) fn load(
         // CosinePower 22 is the decoded shaders' default (pod-fidelity README, D196).
         cosine_power: scalar(scalars.cosine_power_bits, 1., MAX_COSINE_POWER, 22.),
         alpha_mode_raw: scalars.alpha_mode_raw,
+        alpha_test: scalar(scalars.alpha_test_bits, 0., 1., 0.),
         specular: routes.specular,
         spec_map: None,
         skipped: routes.skipped,

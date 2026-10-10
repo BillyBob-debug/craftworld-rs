@@ -1023,7 +1023,23 @@ fn load(
                 (false, Some(n)) => Some(n),
                 (false, None) => v.lighting.lbp.then_some(0),
             };
-            if let Some(n) = preset {
+            // P3b: the Pod's live light is the backdrop plan's preset (also for the plain
+            // `--preview-lighting`, whose main block would otherwise be the wrong holder).
+            let from_plan = v
+                .level
+                .pod
+                .and(preset.or((!v.level.lighting_main).then_some(0)))
+                .and_then(|n| level.scene.backdrop_presets.get(n).map(|p| (n, *p)));
+            if let Some((n, p)) = from_plan {
+                level.scene.settings = Some(p);
+                if let Some(shell) = level.shell.as_mut() {
+                    shell.settings = Some(p);
+                }
+                println!(
+                    "Lighting preset {n} of {} from the backdrop plan (Pod live source)",
+                    level.scene.backdrop_presets.len()
+                );
+            } else if let Some(n) = preset {
                 println!("{}", use_lighting_preset(&mut level.scene, n));
                 if let Some(shell) = level.shell.as_mut() {
                     println!("Shell: {}", use_lighting_preset(shell, n));
@@ -1316,6 +1332,8 @@ struct Prepared {
     gloss: Option<([f32; 3], f32)>,
     /// P3d: gloss colour map (linear) and its UV mode (1 = primary UV, 2 = UV1).
     spec_map: Option<(Image, u32)>,
+    /// P3a: AlphaTestLevel cut-out (0 = none), LBP-lighting materials only.
+    alpha_test: f32,
     /// D189: graph textures 1.. (texture 0 is `image`) and the encoded steps.
     graph: Option<(Vec<Image>, Vec<lbp_preview::FragmentStep>)>,
 }
@@ -1455,6 +1473,7 @@ fn prepare_buckets(
         }
         let surface = asset.as_ref().and_then(|a| a.surface());
         let gloss = surface.and_then(|s| s.specular.map(|c| (c, s.cosine_power)));
+        let alpha_test = surface.map_or(0., |s| s.alpha_test);
         let alpha_mix = asset
             .as_ref()
             .and_then(|a| a.texture())
@@ -1631,6 +1650,7 @@ fn prepare_buckets(
             bump,
             gloss,
             spec_map,
+            alpha_test,
             graph,
         });
     }
@@ -1681,6 +1701,9 @@ fn upload(
             // Budgets are checked on the CPU side; a refusal here keeps the base texture.
             eprintln!("D189: {e}");
         }
+    }
+    if p.alpha_test > 0. {
+        dual::enable_alpha_test(&mut surface, p.alpha_test);
     }
     if let Some((color, power)) = p.gloss {
         dual::enable_gloss(&mut surface, color, power);
@@ -2566,16 +2589,17 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             }
             if surface_on {
                 // P2q: displayed draws (entity × bucket) carrying each surface extra.
-                let (mut bump, mut gloss, mut total) = (0, 0, 0);
+                let (mut bump, mut gloss, mut alpha, mut total) = (0, 0, 0, 0);
                 for (mesh, _) in &plan.placed {
                     for p in plan.prepared[*mesh].iter().flatten() {
                         total += 1;
                         bump += usize::from(p.bump.is_some());
                         gloss += usize::from(p.gloss.is_some());
+                        alpha += usize::from(p.alpha_test > 0.);
                     }
                 }
                 lines.push(format!(
-                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy (drawn only under --lbp-lighting)"
+                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy, {alpha} alpha-tested (P3a; drawn only under --lbp-lighting)"
                 ));
             }
             lines.extend(plan.lines);
@@ -2596,6 +2620,27 @@ fn level_report(v: &Viewer) -> Result<(), String> {
                 ));
                 for (reason, groups) in level_scene::neutral_reasons(&m.payload) {
                     lines.push(format!("    neutral ({groups} groups): {reason}"));
+                }
+                // Which shapes a batch merges (reader order), to tie it to a visible object.
+                if let level_scene::ScenePayload::Shapes { batch, .. } = &m.payload {
+                    const SHOWN: usize = 16;
+                    let shown: Vec<String> = batch
+                        .things
+                        .iter()
+                        .take(SHOWN)
+                        .map(ToString::to_string)
+                        .collect();
+                    let more = batch.things.len().saturating_sub(SHOWN);
+                    lines.push(format!(
+                        "    shape Things ({}): {}{}",
+                        batch.things.len(),
+                        shown.join(", "),
+                        if more > 0 {
+                            format!(" (+{more} more)")
+                        } else {
+                            String::new()
+                        }
+                    ));
                 }
             }
             Ok(lines)

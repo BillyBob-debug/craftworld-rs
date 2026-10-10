@@ -180,6 +180,11 @@ pub fn enable_spec_map(material: &mut ViewerMaterial, image: Handle<Image>, uv_m
     material.extension.graph_image5 = Some(image);
     material.extension.graph_info.y = uv_mode;
 }
+/// P3a: alpha cut-out: fragments whose colour alpha is below `level` are discarded (LBP
+/// mode materials with a stored AlphaTestLevel, docs/p3a-alpha-test.md).
+pub fn enable_alpha_test(material: &mut ViewerMaterial, level: f32) {
+    material.extension.bump_params.z = level;
+}
 /// P2q: static gloss colour with exponent `power` (CosinePower).
 pub fn enable_gloss(material: &mut ViewerMaterial, color: [f32; 3], power: f32) {
     material.extension.gloss = Vec3::from(color).extend(power.max(1.));
@@ -474,6 +479,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
 #endif
     }
 #endif
+    if bump_params.z > 0.0 && color.a < bump_params.z {
+        discard;
+    }
     var rgb = color.rgb;
     if light_dir.w > 0.5 {
         // P2s: mode 3 (untrusted smooth normals) shades with the face normal.

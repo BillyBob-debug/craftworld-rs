@@ -5,6 +5,34 @@
 Port 2 wired from one sampler (2,132 graphs) multiplies the gloss term under --lbp-lighting;
 UV from the diffuse coordinates or a free UV1. Docs: docs/p3d-gloss-map.md. PC verifies shots.
 
+## 2026-10-09 — P3a alpha-test cut-out under the LBP-shaped lighting
+
+Materials with a stored AlphaTestLevel discard fragments below it when the LBP surface extras are on
+(docs/p3a-alpha-test.md). +0 viewable / +0 Complete; PC verifies a cut-out level and the Pod.
+
+## 2026-10-10 — P3e PWorld lighting fields
+
+World keeps the lighting/colourCorrection/fog/fogTint/darkness f32 and the GlobalSettings
+target/from + blend; the settings probe prints them. Question: which backdrop preset a level
+selects. Docs: docs/p3e-world-lighting.md. No viewer change.
+
+## 2026-10-10 — P3b Pod lighting from the backdrop plan's settings
+
+Pod `--lbp-lighting` takes preset 0 of the PLevelSettings holder in the backdrop plan
+(live source, probes #104/#105), also under plain --preview-lighting (its main block was the wrong holder). Docs: docs/p3b-backdrop-settings.md. PC verifies against RPCS3.
+
+## 2026-10-09 — D194 level shapes take their own PShape.color
+
+Shape batches split per (gfx material, PShape.color) and, under the level defaults, load
+with that colour as the instance colour. Targets the 68 grey shapes in Bravery Test
+(gfx 00012ba7, 00018401). --level-report prints shape-batch reasons and Things.
++0 viewable / +0 Complete expected; PC verifies.
+
+## 2026-10-10 — P3c output-port census example
+
+Read-only example counting what feeds each material output port (specular, glow, reflection
+planning). No viewer change. Docs: docs/p3c-output-ports.md. PC runs it on the corpus.
+
 ## 2026-10-09 — P2v game normals for model meshes
 
 Model meshes are lit with the game's decoded normals instead of normals generated from our
