@@ -1697,6 +1697,9 @@ pub enum ScenePayload {
     Backdrop {
         batch: crate::level_backdrop::BackdropBatch,
         material: Result<std::sync::Arc<MaterialAsset>, String>,
+        /// P3k: the static mesh's baked-AO lightmap (shared by every batch of the mesh); the
+        /// batch's `uv1` is its unwrap.
+        lightmap: Option<std::sync::Arc<Lightmap>>,
     },
     /// D160: world-space sticker decal overlays sharing one decal texture (drawn with
     /// alpha blending; `material` is a plain clamped texture, no gfx material graph).
@@ -1704,6 +1707,55 @@ pub enum ScenePayload {
         batch: DecalBatch,
         material: std::sync::Arc<MaterialAsset>,
     },
+}
+
+/// P3k: a backdrop static mesh's baked-AO lightmap, one byte per texel (top mip only; the
+/// GTF is B8, read as the byte before the remap).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Lightmap {
+    pub width: u32,
+    pub height: u32,
+    pub r8: Vec<u8>,
+}
+
+/// P3k: decodes the static mesh's lightmap texture (B8 GTF, <= 16 Mi texels) to one byte per
+/// texel. A texture that is not a plain 2D map of at most 4096 x 4096 is refused.
+fn load_lightmap(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    descriptor: &lbp_mesh::static_mesh::StaticDescriptor,
+    control: &LoadControl,
+) -> Result<Lightmap, String> {
+    let hash = descriptor
+        .sha1
+        .map(|h| h.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let key = resolve(catalog, descriptor.guid, hash.as_deref())?;
+    let texture = lbp_texture::decode_reader(
+        key.size,
+        |offset, count| {
+            source
+                .read_hex_checked(&key, offset, count, control)
+                .map(|p| p.bytes)
+                .map_err(lbp_texture::Error::Input)
+        },
+        || control.check().is_err(),
+    )
+    .map_err(|e| e.to_string())?;
+    let (width, height) = (texture.header.width, texture.header.height);
+    if width == 0 || height == 0 || width > 4096 || height > 4096 {
+        return Err(format!("Unsupported: lightmap extent {width}x{height}"));
+    }
+    let r8: Vec<u8> = texture
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|p| p[0])
+        .collect();
+    if r8.len() != width as usize * height as usize {
+        return Err("Invalid: lightmap pixel count".into());
+    }
+    Ok(Lightmap { width, height, r8 })
 }
 
 /// D160: merged world-space decal overlay triangles for one decal texture.
@@ -2039,6 +2091,7 @@ pub fn neutral_reasons(p: &ScenePayload) -> Vec<(String, usize)> {
         ScenePayload::Backdrop {
             batch,
             material: Err(e),
+            ..
         } if !batch.triangles.is_empty() => out.push((e.clone(), 1)),
         _ => {}
     }
@@ -2549,6 +2602,27 @@ fn load_backdrop(
                     MeshSource::Guid(g) => Some(*g),
                     _ => None,
                 };
+                // P3k: baked AO. A failure leaves the mesh unlit by AO and is counted.
+                let lightmap = match mesh.lightmaps[0].as_ref() {
+                    Some(d) => match control
+                        .check()
+                        .and_then(|_| load_lightmap(source, catalog, d, control))
+                    {
+                        Ok(l) => match charge(l.r8.len()) {
+                            Ok(()) => Some(std::sync::Arc::new(l)),
+                            Err(e) => {
+                                counts.errors.push(format!("lightmap: {e}"));
+                                None
+                            }
+                        },
+                        Err(e) => {
+                            counts.errors.push(format!("lightmap: {e}"));
+                            None
+                        }
+                    },
+                    None => None,
+                };
+                control.check()?;
                 bd::add_backdrop_mesh(
                     scene,
                     &mut counts,
@@ -2583,7 +2657,14 @@ fn load_backdrop(
                             Ok(std::sync::Arc::new(asset))
                         })();
                         let selected = material.as_ref().map(|_| ()).map_err(Clone::clone);
-                        (ScenePayload::Backdrop { batch, material }, selected)
+                        (
+                            ScenePayload::Backdrop {
+                                batch,
+                                material,
+                                lightmap: lightmap.clone(),
+                            },
+                            selected,
+                        )
                     },
                     payload_bounds,
                 );
