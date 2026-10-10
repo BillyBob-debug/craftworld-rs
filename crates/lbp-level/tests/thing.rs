@@ -607,3 +607,56 @@ fn thing_budget() {
     let r = read_payload(&w.b, rev(0x3e5, 1), limits, &none);
     assert!(matches!(r.stop, Some(Stop::Budget { what: "things", .. })));
 }
+
+#[test]
+fn level_lighting_blends_presets_by_world_lighting_and_darkness() {
+    use lbp_level::parts::LevelSettings;
+    let mk = |sun: f32, exposure: f32, fog: f32, ao_bias: f32| LevelSettings {
+        sun_color: [sun, 0., 0., 1.],
+        exposure,
+        fog_color: [fog, fog, fog, 1.],
+        fog_near: 100. * exposure,
+        fog_far: 1000.,
+        baked_ao_bias: ao_bias,
+        baked_ao_scale: 1.,
+        ..LevelSettings::default()
+    };
+    let main = mk(9., 9., 9., 9.);
+    let presets = [
+        mk(0., 1., 0.1, 0.),
+        mk(1., 2., 0.5, 0.5),
+        mk(3., 4., 0.9, 0.),
+    ];
+    let at = |l: f32, d: f32| LevelSettings::at_lighting(&main, &presets, l, d);
+    // Spread evenly: 0, 0.5, 1 land on the presets themselves.
+    let (s, pos) = at(0., 0.);
+    assert_eq!((s.sun_color[0], pos), (0., Some(0.)));
+    let (s, pos) = at(0.5, 0.);
+    assert_eq!((s.sun_color[0], s.exposure, pos), (1., 2., Some(1.)));
+    let (s, pos) = at(1., 0.);
+    assert_eq!((s.sun_color[0], s.exposure, pos), (3., 4., Some(2.)));
+    // 0.6 of three presets: position 1.2, i.e. 80% preset 1 and 20% preset 2.
+    let (s, pos) = at(0.6, 0.);
+    assert!((pos.unwrap() - 1.2).abs() < 1e-6);
+    assert!((s.sun_color[0] - 1.4).abs() < 1e-6);
+    assert!((s.exposure - 2.4).abs() < 1e-6);
+    assert!((s.baked_ao_bias - 0.4).abs() < 1e-6);
+    assert!((s.fog_near - 240.).abs() < 1e-3);
+    // Darkness scales the exposure and the fog colour, nothing else.
+    let (d, _) = at(0.6, 0.25);
+    assert!((d.exposure - s.exposure * 0.75).abs() < 1e-6);
+    assert!((d.fog_color[0] - s.fog_color[0] * 0.75).abs() < 1e-6);
+    assert_eq!(d.fog_color[3], 1.);
+    assert_eq!(d.sun_color, s.sun_color);
+    // Out of range or non-finite lighting clamps; one preset is that preset.
+    assert_eq!(at(7., 0.).1, Some(2.));
+    assert_eq!(at(f32::NAN, 0.).1, Some(0.));
+    assert_eq!(
+        LevelSettings::at_lighting(&main, &presets[1..2], 0.9, 0.),
+        (presets[1], Some(0.))
+    );
+    // No presets: the main block, with darkness still applied.
+    let (m, pos) = LevelSettings::at_lighting(&main, &[], 0.5, 0.5);
+    assert_eq!((m.sun_color, pos), (main.sun_color, None));
+    assert_eq!(m.exposure, 4.5);
+}

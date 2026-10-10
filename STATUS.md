@@ -3972,3 +3972,11 @@ levels, baseline D149 0) / +0 newly Complete.**
   pass, fmt clean. No game data.
 - Not tested here: level report, corpus census, gameplay-distance capture (PC).
 **+0 newly viewable / +0 newly Complete (expected; PC census decides).**
+
+## P3m — level lighting from presets blended by PWorld lighting (2026-10-10)
+- Live reads (tutorial_23, Bravery Test, Moon) fit: presets spread over PWorld lighting (position
+  lighting x (n-1)), blended; darkness scales exposure and fog colour. Replaces preset 0 and the main block;
+  fixes the all-blue levels under --preview-lighting (main block fog 1000..4000). docs/p3m-level-lighting.md.
+- Tests: lbp-level thing test level_lighting_blends_presets_by_world_lighting_and_darkness.
+- Not settled: 4-5 preset spacing, darkness split, Moon/Pod fog colour (script driven).
+**+0 newly viewable / +0 newly Complete.**

@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 — P3m levels are lit by their presets blended by PWorld lighting
+
+Stored presets are spread over PWorld `lighting` and blended; `darkness` scales exposure and fog colour.
+Matches the live blocks of tutorial_23, Bravery Test and the Moon level to 4 digits. Replaces preset 0
+(also for baked AO) and the main block, whose blue 1000..4000 fog drowned levels under --preview-lighting.
+Level mode is LBP-lit by default (P2w). docs/p3m-level-lighting.md. +0 viewable / +0 Complete.
+
 ## 2026-10-10 — P3l cube-map reflections (output port 6)
 
 Reflection graphs with one BC1/BC3 cube map (59 graphs) now draw: six faces as a mipped cube
@@ -95,6 +102,12 @@ reports the agreement with generated normals. +0 viewable / +0 Complete; PC veri
 Game textures get a CPU box-filtered mip chain (linear-light for colour) and a trilinear
 sampler (anisotropy 1, as the game); point-sampled textures stay nearest. Pure viewer change, +0 viewable /
 +0 Complete. Sampler matches the Pod capture (docs/p2u-mipmaps.md); PC verifies shots.
+
+## 2026-10-09 — P2w level scenes use the LBP-shaped lighting by default
+
+Level mode turns on the LBP-shaped lighting (RSX-fitted on the Pod) unless --preview-lighting
+(Lambert) or --no-lbp-lighting (unlit) is given. Moon-level block/preset still INFERRED until the
+requested capture (docs/p2w-level-lighting-default.md). +0 viewable / +0 Complete; PC verifies.
 
 ## 2026-10-09 — D193 sampler port folds under the nested instance tint
 
