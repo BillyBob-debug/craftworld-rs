@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-10 — P3b Pod lighting from the backdrop plan's settings
+
+Pod `--lbp-lighting` takes preset 0 of the PLevelSettings holder in the backdrop plan
+(live source, probes #104/#105), also under plain --preview-lighting (its main block was the wrong holder). Docs: docs/p3b-backdrop-settings.md. PC verifies against RPCS3.
+
 ## 2026-10-09 — D194 level shapes take their own PShape.color
 
 Shape batches split per (gfx material, PShape.color) and, under the level defaults, load

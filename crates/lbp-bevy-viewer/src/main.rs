@@ -1023,7 +1023,23 @@ fn load(
                 (false, Some(n)) => Some(n),
                 (false, None) => v.lighting.lbp.then_some(0),
             };
-            if let Some(n) = preset {
+            // P3b: the Pod's live light is the backdrop plan's preset (also for the plain
+            // `--preview-lighting`, whose main block would otherwise be the wrong holder).
+            let from_plan = v
+                .level
+                .pod
+                .and(preset.or((!v.level.lighting_main).then_some(0)))
+                .and_then(|n| level.scene.backdrop_presets.get(n).map(|p| (n, *p)));
+            if let Some((n, p)) = from_plan {
+                level.scene.settings = Some(p);
+                if let Some(shell) = level.shell.as_mut() {
+                    shell.settings = Some(p);
+                }
+                println!(
+                    "Lighting preset {n} of {} from the backdrop plan (Pod live source)",
+                    level.scene.backdrop_presets.len()
+                );
+            } else if let Some(n) = preset {
                 println!("{}", use_lighting_preset(&mut level.scene, n));
                 if let Some(shell) = level.shell.as_mut() {
                     println!("Shell: {}", use_lighting_preset(shell, n));

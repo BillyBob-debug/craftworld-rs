@@ -472,6 +472,9 @@ pub struct LevelScene<T> {
     pub settings: Option<LevelSettings>,
     /// P2l: the same holder's stored presets (for `--lighting-preset`).
     pub settings_presets: Vec<LevelSettings>,
+    /// P3b: presets of the PLevelSettings holder inside the backdrop plan. The Pod's live
+    /// lighting is this holder's preset 0 (probe #105), not the level's own holder.
+    pub backdrop_presets: Vec<LevelSettings>,
     /// P2c: Things with a CHECKPOINT part and a valid POS (Thing index, world matrix), in
     /// reader order. The player spawns at a checkpoint.
     pub checkpoints: Vec<(usize, [f32; 16])>,
@@ -485,6 +488,7 @@ impl<T> Default for LevelScene<T> {
             counts: SceneCounts::default(),
             settings: None,
             settings_presets: Vec::new(),
+            backdrop_presets: Vec::new(),
             checkpoints: Vec::new(),
         }
     }
@@ -2600,6 +2604,9 @@ fn load_backdrop(
             .map_err(|e| format!("plan wrapper: {e}"))
         })();
         control.check()?;
+        if let Ok(r) = &report {
+            scene.backdrop_presets = LevelSettings::find_presets(&r.things).to_vec();
+        }
         match report {
             Ok(r) if r.stop.is_none() => bd::add_backdrop_plan(
                 scene,
