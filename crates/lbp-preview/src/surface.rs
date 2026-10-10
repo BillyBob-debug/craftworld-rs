@@ -28,6 +28,8 @@ pub struct Surface {
     pub bump_level: f32,
     /// Static COLOR on the specular port (linear rgb), when wired that way.
     pub specular: Option<[f32; 3]>,
+    /// P3d: gloss colour map on port 2 (same layout as `BumpMap`; rgb is the gloss colour).
+    pub spec_map: Option<Box<BumpMap>>,
     /// GfxMaterial CosinePower (finite, clamped to 1..=4096).
     pub cosine_power: f32,
     pub alpha_mode_raw: u8,
@@ -39,9 +41,11 @@ pub struct Surface {
 }
 impl Surface {
     pub fn retained_bytes(&self) -> usize {
-        self.bump.as_ref().map_or(0, |b| {
-            b.texture.rgba.len() + b.sampling_uv.len() * std::mem::size_of::<[f32; 2]>()
-        })
+        [&self.bump, &self.spec_map]
+            .into_iter()
+            .flatten()
+            .map(|b| b.texture.rgba.len() + b.sampling_uv.len() * std::mem::size_of::<[f32; 2]>())
+            .sum()
     }
     pub fn label(&self) -> String {
         let mut parts = Vec::new();
@@ -49,6 +53,12 @@ impl Surface {
             parts.push(format!(
                 "bump UV{} × {:.2} ({}×{})",
                 b.uv_channel, self.bump_level, b.texture.header.width, b.texture.header.height
+            ));
+        }
+        if let Some(m) = &self.spec_map {
+            parts.push(format!(
+                "gloss map UV{} ^ {:.0} ({}×{})",
+                m.uv_channel, self.cosine_power, m.texture.header.width, m.texture.header.height
             ));
         }
         if let Some(s) = self.specular {
@@ -71,6 +81,8 @@ impl Surface {
 pub struct SurfaceRoutes {
     pub bump: Option<crate::linked::SamplerSelection>,
     pub specular: Option<[f32; 3]>,
+    /// P3d: port 2 wired straight from one sampler (a gloss colour map).
+    pub spec_map: Option<crate::linked::SamplerSelection>,
     pub skipped: Vec<String>,
 }
 fn is_static(node: &lbp_resource::material::BoxMetadata) -> bool {
@@ -134,9 +146,15 @@ pub fn select_routes(graph: &GraphMetadata) -> Result<SurfaceRoutes, String> {
                 let [r, g, b, _] = tint.values();
                 routes.specular = Some([r, g, b]);
             }
-            None => routes
-                .skipped
-                .push("gloss not drawn (port 2 is not one static COLOR)".into()),
+            None => match endpoint(w).filter(|&i| boxes[i].type_raw == 1) {
+                Some(i) => match crate::linked::sampler(graph, i) {
+                    Ok(s) => routes.spec_map = Some(s),
+                    Err(e) => routes.skipped.push(format!("gloss map not drawn ({e})")),
+                },
+                None => routes
+                    .skipped
+                    .push("gloss not drawn (port 2 is not one static COLOR or one sampler)".into()),
+            },
         },
         _ => routes
             .skipped
@@ -172,6 +190,7 @@ pub(crate) fn load(
         alpha_mode_raw: scalars.alpha_mode_raw,
         alpha_test: scalar(scalars.alpha_test_bits, 0., 1., 0.),
         specular: routes.specular,
+        spec_map: None,
         skipped: routes.skipped,
         bump: None,
     };
@@ -179,6 +198,12 @@ pub(crate) fn load(
         match load_bump(source, catalog, graph, sampler, vertices, uv, control) {
             Ok(b) => surface.bump = Some(Box::new(b)),
             Err(e) => surface.skipped.push(format!("bump not drawn ({e})")),
+        }
+    }
+    if let Some(sampler) = routes.spec_map {
+        match load_bump(source, catalog, graph, sampler, vertices, uv, control) {
+            Ok(b) => surface.spec_map = Some(Box::new(b)),
+            Err(e) => surface.skipped.push(format!("gloss map not drawn ({e})")),
         }
     }
     Ok(surface)
@@ -294,13 +319,14 @@ mod tests {
         assert_eq!(routes.specular, Some([0.6, 0.6, 0.6]));
         assert!(routes.skipped.is_empty());
 
-        // A swizzled bump wire and a sampler on the gloss port are named, not drawn.
+        // A swizzled bump wire is named, not drawn; a sampler on the gloss port is a gloss map.
         let mut swizzled = full.clone();
         swizzled.wires[0].swizzle_raw = [b'a', 0, 0, 0, 0];
         swizzled.wires[1].box_from = 1;
         let routes = select_routes(&swizzled).unwrap();
         assert!(routes.bump.is_none() && routes.specular.is_none());
-        assert_eq!(routes.skipped.len(), 2);
+        assert_eq!(routes.spec_map.unwrap().slot, 2);
+        assert_eq!(routes.skipped.len(), 1);
 
         // No surface wires: nothing drawn, nothing skipped.
         let plain = graph(full.boxes, vec![wire(1, 0, 0)]);

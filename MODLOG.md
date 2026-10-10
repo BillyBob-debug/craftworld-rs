@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-10 — P3d gloss colour maps
+
+Port 2 wired from one sampler (2,132 graphs) multiplies the gloss term under --lbp-lighting;
+UV from the diffuse coordinates or a free UV1. Docs: docs/p3d-gloss-map.md. PC verifies shots.
+
 ## 2026-10-09 — P3a alpha-test cut-out under the LBP-shaped lighting
 
 Materials with a stored AlphaTestLevel discard fragments below it when the LBP surface extras are on
