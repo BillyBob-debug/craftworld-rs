@@ -556,11 +556,12 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
         }
 #endif
         rgb = rgb * factor + gloss_term(n, pbr.V, factor, spec_tint, shadow);
-        // P3i: reflection graph sampled at the reflection vector (INFERRED: view space, so the
-        // coordinates follow the camera), scaled by the luminance of the lit light.
+        // P3i: reflection graph sampled at the world-orientation reflection vector (the game's
+        // TC4 is the camera-translated world position, not view-rotated; world axes INFERRED to
+        // match ours), scaled by the luminance of the lit light.
         let refl_count = graph_info.z >> 8u;
         if light_dir.w > 1.5 && refl_count > 0u && graph_info.x == 0u && dot(n, n) > 0.0 {
-            let rv = (view.view_from_world * vec4<f32>(reflect(-pbr.V, n), 0.0)).xyz;
+            let rv = reflect(-pbr.V, n);
             let bias = exp2(graph_param[31].w);
             let gx = dpdx(rv.xy) * bias;
             let gy = dpdy(rv.xy) * bias;

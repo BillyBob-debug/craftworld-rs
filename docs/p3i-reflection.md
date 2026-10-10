@@ -23,8 +23,9 @@ Change (only with the LBP surface extras and the LBP-shaped lighting):
 - the shader evaluates the graph at R (explicit gradients scaled by 2^blur, the TXB bias),
   multiplies by luma(light factor) and adds before the sqrt output.
 
-INFERRED (flagged): R is taken in VIEW space (the TC4 space is not decoded; world-space R would
-make the 2D fetch rotate with the camera instead of following it); luma weights 0.299/0.587/
+R is in world orientation (PC verification 2026-10-10: fpdec builds R from TC4, and the vertex
+program sets TC4 = pos - camera, so no view rotation; first draft used view space and was
+wrong). World axes assumed equal to ours (INFERRED); luma weights 0.299/0.587/
 0.114 and the light factor being the squared factor; output scale 1 (the NV40 scale field is
 open); wrap mode is the material sampler's own (Repeat/Mirror/Clamp) for [-1,1] coordinates.
 Not done: cube-map reflections (59 graphs, 3.6%), the glass refraction grab (TEX u15), type 12
