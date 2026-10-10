@@ -1503,15 +1503,13 @@ pub(crate) fn load_material(
                 });
         // P3h: glow (port 4) goes through the same diffuse route with its graph standing in
         // for port 0; no instance colour (it tints the diffuse, not the emission).
-        let prefix = &graph.material.prefix;
-        let shader_blob = prefix
-            .blob_start
-            .checked_add(prefix.blob_bytes)
-            .and_then(|end| material_bytes.get(prefix.blob_start..end))
-            .unwrap_or(&[]);
+        // The blob lives in the expanded payload, not in the raw file bytes.
+        let shader_blob =
+            lbp_resource::material::shader_blob(&material_bytes, || control.check().is_err())
+                .unwrap_or_default();
         let mut glow_wired = crate::surface::rewire_output(&graph.graph, crate::surface::GLOW_PORT);
         if matches!(glow_wired, Ok(Some(_)))
-            && !crate::surface::glow_in_program(&graph.graph, shader_blob)
+            && !crate::surface::glow_in_program(&graph.graph, &shader_blob)
         {
             surface
                 .skipped
