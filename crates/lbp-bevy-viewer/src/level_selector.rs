@@ -129,16 +129,25 @@ impl LevelSelector {
                         for e in entries {
                             let selected =
                                 current_path.is_some_and(|p| p.eq_ignore_ascii_case(&e.path));
-                            let label = if e.named {
+                            let mut label = if e.named {
                                 format!("{}  [{}]", e.name, file_name(&e.path))
                             } else {
                                 e.name.clone()
                             };
-                            if ui
-                                .selectable_label(selected, label)
-                                .on_hover_text(&e.path)
-                                .clicked()
-                            {
+                            if !e.supported {
+                                label.push_str("  (unsupported)");
+                            }
+                            let response = ui
+                                .add_enabled(
+                                    e.supported,
+                                    egui::Button::selectable(selected, label),
+                                )
+                                .on_hover_text(if e.supported {
+                                    e.path.as_str()
+                                } else {
+                                    "Vita crossplay level (.cpv): the level reader does not support it yet"
+                                });
+                            if response.clicked() {
                                 chosen = Some((*e).clone());
                             }
                         }
