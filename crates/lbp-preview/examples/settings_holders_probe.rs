@@ -2,8 +2,8 @@
 //! count and the values the live game was seen to use for pod_planets (sun x 0.74296,
 //! FogNear 5804.64, FogFar 58453.61, fog colour (0.6456, 0.4092, 0.2281); PC Ghidra read,
 //! oracles/results/2026-10-09-shading-ghidra.md). Prints summary numbers only.
-//! Usage: settings_holders_probe LEVEL-BYTES-SOURCE as for pod_globe_extent:
-//! settings_holders_probe SNAPSHOT GAME-DIRS LEVEL-PATH
+//! Usage: settings_holders_probe SNAPSHOT GAME-DIRS LEVEL-PATH
+//!        settings_holders_probe SNAPSHOT GAME-DIRS --plan GUID-HEX   (a plan resource's Things)
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_level::parts::LevelSettings;
 use std::path::Path;
@@ -35,20 +35,9 @@ fn show(label: &str, s: &LevelSettings) {
     }
 }
 
-fn run() -> Result<(), String> {
-    let args: Vec<_> = std::env::args().collect();
-    if args.len() != 4 {
-        return Err("settings_holders_probe SNAPSHOT GAME-DIRS LEVEL-PATH".into());
-    }
-    let control = LoadControl::default();
-    let catalog = lbp_catalog::load(Path::new(&args[1]), &control)?;
-    let source = AttachedSource::attach(Path::new(&args[2]), &catalog, &control)?;
-    let (key, _) = lbp_preview::level_scene::resolve_level(&catalog, None, Some(&args[3]))?;
-    let bytes = lbp_preview::level_scene::read_level_bytes(&source, &key, &control)?;
-    let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
-        .map_err(|e| e.to_string())?;
+fn list(things: &[lbp_level::thing::ThingRecord]) {
     let mut holders = 0;
-    for t in &report.things {
+    for t in things {
         let Some(main) = t.data.level_settings.as_ref() else {
             continue;
         };
@@ -66,8 +55,41 @@ fn run() -> Result<(), String> {
     }
     println!(
         "{holders} PLevelSettings holder(s) in {} Things",
-        report.things.len()
+        things.len()
     );
+}
+
+fn run() -> Result<(), String> {
+    let args: Vec<_> = std::env::args().collect();
+    if args.len() != 4 && args.len() != 5 {
+        return Err(
+            "settings_holders_probe SNAPSHOT GAME-DIRS LEVEL-PATH | --plan GUID-HEX".into(),
+        );
+    }
+    let control = LoadControl::default();
+    let catalog = lbp_catalog::load(Path::new(&args[1]), &control)?;
+    let source = AttachedSource::attach(Path::new(&args[2]), &catalog, &control)?;
+    if args[3] == "--plan" {
+        let guid = u32::from_str_radix(args.get(4).ok_or("--plan needs a GUID")?, 16)
+            .map_err(|_| "GUID: hex")?;
+        let key = lbp_preview::resolve(&catalog, Some(guid), None)?;
+        let bytes = lbp_preview::level_scene::read_resource(
+            &source,
+            &key,
+            &control,
+            lbp_level::plan::MAX_INPUT,
+        )?;
+        let report = lbp_level::read_plan(&bytes, lbp_level::Limits::default(), &|| false)
+            .map_err(|e| e.to_string())?;
+        println!("plan stop: {:?}", report.stop);
+        list(&report.things);
+        return Ok(());
+    }
+    let (key, _) = lbp_preview::level_scene::resolve_level(&catalog, None, Some(&args[3]))?;
+    let bytes = lbp_preview::level_scene::read_level_bytes(&source, &key, &control)?;
+    let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
+        .map_err(|e| e.to_string())?;
+    list(&report.things);
     Ok(())
 }
 
