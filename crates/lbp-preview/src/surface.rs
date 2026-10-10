@@ -11,8 +11,6 @@ const SPECULAR_PORT: u8 = 2;
 const BUMP_PORT: u8 = 3;
 /// P3h: glow (INFERRED from the decoded shaders: added unlit, oracles/results/2026-10-09-shading-fpdec.md).
 pub const GLOW_PORT: u8 = 4;
-/// GfxMaterial alpha mode of the refractive glass path (pod-fidelity README); its program has no glow add (INFERRED).
-pub const REFRACTIVE_ALPHA_MODE: u8 = 4;
 /// Upper bounds for untrusted material scalars before they reach a shader.
 const MAX_BUMP_LEVEL: f32 = 16.;
 const MAX_COSINE_POWER: f32 = 4096.;
@@ -146,6 +144,30 @@ pub fn rewire_output(graph: &GraphMetadata, port: u8) -> Result<Option<GraphMeta
     });
     derived.wire_count = derived.wires.len();
     Ok(Some(derived))
+}
+/// P3h: whether the compiled program has the glow add. A colour box (type 3) feeding port 4 is
+/// bound to the fragment program as constant `ta<k>` (k = its box index, CONFIRMED over 8,043
+/// gmats, oracles 2026-10-10-glow-gate); programs that never name it (e.g. the frozen cube
+/// 00005407) have no glow add. Raw scan of the shader blob for `\0ta<k>\0` (never the bare
+/// prefix: `ta1` is inside `ta10`); named in any variant counts. Texture, mix and other source
+/// kinds are not decided here and pass.
+pub fn glow_in_program(graph: &GraphMetadata, blob: &[u8]) -> bool {
+    let Some(output) = graph.boxes.iter().position(|b| b.type_raw == 0) else {
+        return true;
+    };
+    let source = graph
+        .wires
+        .iter()
+        .find(|w| w.box_to == output as i32 && w.port_to_raw == GLOW_PORT)
+        .map(|w| w.box_from);
+    let Some(k) = source.and_then(|f| usize::try_from(f).ok()) else {
+        return true;
+    };
+    if graph.boxes.get(k).map(|b| b.type_raw) != Some(3) {
+        return true;
+    }
+    let name = format!("\0ta{k}\0").into_bytes();
+    blob.windows(name.len()).any(|w| w == name.as_slice())
 }
 fn is_static(node: &lbp_resource::material::BoxMetadata) -> bool {
     node.subtype_raw == 0
@@ -427,5 +449,23 @@ mod tests {
         assert_eq!(scalar(1e9f32.to_bits(), 1., 4096., 22.), 4096.);
         assert_eq!(scalar(0.6f32.to_bits(), 0., 16., 0.), 0.6);
         assert_eq!(scalar((-1f32).to_bits(), 0., 16., 0.), 0.);
+    }
+
+    #[test]
+    fn p3h_glow_needs_the_program_to_name_the_colour_box() {
+        // output <- port 4 <- colour box 1; the blob names ta1 or only ta10
+        let g = graph(
+            vec![node(0, [0; 8]), node(3, [0; 8])],
+            vec![wire(1, 0, GLOW_PORT)],
+        );
+        assert!(glow_in_program(&g, b"CGB\0ta1\0ta1\0\0ta1\0x"));
+        assert!(!glow_in_program(&g, b"\0ta10\0\0ta2\0"));
+        assert!(!glow_in_program(&g, b""));
+        // texture sources are not decided here
+        let t = graph(
+            vec![node(0, [0; 8]), node(1, sampler_params(0))],
+            vec![wire(1, 0, GLOW_PORT)],
+        );
+        assert!(glow_in_program(&t, b""));
     }
 }

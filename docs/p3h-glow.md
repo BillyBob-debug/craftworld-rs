@@ -35,6 +35,9 @@ check nothing else changes.
 unscaled before tintcol x4 and the sqrt (our order is right), constant glows come from the
 stored colour, so bright white spheres and red lamps are authentic. Alpha is
 `tintcol.w * lerp(1/(1+4*dot(g,g)), 1, sat(TC3.z))` (scale x4 INFERRED); still not drawn.
-Change: materials with alpha mode 4 (the refractive program, e.g. the frozen cube 00005407)
-skip glow: INFERRED, their listing has no glow add. `--no-glow` and a glowing count in
+Change: a colour box (type 3) feeding port 4 is bound to the program as constant `ta<k>`
+(k = box index; 2026-10-10-glow-gate, CONFIRMED over 8,043 gmats). When the shader blob names no
+`\0ta<k>\0` (raw scan, any variant) the program has no glow add, so glow is skipped (the
+frozen cube 00005407 and three others). Texture/mix sources are not decided and pass. An
+earlier alpha-mode-4 gate was wrong (the cube is mode 1) and is gone. `--no-glow` and a glowing count in
 `--level-report` ease A/B checks.
