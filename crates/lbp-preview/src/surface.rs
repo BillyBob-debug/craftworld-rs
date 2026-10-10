@@ -9,6 +9,8 @@ use lbp_resource::material::{GraphInspection, GraphMetadata};
 /// Output-node port numbers (CONFIRMED_FROM_COMMUNITY_CODE, docs/material-graph.md).
 const SPECULAR_PORT: u8 = 2;
 const BUMP_PORT: u8 = 3;
+/// P3h: glow (INFERRED from the decoded shaders: added unlit, oracles/results/2026-10-09-shading-fpdec.md).
+pub const GLOW_PORT: u8 = 4;
 /// Upper bounds for untrusted material scalars before they reach a shader.
 const MAX_BUMP_LEVEL: f32 = 16.;
 const MAX_COSINE_POWER: f32 = 4096.;
@@ -36,6 +38,9 @@ pub struct Surface {
     /// GfxMaterial AlphaTestLevel (finite, 0..=1; 0 = no cut-out). The decoded shaders write
     /// alpha 0 below it (oracles/results/2026-10-09-shading-fpdec.md); the viewer discards.
     pub alpha_test: f32,
+    /// P3h: what output port 4 (glow) evaluates to, loaded by the diffuse route with the glow
+    /// graph standing in for port 0 (a solid colour or a baked texture), when wired.
+    pub glow: Option<Box<crate::MaterialAsset>>,
     /// Wired surface ports this preview does not draw, with the reason.
     pub skipped: Vec<String>,
 }
@@ -45,7 +50,13 @@ impl Surface {
             .into_iter()
             .flatten()
             .map(|b| b.texture.rgba.len() + b.sampling_uv.len() * std::mem::size_of::<[f32; 2]>())
-            .sum()
+            .sum::<usize>()
+            + match self.glow.as_deref() {
+                Some(crate::MaterialAsset::Texture(a)) => {
+                    a.texture.rgba.len() + a.sampling_uv.len() * std::mem::size_of::<[f32; 2]>()
+                }
+                _ => 0,
+            }
     }
     pub fn label(&self) -> String {
         let mut parts = Vec::new();
@@ -60,6 +71,17 @@ impl Surface {
                 "gloss map UV{} ^ {:.0} ({}×{})",
                 m.uv_channel, self.cosine_power, m.texture.header.width, m.texture.header.height
             ));
+        }
+        match self.glow.as_deref() {
+            Some(crate::MaterialAsset::Solid(a)) => {
+                let [r, g, b, _] = a.selection.color.values();
+                parts.push(format!("glow {r:.2}/{g:.2}/{b:.2}"));
+            }
+            Some(crate::MaterialAsset::Texture(a)) => parts.push(format!(
+                "glow map ({}×{})",
+                a.texture.header.width, a.texture.header.height
+            )),
+            None => {}
         }
         if let Some(s) = self.specular {
             parts.push(format!(
@@ -84,6 +106,44 @@ pub struct SurfaceRoutes {
     /// P3d: port 2 wired straight from one sampler (a gloss colour map).
     pub spec_map: Option<crate::linked::SamplerSelection>,
     pub skipped: Vec<String>,
+}
+/// P3h: a copy of `graph` whose output node reads `port` as its port 0, so the diffuse route
+/// can evaluate the glow graph. `Ok(None)` when `port` is unwired; one wire only.
+pub fn rewire_output(graph: &GraphMetadata, port: u8) -> Result<Option<GraphMetadata>, String> {
+    let outputs: Vec<usize> = (0..graph.boxes.len())
+        .filter(|&i| graph.boxes[i].type_raw == 0)
+        .collect();
+    let [output] = outputs[..] else {
+        return Err("Unsupported: surface needs one output node".into());
+    };
+    let into = |p: u8| {
+        graph
+            .wires
+            .iter()
+            .enumerate()
+            .filter(move |(_, w)| w.box_to == output as i32 && w.port_to_raw == p)
+            .map(|(i, _)| i)
+            .collect::<Vec<_>>()
+    };
+    let wired = into(port);
+    let [wire] = wired[..] else {
+        return if wired.is_empty() {
+            Ok(None)
+        } else {
+            Err(format!("several port {port} wires"))
+        };
+    };
+    let mut derived = graph.clone();
+    let diffuse = into(0);
+    derived.wires[wire].port_to_raw = 0;
+    let mut index = 0;
+    derived.wires.retain(|_| {
+        let keep = !diffuse.contains(&index);
+        index += 1;
+        keep
+    });
+    derived.wire_count = derived.wires.len();
+    Ok(Some(derived))
 }
 fn is_static(node: &lbp_resource::material::BoxMetadata) -> bool {
     node.subtype_raw == 0
@@ -191,6 +251,7 @@ pub(crate) fn load(
         alpha_test: scalar(scalars.alpha_test_bits, 0., 1., 0.),
         specular: routes.specular,
         spec_map: None,
+        glow: None,
         skipped: routes.skipped,
         bump: None,
     };
@@ -303,6 +364,31 @@ mod tests {
     }
     fn sampler_params(slot: u32) -> [u32; 8] {
         [1f32.to_bits(), 1f32.to_bits(), 0, 0, 0, slot, 0, 0]
+    }
+
+    #[test]
+    fn p3h_glow_graph_replaces_the_diffuse_wire_on_a_copy() {
+        // output 0; sampler 1 -> port 0 (diffuse); sampler 2 -> port 4 (glow)
+        let g = graph(
+            vec![
+                node(0, [0; 8]),
+                node(1, sampler_params(0)),
+                node(1, sampler_params(1)),
+            ],
+            vec![wire(1, 0, 0), wire(2, 0, GLOW_PORT)],
+        );
+        let d = rewire_output(&g, GLOW_PORT).unwrap().unwrap();
+        assert_eq!(d.wires.len(), 1);
+        assert_eq!((d.wires[0].box_from, d.wires[0].port_to_raw), (2, 0));
+        assert_eq!(d.wire_count, 1);
+        // The original is untouched; an unwired port is None; two wires are refused.
+        assert_eq!(g.wires.len(), 2);
+        assert!(rewire_output(&g, BUMP_PORT).unwrap().is_none());
+        let two = graph(
+            vec![node(0, [0; 8]), node(1, sampler_params(0))],
+            vec![wire(1, 0, GLOW_PORT), wire(1, 0, GLOW_PORT)],
+        );
+        assert!(rewire_output(&two, GLOW_PORT).is_err());
     }
 
     #[test]

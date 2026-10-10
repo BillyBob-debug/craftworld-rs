@@ -1321,6 +1321,8 @@ fn load(
         eprintln!("{}", v.status);
     }
 }
+/// P3h: glow colour (multiplies the map) and the optional map with its UV mode.
+type GlowDraw = ([f32; 3], Option<(Image, u32)>);
 /// CPU-side display preparation shared by the single-mesh and level paths: one entry per
 /// supported material bucket (plus one neutral bucket). `normalize` centres and scales
 /// the mesh to unit size (single-mesh view); level scenes keep model coordinates.
@@ -1344,6 +1346,8 @@ struct Prepared {
     spec_map: Option<(Image, u32)>,
     /// P3a: AlphaTestLevel cut-out (0 = none), LBP-lighting materials only.
     alpha_test: f32,
+    /// P3h: unlit glow colour and its optional map (sRGB image, UV mode 2 = primary, 3 = UV1).
+    glow: Option<GlowDraw>,
     /// D189: graph textures 1.. (texture 0 is `image`) and the encoded steps.
     graph: Option<(Vec<Image>, Vec<lbp_preview::FragmentStep>)>,
 }
@@ -1647,6 +1651,79 @@ fn prepare_buckets(
             }
             None => None,
         };
+        // P3h: glow (output port 4) is a solid colour, or one baked map on the diffuse UVs or
+        // on UV1 when that is free or holds the same coordinates (graph slot 4, so no graph).
+        let glow = match surface.and_then(|s| s.glow.as_deref()) {
+            Some(lbp_preview::MaterialAsset::Solid(g)) => {
+                let [r, gr, b, _] = g.selection.color.values();
+                ([r, gr, b] != [0.; 3]).then_some(([r, gr, b], None))
+            }
+            Some(lbp_preview::MaterialAsset::Texture(g))
+                if graph.is_none()
+                    && g.dual.is_none()
+                    && g.third.is_none()
+                    && g.fourth.is_none()
+                    && g.product.is_none()
+                    && g.fragment.is_none() =>
+            {
+                let same_diffuse = asset
+                    .as_ref()
+                    .and_then(|a| a.sampling_uv())
+                    .is_some_and(|d| d == g.sampling_uv.as_slice());
+                let owner: Option<&[[f32; 2]]> = asset
+                    .as_ref()
+                    .and_then(|a| a.texture())
+                    .and_then(|a| a.dual.as_ref())
+                    .map(|d| d.sampling_uv.as_slice())
+                    .or_else(|| {
+                        surface
+                            .and_then(|s| s.bump.as_deref())
+                            .filter(|_| bump.is_some())
+                            .map(|b| b.sampling_uv.as_slice())
+                    })
+                    .or_else(|| {
+                        surface
+                            .and_then(|s| s.spec_map.as_deref())
+                            .filter(|_| spec_map.as_ref().is_some_and(|(_, m)| *m == 2))
+                            .map(|m| m.sampling_uv.as_slice())
+                    });
+                let mode = if same_diffuse {
+                    Some(2)
+                } else if owner == Some(g.sampling_uv.as_slice()) {
+                    Some(3)
+                } else if owner.is_none() {
+                    adapter::secondary_uv(&mut mesh, &g.sampling_uv)?;
+                    Some(3)
+                } else {
+                    None
+                };
+                match mode {
+                    Some(mode) => {
+                        let [width, height] = g.display_extent();
+                        let mut image = adapter::image_axes(
+                            width,
+                            height,
+                            g.display_pixels().to_vec(),
+                            g.wrap,
+                        )?;
+                        if g.nearest_sampling() {
+                            adapter::set_nearest(&mut image);
+                        }
+                        Some(([1.; 3], Some((image, mode))))
+                    }
+                    None => {
+                        details.push("P3h: glow map not drawn (UV1 is taken)".into());
+                        None
+                    }
+                }
+            }
+            Some(lbp_preview::MaterialAsset::Texture(_)) => {
+                details
+                    .push("P3h: glow map not drawn (it needs several textures or a graph)".into());
+                None
+            }
+            None => None,
+        };
         prepared.push(Prepared {
             mesh,
             image,
@@ -1661,6 +1738,7 @@ fn prepare_buckets(
             gloss,
             spec_map,
             alpha_test,
+            glow,
             graph,
         });
     }
@@ -1711,6 +1789,13 @@ fn upload(
             // Budgets are checked on the CPU side; a refusal here keeps the base texture.
             eprintln!("D189: {e}");
         }
+    }
+    if let Some((color, map)) = p.glow {
+        dual::enable_glow(
+            &mut surface,
+            color,
+            map.map(|(image, mode)| (images.add(image), mode)),
+        );
     }
     if p.alpha_test > 0. {
         dual::enable_alpha_test(&mut surface, p.alpha_test);
