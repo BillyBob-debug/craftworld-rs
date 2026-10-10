@@ -5,6 +5,22 @@
 Sun, ambient, rim and rim2 .w for the gloss term = stored .w x the game factor (rim and rim2
 separately); rgb unchanged. Docs: docs/p3f-gloss-weights.md. Gloss only under --lbp-lighting.
 
+## 2026-10-10 — P3d gloss colour maps
+
+Port 2 wired from one sampler (2,132 graphs) multiplies the gloss term under --lbp-lighting;
+UV from the diffuse coordinates or a free UV1. Docs: docs/p3d-gloss-map.md. PC verifies shots.
+
+## 2026-10-09 — P3a alpha-test cut-out under the LBP-shaped lighting
+
+Materials with a stored AlphaTestLevel discard fragments below it when the LBP surface extras are on
+(docs/p3a-alpha-test.md). +0 viewable / +0 Complete; PC verifies a cut-out level and the Pod.
+
+## 2026-10-10 — P3e PWorld lighting fields
+
+World keeps the lighting/colourCorrection/fog/fogTint/darkness f32 and the GlobalSettings
+target/from + blend; the settings probe prints them. Question: which backdrop preset a level
+selects. Docs: docs/p3e-world-lighting.md. No viewer change.
+
 ## 2026-10-10 — P3b Pod lighting from the backdrop plan's settings
 
 Pod `--lbp-lighting` takes preset 0 of the PLevelSettings holder in the backdrop plan

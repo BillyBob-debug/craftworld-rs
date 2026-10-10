@@ -174,6 +174,17 @@ pub fn enable_bump(material: &mut ViewerMaterial, image: Handle<Image>, level: f
     material.extension.bump_image = Some(image);
     material.extension.bump_params = Vec4::new(level, 1., 0., 0.);
 }
+/// P3d: gloss colour map on `graph_image5` (free unless a D189 graph is bound) with the
+/// static gloss white; `uv_mode` 1 = primary UV, 2 = UV1. Call only without a graph.
+pub fn enable_spec_map(material: &mut ViewerMaterial, image: Handle<Image>, uv_mode: u32) {
+    material.extension.graph_image5 = Some(image);
+    material.extension.graph_info.y = uv_mode;
+}
+/// P3a: alpha cut-out: fragments whose colour alpha is below `level` are discarded (LBP
+/// mode materials with a stored AlphaTestLevel, docs/p3a-alpha-test.md).
+pub fn enable_alpha_test(material: &mut ViewerMaterial, level: f32) {
+    material.extension.bump_params.z = level;
+}
 /// P2q: static gloss colour with exponent `power` (CosinePower).
 pub fn enable_gloss(material: &mut ViewerMaterial, color: [f32; 3], power: f32) {
     material.extension.gloss = Vec3::from(color).extend(power.max(1.));
@@ -349,7 +360,7 @@ fn preview_light(n: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
 // sums the game's per-light scalars with the same weights as the colours, light^2 is
 // the squared factor, spec = gloss colour x pow(saturate(R.L), CosinePower) with R the
 // mirrored view ray.
-fn gloss_term(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>) -> vec3<f32> {
+fn gloss_term(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>, tint: vec3<f32>) -> vec3<f32> {
     if light_dir.w < 1.5 || gloss.w <= 0.0 || dot(n, n) <= 0.0 {
         return vec3<f32>(0.0);
     }
@@ -358,7 +369,7 @@ fn gloss_term(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>) -> vec3<f32> 
         + light_key.w * max(dot(n, light_dir.xyz), 0.0)
         + mix(rim_low.w, rim_high.w, (n.y + 1.0) * 0.5) * rim;
     let r = reflect(-to_view, n);
-    let spec = gloss.rgb * pow(clamp(dot(r, light_dir.xyz), 0.0, 1.0), gloss.w);
+    let spec = gloss.rgb * tint * pow(clamp(dot(r, light_dir.xyz), 0.0, 1.0), gloss.w);
     return 2.0 * w * factor * spec;
 }
 // Facing normal, tilted by the bump offset in a cotangent frame built from the
@@ -468,13 +479,28 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
 #endif
     }
 #endif
+    if bump_params.z > 0.0 && color.a < bump_params.z {
+        discard;
+    }
     var rgb = color.rgb;
     if light_dir.w > 0.5 {
         // P2s: mode 3 (untrusted smooth normals) shades with the face normal.
         let shading = select(in.world_normal, face, light_dir.w > 2.5);
         let n = lit_normal(shading, face, pbr.V, bump);
         let factor = preview_light(n, pbr.V);
-        rgb = rgb * factor + gloss_term(n, pbr.V, factor);
+        // P3d: gloss colour map (port 2 sampler) on graph slot 5, unused without a graph.
+        var spec_tint = vec3<f32>(1.0);
+#ifdef VERTEX_UVS_A
+        if graph_info.y == 1u {
+            spec_tint = textureSample(graph_image5, graph_sampler5, in.uv).rgb;
+        }
+#endif
+#ifdef VERTEX_UVS_B
+        if graph_info.y == 2u {
+            spec_tint = textureSample(graph_image5, graph_sampler5, in.uv_b).rgb;
+        }
+#endif
+        rgb = rgb * factor + gloss_term(n, pbr.V, factor, spec_tint);
         if light_dir.w > 1.5 {
             let depth = -(view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
             rgb = lbp_output(rgb, depth);
@@ -530,7 +556,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .map(|l| l.replace("#{MATERIAL_BIND_GROUP}", "2") + "\n")
             .collect();
         assert!(body.contains("lit_normal(shading, face, pbr.V, bump)"));
-        assert!(body.contains("gloss_term(n, pbr.V, factor)"));
+        assert!(body.contains("gloss_term(n, pbr.V, factor, spec_tint)"));
         assert!(body.contains("rgb = lbp_output(rgb, depth);"));
         assert!(body.contains("graph_color(in.uv, in.uv_b, graph_d0, graph_d1)"));
         let source = format!("{STUBS}{body}");

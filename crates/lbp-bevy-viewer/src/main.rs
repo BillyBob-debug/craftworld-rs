@@ -1330,6 +1330,10 @@ struct Prepared {
     bump: Option<(Image, f32)>,
     /// P2q: static gloss colour and CosinePower.
     gloss: Option<([f32; 3], f32)>,
+    /// P3d: gloss colour map (linear) and its UV mode (1 = primary UV, 2 = UV1).
+    spec_map: Option<(Image, u32)>,
+    /// P3a: AlphaTestLevel cut-out (0 = none), LBP-lighting materials only.
+    alpha_test: f32,
     /// D189: graph textures 1.. (texture 0 is `image`) and the encoded steps.
     graph: Option<(Vec<Image>, Vec<lbp_preview::FragmentStep>)>,
 }
@@ -1469,6 +1473,7 @@ fn prepare_buckets(
         }
         let surface = asset.as_ref().and_then(|a| a.surface());
         let gloss = surface.and_then(|s| s.specular.map(|c| (c, s.cosine_power)));
+        let alpha_test = surface.map_or(0., |s| s.alpha_test);
         let alpha_mix = asset
             .as_ref()
             .and_then(|a| a.texture())
@@ -1584,6 +1589,54 @@ fn prepare_buckets(
             }
             None => None,
         };
+        // P3d: the gloss map shares the diffuse UVs, or takes UV1 when that is free or holds
+        // the same coordinates (graph slot 5 carries the image, so no graph may be bound).
+        let mut gloss = gloss;
+        let spec_map = match surface.and_then(|s| s.spec_map.as_deref().map(|m| (m, s))) {
+            Some((m, s)) if graph.is_none() => {
+                let same_diffuse = asset
+                    .as_ref()
+                    .and_then(|a| a.sampling_uv())
+                    .is_some_and(|d| d == m.sampling_uv.as_slice());
+                let same_bump = surface
+                    .and_then(|s| s.bump.as_deref())
+                    .is_some_and(|b| bump.is_some() && b.sampling_uv == m.sampling_uv);
+                let mode = if same_diffuse {
+                    Some(1)
+                } else if same_bump {
+                    Some(2)
+                } else if second_image.is_none() && bump.is_none() {
+                    adapter::secondary_uv(&mut mesh, &m.sampling_uv)?;
+                    Some(2)
+                } else {
+                    None
+                };
+                match mode {
+                    Some(mode) => {
+                        gloss.get_or_insert(([1.; 3], s.cosine_power));
+                        Some((
+                            adapter::linear_image(
+                                m.texture.header.width,
+                                m.texture.header.height,
+                                m.texture.rgba.clone(),
+                                m.wrap,
+                            )?,
+                            mode,
+                        ))
+                    }
+                    None => {
+                        details.push("P3d: gloss map not drawn (UV1 is taken)".into());
+                        None
+                    }
+                }
+            }
+            Some(_) => {
+                details
+                    .push("P3d: gloss map not drawn (a per-fragment graph uses its slot)".into());
+                None
+            }
+            None => None,
+        };
         prepared.push(Prepared {
             mesh,
             image,
@@ -1596,6 +1649,8 @@ fn prepare_buckets(
             normals_trusted,
             bump,
             gloss,
+            spec_map,
+            alpha_test,
             graph,
         });
     }
@@ -1647,8 +1702,14 @@ fn upload(
             eprintln!("D189: {e}");
         }
     }
+    if p.alpha_test > 0. {
+        dual::enable_alpha_test(&mut surface, p.alpha_test);
+    }
     if let Some((color, power)) = p.gloss {
         dual::enable_gloss(&mut surface, color, power);
+    }
+    if let Some((map, mode)) = p.spec_map {
+        dual::enable_spec_map(&mut surface, images.add(map), mode);
     }
     surface.extension.normals_trusted = p.normals_trusted;
     (meshes.add(p.mesh), materials.add(surface), image)
@@ -2528,16 +2589,17 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             }
             if surface_on {
                 // P2q: displayed draws (entity × bucket) carrying each surface extra.
-                let (mut bump, mut gloss, mut total) = (0, 0, 0);
+                let (mut bump, mut gloss, mut alpha, mut total) = (0, 0, 0, 0);
                 for (mesh, _) in &plan.placed {
                     for p in plan.prepared[*mesh].iter().flatten() {
                         total += 1;
                         bump += usize::from(p.bump.is_some());
                         gloss += usize::from(p.gloss.is_some());
+                        alpha += usize::from(p.alpha_test > 0.);
                     }
                 }
                 lines.push(format!(
-                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy (drawn only under --lbp-lighting)"
+                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy, {alpha} alpha-tested (P3a; drawn only under --lbp-lighting)"
                 ));
             }
             lines.extend(plan.lines);
