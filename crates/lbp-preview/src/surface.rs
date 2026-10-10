@@ -11,6 +11,8 @@ const SPECULAR_PORT: u8 = 2;
 const BUMP_PORT: u8 = 3;
 /// P3h: glow (INFERRED from the decoded shaders: added unlit, oracles/results/2026-10-09-shading-fpdec.md).
 pub const GLOW_PORT: u8 = 4;
+/// GfxMaterial alpha mode of the refractive glass path (pod-fidelity README); its program has no glow add (INFERRED).
+pub const REFRACTIVE_ALPHA_MODE: u8 = 4;
 /// P3i: reflection (CONFIRMED port 6 by d104-uv-channel E5; math from the fpdec oracles
 /// 2026-10-10-node-types-10-12.md and 2026-10-10-reflection-uv.md).
 pub const REFLECTION_PORT: u8 = 6;

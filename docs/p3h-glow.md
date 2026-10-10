@@ -29,3 +29,12 @@ No GPU in the cloud: not rendered. PC verification wanted: fmt/test/clippy on 1.
 unchanged; `surface` label counts of "glow" draws on Bravery Test and tutorial_23; before/after
 at gameplay distance on a level with lamps/screens (tutorial_23 lamp, logic-board screens);
 check nothing else changes.
+
+## Verification follow-up (2026-10-10)
+`2026-10-10-glow-output-stage.md` and `2026-10-10-glow-port4-col0.md` (fpdec): glow is added
+unscaled before tintcol x4 and the sqrt (our order is right), constant glows come from the
+stored colour, so bright white spheres and red lamps are authentic. Alpha is
+`tintcol.w * lerp(1/(1+4*dot(g,g)), 1, sat(TC3.z))` (scale x4 INFERRED); still not drawn.
+Change: materials with alpha mode 4 (the refractive program, e.g. the frozen cube 00005407)
+skip glow: INFERRED, their listing has no glow add. `--no-glow` and a glowing count in
+`--level-report` ease A/B checks.

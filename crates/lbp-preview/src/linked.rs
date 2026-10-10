@@ -1503,7 +1503,18 @@ pub(crate) fn load_material(
                 });
         // P3h: glow (port 4) goes through the same diffuse route with its graph standing in
         // for port 0; no instance colour (it tints the diffuse, not the emission).
-        match crate::surface::rewire_output(&graph.graph, crate::surface::GLOW_PORT) {
+        // INFERRED (2026-10-10-glow-port4-col0.md): the refractive/reflective program (alpha mode 4,
+        // the frozen cube 00005407) has no glow add, so a wired port 4 draws nothing there.
+        let mut glow_wired = crate::surface::rewire_output(&graph.graph, crate::surface::GLOW_PORT);
+        if surface.alpha_mode_raw == crate::surface::REFRACTIVE_ALPHA_MODE
+            && matches!(glow_wired, Ok(Some(_)))
+        {
+            surface
+                .skipped
+                .push("glow not drawn (refractive program has no glow add)".into());
+            glow_wired = Ok(None);
+        }
+        match glow_wired {
             Ok(None) => {}
             Ok(Some(_)) => {
                 let glow_options = crate::PreviewOptions {
