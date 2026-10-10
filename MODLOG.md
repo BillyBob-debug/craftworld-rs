@@ -7,6 +7,12 @@ with that colour as the instance colour. Targets the 68 grey shapes in Bravery T
 (gfx 00012ba7, 00018401). --level-report prints shape-batch reasons and Things.
 +0 viewable / +0 Complete expected; PC verifies.
 
+## 2026-10-09 — P2v game normals for model meshes
+
+Model meshes are lit with the game's decoded normals instead of normals generated from our
+triangles (fallback per vertex; skinned per-bone copies and shapes unchanged). Per-mesh detail
+reports the agreement with generated normals. +0 viewable / +0 Complete; PC verifies shots.
+
 ## 2026-10-09 — P2u mipmaps and anisotropic filtering
 
 Game textures get a CPU box-filtered mip chain (linear-light for colour) and a trilinear

@@ -1368,7 +1368,14 @@ fn prepare(
             range.len()
         ));
     }
-    prepare_buckets(&g.positions, buckets, normalize, evidence, details)
+    prepare_buckets(
+        &g.positions,
+        preview.normals.as_deref(),
+        buckets,
+        normalize,
+        evidence,
+        details,
+    )
 }
 /// D192: triangles and primitive ranges without the material-less groups. The game's
 /// per-primitive draw loop skips a primitive whose material is null (no bind, no draw;
@@ -1401,6 +1408,7 @@ fn drop_materialless(preview: &lbp_preview::GroupedMesh) -> Result<TriangleParti
 /// Material buckets over one position array (model mesh or merged shape batch).
 fn prepare_buckets(
     positions: &[[f32; 3]],
+    game_normals: Option<&[[f32; 3]]>,
     buckets: Vec<adapter::Bucket<lbp_preview::MaterialAsset>>,
     normalize: bool,
     evidence: &mut browser::PreviewEvidence,
@@ -1431,7 +1439,18 @@ fn prepare_buckets(
             }
             Err(e) => return Err(e),
         };
-        let normals_trusted = adapter::mesh_normals_trusted(&mesh);
+        let mut normals_trusted = adapter::mesh_normals_trusted(&mesh);
+        // P2v: the game's decoded normals replace ours; the draw is trusted when every
+        // referenced vertex took one.
+        if let Some(game) = game_normals {
+            let (used, total, agree) = adapter::apply_game_normals(&mut mesh, game);
+            if total > 0 {
+                details.push(format!(
+                    "Normals: game (decoded) on {used}/{total} referenced vertices, mean |dot| with generated {agree:.3}"
+                ));
+                normals_trusted = used == total;
+            }
+        }
         let surface = asset.as_ref().and_then(|a| a.surface());
         let gloss = surface.and_then(|s| s.specular.map(|c| (c, s.cosine_power)));
         let alpha_mix = asset
@@ -1649,6 +1668,7 @@ fn plan_level(
                 // World-space batch; a material that did not select draws neutral grey.
                 level_scene::ScenePayload::Shapes { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
                     false,
                     &mut evidence,
@@ -1657,6 +1677,7 @@ fn plan_level(
                 // D119 backdrop batch (mesh space; the item matrix places it).
                 level_scene::ScenePayload::Backdrop { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
                     false,
                     &mut evidence,
@@ -1665,6 +1686,7 @@ fn plan_level(
                 // D160 sticker decal overlays (world space, alpha blended).
                 level_scene::ScenePayload::Decals { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(Some(material.clone()), batch.triangles.clone())],
                     false,
                     &mut evidence,

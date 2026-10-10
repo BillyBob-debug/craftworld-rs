@@ -2240,6 +2240,8 @@ pub fn load_level_scene_with_options(
                 let mut copy = GroupedMesh {
                     geometry: m.geometry.clone(),
                     bindings: m.bindings.clone(),
+                    // Positions moved by the bone matrices; the stored normals no longer match.
+                    normals: None,
                 };
                 copy.geometry.positions = positions;
                 ScenePayload::Model(Box::new(copy))
@@ -2271,6 +2273,7 @@ pub fn load_level_scene_with_options(
                     let mut copy = GroupedMesh {
                         geometry: m.geometry.clone(),
                         bindings: m.bindings.clone(),
+                        normals: None,
                     };
                     copy.geometry.positions = positions;
                     ScenePayload::Model(Box::new(copy))
@@ -2703,6 +2706,7 @@ mod tests {
                 skeleton: Default::default(),
             },
             bindings: vec![Err(crate::MATERIALLESS_REASON.into()), second],
+            normals: None,
         }
     }
 
