@@ -106,7 +106,7 @@ pub(crate) struct Source {
     pub(crate) transform: crate::SamplingTransform,
 }
 impl GraphProgram {
-    fn sources(&self) -> Vec<Source> {
+    pub(crate) fn sources(&self) -> Vec<Source> {
         let mut sources = vec![];
         for node in &self.nodes {
             if let GraphOp::Sample {

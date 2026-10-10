@@ -1323,6 +1323,8 @@ fn load(
 }
 /// P3h: glow colour (multiplies the map) and the optional map with its UV mode.
 type GlowDraw = ([f32; 3], Option<(Image, u32)>);
+/// P3i: reflection textures, encoded steps and ReflectionBlur.
+type ReflectionDraw = (Vec<Image>, Vec<lbp_preview::FragmentStep>, f32);
 /// CPU-side display preparation shared by the single-mesh and level paths: one entry per
 /// supported material bucket (plus one neutral bucket). `normalize` centres and scales
 /// the mesh to unit size (single-mesh view); level scenes keep model coordinates.
@@ -1348,6 +1350,7 @@ struct Prepared {
     alpha_test: f32,
     /// P3h: unlit glow colour and its optional map (sRGB image, UV mode 2 = primary, 3 = UV1).
     glow: Option<GlowDraw>,
+    reflection: Option<ReflectionDraw>,
     /// D189: graph textures 1.. (texture 0 is `image`) and the encoded steps.
     graph: Option<(Vec<Image>, Vec<lbp_preview::FragmentStep>)>,
 }
@@ -1724,6 +1727,32 @@ fn prepare_buckets(
             }
             None => None,
         };
+        // P3i: the reflection graph takes the free graph texture slots 0..=3, so it needs a
+        // plain diffuse (no per-fragment graph and no second, third or fourth sample).
+        let reflection = match surface.and_then(|s| s.reflection.as_deref()) {
+            Some(r)
+                if graph.is_none()
+                    && second_image.is_none()
+                    && third_image.is_none()
+                    && fourth_image.is_none() =>
+            {
+                let images = r
+                    .textures
+                    .iter()
+                    .map(|(t, wrap)| {
+                        adapter::image_axes(t.header.width, t.header.height, t.rgba.clone(), *wrap)
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                Some((images, r.steps.clone(), r.blur))
+            }
+            Some(_) => {
+                details.push(
+                    "P3i: reflection not drawn (the diffuse uses the graph texture slots)".into(),
+                );
+                None
+            }
+            None => None,
+        };
         prepared.push(Prepared {
             mesh,
             image,
@@ -1739,6 +1768,7 @@ fn prepare_buckets(
             spec_map,
             alpha_test,
             glow,
+            reflection,
             graph,
         });
     }
@@ -1788,6 +1818,12 @@ fn upload(
         if let Err(e) = dual::enable_graph(&mut surface, handles, &steps) {
             // Budgets are checked on the CPU side; a refusal here keeps the base texture.
             eprintln!("D189: {e}");
+        }
+    }
+    if let Some((textures, steps, blur)) = p.reflection {
+        let handles = textures.into_iter().map(|i| images.add(i)).collect();
+        if let Err(e) = dual::enable_reflection(&mut surface, handles, &steps, blur) {
+            eprintln!("P3i: {e}");
         }
     }
     if let Some((color, map)) = p.glow {

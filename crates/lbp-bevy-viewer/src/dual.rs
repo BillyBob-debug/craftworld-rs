@@ -194,7 +194,8 @@ pub fn enable_glow(
     map: Option<(Handle<Image>, u32)>,
 ) {
     let ext = &mut material.extension;
-    ext.graph_param[31] = Vec4::new(color[0], color[1], color[2], 1.);
+    let blur = ext.graph_param[31].w;
+    ext.graph_param[31] = Vec4::new(color[0], color[1], color[2], blur);
     ext.graph_info.w = match map {
         Some((image, mode)) => {
             ext.graph_image4 = Some(image);
@@ -202,6 +203,33 @@ pub fn enable_glow(
         }
         None => 1,
     };
+}
+/// P3i: reflection graph sampled at R.xy with LOD bias `blur` (docs/p3i-reflection.md).
+/// `images[k]` is graph texture k (at most 4, graph slots 0..=3), `steps` at most 31 rows
+/// from row 0; the count rides graph_info.z >> 8 and the blur graph_param[31].w. Needs no
+/// diffuse graph or second/third/fourth sample (the slots are shared).
+pub fn enable_reflection(
+    material: &mut ViewerMaterial,
+    images: Vec<Handle<Image>>,
+    steps: &[lbp_preview::FragmentStep],
+    blur: f32,
+) -> Result<(), String> {
+    if images.is_empty() || images.len() > 4 || steps.is_empty() || steps.len() > 31 {
+        return Err("Invalid: reflection graph budget".into());
+    }
+    let ext = &mut material.extension;
+    let mut images = images.into_iter();
+    ext.image = images.next();
+    ext.third_image = images.next();
+    ext.fourth_image = images.next();
+    ext.graph_image3 = images.next();
+    for (k, step) in steps.iter().enumerate() {
+        ext.graph_code[k] = UVec4::from_array(step.code);
+        ext.graph_param[k] = Vec4::from_array(step.param);
+    }
+    ext.graph_param[31].w = blur;
+    ext.graph_info.z = (ext.graph_info.z & 1) | ((steps.len() as u32) << 8);
+    Ok(())
 }
 /// P2q: static gloss colour with exponent `power` (CosinePower).
 pub fn enable_gloss(material: &mut ViewerMaterial, color: [f32; 3], power: f32) {
@@ -229,7 +257,7 @@ pub fn set_lighting(
             ext.rim_low = l.rim[0].extend(l.scales.z);
             ext.rim_high = l.rim[1].extend(l.scales.w);
             ext.lbp_fog = l.lbp_fog();
-            ext.graph_info.z = u32::from(l.shadows);
+            ext.graph_info.z = (ext.graph_info.z & !1) | u32::from(l.shadows);
             ext.lbp_fog_color = l.lbp_fog_color().extend(1.);
             true
         }
@@ -240,7 +268,7 @@ pub fn set_lighting(
             ext.rim_low = Vec4::ZERO;
             ext.rim_high = Vec4::ZERO;
             ext.lbp_fog = Vec4::ZERO;
-            ext.graph_info.z = 0;
+            ext.graph_info.z &= !1;
             false
         }
     }
@@ -320,9 +348,9 @@ fn graph_lane(v: vec4<f32>, code: u32) -> vec4<f32> {
 }
 // D189 per-fragment D100 program (mirrors lbp_preview::evaluate_fragment): linear texels,
 // MULTIPLY/ADD per lane, MIX (r - l) * f + l, BLEND l + (r - l) * clamp((m.x - p0)/(p1 - p0)).
-fn graph_color(uv0: vec2<f32>, uv1: vec2<f32>, d0: vec4<f32>, d1: vec4<f32>) -> vec4<f32> {
+fn graph_color(count_in: u32, uv0: vec2<f32>, uv1: vec2<f32>, d0: vec4<f32>, d1: vec4<f32>) -> vec4<f32> {
     var values: array<vec4<f32>, 32>;
-    let count = min(graph_info.x, 32u);
+    let count = min(count_in, 32u);
     for (var k = 0u; k < count; k++) {
         let code = graph_code[k];
         let p = graph_param[k];
@@ -465,7 +493,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
     let graph_d0 = vec4<f32>(dpdx(in.uv), dpdy(in.uv));
     let graph_d1 = vec4<f32>(dpdx(in.uv_b), dpdy(in.uv_b));
     if graph_info.x > 0u {
-        let g = graph_color(in.uv, in.uv_b, graph_d0, graph_d1);
+        let g = graph_color(graph_info.x, in.uv, in.uv_b, graph_d0, graph_d1);
         color = vec4<f32>(clamp(g.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     }
 #endif
@@ -510,7 +538,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
         // P3g: Bevy's cascaded sun-shadow map (one directional light, set up by the viewer),
         // LBP-lit level meshes only; 1 = lit.
         var shadow = 1.0;
-        if light_dir.w > 1.5 && graph_info.z > 0u {
+        if light_dir.w > 1.5 && (graph_info.z & 1u) > 0u {
             let view_z = (view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
             shadow = fetch_directional_shadow(0u, in.world_position, in.world_normal, view_z, in.position.xy);
         }
@@ -528,6 +556,18 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
         }
 #endif
         rgb = rgb * factor + gloss_term(n, pbr.V, factor, spec_tint, shadow);
+        // P3i: reflection graph sampled at the reflection vector (INFERRED: view space, so the
+        // coordinates follow the camera), scaled by the luminance of the lit light.
+        let refl_count = graph_info.z >> 8u;
+        if light_dir.w > 1.5 && refl_count > 0u && graph_info.x == 0u && dot(n, n) > 0.0 {
+            let rv = (view.view_from_world * vec4<f32>(reflect(-pbr.V, n), 0.0)).xyz;
+            let bias = exp2(graph_param[31].w);
+            let gx = dpdx(rv.xy) * bias;
+            let gy = dpdy(rv.xy) * bias;
+            let d = vec4<f32>(gx.x, gx.y, gy.x, gy.y);
+            let refl = graph_color(refl_count, rv.xy, rv.xy, d, d);
+            rgb += refl.rgb * dot(factor, vec3<f32>(0.299, 0.587, 0.114));
+        }
         // P3h: glow is added unlit before the square-root output (INFERRED scale 1).
         if light_dir.w > 1.5 && graph_info.w > 0u && graph_info.x == 0u {
             var glow = graph_param[31].rgb;
@@ -598,12 +638,32 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
         let mut m = super::material(StandardMaterial::default());
         super::enable_glow(&mut m, [0.2, 0.4, 0.6], None);
         assert_eq!(m.extension.graph_info.w, 1);
-        assert_eq!(m.extension.graph_param[31], Vec4::new(0.2, 0.4, 0.6, 1.));
+        assert_eq!(m.extension.graph_param[31], Vec4::new(0.2, 0.4, 0.6, 0.));
         assert!(m.extension.graph_image4.is_none());
         let h = Handle::<Image>::default();
         super::enable_glow(&mut m, [1.; 3], Some((h, 3)));
         assert_eq!(m.extension.graph_info.w, 3);
         assert!(m.extension.graph_image4.is_some());
+    }
+    /// P3i: reflection packs its step count above the shadow bit and its blur next to glow.
+    #[test]
+    fn reflection_packs_beside_shadow_and_glow() {
+        use bevy::prelude::*;
+        let mut m = super::material(StandardMaterial::default());
+        m.extension.graph_info.z = 1; // shadow bit
+        let step = lbp_preview::FragmentStep {
+            code: [2, 0, 0, 0],
+            param: [1.; 4],
+        };
+        let h = Handle::<Image>::default();
+        super::enable_reflection(&mut m, vec![h.clone()], &[step, step], 0.45).unwrap();
+        assert_eq!(m.extension.graph_info.z, 1 | (2 << 8));
+        assert_eq!(m.extension.graph_param[31].w, 0.45);
+        super::enable_glow(&mut m, [0.5; 3], None);
+        assert_eq!(m.extension.graph_param[31].w, 0.45, "glow keeps the blur");
+        assert!(super::enable_reflection(&mut m, vec![h; 5], &[step], 0.).is_err());
+        // Lighting changes only the shadow bit.
+        assert!(super::enable_reflection(&mut m, vec![], &[step], 0.).is_err());
     }
     /// D121: the authored shader (all `#ifdef` blocks enabled, imports stubbed) parses
     /// and validates headlessly. Bevy's own composition is exercised only at run time.
@@ -618,7 +678,8 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
         assert!(body.contains("gloss_term(n, pbr.V, factor, spec_tint, shadow)"));
         assert!(body.contains("rgb = lbp_output(rgb, depth);"));
         assert!(body.contains("rgb += glow;"));
-        assert!(body.contains("graph_color(in.uv, in.uv_b, graph_d0, graph_d1)"));
+        assert!(body.contains("graph_color(refl_count, rv.xy, rv.xy, d, d)"));
+        assert!(body.contains("graph_color(graph_info.x, in.uv, in.uv_b, graph_d0, graph_d1)"));
         let source = format!("{STUBS}{body}");
         let module = naga::front::wgsl::parse_str(&source)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));

@@ -11,10 +11,28 @@ const SPECULAR_PORT: u8 = 2;
 const BUMP_PORT: u8 = 3;
 /// P3h: glow (INFERRED from the decoded shaders: added unlit, oracles/results/2026-10-09-shading-fpdec.md).
 pub const GLOW_PORT: u8 = 4;
+/// P3i: reflection (CONFIRMED port 6 by d104-uv-channel E5; math from the fpdec oracles
+/// 2026-10-10-node-types-10-12.md and 2026-10-10-reflection-uv.md).
+pub const REFLECTION_PORT: u8 = 6;
+/// Most reflection textures and steps the viewer binds (graph slots 0..=3, rows 0..=30).
+pub const MAX_REFLECTION_TEXTURES: usize = 4;
+pub const MAX_REFLECTION_STEPS: usize = 31;
 /// Upper bounds for untrusted material scalars before they reach a shader.
 const MAX_BUMP_LEVEL: f32 = 16.;
 const MAX_COSINE_POWER: f32 = 4096.;
+const MAX_REFLECTION_BLUR: f32 = 16.;
 
+/// P3i: a reflection graph sampled at the reflection vector instead of a UV: every sampler
+/// reads R.xy (2D textures only; cube maps are refused by the decoder) with LOD bias
+/// `blur` (GfxMaterial ReflectionBlur).
+pub struct Reflection {
+    pub textures: Vec<(lbp_texture::Texture, crate::TextureWrapping)>,
+    /// Encoded D100 steps (root last); sample steps use identity scale/offset, channel 0.
+    pub steps: Vec<crate::FragmentStep>,
+    pub blur: f32,
+}
+/// Sampler slots in texture order and the encoded steps.
+pub(crate) type ReflectionProgram = (Vec<usize>, Vec<crate::FragmentStep>);
 pub struct BumpMap {
     pub texture: lbp_texture::Texture,
     pub texture_key: lbp_catalog::attachment::LocationKey,
@@ -38,6 +56,9 @@ pub struct Surface {
     /// GfxMaterial AlphaTestLevel (finite, 0..=1; 0 = no cut-out). The decoded shaders write
     /// alpha 0 below it (oracles/results/2026-10-09-shading-fpdec.md); the viewer discards.
     pub alpha_test: f32,
+    /// P3i: what output port 6 evaluates to when it is a graph of 2D samplers (port 6 sampled
+    /// at the reflection vector, added to the diffuse times the luminance of the light).
+    pub reflection: Option<Box<Reflection>>,
     /// P3h: what output port 4 (glow) evaluates to, loaded by the diffuse route with the glow
     /// graph standing in for port 0 (a solid colour or a baked texture), when wired.
     pub glow: Option<Box<crate::MaterialAsset>>,
@@ -51,6 +72,9 @@ impl Surface {
             .flatten()
             .map(|b| b.texture.rgba.len() + b.sampling_uv.len() * std::mem::size_of::<[f32; 2]>())
             .sum::<usize>()
+            + self.reflection.as_deref().map_or(0, |r| {
+                r.textures.iter().map(|(t, _)| t.rgba.len()).sum::<usize>()
+            })
             + match self.glow.as_deref() {
                 Some(crate::MaterialAsset::Texture(a)) => {
                     a.texture.rgba.len() + a.sampling_uv.len() * std::mem::size_of::<[f32; 2]>()
@@ -70,6 +94,14 @@ impl Surface {
             parts.push(format!(
                 "gloss map UV{} ^ {:.0} ({}×{})",
                 m.uv_channel, self.cosine_power, m.texture.header.width, m.texture.header.height
+            ));
+        }
+        if let Some(r) = &self.reflection {
+            parts.push(format!(
+                "reflection {} map{} blur {:.2}",
+                r.textures.len(),
+                if r.textures.len() == 1 { "" } else { "s" },
+                r.blur
             ));
         }
         match self.glow.as_deref() {
@@ -252,6 +284,7 @@ pub(crate) fn load(
         specular: routes.specular,
         spec_map: None,
         glow: None,
+        reflection: None,
         skipped: routes.skipped,
         bump: None,
     };
@@ -267,7 +300,131 @@ pub(crate) fn load(
             Err(e) => surface.skipped.push(format!("gloss map not drawn ({e})")),
         }
     }
+    match load_reflection(source, catalog, graph, control) {
+        Ok(None) => {}
+        Ok(Some(r)) => surface.reflection = Some(Box::new(r)),
+        Err(e) => surface.skipped.push(format!("reflection not drawn ({e})")),
+    }
     Ok(surface)
+}
+/// P3i: the port 6 graph as per-fragment steps whose samplers read the reflection vector.
+/// Pure (no I/O): returns the sampler slots in texture order and the encoded steps.
+pub(crate) fn reflection_program(
+    graph: &GraphMetadata,
+) -> Result<Option<ReflectionProgram>, String> {
+    let outputs: Vec<usize> = (0..graph.boxes.len())
+        .filter(|&i| graph.boxes[i].type_raw == 0)
+        .collect();
+    let [output] = outputs[..] else {
+        return Err("Unsupported: surface needs one output node".into());
+    };
+    let wires: Vec<_> = graph
+        .wires
+        .iter()
+        .filter(|w| w.box_to == output as i32 && w.port_to_raw == REFLECTION_PORT)
+        .collect();
+    let [wire] = wires[..] else {
+        return if wires.is_empty() {
+            Ok(None)
+        } else {
+            Err("several port 6 wires".into())
+        };
+    };
+    let root = usize::try_from(wire.box_from)
+        .ok()
+        .filter(|&i| i < graph.boxes.len() && wire.port_from_raw == 0 && wire.swizzle_raw == [0; 5])
+        .ok_or("port 6 wire is swizzled or leaves a non-zero port")?;
+    let program = crate::grid_graph_program(graph, root)?;
+    let sources = program.sources();
+    let slots = crate::fragment::slots(&sources);
+    if slots.len() > MAX_REFLECTION_TEXTURES {
+        return Err(format!(
+            "{} textures, at most {MAX_REFLECTION_TEXTURES}",
+            slots.len()
+        ));
+    }
+    let mut steps =
+        crate::fragment::encode(&crate::grid_graph::steps(&program, &sources)?, &sources)?;
+    if steps.len() > MAX_REFLECTION_STEPS {
+        return Err(format!(
+            "{} steps, at most {MAX_REFLECTION_STEPS}",
+            steps.len()
+        ));
+    }
+    for step in &mut steps {
+        if step.code[0] == crate::fragment::FRAGMENT_SAMPLE {
+            // The TXB coordinate is the plain reflection vector (reflection-uv oracle): no UV
+            // channel, no sampler scale/offset.
+            step.code[2] = 0;
+            step.param = [1., 1., 0., 0.];
+        }
+    }
+    Ok(Some((slots, steps)))
+}
+fn load_reflection(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    graph: &GraphInspection,
+    control: &LoadControl,
+) -> Result<Option<Reflection>, String> {
+    let Some((slots, steps)) = reflection_program(&graph.graph)? else {
+        return Ok(None);
+    };
+    let textures = slots
+        .iter()
+        .map(|&slot| load_slot(source, catalog, graph, slot, control))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(Some(Reflection {
+        textures: textures.into_iter().map(|(t, _, w)| (t, w)).collect(),
+        steps,
+        blur: scalar(
+            graph.material.prefix.scalars.reflection_blur_bits,
+            0.,
+            MAX_REFLECTION_BLUR,
+            0.,
+        ),
+    }))
+}
+/// Decodes the 2D texture bound to material slot `slot` (cube and volume maps error).
+fn load_slot(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    graph: &GraphInspection,
+    slot: usize,
+    control: &LoadControl,
+) -> Result<
+    (
+        lbp_texture::Texture,
+        lbp_catalog::attachment::LocationKey,
+        crate::TextureWrapping,
+    ),
+    String,
+> {
+    let prefix = &graph.material.prefix;
+    let descriptor = prefix
+        .textures
+        .get(slot)
+        .ok_or("Unsupported: texture slot")?;
+    if descriptor.kind == 0 || descriptor.flags != 0 {
+        return Err("Unsupported: absent texture or descriptor flags".into());
+    }
+    let wrap = crate::TextureWrapping::from_raw(
+        prefix.wrap_s_raw.get(slot).copied(),
+        prefix.wrap_t_raw.get(slot).copied(),
+    )?;
+    let texture_key = crate::resolve(catalog, descriptor.guid, descriptor.sha1.as_deref())?;
+    let texture = lbp_texture::decode_reader(
+        texture_key.size,
+        |offset, count| {
+            source
+                .read_hex_checked(&texture_key, offset, count, control)
+                .map(|p| p.bytes)
+                .map_err(lbp_texture::Error::Input)
+        },
+        || control.check().is_err(),
+    )
+    .map_err(|e| e.to_string())?;
+    Ok((texture, texture_key, wrap))
 }
 fn load_bump(
     source: &AttachedSource,
@@ -364,6 +521,40 @@ mod tests {
     }
     fn sampler_params(slot: u32) -> [u32; 8] {
         [1f32.to_bits(), 1f32.to_bits(), 0, 0, 0, slot, 0, 0]
+    }
+
+    #[test]
+    fn p3i_reflection_samplers_read_the_reflection_vector() {
+        // output <- port 6 <- MIX(COLOR, sampler slot 2) with the unwired weight 0.25
+        let mut mix_params = [0; 8];
+        mix_params[0] = 0.25f32.to_bits();
+        let color = [0.1f32, 0.2, 0.3, 1.0].map(f32::to_bits);
+        let g = graph(
+            vec![
+                node(0, [0; 8]),
+                node(12, mix_params),
+                node(3, [color[0], color[1], color[2], color[3], 0, 0, 0, 0]),
+                node(1, [2f32.to_bits(), 3f32.to_bits(), 0, 0, 0, 2, 0, 0]),
+            ],
+            vec![wire(1, 0, REFLECTION_PORT), wire(2, 1, 0), wire(3, 1, 1)],
+        );
+        let (slots, steps) = reflection_program(&g).unwrap().unwrap();
+        assert_eq!(slots, vec![2]);
+        let sample = steps
+            .iter()
+            .find(|s| s.code[0] == crate::fragment::FRAGMENT_SAMPLE)
+            .unwrap();
+        assert_eq!(sample.code[2], 0, "no UV channel");
+        assert_eq!(sample.param, [1., 1., 0., 0.], "scale/offset ignored");
+        assert!(steps.len() <= MAX_REFLECTION_STEPS);
+        // Unwired port 6: nothing. Two wires: refused.
+        let plain = graph(vec![node(0, [0; 8])], vec![]);
+        assert!(reflection_program(&plain).unwrap().is_none());
+        let two = graph(
+            vec![node(0, [0; 8]), node(1, sampler_params(0))],
+            vec![wire(1, 0, REFLECTION_PORT), wire(1, 0, REFLECTION_PORT)],
+        );
+        assert!(reflection_program(&two).is_err());
     }
 
     #[test]

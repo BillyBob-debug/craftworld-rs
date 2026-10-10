@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 — P3i reflection (output port 6)
+
+Under --lbp-lighting the port-6 graph is evaluated per fragment at the reflection vector R
+(2D maps, ReflectionBlur bias) and added x luma(light); cube maps and diffuse-graph materials
+are named, not drawn. View space, luma weights, scale 1 INFERRED. Docs: docs/p3i-reflection.md.
+Not rendered in the cloud; PC verifies metal/glass, census.
+
 ## 2026-10-10 — P3h glow (output port 4)
 
 Under --lbp-lighting port 4 is loaded through the diffuse route (port 4 stood in for port 0)
