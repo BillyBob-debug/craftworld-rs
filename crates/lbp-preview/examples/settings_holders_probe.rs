@@ -27,6 +27,10 @@ fn show(label: &str, s: &LevelSettings) {
         s.fog_color[0], s.fog_color[1], s.fog_color[2], s.fog_color[3],
         s.fog_near, s.fog_far, s.presets
     );
+    println!(
+        "    full vec4: sun {:?} ambient {:?} rim {:?} rim2 {:?}",
+        s.sun_color, s.ambient_color, s.rim_color, s.rim_color2
+    );
     let values = [s.sun_position[0], s.fog_near, s.fog_far, s.fog_color[0]];
     for ((name, want), v) in WANTED.iter().zip(values) {
         if near(v, *want) {

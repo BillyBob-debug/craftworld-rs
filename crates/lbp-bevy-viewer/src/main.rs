@@ -2559,6 +2559,27 @@ fn level_report(v: &Viewer) -> Result<(), String> {
                 for (reason, groups) in level_scene::neutral_reasons(&m.payload) {
                     lines.push(format!("    neutral ({groups} groups): {reason}"));
                 }
+                // Which shapes a batch merges (reader order), to tie it to a visible object.
+                if let level_scene::ScenePayload::Shapes { batch, .. } = &m.payload {
+                    const SHOWN: usize = 16;
+                    let shown: Vec<String> = batch
+                        .things
+                        .iter()
+                        .take(SHOWN)
+                        .map(ToString::to_string)
+                        .collect();
+                    let more = batch.things.len().saturating_sub(SHOWN);
+                    lines.push(format!(
+                        "    shape Things ({}): {}{}",
+                        batch.things.len(),
+                        shown.join(", "),
+                        if more > 0 {
+                            format!(" (+{more} more)")
+                        } else {
+                            String::new()
+                        }
+                    ));
+                }
             }
             Ok(lines)
         })
