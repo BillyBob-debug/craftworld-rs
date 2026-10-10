@@ -622,7 +622,11 @@ fn level_lighting_blends_presets_by_world_lighting_and_darkness() {
         ..LevelSettings::default()
     };
     let main = mk(9., 9., 9., 9.);
-    let presets = [mk(0., 1., 0.1, 0.), mk(1., 2., 0.5, 0.5), mk(3., 4., 0.9, 0.)];
+    let presets = [
+        mk(0., 1., 0.1, 0.),
+        mk(1., 2., 0.5, 0.5),
+        mk(3., 4., 0.9, 0.),
+    ];
     let at = |l: f32, d: f32| LevelSettings::at_lighting(&main, &presets, l, d);
     // Spread evenly: 0, 0.5, 1 land on the presets themselves.
     let (s, pos) = at(0., 0.);

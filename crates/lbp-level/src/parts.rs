@@ -427,9 +427,8 @@ impl LevelSettings {
     pub fn lerp(&self, other: &Self, t: f32) -> Self {
         let f = |a: f32, b: f32| a + (b - a) * t;
         let v3 = |a: [f32; 3], b: [f32; 3]| [f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2])];
-        let v4 = |a: [f32; 4], b: [f32; 4]| {
-            [f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2]), f(a[3], b[3])]
-        };
+        let v4 =
+            |a: [f32; 4], b: [f32; 4]| [f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2]), f(a[3], b[3])];
         Self {
             sun_position: v3(self.sun_position, other.sun_position),
             sun_position_scale: f(self.sun_position_scale, other.sun_position_scale),

@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 — P3m levels are lit by their presets blended by PWorld lighting
+
+Stored presets are spread over PWorld `lighting` and blended; `darkness` scales exposure and fog colour.
+Matches the live blocks of tutorial_23, Bravery Test and the Moon level to 4 digits. Replaces preset 0
+(also for baked AO) and the main block, whose blue 1000..4000 fog drowned levels under --preview-lighting.
+Level mode is LBP-lit by default (P2w). docs/p3m-level-lighting.md. +0 viewable / +0 Complete.
+
 ## 2026-10-10 — P3l cube-map reflections (output port 6)
 
 Reflection graphs with one BC1/BC3 cube map (59 graphs) now draw: six faces as a mipped cube
