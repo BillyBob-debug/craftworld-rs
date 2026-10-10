@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-10 — P3c output-port census example
+
+Read-only example counting what feeds each material output port (specular, glow, reflection
+planning). No viewer change. Docs: docs/p3c-output-ports.md. PC runs it on the corpus.
+
 ## 2026-10-09 — P2v game normals for model meshes
 
 Model meshes are lit with the game's decoded normals instead of normals generated from our
