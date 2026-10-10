@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-10 — P3d gloss colour maps
+
+Port 2 wired from one sampler (2,132 graphs) multiplies the gloss term under --lbp-lighting;
+UV from the diffuse coordinates or a free UV1. Docs: docs/p3d-gloss-map.md. PC verifies shots.
+
 ## 2026-10-09 — P2v game normals for model meshes
 
 Model meshes are lit with the game's decoded normals instead of normals generated from our
