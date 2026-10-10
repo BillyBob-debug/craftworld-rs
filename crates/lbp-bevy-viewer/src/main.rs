@@ -154,6 +154,8 @@ struct Viewer {
     /// P2q `--bump-gloss` / `--no-bump-gloss` (docs/p2q-bump-gloss.md).
     bump_gloss: bool,
     no_bump_gloss: bool,
+    /// P3g `--no-lbp-shadows`: LBP lighting without the sun-shadow map.
+    no_shadows: bool,
     instance_input_enabled: bool,
     instance_rgba: [f32; 4],
     animation_base: bool,
@@ -425,6 +427,7 @@ fn options() -> Result<Viewer, String> {
     let mut v = Viewer {
         bump_gloss: false,
         no_bump_gloss: false,
+        no_shadows: false,
         instance_input_enabled: false,
         instance_rgba: [1.; 4],
         animation_base: false,
@@ -516,6 +519,10 @@ fn options() -> Result<Viewer, String> {
         if flag == "--lbp-lighting" {
             v.lighting.enabled = true;
             v.lighting.lbp = true;
+            continue;
+        }
+        if flag == "--no-lbp-shadows" {
+            v.no_shadows = true;
             continue;
         }
         if flag == "--bump-gloss" {
@@ -813,6 +820,9 @@ fn main() {
     };
     let mut app = App::new();
     app.insert_resource(viewer)
+        .insert_resource(bevy::light::DirectionalLightShadowMap {
+            size: SHADOW_MAP_SIZE,
+        })
         .init_resource::<Orbit>()
         .insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.045)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -2787,8 +2797,67 @@ type LightRoots<'w, 's> = (
     Query<'w, 's, &'static Transform, With<PodPlanetsRoot>>,
     Query<'w, 's, &'static Transform, (With<PodShellRoot>, Without<PodTentRoot>)>,
 );
+/// P3g: the sun's shadow-map edge. The game renders three 768x768 sun-shadow maps (Moon
+/// capture); Bevy wants a power of two for stable cascades, so 1024 stands in (INFERRED).
+const SHADOW_MAP_SIZE: usize = 1024;
+/// P3g: the one directional light that exists only to feed the cascaded shadow map (the
+/// viewer shader does its own lighting). Holds the display scale its cascades were cut for.
+#[derive(Component)]
+struct SunShadow(f32);
+/// P3g: far bounds of the three cascades, in level units along the view axis. The first
+/// covers the gameplay view (about 1,200 units of camera distance), INFERRED from the
+/// game's three maps; the cut is a preview choice.
+const SHADOW_CASCADE_UNITS: [f32; 2] = [3500., 40000.];
+fn sync_sun_shadow(
+    commands: &mut Commands,
+    suns: &mut Query<(Entity, &SunShadow, &mut Transform)>,
+    light: Option<&lighting::PreviewLight>,
+) {
+    let want = light.filter(|l| l.shadows && l.toward_light.is_finite());
+    let mut kept = false;
+    for (entity, cut, mut transform) in suns.iter_mut() {
+        match want {
+            Some(l) if !kept && (cut.0 - l.display_scale).abs() <= f32::EPSILON => {
+                *transform = sun_transform(l.toward_light);
+                kept = true;
+            }
+            _ => commands.entity(entity).despawn(),
+        }
+    }
+    let Some(l) = want.filter(|_| !kept) else {
+        return;
+    };
+    let s = l.display_scale;
+    commands.spawn((
+        SunShadow(s),
+        DirectionalLight {
+            // Near black for any StandardMaterial in the scene; the viewer shader ignores it.
+            illuminance: 1.,
+            shadow_maps_enabled: true,
+            ..default()
+        },
+        bevy::light::CascadeShadowConfigBuilder {
+            num_cascades: 3,
+            minimum_distance: 0.01,
+            maximum_distance: SHADOW_CASCADE_UNITS[1] * s,
+            first_cascade_far_bound: SHADOW_CASCADE_UNITS[0] * s,
+            overlap_proportion: 0.2,
+        }
+        .build(),
+        sun_transform(l.toward_light),
+    ));
+}
+fn sun_transform(toward_light: Vec3) -> Transform {
+    let up = if toward_light.y.abs() > 0.99 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    Transform::default().looking_to(-toward_light, up)
+}
 fn apply_lighting(
     mut commands: Commands,
+    mut suns: Query<(Entity, &SunShadow, &mut Transform)>,
     mut v: ResMut<Viewer>,
     mut materials: ResMut<Assets<ViewerMaterial>>,
     cameras: Query<Entity, With<Camera3d>>,
@@ -2820,10 +2889,12 @@ fn apply_lighting(
     if !on && !v.lighting.applied {
         return;
     }
+    let no_shadows = v.no_shadows;
     let light = on.then(|| {
         if v.lighting.lbp {
             let mut l = v.lighting.light.lbp_shaped(turn);
             l.pod_t = pod_t;
+            l.shadows &= !no_shadows;
             l
         } else {
             v.lighting.light.clone()
@@ -2833,12 +2904,15 @@ fn apply_lighting(
         let l = if v.lighting.lbp {
             let mut l = l.lbp_shaped(shell_turn);
             l.pod_t = pod_t;
+            // The Pod shell draws with fragment variant 8: no shadow (CONFIRMED).
+            l.shadows = false;
             l
         } else {
             l.clone()
         };
         (*from, on.then_some(l))
     });
+    sync_sun_shadow(&mut commands, &mut suns, light.as_ref());
     let mut unlit = 0usize;
     for (i, (_, _, handle, _)) in v.scene.iter().enumerate() {
         let layer = match &shell {
@@ -3551,6 +3625,7 @@ mod tests {
         let mut v = Viewer {
             bump_gloss: false,
             no_bump_gloss: false,
+            no_shadows: false,
             instance_input_enabled: false,
             instance_rgba: [1.; 4],
             animation_base: false,

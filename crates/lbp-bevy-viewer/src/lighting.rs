@@ -34,6 +34,9 @@ pub struct PreviewLight {
     pub exposure: f32,
     /// P2l: LBP-shaped mode (`lbp`); off = D121 Lambert preview.
     pub lbp: bool,
+    /// P3g: the sun term is multiplied by the dynamic sun-shadow map (LBP mode, level
+    /// meshes only: the Pod draws with fragment variant 8, which has no shadow).
+    pub shadows: bool,
     /// P2q: the scalar (.w) the game sends with the sun, ambient and rim colours; it
     /// weights the gloss term (brdf.cg `light.w`). Zero outside LBP mode.
     pub scales: Vec4,
@@ -84,6 +87,7 @@ impl PreviewLight {
             rim: [Vec3::ZERO; 2],
             exposure: 1.,
             lbp: false,
+            shadows: false,
             scales: Vec4::ZERO,
             stored_w: [1.; 4],
             multiplier: 1.,
@@ -190,6 +194,7 @@ impl PreviewLight {
                 .filter(|e| e.is_finite() && *e > 0.)
                 .unwrap_or(1.),
             lbp: false,
+            shadows: false,
             scales: Vec4::ZERO,
             multiplier,
             display_scale: if scale.is_finite() && scale > 0. {
@@ -218,6 +223,7 @@ impl PreviewLight {
         let mut light = self.clone();
         let e = self.exposure;
         light.lbp = true;
+        light.shadows = true;
         // P2p: the scales the game sends with each colour (D-RSX capture of the Pod).
         light.key = self.raw_key * GAME_SUN_SCALE * e;
         light.ambient = self.raw_ambient * GAME_AMBIENT_SCALE * e;
@@ -471,6 +477,13 @@ mod tests {
         let t = PreviewLight::from_settings(&s, Vec3::ZERO, 1.)
             .lbp_shaped(Quat::from_rotation_z(std::f32::consts::FRAC_PI_2));
         assert!((t.toward_light - Vec3::NEG_X).length() < 1e-5);
+    }
+
+    #[test]
+    fn shadows_follow_lbp_mode_only() {
+        let plain = PreviewLight::from_settings(&settings(), Vec3::ZERO, 1.);
+        assert!(!plain.shadows);
+        assert!(plain.lbp_shaped(Quat::IDENTITY).shadows);
     }
 
     #[test]
