@@ -1745,7 +1745,13 @@ fn load_lightmap(
     if width == 0 || height == 0 || width > 4096 || height > 4096 {
         return Err(format!("Unsupported: lightmap extent {width}x{height}"));
     }
-    let r8: Vec<u8> = texture.rgba.chunks_exact(4).map(|p| p[0]).collect();
+    let r8: Vec<u8> = texture
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|p| p[0])
+        .collect();
     if r8.len() != width as usize * height as usize {
         return Err("Invalid: lightmap pixel count".into());
     }
