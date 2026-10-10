@@ -1,5 +1,8 @@
 # D194 — level shapes take their own PShape.color (2026-10-09)
 
+Probe: `cargo run -p lbp-preview --example material_graph_dump -- SNAPSHOT GAME-DIRS GFX-GUID`
+prints one material's graph structure (no asset bytes).
+
 Follows D191 ([d191-level-thing-defaults.md](d191-level-thing-defaults.md)), which gave
 RENDER_MESH Things their own `PRenderMesh.editorColor` but left shapes explicit-only.
 Scene assembly (`level_scene.rs`) and the viewer report; no parser or shader change.
@@ -26,9 +29,20 @@ multiply requires two direct textures or one texture and static COLOR":
   the LBP2 band).
 - `--level-report` prints `neutral (1 groups): <error>` for a failed shape or backdrop
   batch and `shape Things (N): ...` (first 16, reader order) for each shape batch.
+- Nested tint over several animated samplers: the PC graph dump of gfx 00018401 (12
+  boxes) shows diffuse = (TEX s0 × THING) × (TEX s1 × TEX s2), all three samplers
+  animated (623100, 623400, 623500). After projection the nested-tint rewrite folds s0
+  under the tint, leaving a three-sample product tinted by THING. The D92 refusal for
+  several animated leaves with a folded nested sampler, and the loader's "exactly two
+  direct samples" guard, are lifted for this: the componentwise product is commutative,
+  so the tint on the primary texture is exact. Alpha-subtracted samplers keep the D92
+  refusal; a fourth sample (product tree) keeps the loader refusal.
 - `PShape.brightness`, `colorOff`/`brightnessOff` and player colour are not applied.
 
 ## Evidence
+
+- Second cause (after PShape.color): 59 of the shapes use gfx 00018401, whose graph
+  needs the nested-tint rewrite with three animated samplers; see below.
 
 - The refusal is the `_` arm of the multiply route in `linked.rs`: the inputs are not
   texture/COLOR. An unprojected ThingColor box (type 2) lands there, and the instance
@@ -44,7 +58,8 @@ multiply requires two direct textures or one texture and static COLOR":
 
 ## Tests
 
-`shapes_split_per_shape_color_d194`, `shape_color_argb_packs_and_clamps_vectors`,
+`d194_three_animated_samplers_under_a_nested_tint` (instance.rs; also the D88 two-animated
+nested case now selects), `shapes_split_per_shape_color_d194`, `shape_color_argb_packs_and_clamps_vectors`,
 `shape_batch_neutral_reason_is_its_material_error` (level_scene.rs).
 
 ## Not tested (cloud)
