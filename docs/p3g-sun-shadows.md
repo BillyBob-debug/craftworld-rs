@@ -13,7 +13,11 @@ Change (only with `--lbp-lighting`; `--no-lbp-shadows` turns it off for A/B shot
 - the viewer shader multiplies the sun term of `preview_light`, and the sun share of the gloss
   weight and the specular lobe, by Bevy's `fetch_directional_shadow` (light 0). Ambient and rim
   are unshadowed.
-- the Pod shell layer never receives shadows (it draws with variant 8, CONFIRMED).
+- the Pod gets no shadows at all, shell and planets layers (it draws with variant 8, CONFIRMED;
+  the PC saw the room walls darken the planets 15-50% under the outside sun, so they are
+  excluded whenever a shell is present).
+- the sun query is disjoint from the light-root queries (`SunFilter`); a unit test initialises
+  `apply_lighting` so a Bevy B0001 conflict fails CI instead of panicking at start-up.
 
 Evidence labels: variant 2 for level meshes INFERRED (EBOOT variant rule not looked up);
 768 map size CONFIRMED from the capture, 1024 here INFERRED-substitute (Bevy wants a power of

@@ -2804,13 +2804,16 @@ const SHADOW_MAP_SIZE: usize = 1024;
 /// viewer shader does its own lighting). Holds the display scale its cascades were cut for.
 #[derive(Component)]
 struct SunShadow(f32);
+/// The sun's `&mut Transform` must not overlap the `LightRoots` queries of `apply_lighting`
+/// (Bevy B0001 at start-up otherwise).
+type SunFilter = (Without<PodPlanetsRoot>, Without<PodShellRoot>);
 /// P3g: far bounds of the three cascades, in level units along the view axis. The first
 /// covers the gameplay view (about 1,200 units of camera distance), INFERRED from the
 /// game's three maps; the cut is a preview choice.
 const SHADOW_CASCADE_UNITS: [f32; 2] = [3500., 40000.];
 fn sync_sun_shadow(
     commands: &mut Commands,
-    suns: &mut Query<(Entity, &SunShadow, &mut Transform)>,
+    suns: &mut Query<(Entity, &SunShadow, &mut Transform), SunFilter>,
     light: Option<&lighting::PreviewLight>,
 ) {
     let want = light.filter(|l| l.shadows && l.toward_light.is_finite());
@@ -2857,7 +2860,7 @@ fn sun_transform(toward_light: Vec3) -> Transform {
 }
 fn apply_lighting(
     mut commands: Commands,
-    mut suns: Query<(Entity, &SunShadow, &mut Transform)>,
+    mut suns: Query<(Entity, &SunShadow, &mut Transform), SunFilter>,
     mut v: ResMut<Viewer>,
     mut materials: ResMut<Assets<ViewerMaterial>>,
     cameras: Query<Entity, With<Camera3d>>,
@@ -2889,7 +2892,9 @@ fn apply_lighting(
     if !on && !v.lighting.applied {
         return;
     }
-    let no_shadows = v.no_shadows;
+    // The Pod (shell present) draws everything with fragment variant 8: no shadow, planets
+    // included (CONFIRMED, 161 of 162 main-pass draws); only plain levels get the sun map.
+    let no_shadows = v.no_shadows || v.lighting.shell.is_some();
     let light = on.then(|| {
         if v.lighting.lbp {
             let mut l = v.lighting.light.lbp_shaped(turn);
@@ -3383,6 +3388,17 @@ mod tests {
         assert_eq!(rules.len(), 2);
     }
     use super::*;
+
+    /// CI never launches the viewer, so a Bevy B0001 query conflict in `apply_lighting`
+    /// (P3g: the sun query overlapped the light-root queries) panicked every start-up.
+    /// Initialising the system checks its parameter access without a window or a GPU.
+    #[test]
+    fn apply_lighting_parameters_do_not_conflict() {
+        use bevy::ecs::system::{IntoSystem, System};
+        let mut world = World::new();
+        let mut system = IntoSystem::into_system(apply_lighting);
+        system.initialize(&mut world);
+    }
     /// Re: the joint hierarchy spawned for GPU skinning gives, after transform
     /// propagation, joint global × inverse bind = N × CPU skin matrix × N⁻¹.
     #[test]
