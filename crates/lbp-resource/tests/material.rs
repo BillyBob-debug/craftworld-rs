@@ -229,3 +229,16 @@ fn d73_widened_gate_accepts_952_and_0x3f8_same_layout_and_rejects_above() {
         );
     }
 }
+#[test]
+fn shader_blob_comes_from_the_expanded_payload() {
+    for compact in [false, true] {
+        for mode in [0, 1, 2] {
+            let bytes = wire(&recipe(compact), compact, mode);
+            assert_eq!(
+                material::shader_blob(&bytes, || false).unwrap(),
+                b"synthetic-opaque",
+                "compact {compact} mode {mode}"
+            );
+        }
+    }
+}

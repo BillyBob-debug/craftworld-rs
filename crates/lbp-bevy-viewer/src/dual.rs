@@ -185,6 +185,24 @@ pub fn enable_spec_map(material: &mut ViewerMaterial, image: Handle<Image>, uv_m
 pub fn enable_alpha_test(material: &mut ViewerMaterial, level: f32) {
     material.extension.bump_params.z = level;
 }
+/// P3h: unlit glow added to the lit colour. `color` multiplies the optional map (graph slot
+/// 4, sRGB like the diffuse); `mode` 2 = primary UV, 3 = UV1. Rides graph_info.w and the
+/// last graph_param row, so it needs no per-fragment graph (slots shared).
+pub fn enable_glow(
+    material: &mut ViewerMaterial,
+    color: [f32; 3],
+    map: Option<(Handle<Image>, u32)>,
+) {
+    let ext = &mut material.extension;
+    ext.graph_param[31] = Vec4::new(color[0], color[1], color[2], 1.);
+    ext.graph_info.w = match map {
+        Some((image, mode)) => {
+            ext.graph_image4 = Some(image);
+            mode
+        }
+        None => 1,
+    };
+}
 /// P2q: static gloss colour with exponent `power` (CosinePower).
 pub fn enable_gloss(material: &mut ViewerMaterial, color: [f32; 3], power: f32) {
     material.extension.gloss = Vec3::from(color).extend(power.max(1.));
@@ -510,6 +528,21 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
         }
 #endif
         rgb = rgb * factor + gloss_term(n, pbr.V, factor, spec_tint, shadow);
+        // P3h: glow is added unlit before the square-root output (INFERRED scale 1).
+        if light_dir.w > 1.5 && graph_info.w > 0u && graph_info.x == 0u {
+            var glow = graph_param[31].rgb;
+#ifdef VERTEX_UVS_A
+            if graph_info.w == 2u {
+                glow *= textureSample(graph_image4, graph_sampler4, in.uv).rgb;
+            }
+#endif
+#ifdef VERTEX_UVS_B
+            if graph_info.w == 3u {
+                glow *= textureSample(graph_image4, graph_sampler4, in.uv_b).rgb;
+            }
+#endif
+            rgb += glow;
+        }
         if light_dir.w > 1.5 {
             let depth = -(view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
             rgb = lbp_output(rgb, depth);
@@ -558,6 +591,20 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
     return c;
 }
 "#;
+    /// P3h: glow rides graph_info.w (1 = colour, 2/3 = map on UV0/UV1) and the last param row.
+    #[test]
+    fn glow_uses_the_free_graph_slots() {
+        use bevy::prelude::*;
+        let mut m = super::material(StandardMaterial::default());
+        super::enable_glow(&mut m, [0.2, 0.4, 0.6], None);
+        assert_eq!(m.extension.graph_info.w, 1);
+        assert_eq!(m.extension.graph_param[31], Vec4::new(0.2, 0.4, 0.6, 1.));
+        assert!(m.extension.graph_image4.is_none());
+        let h = Handle::<Image>::default();
+        super::enable_glow(&mut m, [1.; 3], Some((h, 3)));
+        assert_eq!(m.extension.graph_info.w, 3);
+        assert!(m.extension.graph_image4.is_some());
+    }
     /// D121: the authored shader (all `#ifdef` blocks enabled, imports stubbed) parses
     /// and validates headlessly. Bevy's own composition is exercised only at run time.
     #[test]
@@ -570,6 +617,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
         assert!(body.contains("lit_normal(shading, face, pbr.V, bump)"));
         assert!(body.contains("gloss_term(n, pbr.V, factor, spec_tint, shadow)"));
         assert!(body.contains("rgb = lbp_output(rgb, depth);"));
+        assert!(body.contains("rgb += glow;"));
         assert!(body.contains("graph_color(in.uv, in.uv_b, graph_d0, graph_d1)"));
         let source = format!("{STUBS}{body}");
         let module = naga::front::wgsl::parse_str(&source)

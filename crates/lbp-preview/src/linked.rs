@@ -1491,14 +1491,54 @@ pub(crate) fn load_material(
         uv_input,
         control,
         options,
+        0,
     )?;
     if let Some(key) = surface_key {
-        let (graph, _) = read_material_graph(source, &key, control)?;
-        let surface = crate::surface::load(source, catalog, &graph, vertices, uv_input, control)
-            .unwrap_or_else(|e| crate::surface::Surface {
-                skipped: vec![format!("surface not read ({e})")],
-                ..Default::default()
-            });
+        let (graph, material_bytes) = read_material_graph(source, &key, control)?;
+        let mut surface =
+            crate::surface::load(source, catalog, &graph, vertices, uv_input, control)
+                .unwrap_or_else(|e| crate::surface::Surface {
+                    skipped: vec![format!("surface not read ({e})")],
+                    ..Default::default()
+                });
+        // P3h: glow (port 4) goes through the same diffuse route with its graph standing in
+        // for port 0; no instance colour (it tints the diffuse, not the emission).
+        // The blob lives in the expanded payload, not in the raw file bytes.
+        let shader_blob =
+            lbp_resource::material::shader_blob(&material_bytes, || control.check().is_err())
+                .unwrap_or_default();
+        let mut glow_wired = crate::surface::rewire_output(&graph.graph, crate::surface::GLOW_PORT);
+        if matches!(glow_wired, Ok(Some(_)))
+            && !crate::surface::glow_in_program(&graph.graph, &shader_blob)
+        {
+            surface
+                .skipped
+                .push("glow not drawn (the compiled program names no glow colour)".into());
+            glow_wired = Ok(None);
+        }
+        match glow_wired {
+            Ok(None) => {}
+            Ok(Some(_)) => {
+                let glow_options = crate::PreviewOptions {
+                    instance_color: None,
+                    ..options
+                };
+                match load_diffuse_material(
+                    source,
+                    catalog,
+                    key,
+                    vertices,
+                    uv_input,
+                    control,
+                    glow_options,
+                    crate::surface::GLOW_PORT,
+                ) {
+                    Ok(glow) => surface.glow = Some(Box::new(glow)),
+                    Err(e) => surface.skipped.push(format!("glow not drawn ({e})")),
+                }
+            }
+            Err(e) => surface.skipped.push(format!("glow not drawn ({e})")),
+        }
         match &mut asset {
             MaterialAsset::Texture(a) => a.surface = Some(std::sync::Arc::new(surface)),
             MaterialAsset::Solid(a) => a.surface = Some(std::sync::Arc::new(surface)),
@@ -1506,6 +1546,7 @@ pub(crate) fn load_material(
     }
     Ok(asset)
 }
+#[allow(clippy::too_many_arguments)] // output_port picks glow (P3h) or diffuse (0)
 fn load_diffuse_material(
     source: &AttachedSource,
     catalog: &Catalog,
@@ -1514,8 +1555,14 @@ fn load_diffuse_material(
     uv_input: UvInput,
     control: &LoadControl,
     options: crate::PreviewOptions,
+    output_port: u8,
 ) -> Result<MaterialAsset, String> {
     let (mut graph, bytes) = read_material_graph(source, &material_key, control)?;
+    // P3h: evaluate another output port (glow) as if it were the diffuse port 0.
+    if output_port != 0 {
+        graph.graph = crate::surface::rewire_output(&graph.graph, output_port)?
+            .ok_or("Unsupported: output port is not wired")?;
+    }
     let original_graph = graph.graph.clone();
     let instance_projection = if let Some(color) = options.instance_color {
         // D105: falls back to the plain substitution for the graph evaluator.

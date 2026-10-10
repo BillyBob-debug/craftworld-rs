@@ -194,6 +194,8 @@ struct Viewer {
     /// D121 `--preview-lighting` (docs/d121-preview-lighting.md); default off.
     lighting: lighting::LightingState,
 }
+/// P3h `--no-glow`: draw material glow (port 4) nowhere, for A/B captures.
+static NO_GLOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 impl Viewer {
     fn preview_options(&self) -> lbp_preview::PreviewOptions {
         lbp_preview::PreviewOptions {
@@ -521,6 +523,10 @@ fn options() -> Result<Viewer, String> {
             v.lighting.lbp = true;
             continue;
         }
+        if flag == "--no-glow" {
+            NO_GLOW.store(true, std::sync::atomic::Ordering::Relaxed);
+            continue;
+        }
         if flag == "--no-lbp-shadows" {
             v.no_shadows = true;
             continue;
@@ -599,7 +605,7 @@ fn options() -> Result<Viewer, String> {
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: local animation base-row snapshot (not game time; also levels)\n--no-animation-base, --no-instance-default: turn off the D188 single-mesh defaults (animation base values; white instance color 1,1,1,1 when no Thing supplies one) and the D191 level defaults (animation base values; each Thing's editorColor as its instance color, inferred)\n--instance-rgba R,G,B,A: supplied linear instance color (overrides the white default)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit (window shown without taking focus)
 --no-activate: show the window without taking focus or the foreground (interactive runs)
---qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N|main: with a level, light from its stored preset N instead of the main settings (P2l; --lbp-lighting defaults to preset 0 when one is stored, main forces the main block)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l)\n--bump-gloss / --no-bump-gloss: material bump maps (output port 3) and static gloss colours (port 2) under --lbp-lighting, on with it by default (P2q; offsets and frame inferred)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open; --pod-figure-data: closed spot from the shell's data (checkpoint + spawn offset, dropped to the floor) instead of the RPCS3 fit (both are reported)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\n--play-sackboy: with a level, its shapes as a physics world and Sackboy as a capsule at the first checkpoint (arrows walk and change lanes, Space jumps; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f) with the position printed each tick\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N|main: with a level, light from its stored preset N instead of the main settings (P2l; --lbp-lighting defaults to preset 0 when one is stored, main forces the main block)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l)\n--no-glow: skip material glow (output port 4; P3h A/B)\n--bump-gloss / --no-bump-gloss: material bump maps (output port 3) and static gloss colours (port 2) under --lbp-lighting, on with it by default (P2q; offsets and frame inferred)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open; --pod-figure-data: closed spot from the shell's data (checkpoint + spawn offset, dropped to the floor) instead of the RPCS3 fit (both are reported)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\n--play-sackboy: with a level, its shapes as a physics world and Sackboy as a capsule at the first checkpoint (arrows walk and change lanes, Space jumps; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f) with the position printed each tick\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -1321,6 +1327,8 @@ fn load(
         eprintln!("{}", v.status);
     }
 }
+/// P3h: glow colour (multiplies the map) and the optional map with its UV mode.
+type GlowDraw = ([f32; 3], Option<(Image, u32)>);
 /// CPU-side display preparation shared by the single-mesh and level paths: one entry per
 /// supported material bucket (plus one neutral bucket). `normalize` centres and scales
 /// the mesh to unit size (single-mesh view); level scenes keep model coordinates.
@@ -1344,6 +1352,8 @@ struct Prepared {
     spec_map: Option<(Image, u32)>,
     /// P3a: AlphaTestLevel cut-out (0 = none), LBP-lighting materials only.
     alpha_test: f32,
+    /// P3h: unlit glow colour and its optional map (sRGB image, UV mode 2 = primary, 3 = UV1).
+    glow: Option<GlowDraw>,
     /// D189: graph textures 1.. (texture 0 is `image`) and the encoded steps.
     graph: Option<(Vec<Image>, Vec<lbp_preview::FragmentStep>)>,
 }
@@ -1647,6 +1657,79 @@ fn prepare_buckets(
             }
             None => None,
         };
+        // P3h: glow (output port 4) is a solid colour, or one baked map on the diffuse UVs or
+        // on UV1 when that is free or holds the same coordinates (graph slot 4, so no graph).
+        let glow = match surface.and_then(|s| s.glow.as_deref()) {
+            Some(lbp_preview::MaterialAsset::Solid(g)) => {
+                let [r, gr, b, _] = g.selection.color.values();
+                ([r, gr, b] != [0.; 3]).then_some(([r, gr, b], None))
+            }
+            Some(lbp_preview::MaterialAsset::Texture(g))
+                if graph.is_none()
+                    && g.dual.is_none()
+                    && g.third.is_none()
+                    && g.fourth.is_none()
+                    && g.product.is_none()
+                    && g.fragment.is_none() =>
+            {
+                let same_diffuse = asset
+                    .as_ref()
+                    .and_then(|a| a.sampling_uv())
+                    .is_some_and(|d| d == g.sampling_uv.as_slice());
+                let owner: Option<&[[f32; 2]]> = asset
+                    .as_ref()
+                    .and_then(|a| a.texture())
+                    .and_then(|a| a.dual.as_ref())
+                    .map(|d| d.sampling_uv.as_slice())
+                    .or_else(|| {
+                        surface
+                            .and_then(|s| s.bump.as_deref())
+                            .filter(|_| bump.is_some())
+                            .map(|b| b.sampling_uv.as_slice())
+                    })
+                    .or_else(|| {
+                        surface
+                            .and_then(|s| s.spec_map.as_deref())
+                            .filter(|_| spec_map.as_ref().is_some_and(|(_, m)| *m == 2))
+                            .map(|m| m.sampling_uv.as_slice())
+                    });
+                let mode = if same_diffuse {
+                    Some(2)
+                } else if owner == Some(g.sampling_uv.as_slice()) {
+                    Some(3)
+                } else if owner.is_none() {
+                    adapter::secondary_uv(&mut mesh, &g.sampling_uv)?;
+                    Some(3)
+                } else {
+                    None
+                };
+                match mode {
+                    Some(mode) => {
+                        let [width, height] = g.display_extent();
+                        let mut image = adapter::image_axes(
+                            width,
+                            height,
+                            g.display_pixels().to_vec(),
+                            g.wrap,
+                        )?;
+                        if g.nearest_sampling() {
+                            adapter::set_nearest(&mut image);
+                        }
+                        Some(([1.; 3], Some((image, mode))))
+                    }
+                    None => {
+                        details.push("P3h: glow map not drawn (UV1 is taken)".into());
+                        None
+                    }
+                }
+            }
+            Some(lbp_preview::MaterialAsset::Texture(_)) => {
+                details
+                    .push("P3h: glow map not drawn (it needs several textures or a graph)".into());
+                None
+            }
+            None => None,
+        };
         prepared.push(Prepared {
             mesh,
             image,
@@ -1661,6 +1744,7 @@ fn prepare_buckets(
             gloss,
             spec_map,
             alpha_test,
+            glow,
             graph,
         });
     }
@@ -1711,6 +1795,16 @@ fn upload(
             // Budgets are checked on the CPU side; a refusal here keeps the base texture.
             eprintln!("D189: {e}");
         }
+    }
+    if let Some((color, map)) = p
+        .glow
+        .filter(|_| !NO_GLOW.load(std::sync::atomic::Ordering::Relaxed))
+    {
+        dual::enable_glow(
+            &mut surface,
+            color,
+            map.map(|(image, mode)| (images.add(image), mode)),
+        );
     }
     if p.alpha_test > 0. {
         dual::enable_alpha_test(&mut surface, p.alpha_test);
@@ -2599,17 +2693,18 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             }
             if surface_on {
                 // P2q: displayed draws (entity × bucket) carrying each surface extra.
-                let (mut bump, mut gloss, mut alpha, mut total) = (0, 0, 0, 0);
+                let (mut bump, mut gloss, mut alpha, mut glow, mut total) = (0, 0, 0, 0, 0);
                 for (mesh, _) in &plan.placed {
                     for p in plan.prepared[*mesh].iter().flatten() {
                         total += 1;
                         bump += usize::from(p.bump.is_some());
                         gloss += usize::from(p.gloss.is_some());
                         alpha += usize::from(p.alpha_test > 0.);
+                        glow += usize::from(p.glow.is_some());
                     }
                 }
                 lines.push(format!(
-                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy, {alpha} alpha-tested (P3a; drawn only under --lbp-lighting)"
+                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy, {alpha} alpha-tested, {glow} glowing (P3a/P3h; drawn only under --lbp-lighting)"
                 ));
             }
             lines.extend(plan.lines);

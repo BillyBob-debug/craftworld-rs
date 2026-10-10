@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-10 — P3h glow (output port 4)
+
+Under --lbp-lighting port 4 is loaded through the diffuse route (port 4 stood in for port 0)
+and added unlit before the sqrt output: a solid colour or one baked map on a free UV set.
+Docs: docs/p3h-glow.md. Not rendered in the cloud; PC verifies lamps/screens, census.
+
 ## 2026-10-10 - P3j shader scalars (bump x2, cosine power x22)
 
 The shader constants are fixed transforms of the stored GfxMaterial scalars (PC CGB patch lists,
