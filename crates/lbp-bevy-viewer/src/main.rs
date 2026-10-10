@@ -10,6 +10,7 @@ mod ui_script;
 use dual::ViewerMaterial;
 mod browser;
 mod level_play;
+mod level_selector;
 mod lighting;
 mod sackboy_play;
 use bevy::{
@@ -132,6 +133,19 @@ impl LevelMode {
     fn active(&self) -> bool {
         self.guid.is_some() || self.path.is_some()
     }
+    /// Level selector: point at `entry` and drop Pod/QA framing from the previous target.
+    fn retarget(&mut self, entry: &lbp_preview::level_list::LevelEntry) {
+        self.guid = entry.guid;
+        self.path = Some(entry.path.clone());
+        self.focus = None;
+        self.pod = None;
+        self.shell = None;
+        self.t0 = None;
+        self.shell_camera = None;
+        self.game_camera = false;
+        self.lines.clear();
+        self.home = None;
+    }
     fn label(&self) -> String {
         match (&self.path, self.guid) {
             (Some(p), _) => p.clone(),
@@ -141,6 +155,7 @@ impl LevelMode {
     }
 }
 struct Job {
+    started: std::time::Instant,
     control: LoadControl,
     receiver: Mutex<mpsc::Receiver<Result<Completed, String>>>,
 }
@@ -189,6 +204,7 @@ struct Viewer {
     /// `--window-16-9`: a 1280x720 window (the game's frame aspect) for RPCS3 comparisons.
     window_16_9: bool,
     browser: browser::Browser,
+    selector: level_selector::LevelSelector,
     census: CorpusCounts,
     level: LevelMode,
     /// D121 `--preview-lighting` (docs/d121-preview-lighting.md); default off.
@@ -230,6 +246,12 @@ impl Viewer {
     fn bump_gloss_on(&self) -> bool {
         !self.no_bump_gloss && (self.bump_gloss || self.lighting.lbp)
     }
+    /// Level selector click: load that level in place, dropping any Pod/QA framing that
+    /// belonged to the previous target.
+    fn select_level(&mut self, entry: &lbp_preview::level_list::LevelEntry) {
+        self.level.retarget(entry);
+        self.requested = true;
+    }
     fn start(&mut self) {
         self.browser.displayed_guid = None;
         self.job = None;
@@ -239,6 +261,7 @@ impl Viewer {
         if paths != self.context_paths {
             self.context = None;
             self.browser.clear_source();
+            self.selector.clear();
         }
         let cached = (paths == self.context_paths)
             .then(|| self.context.clone())
@@ -392,6 +415,7 @@ impl Viewer {
         }
         self.context_paths = (self.snapshot.clone(), self.game.clone());
         self.job = Some(Job {
+            started: std::time::Instant::now(),
             control,
             receiver: Mutex::new(rx),
         });
@@ -459,6 +483,7 @@ fn options() -> Result<Viewer, String> {
         hide_ui: false,
         window_16_9: false,
         browser: browser::Browser::default(),
+        selector: level_selector::LevelSelector::default(),
         census: CorpusCounts::default(),
         level: LevelMode::default(),
         lighting: lighting::LightingState::default(),
@@ -3156,9 +3181,21 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
             .default_size(390.)
             .min_size(260.)
             .show(&mut browser_ui, |ui| {
-                ui.heading("Browse assets");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut v.selector.levels_tab, false, "Assets");
+                    ui.selectable_value(&mut v.selector.levels_tab, true, "Levels");
+                });
+                ui.separator();
                 let context = v.context.clone();
-                if let Some((catalog, _)) = context {
+                if v.selector.levels_tab {
+                    ui.heading("Browse levels");
+                    let current = v.level.path.clone();
+                    if let Some(entry) = v.selector.panel(ui, context.as_ref(), current.as_deref())
+                    {
+                        v.select_level(&entry);
+                    }
+                } else if let Some((catalog, _)) = context {
+                    ui.heading("Browse assets");
                     let selected = v.guid.clone();
                     if let Some(guid) = v.browser.panel(ui, &catalog, &selected) {
                         v.guid = guid;
@@ -3172,6 +3209,23 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
                     ui.label("Attach a snapshot and game directory to browse.");
                 }
             });
+    }
+    if let Some(job) = &v.job {
+        let target = if v.level.active() {
+            let label = v.level.label();
+            let name = v.selector.name_of(&label).unwrap_or(&label).to_string();
+            format!("Loading level {name}")
+        } else {
+            "Loading".to_string()
+        };
+        let detail = if v.context.is_none() {
+            "reading snapshot and attaching game data"
+        } else if v.level.active() {
+            "reading level and building scene"
+        } else {
+            "reading and preparing preview"
+        };
+        level_selector::loading_overlay(ctx, &target, detail, job.started.elapsed());
     }
     egui::Window::new("Asset preview").default_pos(if v.synthetic { [10., 10.] } else { [900., 10.] }).default_width(310.).show(ctx, |ui| {
         if !v.synthetic {
@@ -3785,10 +3839,36 @@ mod tests {
         assert!(level_home(Vec3::ZERO, Vec3::ZERO).is_err());
     }
     #[test]
+    fn selecting_a_level_retargets_and_clears_previous_framing() {
+        let mut mode = LevelMode {
+            pod: Some(3),
+            shell: Some(0x27b9),
+            focus: Some(1),
+            game_camera: true,
+            lines: vec!["old".into()],
+            ..LevelMode::default()
+        };
+        mode.retarget(&lbp_preview::level_list::LevelEntry {
+            path: "a/b/c.bin".into(),
+            guid: Some(7),
+            group: "a/b".into(),
+            name: "c".into(),
+            named: false,
+        });
+        assert_eq!(
+            (mode.guid, mode.path.as_deref()),
+            (Some(7), Some("a/b/c.bin"))
+        );
+        assert!(mode.pod.is_none() && mode.shell.is_none() && mode.focus.is_none());
+        assert!(!mode.game_camera && mode.lines.is_empty() && mode.home.is_none());
+        assert!(mode.active());
+    }
+    #[test]
     fn dropping_replaced_job_cancels_and_disconnects_stale_result() {
         let control = LoadControl::default();
         let (tx, rx) = mpsc::sync_channel(1);
         let job = Job {
+            started: std::time::Instant::now(),
             control: control.clone(),
             receiver: Mutex::new(rx),
         };
@@ -3840,6 +3920,7 @@ mod tests {
             synthetic: false,
             hide_ui: false,
             window_16_9: false,
+            selector: level_selector::LevelSelector::default(),
             browser: browser::Browser::default(),
             census: CorpusCounts::default(),
             level: LevelMode::default(),
