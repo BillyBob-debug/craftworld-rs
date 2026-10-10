@@ -6,6 +6,18 @@ World keeps the lighting/colourCorrection/fog/fogTint/darkness f32 and the Globa
 target/from + blend; the settings probe prints them. Question: which backdrop preset a level
 selects. Docs: docs/p3e-world-lighting.md. No viewer change.
 
+## 2026-10-09 — D194 level shapes take their own PShape.color
+
+Shape batches split per (gfx material, PShape.color) and, under the level defaults, load
+with that colour as the instance colour. Targets the 68 grey shapes in Bravery Test
+(gfx 00012ba7, 00018401). --level-report prints shape-batch reasons and Things.
++0 viewable / +0 Complete expected; PC verifies.
+
+## 2026-10-10 — P3c output-port census example
+
+Read-only example counting what feeds each material output port (specular, glow, reflection
+planning). No viewer change. Docs: docs/p3c-output-ports.md. PC runs it on the corpus.
+
 ## 2026-10-09 — P2v game normals for model meshes
 
 Model meshes are lit with the game's decoded normals instead of normals generated from our
