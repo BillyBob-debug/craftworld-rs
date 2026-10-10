@@ -1583,12 +1583,14 @@ fn load_diffuse_material(
     let additional_texture_slots =
         crate::instance::additional_texture_slots(&original_graph, &displayed_slots)?;
     if let Some(tint) = instance_projection.as_ref().and_then(|p| p.nested_tint) {
+        // D194: a third independent sample is allowed; the tint multiplies the primary
+        // texture and the product is commutative. A fourth sample (product tree) is not.
         if selection.second_sample.is_none()
             || selection.tint != crate::DiffuseTint::default()
-            || selection.third_sample.is_some()
+            || selection.fourth_sample.is_some()
         {
             return Err(
-                "Unsupported: instance nested tint needs exactly two direct samples".into(),
+                "Unsupported: instance nested tint needs two or three direct samples".into(),
             );
         }
         selection.tint = tint;
