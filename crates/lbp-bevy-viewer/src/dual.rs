@@ -212,7 +212,7 @@ pub fn set_lighting(
             ext.rim_high = l.rim[1].extend(l.scales.w);
             ext.lbp_fog = l.lbp_fog();
             ext.graph_info.z = u32::from(l.shadows);
-            ext.lbp_fog_color = Vec3::from(crate::lighting::GAME_FOG_COLOR).extend(1.);
+            ext.lbp_fog_color = l.lbp_fog_color().extend(1.);
             true
         }
         None => {

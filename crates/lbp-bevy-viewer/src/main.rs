@@ -2895,11 +2895,14 @@ fn apply_lighting(
     // The Pod (shell present) draws everything with fragment variant 8: no shadow, planets
     // included (CONFIRMED, 161 of 162 main-pass draws); only plain levels get the sun map.
     let no_shadows = v.no_shadows || v.lighting.shell.is_some();
+    // P2x: Pod scenes (shell layer, game camera, globe view) keep the live-game fog constants.
+    let pod_fog = v.lighting.shell.is_some() || v.level.game_camera || v.level.pod.is_some();
     let light = on.then(|| {
         if v.lighting.lbp {
             let mut l = v.lighting.light.lbp_shaped(turn);
             l.pod_t = pod_t;
             l.shadows &= !no_shadows;
+            l.pod_fog = pod_fog;
             l
         } else {
             v.lighting.light.clone()
@@ -2911,6 +2914,7 @@ fn apply_lighting(
             l.pod_t = pod_t;
             // The Pod shell draws with fragment variant 8: no shadow (CONFIRMED).
             l.shadows = false;
+            l.pod_fog = pod_fog;
             l
         } else {
             l.clone()
