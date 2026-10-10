@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-10 — P3e PWorld lighting fields
+
+World keeps the lighting/colourCorrection/fog/fogTint/darkness f32 and the GlobalSettings
+target/from + blend; the settings probe prints them. Question: which backdrop preset a level
+selects. Docs: docs/p3e-world-lighting.md. No viewer change.
+
 ## 2026-10-09 — P2v game normals for model meshes
 
 Model meshes are lit with the game's decoded normals instead of normals generated from our

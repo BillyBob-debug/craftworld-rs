@@ -36,6 +36,20 @@ fn show(label: &str, s: &LevelSettings) {
 }
 
 fn list(things: &[lbp_level::thing::ThingRecord]) {
+    for t in things {
+        if let Some(w) = t.data.world.as_ref() {
+            println!(
+                "PWorld Thing {}: lighting/colourCorrection/fog/fogTint/darkness {:?}; GlobalSettings target {:?} from {:?} blend {}; backdrop plans {:?} / {:?}",
+                t.index,
+                w.lighting,
+                w.gs_target,
+                w.gs_from,
+                w.gs_blend,
+                w.backdrop_plan.as_ref().and_then(|d| d.guid),
+                w.backdrop_new_plan.as_ref().and_then(|d| d.guid)
+            );
+        }
+    }
     let mut holders = 0;
     for t in things {
         let Some(main) = t.data.level_settings.as_ref() else {
