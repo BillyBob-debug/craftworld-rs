@@ -211,6 +211,7 @@ pub fn set_lighting(
             ext.rim_low = l.rim[0].extend(l.scales.z);
             ext.rim_high = l.rim[1].extend(l.scales.w);
             ext.lbp_fog = l.lbp_fog();
+            ext.graph_info.z = u32::from(l.shadows);
             ext.lbp_fog_color = l.lbp_fog_color().extend(1.);
             true
         }
@@ -221,6 +222,7 @@ pub fn set_lighting(
             ext.rim_low = Vec4::ZERO;
             ext.rim_high = Vec4::ZERO;
             ext.lbp_fog = Vec4::ZERO;
+            ext.graph_info.z = 0;
             false
         }
     }
@@ -241,7 +243,7 @@ impl Plugin for DualPlugin {
 // Independently authored preview shader; imported Bevy interfaces are pinned by Cargo.lock.
 const SOURCE: &str = r#"
 #import bevy_pbr::mesh_view_bindings::view
-#import bevy_pbr::{forward_io::{VertexOutput, FragmentOutput}, pbr_fragment::pbr_input_from_standard_material, pbr_functions::main_pass_post_lighting_processing}
+#import bevy_pbr::{forward_io::{VertexOutput, FragmentOutput}, pbr_fragment::pbr_input_from_standard_material, pbr_functions::main_pass_post_lighting_processing, shadows::fetch_directional_shadow}
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var second_image: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var second_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> enabled: vec4<f32>;
@@ -340,7 +342,7 @@ fn graph_color(uv0: vec2<f32>, uv1: vec2<f32>, d0: vec4<f32>, d1: vec4<f32>) -> 
 // D121 preview Lambert factor (mirrors lighting::PreviewLight::factor/facing_normal).
 // Double-sided: the smooth normal is turned into the hemisphere of the face normal that
 // points at the viewer, so back faces and mirrored instances light like front faces.
-fn preview_light(n: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
+fn preview_light(n: vec3<f32>, to_view: vec3<f32>, shadow: f32) -> vec3<f32> {
     if dot(n, n) <= 0.0 {
         return vec3<f32>(1.0);
     }
@@ -350,7 +352,7 @@ fn preview_light(n: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
         // for the game's square-then-sqrt combine.
         let rim = pow(clamp(dot(n, -to_view) + 0.9, 0.0, 1.0), 2.0);
         let f = light_ambient.rgb * (n.y * 0.15 + 0.5)
-            + light_key.rgb * max(dot(n, light_dir.xyz), 0.0)
+            + light_key.rgb * (max(dot(n, light_dir.xyz), 0.0) * shadow)
             + mix(rim_low.rgb, rim_high.rgb, (n.y + 1.0) * 0.5) * rim;
         return f * f;
     }
@@ -360,16 +362,16 @@ fn preview_light(n: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
 // sums the game's per-light scalars with the same weights as the colours, light^2 is
 // the squared factor, spec = gloss colour x pow(saturate(R.L), CosinePower) with R the
 // mirrored view ray.
-fn gloss_term(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>, tint: vec3<f32>) -> vec3<f32> {
+fn gloss_term(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>, tint: vec3<f32>, shadow: f32) -> vec3<f32> {
     if light_dir.w < 1.5 || gloss.w <= 0.0 || dot(n, n) <= 0.0 {
         return vec3<f32>(0.0);
     }
     let rim = pow(clamp(dot(n, -to_view) + 0.9, 0.0, 1.0), 2.0);
     let w = light_ambient.w * (n.y * 0.15 + 0.5)
-        + light_key.w * max(dot(n, light_dir.xyz), 0.0)
+        + light_key.w * (max(dot(n, light_dir.xyz), 0.0) * shadow)
         + mix(rim_low.w, rim_high.w, (n.y + 1.0) * 0.5) * rim;
     let r = reflect(-to_view, n);
-    let spec = gloss.rgb * tint * pow(clamp(dot(r, light_dir.xyz), 0.0, 1.0), gloss.w);
+    let spec = gloss.rgb * tint * (pow(clamp(dot(r, light_dir.xyz), 0.0, 1.0), gloss.w) * shadow);
     return 2.0 * w * factor * spec;
 }
 // Facing normal, tilted by the bump offset in a cotangent frame built from the
@@ -487,7 +489,14 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
         // P2s: mode 3 (untrusted smooth normals) shades with the face normal.
         let shading = select(in.world_normal, face, light_dir.w > 2.5);
         let n = lit_normal(shading, face, pbr.V, bump);
-        let factor = preview_light(n, pbr.V);
+        // P3g: Bevy's cascaded sun-shadow map (one directional light, set up by the viewer),
+        // LBP-lit level meshes only; 1 = lit.
+        var shadow = 1.0;
+        if light_dir.w > 1.5 && graph_info.z > 0u {
+            let view_z = (view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
+            shadow = fetch_directional_shadow(0u, in.world_position, in.world_normal, view_z, in.position.xy);
+        }
+        let factor = preview_light(n, pbr.V, shadow);
         // P3d: gloss colour map (port 2 sampler) on graph slot 5, unused without a graph.
         var spec_tint = vec3<f32>(1.0);
 #ifdef VERTEX_UVS_A
@@ -500,7 +509,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
             spec_tint = textureSample(graph_image5, graph_sampler5, in.uv_b).rgb;
         }
 #endif
-        rgb = rgb * factor + gloss_term(n, pbr.V, factor, spec_tint);
+        rgb = rgb * factor + gloss_term(n, pbr.V, factor, spec_tint, shadow);
         if light_dir.w > 1.5 {
             let depth = -(view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
             rgb = lbp_output(rgb, depth);
@@ -542,6 +551,9 @@ fn pbr_input_from_standard_material(in: VertexOutput, front: bool) -> PbrInputSt
     p.V = vec3<f32>(0.0, 0.0, 1.0);
     return p;
 }
+fn fetch_directional_shadow(id: u32, p: vec4<f32>, n: vec3<f32>, z: f32, xy: vec2<f32>) -> f32 {
+    return 1.0;
+}
 fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32> {
     return c;
 }
@@ -556,7 +568,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .map(|l| l.replace("#{MATERIAL_BIND_GROUP}", "2") + "\n")
             .collect();
         assert!(body.contains("lit_normal(shading, face, pbr.V, bump)"));
-        assert!(body.contains("gloss_term(n, pbr.V, factor, spec_tint)"));
+        assert!(body.contains("gloss_term(n, pbr.V, factor, spec_tint, shadow)"));
         assert!(body.contains("rgb = lbp_output(rgb, depth);"));
         assert!(body.contains("graph_color(in.uv, in.uv_b, graph_d0, graph_d1)"));
         let source = format!("{STUBS}{body}");

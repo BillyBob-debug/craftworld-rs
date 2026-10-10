@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-10 — P3g dynamic sun shadows
+
+`--lbp-lighting` adds one cascaded Bevy sun-shadow map (3 cascades, 1024) that darkens the
+sun term, sun gloss and specular; Pod (shell and planets) excluded; `--no-lbp-shadows` opts out. Docs:
+docs/p3g-sun-shadows.md. Not rendered in the cloud; PC verifies acne/peter-panning.
+
 ## 2026-10-09 — P2x level fog from the level's own settings
 
 Under the LBP-shaped lighting a level's fog uses its FogNear/FogFar/FogColor (game formula from
