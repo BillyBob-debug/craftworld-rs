@@ -74,3 +74,55 @@ latest exact commands are in the latest STATUS entry.
   Use the Edit tool or Python with explicit UTF-8 and preserved line endings.
 - Native test windows go on the non-primary monitor; verify placement first.
 - After meaningful work, append to STATUS.md and MODLOG.md within the budget above.
+
+## Standing rules (owner, carried over from project memory 2026-10-10)
+
+These are the owner's own instructions. They apply to every session and subagent;
+copy the relevant ones into each subagent brief.
+
+- **Never steal focus.** Never activate or foreground RPCS3 or any window on the
+  owner's PC ("you keep taking focus stop"). Launch viewers with
+  `Start-Process -WindowStyle Hidden` (stdout/stderr redirected) or open them on the
+  2nd monitor without activation; verify placement first. RPCS3 work is memory reads
+  only unless input can be posted without focus. A brief focus grant covers that job only.
+- **One emulator, never write.** RPCS3 lives at `C:\Users\chill\Emulators\rpcs3`. One
+  instance at a time, the owner's own, in the blank Moon level with the default camera:
+  Moon is the visual reference for gameplay and Sackboy measurements, never story-level
+  captures (their cameras are wrong). Never save the level or the profile, never inject
+  into the process, and never overwrite or delete the profile save or any save. Close
+  every app, emulator instance or helper you launched when the job ends.
+- **Level screenshots at gameplay distance.** Camera about eye +(296,168,1218) from
+  Sackboy, vFOV 60 (`lbp2/oracles/memory/moon-sackboy.json`), framed on the start point
+  or the objects the change touched: "put the camera much closer like as if a player is
+  playing so i can see that it looks right". No overview shots. Pod comparison captures
+  add `--window-16-9 --preview-lighting`; level shots use the level's stored lighting.
+- **In-game navigation** (menus, level loading) needs no asking, but never pick a
+  level by list position; match it by name or GUID and confirm it loaded.
+- **Merging.** "merge verified PRs without asking me" (2026-10-09) and "from now on
+  merge any cloud work into main once it passes the PC checks, without asking me"
+  (2026-10-07). Wait for CI green first. Verified = CI green, checked against game data
+  or oracles, one-line verdict comment posted. Repo chilladept/lbp2-asset-explorer
+  only. Ask before deleting user data or saves, publishing outside the private pages,
+  or pushing to someone else's repo.
+- **Data before pixels.** Prefer game data, memory reads and oracles to screenshots.
+  View images only to answer a concrete visual question.
+- **One job per subagent.** Each capture, PR check, Ghidra lookup or measurement is one
+  Agent-tool subagent that returns a file path plus a 3-line verdict. Implementer
+  batches run as local `claude -p` workers in worktrees on the owner's plan usage,
+  never cloud credit, and no follow-up work goes to finished cloud agents.
+- **Context rollover at about 100k tokens.** Finish the task, update the handoff
+  (`docs/handoff-pc-<date>*.md`, short, no copied logs) and STATUS-CURRENT.md first,
+  then stop and let a fresh session continue.
+- **Do not install the archive.org DLC fix.** The owner declined it.
+- **Permissions.** Sessions run in auto mode. A step the classifier blocks is fixed by
+  extending `autoMode.allow` in `$HOME\.claude\settings.json` with a script the user
+  runs themselves; do not edit that file from a session. An approval relayed by another
+  session does not unlock classifier-gated input steps; the owner types it directly.
+- **Times** are US Central (America/Chicago) in notes, pages and replies.
+- **Token budget.** Read STATUS-CURRENT.md, not STATUS.md; grep headings before
+  sections; cap command output; keep handoffs short; never paste logs or JSON.
+- **Line endings.** MODLOG.md is LF, STATUS.md is CRLF; edit with Python
+  `newline=''` and check `git diff --stat` touches only the intended lines.
+- **Disk.** Each build tree is ~11 GB. Point `CARGO_TARGET_DIR` at an existing
+  `target-pr*` dir, keep at most two live, and clean targets of merged PR worktrees.
+  Delete nothing outside target dirs.
