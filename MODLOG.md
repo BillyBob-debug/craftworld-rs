@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-09 — P3a alpha-test cut-out under the LBP-shaped lighting
+
+Materials with a stored AlphaTestLevel discard fragments below it when the LBP surface extras are on
+(docs/p3a-alpha-test.md). +0 viewable / +0 Complete; PC verifies a cut-out level and the Pod.
+
 ## 2026-10-09 — D193 sampler port folds under the nested instance tint
 
 Folded sampler ports (D96) and the nested ThingColor tint now combine instead of refusing;

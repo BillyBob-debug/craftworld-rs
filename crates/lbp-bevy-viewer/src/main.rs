@@ -1314,6 +1314,8 @@ struct Prepared {
     bump: Option<(Image, f32)>,
     /// P2q: static gloss colour and CosinePower.
     gloss: Option<([f32; 3], f32)>,
+    /// P3a: AlphaTestLevel cut-out (0 = none), LBP-lighting materials only.
+    alpha_test: f32,
     /// D189: graph textures 1.. (texture 0 is `image`) and the encoded steps.
     graph: Option<(Vec<Image>, Vec<lbp_preview::FragmentStep>)>,
 }
@@ -1434,6 +1436,7 @@ fn prepare_buckets(
         let normals_trusted = adapter::mesh_normals_trusted(&mesh);
         let surface = asset.as_ref().and_then(|a| a.surface());
         let gloss = surface.and_then(|s| s.specular.map(|c| (c, s.cosine_power)));
+        let alpha_test = surface.map_or(0., |s| s.alpha_test);
         let alpha_mix = asset
             .as_ref()
             .and_then(|a| a.texture())
@@ -1564,6 +1567,7 @@ fn prepare_buckets(
             normals_trusted,
             bump,
             gloss,
+            alpha_test,
             graph,
         });
     }
@@ -1614,6 +1618,9 @@ fn upload(
             // Budgets are checked on the CPU side; a refusal here keeps the base texture.
             eprintln!("D189: {e}");
         }
+    }
+    if p.alpha_test > 0. {
+        dual::enable_alpha_test(&mut surface, p.alpha_test);
     }
     if let Some((color, power)) = p.gloss {
         dual::enable_gloss(&mut surface, color, power);
@@ -2493,16 +2500,17 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             }
             if surface_on {
                 // P2q: displayed draws (entity × bucket) carrying each surface extra.
-                let (mut bump, mut gloss, mut total) = (0, 0, 0);
+                let (mut bump, mut gloss, mut alpha, mut total) = (0, 0, 0, 0);
                 for (mesh, _) in &plan.placed {
                     for p in plan.prepared[*mesh].iter().flatten() {
                         total += 1;
                         bump += usize::from(p.bump.is_some());
                         gloss += usize::from(p.gloss.is_some());
+                        alpha += usize::from(p.alpha_test > 0.);
                     }
                 }
                 lines.push(format!(
-                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy (drawn only under --lbp-lighting)"
+                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy, {alpha} alpha-tested (P3a; drawn only under --lbp-lighting)"
                 ));
             }
             lines.extend(plan.lines);
