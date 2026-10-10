@@ -7,6 +7,14 @@ texture, sample steps on it read R.xyz with the TXB bias as gradient scale. Face
 orientation and handedness INFERRED. Several cubes in one graph are named, not drawn. Docs:
 docs/p3l-cube-reflection.md. Not rendered in the cloud; PC verifies a cube-map gmat.
 
+## 2026-10-10 — P3k baked AO (backdrop lightmap)
+
+Under --lbp-lighting the backdrop static mesh's lightmap (B8 GTF, SMH UV1) is bound as an R8
+mipped texture; the texel enters as shadowmap.x (sun and rim) and ao = bakedAOScale + bakedAOBias
+(PLevelSettings, now parsed) scales ambient and sun (fpdec arithmetic; the binding is INFERRED). `--no-baked-ao` for A/B. A material
+that already uses UV1 keeps it and the AO is named, not drawn. Docs: docs/p3k-baked-ao.md.
+Not rendered in the cloud; PC verifies Bravery Test / tutorial_23 backdrops against RPCS3.
+
 ## 2026-10-10 — P3i reflection (output port 6)
 
 Under --lbp-lighting the port-6 graph is evaluated per fragment at the reflection vector R
