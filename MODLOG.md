@@ -7,6 +7,11 @@ with that colour as the instance colour. Targets the 68 grey shapes in Bravery T
 (gfx 00012ba7, 00018401). --level-report prints shape-batch reasons and Things.
 +0 viewable / +0 Complete expected; PC verifies.
 
+## 2026-10-10 — P3c output-port census example
+
+Read-only example counting what feeds each material output port (specular, glow, reflection
+planning). No viewer change. Docs: docs/p3c-output-ports.md. PC runs it on the corpus.
+
 ## 2026-10-09 — P2v game normals for model meshes
 
 Model meshes are lit with the game's decoded normals instead of normals generated from our
