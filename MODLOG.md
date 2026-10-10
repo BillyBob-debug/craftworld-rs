@@ -1,5 +1,10 @@
 # Development log
 
+## 2026-10-10 — P3b Pod lighting from the backdrop plan's settings
+
+Pod `--lbp-lighting` takes preset 0 of the PLevelSettings holder in the backdrop plan
+(live source, probes #104/#105). Docs: docs/p3b-backdrop-settings.md. PC verifies against RPCS3.
+
 ## 2026-10-09 — D193 sampler port folds under the nested instance tint
 
 Folded sampler ports (D96) and the nested ThingColor tint now combine instead of refusing;

@@ -1024,9 +1024,25 @@ fn load(
                 (false, None) => v.lighting.lbp.then_some(0),
             };
             if let Some(n) = preset {
-                println!("{}", use_lighting_preset(&mut level.scene, n));
-                if let Some(shell) = level.shell.as_mut() {
-                    println!("Shell: {}", use_lighting_preset(shell, n));
+                // P3b: the Pod's live light is the backdrop plan's preset n.
+                let from_plan = v
+                    .level
+                    .pod
+                    .and(level.scene.backdrop_presets.get(n).copied());
+                if let Some(p) = from_plan {
+                    level.scene.settings = Some(p);
+                    if let Some(shell) = level.shell.as_mut() {
+                        shell.settings = Some(p);
+                    }
+                    println!(
+                        "Lighting preset {n} of {} from the backdrop plan (Pod live source)",
+                        level.scene.backdrop_presets.len()
+                    );
+                } else {
+                    println!("{}", use_lighting_preset(&mut level.scene, n));
+                    if let Some(shell) = level.shell.as_mut() {
+                        println!("Shell: {}", use_lighting_preset(shell, n));
+                    }
                 }
             }
             let plan = plan_level(&level.scene, v.level.focus, v.level.pod)?;
