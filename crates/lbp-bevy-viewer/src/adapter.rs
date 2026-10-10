@@ -131,6 +131,45 @@ pub fn normal_trust(positions: &[[f32; 3]], indices: &[u32]) -> (usize, usize) {
         .count();
     (weak, referenced)
 }
+/// P2v: replaces the generated normals of every referenced vertex with the game's decoded
+/// ones (unit length; a stored normal that is non-finite or shorter than 0.5, such as a
+/// clamped packed one, keeps the generated normal). Returns how many referenced vertices
+/// took a game normal, how many are referenced, and the mean |dot| between the game and
+/// generated normals over the replaced vertices (a frame/winding diagnostic: near 1 means
+/// the stored normals agree with our face geometry).
+pub fn apply_game_normals(mesh: &mut Mesh, game: &[[f32; 3]]) -> (usize, usize, f32) {
+    use bevy::mesh::VertexAttributeValues;
+    let (Some(VertexAttributeValues::Float32x3(generated)), Some(Indices::U32(indices))) =
+        (mesh.attribute(Mesh::ATTRIBUTE_NORMAL), mesh.indices())
+    else {
+        return (0, 0, 0.);
+    };
+    if game.len() != generated.len() {
+        return (0, 0, 0.);
+    }
+    let mut referenced = vec![false; generated.len()];
+    for &i in indices.iter() {
+        referenced[i as usize] = true;
+    }
+    let mut out = generated.clone();
+    let (mut used, mut total, mut agree) = (0usize, 0usize, 0f32);
+    for (i, &is_ref) in referenced.iter().enumerate() {
+        if !is_ref {
+            continue;
+        }
+        total += 1;
+        let n = Vec3::from(game[i]);
+        if !n.is_finite() || n.length_squared() < 0.25 {
+            continue;
+        }
+        let n = n.normalize();
+        agree += n.dot(Vec3::from(generated[i])).abs();
+        out[i] = n.to_array();
+        used += 1;
+    }
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, out);
+    (used, total, if used > 0 { agree / used as f32 } else { 0. })
+}
 /// `normal_trust` over a built mesh: true when every referenced vertex is well defined.
 pub fn mesh_normals_trusted(mesh: &Mesh) -> bool {
     use bevy::mesh::VertexAttributeValues;
@@ -559,6 +598,23 @@ mod tests {
             assert_eq!(s.mag_filter, ImageFilterMode::Linear);
             assert_eq!(s.min_filter, ImageFilterMode::Linear);
         }
+    }
+    #[test]
+    fn game_normals_replace_referenced_vertices_only() {
+        let positions = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [5., 5., 5.]];
+        let mut m = mesh(&positions, &[[0, 1, 2]], None).unwrap();
+        let game = [[0., 0., 2.], [0., 0., -1.], [0., 0.1, 0.], [1., 0., 0.]];
+        let (used, total, agree) = apply_game_normals(&mut m, &game);
+        // Vertex 2's stored normal is too short and keeps the generated one; vertex 3 is unreferenced.
+        assert_eq!((used, total), (2, 3));
+        assert!((agree - 1.).abs() < 1e-5);
+        let Some(VertexAttributeValues::Float32x3(n)) = m.attribute(Mesh::ATTRIBUTE_NORMAL) else {
+            panic!()
+        };
+        assert_eq!(n[0], [0., 0., 1.]);
+        assert_eq!(n[1], [0., 0., -1.]);
+        assert_eq!(n[2], [0., 0., 1.]);
+        assert_eq!(apply_game_normals(&mut m, &game[..2]), (0, 0, 0.));
     }
     #[test]
     fn mip_chain_sizes_and_linear_light_average() {
