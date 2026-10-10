@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-09 — P2v game normals for model meshes
+
+Model meshes are lit with the game's decoded normals instead of normals generated from our
+triangles (fallback per vertex; skinned per-bone copies and shapes unchanged). Per-mesh detail
+reports the agreement with generated normals. +0 viewable / +0 Complete; PC verifies shots.
+
 ## 2026-10-09 — P2u mipmaps and anisotropic filtering
 
 Game textures get a CPU box-filtered mip chain (linear-light for colour) and a trilinear
