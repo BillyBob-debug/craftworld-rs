@@ -1,5 +1,101 @@
 # Development log
 
+## 2026-10-10 — P3l cube-map reflections (output port 6)
+
+Reflection graphs with one BC1/BC3 cube map (59 graphs) now draw: six faces as a mipped cube
+texture, sample steps on it read R.xyz with the TXB bias as gradient scale. Face order, face
+orientation and handedness INFERRED. Several cubes in one graph are named, not drawn. Docs:
+docs/p3l-cube-reflection.md. Not rendered in the cloud; PC verifies a cube-map gmat.
+
+## 2026-10-10 — P3k baked AO (backdrop lightmap)
+
+Under --lbp-lighting the backdrop static mesh's lightmap (B8 GTF, SMH UV1) is bound as an R8
+mipped texture; the texel enters as shadowmap.x (sun and rim) and ao = bakedAOScale + bakedAOBias
+(PLevelSettings, now parsed) scales ambient and sun (fpdec arithmetic; the binding is INFERRED). `--no-baked-ao` for A/B. A material
+that already uses UV1 keeps it and the AO is named, not drawn. Docs: docs/p3k-baked-ao.md.
+Not rendered in the cloud; PC verifies Bravery Test / tutorial_23 backdrops against RPCS3.
+
+## 2026-10-10 — P3i reflection (output port 6)
+
+Under --lbp-lighting the port-6 graph is evaluated per fragment at the reflection vector R
+(2D maps, ReflectionBlur bias) and added x luma(light); cube maps and diffuse-graph materials
+are named, not drawn. View space, luma weights, scale 1 INFERRED. Docs: docs/p3i-reflection.md.
+Not rendered in the cloud; PC verifies metal/glass, census.
+
+## 2026-10-10 — P3h glow (output port 4)
+
+Under --lbp-lighting port 4 is loaded through the diffuse route (port 4 stood in for port 0)
+and added unlit before the sqrt output: a solid colour or one baked map on a free UV set.
+Docs: docs/p3h-glow.md. Not rendered in the cloud; PC verifies lamps/screens, census.
+
+## 2026-10-10 - P3j shader scalars (bump x2, cosine power x22)
+
+The shader constants are fixed transforms of the stored GfxMaterial scalars (PC CGB patch lists,
+644 gmats, 0 exceptions): BumpLevel = 2 x stored, CosinePower = 22 x stored (blur = stored - 1 lands
+with P3i). Surface now applies them; gloss powers and bump strength change. PC verifies.
+
+## 2026-10-10 — P3g dynamic sun shadows
+
+`--lbp-lighting` adds one cascaded Bevy sun-shadow map (3 cascades, 1024) that darkens the
+sun term, sun gloss and specular; Pod (shell and planets) excluded; `--no-lbp-shadows` opts out. Docs:
+docs/p3g-sun-shadows.md. Not rendered in the cloud; PC verifies acne/peter-panning.
+
+## 2026-10-09 — P2x level fog from the level's own settings
+
+Under the LBP-shaped lighting a level's fog uses its FogNear/FogFar/FogColor (game formula from
+the PC Ghidra read); the Pod keeps its fitted live-game constants. +0 viewable / +0 Complete;
+PC verifies shots (docs/p2x-level-fog.md).
+
+## 2026-10-10 — P3f gloss weights use the stored colour .w
+
+Sun, ambient, rim and rim2 .w for the gloss term = stored .w x the game factor (rim and rim2
+separately); rgb unchanged. Docs: docs/p3f-gloss-weights.md. Gloss only under --lbp-lighting.
+
+## 2026-10-10 — P3d gloss colour maps
+
+Port 2 wired from one sampler (2,132 graphs) multiplies the gloss term under --lbp-lighting;
+UV from the diffuse coordinates or a free UV1. Docs: docs/p3d-gloss-map.md. PC verifies shots.
+
+## 2026-10-09 — P3a alpha-test cut-out under the LBP-shaped lighting
+
+Materials with a stored AlphaTestLevel discard fragments below it when the LBP surface extras are on
+(docs/p3a-alpha-test.md). +0 viewable / +0 Complete; PC verifies a cut-out level and the Pod.
+
+## 2026-10-10 — P3e PWorld lighting fields
+
+World keeps the lighting/colourCorrection/fog/fogTint/darkness f32 and the GlobalSettings
+target/from + blend; the settings probe prints them. Question: which backdrop preset a level
+selects. Docs: docs/p3e-world-lighting.md. No viewer change.
+
+## 2026-10-10 — P3b Pod lighting from the backdrop plan's settings
+
+Pod `--lbp-lighting` takes preset 0 of the PLevelSettings holder in the backdrop plan
+(live source, probes #104/#105), also under plain --preview-lighting (its main block was the wrong holder). Docs: docs/p3b-backdrop-settings.md. PC verifies against RPCS3.
+
+## 2026-10-09 — D194 level shapes take their own PShape.color
+
+Shape batches split per (gfx material, PShape.color) and, under the level defaults, load
+with that colour as the instance colour. Targets the 68 grey shapes in Bravery Test
+(gfx 00012ba7, 00018401). --level-report prints shape-batch reasons and Things.
++0 viewable / +0 Complete expected; PC verifies.
+
+## 2026-10-10 — P3c output-port census example
+
+Read-only example counting what feeds each material output port (specular, glow, reflection
+planning). No viewer change. Docs: docs/p3c-output-ports.md. PC runs it on the corpus.
+
+## 2026-10-09 — P2v game normals for model meshes
+
+Model meshes are lit with the game's decoded normals instead of normals generated from our
+triangles (fallback per vertex; skinned per-bone copies and shapes unchanged). Per-mesh detail
+reports the agreement with generated normals. +0 viewable / +0 Complete; PC verifies shots.
+
+## 2026-10-09 — P2u mipmaps and anisotropic filtering
+
+Game textures get a CPU box-filtered mip chain (linear-light for colour) and a trilinear
+sampler (anisotropy 1, as the game); point-sampled textures stay nearest. Pure viewer change, +0 viewable /
++0 Complete. Sampler matches the Pod capture (docs/p2u-mipmaps.md); PC verifies shots.
+
 ## 2026-10-09 — P2w level scenes use the LBP-shaped lighting by default
 
 Level mode turns on the LBP-shaped lighting (RSX-fitted on the Pod) unless --preview-lighting

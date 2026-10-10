@@ -394,6 +394,12 @@ pub struct LevelSettings {
     pub fog_far: f32,
     pub rim_color: [f32; 4],
     pub rim_color2: [f32; 4],
+    /// P3k: PLevelSettings bakedAOBias / bakedAOScale (file order after rimColor2: shadow
+    /// amount, shadow blur, AO bias, AO scale, dynamic AO, DOF near). The game's baked AO is
+    /// `lightmap * scale + bias` (oracles 2026-10-10-baked-ao). `Default` is 0/0; readers treat
+    /// a non-positive scale as unset (game default bias 0, scale 1).
+    pub baked_ao_bias: f32,
+    pub baked_ao_scale: f32,
     /// Number of stored preset LevelSettings (not projected).
     pub presets: usize,
     /// D119: `backdropMesh` resource (STATIC_MESH, head >= 0x2f3), after the presets and
@@ -589,6 +595,14 @@ pub struct World {
     pub backdrop_new: Option<usize>,
     pub backdrop_plan: Option<Descriptor>,
     pub backdrop_new_plan: Option<Descriptor>,
+    /// P3e: PWorld `lighting`, `colourCorrection`, `fog`, `fogTint`, `darkness` f32 (the
+    /// current values; meaning of each UNKNOWN, read for the preset-selection question).
+    pub lighting: [f32; 5],
+    /// P3e: the `target` and `from` GlobalSettings (5 f32 each) and the blend factor f32
+    /// stored after them (field names and order from community layouts, UNVERIFIED).
+    pub gs_target: [f32; 5],
+    pub gs_from: [f32; 5],
+    pub gs_blend: f32,
 }
 
 /// `reference(P*)` for a present part of Thing `me`.
@@ -1159,6 +1173,10 @@ fn part_body(
                 w.backdrop_new = tail.backdrop_new;
                 w.backdrop_plan = tail.backdrop_plan;
                 w.backdrop_new_plan = tail.backdrop_new_plan;
+                w.lighting = tail.lighting;
+                w.gs_target = tail.gs_target;
+                w.gs_from = tail.gs_from;
+                w.gs_blend = tail.gs_blend;
             }
         }
         _ => return r.unsupported(format!("part reader {name}")),
@@ -1325,7 +1343,9 @@ fn world_tail(r: &mut Reader, things: &mut Things) -> Result<World> {
         r.s32()?;
     }
     r.bool()?;
-    r.skip_f32(5)?;
+    for x in &mut out.lighting {
+        *x = r.f32()?;
+    }
     for _ in 0..3 {
         let n = r.count(2)?;
         for _ in 0..n {
@@ -1355,8 +1375,10 @@ fn world_tail(r: &mut Reader, things: &mut Things) -> Result<World> {
     }
     r.bool()?;
     r.s32()?;
-    r.skip_f32(10)?;
-    r.f32()?;
+    for x in out.gs_target.iter_mut().chain(out.gs_from.iter_mut()) {
+        *x = r.f32()?;
+    }
+    out.gs_blend = r.f32()?;
     r.bool()?;
     r.s32()?;
     if v >= 0x370 {
@@ -2143,7 +2165,7 @@ fn stickers(r: &mut Reader) -> Result<(Vec<Decal>, usize)> {
 }
 
 fn level_settings(r: &mut Reader) -> Result<LevelSettings> {
-    let s = LevelSettings {
+    let mut s = LevelSettings {
         sun_position: r.v3()?,
         sun_position_scale: r.f32()?,
         sun_color: r.v4()?,
@@ -2155,10 +2177,15 @@ fn level_settings(r: &mut Reader) -> Result<LevelSettings> {
         fog_far: r.f32()?,
         rim_color: r.v4()?,
         rim_color2: r.v4()?,
+        baked_ao_bias: 0.,
+        baked_ao_scale: 0.,
         presets: 0,
         backdrop_mesh: None,
     };
-    r.skip_f32(6)?;
+    r.skip_f32(2)?;
+    s.baked_ao_bias = r.f32()?;
+    s.baked_ao_scale = r.f32()?;
+    r.skip_f32(2)?;
     r.f32()?;
     r.skip_f32(3)?;
     Ok(s)

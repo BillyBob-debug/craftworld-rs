@@ -10,6 +10,7 @@ mod ui_script;
 use dual::ViewerMaterial;
 mod browser;
 mod level_play;
+mod level_selector;
 mod lighting;
 mod sackboy_play;
 use bevy::{
@@ -132,6 +133,19 @@ impl LevelMode {
     fn active(&self) -> bool {
         self.guid.is_some() || self.path.is_some()
     }
+    /// Level selector: point at `entry` and drop Pod/QA framing from the previous target.
+    fn retarget(&mut self, entry: &lbp_preview::level_list::LevelEntry) {
+        self.guid = entry.guid;
+        self.path = Some(entry.path.clone());
+        self.focus = None;
+        self.pod = None;
+        self.shell = None;
+        self.t0 = None;
+        self.shell_camera = None;
+        self.game_camera = false;
+        self.lines.clear();
+        self.home = None;
+    }
     fn label(&self) -> String {
         match (&self.path, self.guid) {
             (Some(p), _) => p.clone(),
@@ -141,6 +155,7 @@ impl LevelMode {
     }
 }
 struct Job {
+    started: std::time::Instant,
     control: LoadControl,
     receiver: Mutex<mpsc::Receiver<Result<Completed, String>>>,
 }
@@ -154,6 +169,8 @@ struct Viewer {
     /// P2q `--bump-gloss` / `--no-bump-gloss` (docs/p2q-bump-gloss.md).
     bump_gloss: bool,
     no_bump_gloss: bool,
+    /// P3g `--no-lbp-shadows`: LBP lighting without the sun-shadow map.
+    no_shadows: bool,
     instance_input_enabled: bool,
     instance_rgba: [f32; 4],
     animation_base: bool,
@@ -187,11 +204,16 @@ struct Viewer {
     /// `--window-16-9`: a 1280x720 window (the game's frame aspect) for RPCS3 comparisons.
     window_16_9: bool,
     browser: browser::Browser,
+    selector: level_selector::LevelSelector,
     census: CorpusCounts,
     level: LevelMode,
     /// D121 `--preview-lighting` (docs/d121-preview-lighting.md); default off.
     lighting: lighting::LightingState,
 }
+/// P3h `--no-glow`: draw material glow (port 4) nowhere, for A/B captures.
+static NO_GLOW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// P3k `--no-baked-ao`: backdrop lightmaps stay unbound.
+static NO_BAKED_AO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 impl Viewer {
     fn preview_options(&self) -> lbp_preview::PreviewOptions {
         lbp_preview::PreviewOptions {
@@ -224,6 +246,12 @@ impl Viewer {
     fn bump_gloss_on(&self) -> bool {
         !self.no_bump_gloss && (self.bump_gloss || self.lighting.lbp)
     }
+    /// Level selector click: load that level in place, dropping any Pod/QA framing that
+    /// belonged to the previous target.
+    fn select_level(&mut self, entry: &lbp_preview::level_list::LevelEntry) {
+        self.level.retarget(entry);
+        self.requested = true;
+    }
     fn start(&mut self) {
         self.browser.displayed_guid = None;
         self.job = None;
@@ -233,6 +261,7 @@ impl Viewer {
         if paths != self.context_paths {
             self.context = None;
             self.browser.clear_source();
+            self.selector.clear();
         }
         let cached = (paths == self.context_paths)
             .then(|| self.context.clone())
@@ -386,6 +415,7 @@ impl Viewer {
         }
         self.context_paths = (self.snapshot.clone(), self.game.clone());
         self.job = Some(Job {
+            started: std::time::Instant::now(),
             control,
             receiver: Mutex::new(rx),
         });
@@ -425,6 +455,7 @@ fn options() -> Result<Viewer, String> {
     let mut v = Viewer {
         bump_gloss: false,
         no_bump_gloss: false,
+        no_shadows: false,
         instance_input_enabled: false,
         instance_rgba: [1.; 4],
         animation_base: false,
@@ -452,6 +483,7 @@ fn options() -> Result<Viewer, String> {
         hide_ui: false,
         window_16_9: false,
         browser: browser::Browser::default(),
+        selector: level_selector::LevelSelector::default(),
         census: CorpusCounts::default(),
         level: LevelMode::default(),
         lighting: lighting::LightingState::default(),
@@ -521,6 +553,18 @@ fn options() -> Result<Viewer, String> {
         }
         if flag == "--no-lbp-lighting" {
             no_lbp_lighting = true;
+            continue;
+        }
+        if flag == "--no-glow" {
+            NO_GLOW.store(true, std::sync::atomic::Ordering::Relaxed);
+            continue;
+        }
+        if flag == "--no-baked-ao" {
+            NO_BAKED_AO.store(true, std::sync::atomic::Ordering::Relaxed);
+            continue;
+        }
+        if flag == "--no-lbp-shadows" {
+            v.no_shadows = true;
             continue;
         }
         if flag == "--bump-gloss" {
@@ -597,7 +641,7 @@ fn options() -> Result<Viewer, String> {
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: local animation base-row snapshot (not game time; also levels)\n--no-animation-base, --no-instance-default: turn off the D188 single-mesh defaults (animation base values; white instance color 1,1,1,1 when no Thing supplies one) and the D191 level defaults (animation base values; each Thing's editorColor as its instance color, inferred)\n--instance-rgba R,G,B,A: supplied linear instance color (overrides the white default)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit (window shown without taking focus)
 --no-activate: show the window without taking focus or the foreground (interactive runs)
---qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N|main: with a level, light from its stored preset N instead of the main settings (P2l; --lbp-lighting defaults to preset 0 when one is stored, main forces the main block)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l); on by default in level mode (P2w), --no-lbp-lighting draws levels unlit, --preview-lighting keeps the older Lambert preview\n--bump-gloss / --no-bump-gloss: material bump maps (output port 3) and static gloss colours (port 2) under --lbp-lighting, on with it by default (P2q; offsets and frame inferred)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open; --pod-figure-data: closed spot from the shell's data (checkpoint + spawn offset, dropped to the floor) instead of the RPCS3 fit (both are reported)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\n--play-sackboy: with a level, its shapes as a physics world and Sackboy as a capsule at the first checkpoint (arrows walk and change lanes, Space jumps; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f) with the position printed each tick\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N|main: with a level, light from its stored preset N instead of the main settings (P2l; --lbp-lighting defaults to preset 0 when one is stored, main forces the main block)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l); on by default in level mode (P2w), --no-lbp-lighting draws levels unlit, --preview-lighting keeps the older Lambert preview\n--no-glow: skip material glow (output port 4; P3h A/B)\n--no-baked-ao: skip the backdrop lightmap baked AO under --lbp-lighting (P3k A/B)\n--bump-gloss / --no-bump-gloss: material bump maps (output port 3) and static gloss colours (port 2) under --lbp-lighting, on with it by default (P2q; offsets and frame inferred)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open; --pod-figure-data: closed spot from the shell's data (checkpoint + spawn offset, dropped to the floor) instead of the RPCS3 fit (both are reported)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\n--play-sackboy: with a level, its shapes as a physics world and Sackboy as a capsule at the first checkpoint (arrows walk and change lanes, Space jumps; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f) with the position printed each tick\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -824,6 +868,9 @@ fn main() {
     };
     let mut app = App::new();
     app.insert_resource(viewer)
+        .insert_resource(bevy::light::DirectionalLightShadowMap {
+            size: SHADOW_MAP_SIZE,
+        })
         .init_resource::<Orbit>()
         .insert_resource(ClearColor(Color::srgb(0.025, 0.035, 0.045)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -1034,7 +1081,23 @@ fn load(
                 (false, Some(n)) => Some(n),
                 (false, None) => v.lighting.lbp.then_some(0),
             };
-            if let Some(n) = preset {
+            // P3b: the Pod's live light is the backdrop plan's preset (also for the plain
+            // `--preview-lighting`, whose main block would otherwise be the wrong holder).
+            let from_plan = v
+                .level
+                .pod
+                .and(preset.or((!v.level.lighting_main).then_some(0)))
+                .and_then(|n| level.scene.backdrop_presets.get(n).map(|p| (n, *p)));
+            if let Some((n, p)) = from_plan {
+                level.scene.settings = Some(p);
+                if let Some(shell) = level.shell.as_mut() {
+                    shell.settings = Some(p);
+                }
+                println!(
+                    "Lighting preset {n} of {} from the backdrop plan (Pod live source)",
+                    level.scene.backdrop_presets.len()
+                );
+            } else if let Some(n) = preset {
                 println!("{}", use_lighting_preset(&mut level.scene, n));
                 if let Some(shell) = level.shell.as_mut() {
                     println!("Shell: {}", use_lighting_preset(shell, n));
@@ -1306,6 +1369,16 @@ fn load(
         eprintln!("{}", v.status);
     }
 }
+/// P3h: glow colour (multiplies the map) and the optional map with its UV mode.
+type GlowDraw = ([f32; 3], Option<(Image, u32)>);
+/// P3i: reflection textures, encoded steps and ReflectionBlur.
+/// P3i/P3l: 2D maps by graph slot (None = the cube slot), the cube map, steps, blur.
+type ReflectionDraw = (
+    Vec<Option<Image>>,
+    Option<Image>,
+    Vec<lbp_preview::FragmentStep>,
+    f32,
+);
 /// CPU-side display preparation shared by the single-mesh and level paths: one entry per
 /// supported material bucket (plus one neutral bucket). `normalize` centres and scales
 /// the mesh to unit size (single-mesh view); level scenes keep model coordinates.
@@ -1325,8 +1398,17 @@ struct Prepared {
     bump: Option<(Image, f32)>,
     /// P2q: static gloss colour and CosinePower.
     gloss: Option<([f32; 3], f32)>,
+    /// P3d: gloss colour map (linear) and its UV mode (1 = primary UV, 2 = UV1).
+    spec_map: Option<(Image, u32)>,
+    /// P3a: AlphaTestLevel cut-out (0 = none), LBP-lighting materials only.
+    alpha_test: f32,
+    /// P3h: unlit glow colour and its optional map (sRGB image, UV mode 2 = primary, 3 = UV1).
+    glow: Option<GlowDraw>,
+    reflection: Option<ReflectionDraw>,
     /// D189: graph textures 1.. (texture 0 is `image`) and the encoded steps.
     graph: Option<(Vec<Image>, Vec<lbp_preview::FragmentStep>)>,
+    /// P3k: backdrop baked-AO lightmap (R8, mipped) sampled on UV1.
+    lightmap: Option<Image>,
 }
 fn prepare(
     preview: &lbp_preview::GroupedMesh,
@@ -1379,7 +1461,15 @@ fn prepare(
             range.len()
         ));
     }
-    prepare_buckets(&g.positions, buckets, normalize, evidence, details)
+    prepare_buckets(
+        &g.positions,
+        preview.normals.as_deref(),
+        buckets,
+        normalize,
+        None,
+        evidence,
+        details,
+    )
 }
 /// D192: triangles and primitive ranges without the material-less groups. The game's
 /// per-primitive draw loop skips a primitive whose material is null (no bind, no draw;
@@ -1412,8 +1502,10 @@ fn drop_materialless(preview: &lbp_preview::GroupedMesh) -> Result<TriangleParti
 /// Material buckets over one position array (model mesh or merged shape batch).
 fn prepare_buckets(
     positions: &[[f32; 3]],
+    game_normals: Option<&[[f32; 3]]>,
     buckets: Vec<adapter::Bucket<lbp_preview::MaterialAsset>>,
     normalize: bool,
+    lightmap_in: Option<(&level_scene::Lightmap, &[[f32; 2]])>,
     evidence: &mut browser::PreviewEvidence,
     details: &mut Vec<String>,
 ) -> Result<Vec<Prepared>, String> {
@@ -1442,9 +1534,21 @@ fn prepare_buckets(
             }
             Err(e) => return Err(e),
         };
-        let normals_trusted = adapter::mesh_normals_trusted(&mesh);
+        let mut normals_trusted = adapter::mesh_normals_trusted(&mesh);
+        // P2v: the game's decoded normals replace ours; the draw is trusted when every
+        // referenced vertex took one.
+        if let Some(game) = game_normals {
+            let (used, total, agree) = adapter::apply_game_normals(&mut mesh, game);
+            if total > 0 {
+                details.push(format!(
+                    "Normals: game (decoded) on {used}/{total} referenced vertices, mean |dot| with generated {agree:.3}"
+                ));
+                normals_trusted = used == total;
+            }
+        }
         let surface = asset.as_ref().and_then(|a| a.surface());
         let gloss = surface.and_then(|s| s.specular.map(|c| (c, s.cosine_power)));
+        let alpha_test = surface.map_or(0., |s| s.alpha_test);
         let alpha_mix = asset
             .as_ref()
             .and_then(|a| a.texture())
@@ -1496,10 +1600,7 @@ fn prepare_buckets(
                 let mut image =
                     adapter::image_axes(width, height, a.display_pixels().to_vec(), a.wrap)?;
                 if a.nearest_sampling() {
-                    if let bevy::image::ImageSampler::Descriptor(s) = &mut image.sampler {
-                        s.mag_filter = bevy::image::ImageFilterMode::Nearest;
-                        s.min_filter = bevy::image::ImageFilterMode::Nearest;
-                    }
+                    adapter::set_nearest(&mut image);
                 }
                 Ok::<_, String>(image)
             })
@@ -1563,6 +1664,180 @@ fn prepare_buckets(
             }
             None => None,
         };
+        // P3d: the gloss map shares the diffuse UVs, or takes UV1 when that is free or holds
+        // the same coordinates (graph slot 5 carries the image, so no graph may be bound).
+        let mut gloss = gloss;
+        let spec_map = match surface.and_then(|s| s.spec_map.as_deref().map(|m| (m, s))) {
+            Some((m, s)) if graph.is_none() => {
+                let same_diffuse = asset
+                    .as_ref()
+                    .and_then(|a| a.sampling_uv())
+                    .is_some_and(|d| d == m.sampling_uv.as_slice());
+                let same_bump = surface
+                    .and_then(|s| s.bump.as_deref())
+                    .is_some_and(|b| bump.is_some() && b.sampling_uv == m.sampling_uv);
+                let mode = if same_diffuse {
+                    Some(1)
+                } else if same_bump {
+                    Some(2)
+                } else if second_image.is_none() && bump.is_none() {
+                    adapter::secondary_uv(&mut mesh, &m.sampling_uv)?;
+                    Some(2)
+                } else {
+                    None
+                };
+                match mode {
+                    Some(mode) => {
+                        gloss.get_or_insert(([1.; 3], s.cosine_power));
+                        Some((
+                            adapter::linear_image(
+                                m.texture.header.width,
+                                m.texture.header.height,
+                                m.texture.rgba.clone(),
+                                m.wrap,
+                            )?,
+                            mode,
+                        ))
+                    }
+                    None => {
+                        details.push("P3d: gloss map not drawn (UV1 is taken)".into());
+                        None
+                    }
+                }
+            }
+            Some(_) => {
+                details
+                    .push("P3d: gloss map not drawn (a per-fragment graph uses its slot)".into());
+                None
+            }
+            None => None,
+        };
+        // P3h: glow (output port 4) is a solid colour, or one baked map on the diffuse UVs or
+        // on UV1 when that is free or holds the same coordinates (graph slot 4, so no graph).
+        let glow = match surface.and_then(|s| s.glow.as_deref()) {
+            Some(lbp_preview::MaterialAsset::Solid(g)) => {
+                let [r, gr, b, _] = g.selection.color.values();
+                ([r, gr, b] != [0.; 3]).then_some(([r, gr, b], None))
+            }
+            Some(lbp_preview::MaterialAsset::Texture(g))
+                if graph.is_none()
+                    && g.dual.is_none()
+                    && g.third.is_none()
+                    && g.fourth.is_none()
+                    && g.product.is_none()
+                    && g.fragment.is_none() =>
+            {
+                let same_diffuse = asset
+                    .as_ref()
+                    .and_then(|a| a.sampling_uv())
+                    .is_some_and(|d| d == g.sampling_uv.as_slice());
+                let owner: Option<&[[f32; 2]]> = asset
+                    .as_ref()
+                    .and_then(|a| a.texture())
+                    .and_then(|a| a.dual.as_ref())
+                    .map(|d| d.sampling_uv.as_slice())
+                    .or_else(|| {
+                        surface
+                            .and_then(|s| s.bump.as_deref())
+                            .filter(|_| bump.is_some())
+                            .map(|b| b.sampling_uv.as_slice())
+                    })
+                    .or_else(|| {
+                        surface
+                            .and_then(|s| s.spec_map.as_deref())
+                            .filter(|_| spec_map.as_ref().is_some_and(|(_, m)| *m == 2))
+                            .map(|m| m.sampling_uv.as_slice())
+                    });
+                let mode = if same_diffuse {
+                    Some(2)
+                } else if owner == Some(g.sampling_uv.as_slice()) {
+                    Some(3)
+                } else if owner.is_none() {
+                    adapter::secondary_uv(&mut mesh, &g.sampling_uv)?;
+                    Some(3)
+                } else {
+                    None
+                };
+                match mode {
+                    Some(mode) => {
+                        let [width, height] = g.display_extent();
+                        let mut image = adapter::image_axes(
+                            width,
+                            height,
+                            g.display_pixels().to_vec(),
+                            g.wrap,
+                        )?;
+                        if g.nearest_sampling() {
+                            adapter::set_nearest(&mut image);
+                        }
+                        Some(([1.; 3], Some((image, mode))))
+                    }
+                    None => {
+                        details.push("P3h: glow map not drawn (UV1 is taken)".into());
+                        None
+                    }
+                }
+            }
+            Some(lbp_preview::MaterialAsset::Texture(_)) => {
+                details
+                    .push("P3h: glow map not drawn (it needs several textures or a graph)".into());
+                None
+            }
+            None => None,
+        };
+        // P3i: the reflection graph takes the free graph texture slots 0..=3, so it needs a
+        // plain diffuse (no per-fragment graph and no second, third or fourth sample).
+        let reflection = match surface.and_then(|s| s.reflection.as_deref()) {
+            Some(r)
+                if graph.is_none()
+                    && second_image.is_none()
+                    && third_image.is_none()
+                    && fourth_image.is_none() =>
+            {
+                let mut cube = None;
+                let images = r
+                    .textures
+                    .iter()
+                    .map(|m| match m {
+                        lbp_preview::surface::ReflectionMap::Flat(t, wrap) => adapter::image_axes(
+                            t.header.width,
+                            t.header.height,
+                            t.rgba.clone(),
+                            *wrap,
+                        )
+                        .map(Some),
+                        lbp_preview::surface::ReflectionMap::Cube(c) => {
+                            let faces: Vec<&[u8]> = std::iter::once(c.texture.rgba.as_slice())
+                                .chain(c.extra_faces.iter().map(Vec::as_slice))
+                                .collect();
+                            cube = Some(adapter::cube_image(c.texture.header.width, &faces)?);
+                            Ok(None)
+                        }
+                    })
+                    .collect::<Result<Vec<_>, String>>()?;
+                Some((images, cube, r.steps.clone(), r.blur))
+            }
+            Some(_) => {
+                details.push(
+                    "P3i: reflection not drawn (the diffuse uses the graph texture slots)".into(),
+                );
+                None
+            }
+            None => None,
+        };
+        // P3k: the backdrop lightmap needs UV1 (the mesh's own unwrap); any feature above that
+        // already took UV1 for a material coordinate set wins and the AO is not drawn.
+        let lightmap = match lightmap_in {
+            Some((map, uv1)) if mesh.attribute(Mesh::ATTRIBUTE_UV_1).is_none() => {
+                adapter::secondary_uv(&mut mesh, uv1)?;
+                Some(adapter::lightmap_image(map.width, map.height, &map.r8)?)
+            }
+            Some(_) => {
+                details.push("P3k: baked AO not drawn (UV1 is taken)".into());
+                None
+            }
+            None => None,
+        };
         prepared.push(Prepared {
             mesh,
             image,
@@ -1575,7 +1850,12 @@ fn prepare_buckets(
             normals_trusted,
             bump,
             gloss,
+            spec_map,
+            alpha_test,
+            glow,
+            reflection,
             graph,
+            lightmap,
         });
     }
     if prepared.is_empty() {
@@ -1626,8 +1906,40 @@ fn upload(
             eprintln!("D189: {e}");
         }
     }
+    if let Some((textures, cube, steps, blur)) = p.reflection {
+        let handles = textures
+            .into_iter()
+            .map(|i| i.map(|i| images.add(i)))
+            .collect();
+        let cube = cube.map(|i| images.add(i));
+        if let Err(e) = dual::enable_reflection(&mut surface, handles, cube, &steps, blur) {
+            eprintln!("P3i: {e}");
+        }
+    }
+    if let Some((color, map)) = p
+        .glow
+        .filter(|_| !NO_GLOW.load(std::sync::atomic::Ordering::Relaxed))
+    {
+        dual::enable_glow(
+            &mut surface,
+            color,
+            map.map(|(image, mode)| (images.add(image), mode)),
+        );
+    }
+    if let Some(map) = p
+        .lightmap
+        .filter(|_| !NO_BAKED_AO.load(std::sync::atomic::Ordering::Relaxed))
+    {
+        dual::enable_lightmap(&mut surface, images.add(map));
+    }
+    if p.alpha_test > 0. {
+        dual::enable_alpha_test(&mut surface, p.alpha_test);
+    }
     if let Some((color, power)) = p.gloss {
         dual::enable_gloss(&mut surface, color, power);
+    }
+    if let Some((map, mode)) = p.spec_map {
+        dual::enable_spec_map(&mut surface, images.add(map), mode);
     }
     surface.extension.normals_trusted = p.normals_trusted;
     (meshes.add(p.mesh), materials.add(surface), image)
@@ -1663,24 +1975,34 @@ fn plan_level(
                 // World-space batch; a material that did not select draws neutral grey.
                 level_scene::ScenePayload::Shapes { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
                     false,
+                    None,
                     &mut evidence,
                     &mut details,
                 ),
                 // D119 backdrop batch (mesh space; the item matrix places it).
-                level_scene::ScenePayload::Backdrop { batch, material } => prepare_buckets(
+                level_scene::ScenePayload::Backdrop {
+                    batch,
+                    material,
+                    lightmap,
+                } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
                     false,
+                    lightmap.as_deref().map(|l| (l, batch.uv1.as_slice())),
                     &mut evidence,
                     &mut details,
                 ),
                 // D160 sticker decal overlays (world space, alpha blended).
                 level_scene::ScenePayload::Decals { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(Some(material.clone()), batch.triangles.clone())],
                     false,
+                    None,
                     &mut evidence,
                     &mut details,
                 )
@@ -2504,16 +2826,18 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             }
             if surface_on {
                 // P2q: displayed draws (entity × bucket) carrying each surface extra.
-                let (mut bump, mut gloss, mut total) = (0, 0, 0);
+                let (mut bump, mut gloss, mut alpha, mut glow, mut total) = (0, 0, 0, 0, 0);
                 for (mesh, _) in &plan.placed {
                     for p in plan.prepared[*mesh].iter().flatten() {
                         total += 1;
                         bump += usize::from(p.bump.is_some());
                         gloss += usize::from(p.gloss.is_some());
+                        alpha += usize::from(p.alpha_test > 0.);
+                        glow += usize::from(p.glow.is_some());
                     }
                 }
                 lines.push(format!(
-                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy (drawn only under --lbp-lighting)"
+                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy, {alpha} alpha-tested, {glow} glowing (P3a/P3h; drawn only under --lbp-lighting)"
                 ));
             }
             lines.extend(plan.lines);
@@ -2534,6 +2858,27 @@ fn level_report(v: &Viewer) -> Result<(), String> {
                 ));
                 for (reason, groups) in level_scene::neutral_reasons(&m.payload) {
                     lines.push(format!("    neutral ({groups} groups): {reason}"));
+                }
+                // Which shapes a batch merges (reader order), to tie it to a visible object.
+                if let level_scene::ScenePayload::Shapes { batch, .. } = &m.payload {
+                    const SHOWN: usize = 16;
+                    let shown: Vec<String> = batch
+                        .things
+                        .iter()
+                        .take(SHOWN)
+                        .map(ToString::to_string)
+                        .collect();
+                    let more = batch.things.len().saturating_sub(SHOWN);
+                    lines.push(format!(
+                        "    shape Things ({}): {}{}",
+                        batch.things.len(),
+                        shown.join(", "),
+                        if more > 0 {
+                            format!(" (+{more} more)")
+                        } else {
+                            String::new()
+                        }
+                    ));
                 }
             }
             Ok(lines)
@@ -2680,8 +3025,70 @@ type LightRoots<'w, 's> = (
     Query<'w, 's, &'static Transform, With<PodPlanetsRoot>>,
     Query<'w, 's, &'static Transform, (With<PodShellRoot>, Without<PodTentRoot>)>,
 );
+/// P3g: the sun's shadow-map edge. The game renders three 768x768 sun-shadow maps (Moon
+/// capture); Bevy wants a power of two for stable cascades, so 1024 stands in (INFERRED).
+const SHADOW_MAP_SIZE: usize = 1024;
+/// P3g: the one directional light that exists only to feed the cascaded shadow map (the
+/// viewer shader does its own lighting). Holds the display scale its cascades were cut for.
+#[derive(Component)]
+struct SunShadow(f32);
+/// The sun's `&mut Transform` must not overlap the `LightRoots` queries of `apply_lighting`
+/// (Bevy B0001 at start-up otherwise).
+type SunFilter = (Without<PodPlanetsRoot>, Without<PodShellRoot>);
+/// P3g: far bounds of the three cascades, in level units along the view axis. The first
+/// covers the gameplay view (about 1,200 units of camera distance), INFERRED from the
+/// game's three maps; the cut is a preview choice.
+const SHADOW_CASCADE_UNITS: [f32; 2] = [3500., 40000.];
+fn sync_sun_shadow(
+    commands: &mut Commands,
+    suns: &mut Query<(Entity, &SunShadow, &mut Transform), SunFilter>,
+    light: Option<&lighting::PreviewLight>,
+) {
+    let want = light.filter(|l| l.shadows && l.toward_light.is_finite());
+    let mut kept = false;
+    for (entity, cut, mut transform) in suns.iter_mut() {
+        match want {
+            Some(l) if !kept && (cut.0 - l.display_scale).abs() <= f32::EPSILON => {
+                *transform = sun_transform(l.toward_light);
+                kept = true;
+            }
+            _ => commands.entity(entity).despawn(),
+        }
+    }
+    let Some(l) = want.filter(|_| !kept) else {
+        return;
+    };
+    let s = l.display_scale;
+    commands.spawn((
+        SunShadow(s),
+        DirectionalLight {
+            // Near black for any StandardMaterial in the scene; the viewer shader ignores it.
+            illuminance: 1.,
+            shadow_maps_enabled: true,
+            ..default()
+        },
+        bevy::light::CascadeShadowConfigBuilder {
+            num_cascades: 3,
+            minimum_distance: 0.01,
+            maximum_distance: SHADOW_CASCADE_UNITS[1] * s,
+            first_cascade_far_bound: SHADOW_CASCADE_UNITS[0] * s,
+            overlap_proportion: 0.2,
+        }
+        .build(),
+        sun_transform(l.toward_light),
+    ));
+}
+fn sun_transform(toward_light: Vec3) -> Transform {
+    let up = if toward_light.y.abs() > 0.99 {
+        Vec3::Z
+    } else {
+        Vec3::Y
+    };
+    Transform::default().looking_to(-toward_light, up)
+}
 fn apply_lighting(
     mut commands: Commands,
+    mut suns: Query<(Entity, &SunShadow, &mut Transform), SunFilter>,
     mut v: ResMut<Viewer>,
     mut materials: ResMut<Assets<ViewerMaterial>>,
     cameras: Query<Entity, With<Camera3d>>,
@@ -2713,10 +3120,17 @@ fn apply_lighting(
     if !on && !v.lighting.applied {
         return;
     }
+    // The Pod (shell present) draws everything with fragment variant 8: no shadow, planets
+    // included (CONFIRMED, 161 of 162 main-pass draws); only plain levels get the sun map.
+    let no_shadows = v.no_shadows || v.lighting.shell.is_some();
+    // P2x: Pod scenes (shell layer, game camera, globe view) keep the live-game fog constants.
+    let pod_fog = v.lighting.shell.is_some() || v.level.game_camera || v.level.pod.is_some();
     let light = on.then(|| {
         if v.lighting.lbp {
             let mut l = v.lighting.light.lbp_shaped(turn);
             l.pod_t = pod_t;
+            l.shadows &= !no_shadows;
+            l.pod_fog = pod_fog;
             l
         } else {
             v.lighting.light.clone()
@@ -2726,12 +3140,16 @@ fn apply_lighting(
         let l = if v.lighting.lbp {
             let mut l = l.lbp_shaped(shell_turn);
             l.pod_t = pod_t;
+            // The Pod shell draws with fragment variant 8: no shadow (CONFIRMED).
+            l.shadows = false;
+            l.pod_fog = pod_fog;
             l
         } else {
             l.clone()
         };
         (*from, on.then_some(l))
     });
+    sync_sun_shadow(&mut commands, &mut suns, light.as_ref());
     let mut unlit = 0usize;
     for (i, (_, _, handle, _)) in v.scene.iter().enumerate() {
         let layer = match &shell {
@@ -2798,9 +3216,21 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
             .default_size(390.)
             .min_size(260.)
             .show(&mut browser_ui, |ui| {
-                ui.heading("Browse assets");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut v.selector.levels_tab, false, "Assets");
+                    ui.selectable_value(&mut v.selector.levels_tab, true, "Levels");
+                });
+                ui.separator();
                 let context = v.context.clone();
-                if let Some((catalog, _)) = context {
+                if v.selector.levels_tab {
+                    ui.heading("Browse levels");
+                    let current = v.level.path.clone();
+                    if let Some(entry) = v.selector.panel(ui, context.as_ref(), current.as_deref())
+                    {
+                        v.select_level(&entry);
+                    }
+                } else if let Some((catalog, _)) = context {
+                    ui.heading("Browse assets");
                     let selected = v.guid.clone();
                     if let Some(guid) = v.browser.panel(ui, &catalog, &selected) {
                         v.guid = guid;
@@ -2814,6 +3244,23 @@ fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Or
                     ui.label("Attach a snapshot and game directory to browse.");
                 }
             });
+    }
+    if let Some(job) = &v.job {
+        let target = if v.level.active() {
+            let label = v.level.label();
+            let name = v.selector.name_of(&label).unwrap_or(&label).to_string();
+            format!("Loading level {name}")
+        } else {
+            "Loading".to_string()
+        };
+        let detail = if v.context.is_none() {
+            "reading snapshot and attaching game data"
+        } else if v.level.active() {
+            "reading level and building scene"
+        } else {
+            "reading and preparing preview"
+        };
+        level_selector::loading_overlay(ctx, &target, detail, job.started.elapsed());
     }
     egui::Window::new("Asset preview").default_pos(if v.synthetic { [10., 10.] } else { [900., 10.] }).default_width(310.).show(ctx, |ui| {
         if !v.synthetic {
@@ -3037,10 +3484,7 @@ fn synthetic(
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, sampling_uv)
         .with_inserted_indices(bevy::mesh::Indices::U32(vec![0, 2, 1, 0, 3, 2]));
         let mut image = adapter::image(2, 2, rgba.clone(), repeat).unwrap();
-        if let bevy::image::ImageSampler::Descriptor(ref mut s) = image.sampler {
-            s.mag_filter = bevy::image::ImageFilterMode::Nearest;
-            s.min_filter = bevy::image::ImageFilterMode::Nearest;
-        }
+        adapter::set_nearest(&mut image);
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(dual::material(StandardMaterial {
@@ -3205,6 +3649,17 @@ mod tests {
         assert_eq!(rules.len(), 2);
     }
     use super::*;
+
+    /// CI never launches the viewer, so a Bevy B0001 query conflict in `apply_lighting`
+    /// (P3g: the sun query overlapped the light-root queries) panicked every start-up.
+    /// Initialising the system checks its parameter access without a window or a GPU.
+    #[test]
+    fn apply_lighting_parameters_do_not_conflict() {
+        use bevy::ecs::system::{IntoSystem, System};
+        let mut world = World::new();
+        let mut system = IntoSystem::into_system(apply_lighting);
+        system.initialize(&mut world);
+    }
     /// Re: the joint hierarchy spawned for GPU skinning gives, after transform
     /// propagation, joint global × inverse bind = N × CPU skin matrix × N⁻¹.
     #[test]
@@ -3419,10 +3874,37 @@ mod tests {
         assert!(level_home(Vec3::ZERO, Vec3::ZERO).is_err());
     }
     #[test]
+    fn selecting_a_level_retargets_and_clears_previous_framing() {
+        let mut mode = LevelMode {
+            pod: Some(3),
+            shell: Some(0x27b9),
+            focus: Some(1),
+            game_camera: true,
+            lines: vec!["old".into()],
+            ..LevelMode::default()
+        };
+        mode.retarget(&lbp_preview::level_list::LevelEntry {
+            path: "a/b/c.bin".into(),
+            guid: Some(7),
+            group: "a/b".into(),
+            name: "c".into(),
+            named: false,
+            supported: true,
+        });
+        assert_eq!(
+            (mode.guid, mode.path.as_deref()),
+            (Some(7), Some("a/b/c.bin"))
+        );
+        assert!(mode.pod.is_none() && mode.shell.is_none() && mode.focus.is_none());
+        assert!(!mode.game_camera && mode.lines.is_empty() && mode.home.is_none());
+        assert!(mode.active());
+    }
+    #[test]
     fn dropping_replaced_job_cancels_and_disconnects_stale_result() {
         let control = LoadControl::default();
         let (tx, rx) = mpsc::sync_channel(1);
         let job = Job {
+            started: std::time::Instant::now(),
             control: control.clone(),
             receiver: Mutex::new(rx),
         };
@@ -3447,6 +3929,7 @@ mod tests {
         let mut v = Viewer {
             bump_gloss: false,
             no_bump_gloss: false,
+            no_shadows: false,
             instance_input_enabled: false,
             instance_rgba: [1.; 4],
             animation_base: false,
@@ -3473,6 +3956,7 @@ mod tests {
             synthetic: false,
             hide_ui: false,
             window_16_9: false,
+            selector: level_selector::LevelSelector::default(),
             browser: browser::Browser::default(),
             census: CorpusCounts::default(),
             level: LevelMode::default(),

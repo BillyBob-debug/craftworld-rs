@@ -4,7 +4,10 @@ use bevy::{
     image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
     mesh::Indices,
     prelude::*,
-    render::render_resource::{Extent3d, PrimitiveTopology, TextureDimension, TextureFormat},
+    render::render_resource::{
+        Extent3d, PrimitiveTopology, TextureDimension, TextureFormat, TextureViewDescriptor,
+        TextureViewDimension,
+    },
 };
 
 /// Bind-pose centre and largest extent; posed frames reuse it so the view stays still.
@@ -131,6 +134,45 @@ pub fn normal_trust(positions: &[[f32; 3]], indices: &[u32]) -> (usize, usize) {
         .count();
     (weak, referenced)
 }
+/// P2v: replaces the generated normals of every referenced vertex with the game's decoded
+/// ones (unit length; a stored normal that is non-finite or shorter than 0.5, such as a
+/// clamped packed one, keeps the generated normal). Returns how many referenced vertices
+/// took a game normal, how many are referenced, and the mean |dot| between the game and
+/// generated normals over the replaced vertices (a frame/winding diagnostic: near 1 means
+/// the stored normals agree with our face geometry).
+pub fn apply_game_normals(mesh: &mut Mesh, game: &[[f32; 3]]) -> (usize, usize, f32) {
+    use bevy::mesh::VertexAttributeValues;
+    let (Some(VertexAttributeValues::Float32x3(generated)), Some(Indices::U32(indices))) =
+        (mesh.attribute(Mesh::ATTRIBUTE_NORMAL), mesh.indices())
+    else {
+        return (0, 0, 0.);
+    };
+    if game.len() != generated.len() {
+        return (0, 0, 0.);
+    }
+    let mut referenced = vec![false; generated.len()];
+    for &i in indices.iter() {
+        referenced[i as usize] = true;
+    }
+    let mut out = generated.clone();
+    let (mut used, mut total, mut agree) = (0usize, 0usize, 0f32);
+    for (i, &is_ref) in referenced.iter().enumerate() {
+        if !is_ref {
+            continue;
+        }
+        total += 1;
+        let n = Vec3::from(game[i]);
+        if !n.is_finite() || n.length_squared() < 0.25 {
+            continue;
+        }
+        let n = n.normalize();
+        agree += n.dot(Vec3::from(generated[i])).abs();
+        out[i] = n.to_array();
+        used += 1;
+    }
+    mesh.insert_attribute(Mesh::ATTRIBUTE_NORMAL, out);
+    (used, total, if used > 0 { agree / used as f32 } else { 0. })
+}
 /// `normal_trust` over a built mesh: true when every referenced vertex is well defined.
 pub fn mesh_normals_trusted(mesh: &Mesh) -> bool {
     use bevy::mesh::VertexAttributeValues;
@@ -165,6 +207,194 @@ pub fn image_axes(
     pixels: Vec<u8>,
     wrap: lbp_preview::TextureWrapping,
 ) -> Result<Image, String> {
+    image_axes_fmt(width, height, pixels, wrap, true)
+}
+/// Anisotropy of the trilinear game-texture sampler: the Pod RenderDoc capture shows
+/// LINEAR_MIPMAP_LINEAR, LOD bias 0 and MAX_ANISOTROPY 1 (docs/p2u-mipmaps.md).
+pub const ANISOTROPY: u16 = 1;
+fn srgb_to_linear(v: u8) -> f32 {
+    let c = f32::from(v) / 255.;
+    if c <= 0.04045 {
+        c / 12.92
+    } else {
+        ((c + 0.055) / 1.055).powf(2.4)
+    }
+}
+fn linear_to_srgb(c: f32) -> u8 {
+    let c = c.clamp(0., 1.);
+    let v = if c <= 0.003_130_8 {
+        c * 12.92
+    } else {
+        1.055 * c.powf(1. / 2.4) - 0.055
+    };
+    (v * 255. + 0.5) as u8
+}
+/// Mip count down to 1x1 (floor(log2(max side)) + 1).
+pub fn mip_count(width: u32, height: u32) -> u32 {
+    32 - width.max(height).max(1).leading_zeros()
+}
+/// Full box-filtered mip chain appended after the base level (mip 0 first, then 1..n,
+/// tightly packed, the layout `Image` expects for a single-layer 2D texture). `srgb`
+/// averages colour in linear light (alpha is averaged as stored); data textures
+/// average the stored values. Odd sides clamp the last row/column. Tiny textures (a
+/// side of 1) add levels along the other axis only until 1x1.
+pub fn with_mips(width: u32, height: u32, base: Vec<u8>, srgb: bool) -> Vec<u8> {
+    let levels = mip_count(width, height);
+    if levels <= 1 {
+        return base;
+    }
+    let lut: Vec<f32> = (0..=255u8).map(srgb_to_linear).collect();
+    let mut out = base;
+    let (mut pw, mut ph) = (width as usize, height as usize);
+    let mut prev_start = 0usize;
+    for _ in 1..levels {
+        let (w, h) = ((pw / 2).max(1), (ph / 2).max(1));
+        let start = out.len();
+        out.reserve(w * h * 4);
+        for y in 0..h {
+            let y0 = (y * 2).min(ph - 1);
+            let y1 = (y * 2 + 1).min(ph - 1);
+            for x in 0..w {
+                let x0 = (x * 2).min(pw - 1);
+                let x1 = (x * 2 + 1).min(pw - 1);
+                let at = |xx: usize, yy: usize| prev_start + (yy * pw + xx) * 4;
+                let taps = [at(x0, y0), at(x1, y0), at(x0, y1), at(x1, y1)];
+                for c in 0..4 {
+                    let v = if srgb && c < 3 {
+                        let sum: f32 = taps.iter().map(|&t| lut[usize::from(out[t + c])]).sum();
+                        linear_to_srgb(sum / 4.)
+                    } else {
+                        let sum: u32 = taps.iter().map(|&t| u32::from(out[t + c])).sum();
+                        ((sum + 2) / 4) as u8
+                    };
+                    out.push(v);
+                }
+            }
+        }
+        prev_start = start;
+        pw = w;
+        ph = h;
+    }
+    out
+}
+/// Single-channel box-filtered mip chain (mip 0 first, tightly packed), stored values
+/// averaged (data texture).
+pub fn with_mips_r8(width: u32, height: u32, base: Vec<u8>) -> Vec<u8> {
+    let levels = mip_count(width, height);
+    let mut out = base;
+    let (mut pw, mut ph) = (width as usize, height as usize);
+    let mut prev_start = 0usize;
+    for _ in 1..levels {
+        let (w, h) = ((pw / 2).max(1), (ph / 2).max(1));
+        let start = out.len();
+        out.reserve(w * h);
+        for y in 0..h {
+            let (y0, y1) = ((y * 2).min(ph - 1), (y * 2 + 1).min(ph - 1));
+            for x in 0..w {
+                let (x0, x1) = ((x * 2).min(pw - 1), (x * 2 + 1).min(pw - 1));
+                let at = |xx: usize, yy: usize| u32::from(out[prev_start + yy * pw + xx]);
+                let sum = at(x0, y0) + at(x1, y0) + at(x0, y1) + at(x1, y1);
+                out.push(((sum + 2) / 4) as u8);
+            }
+        }
+        prev_start = start;
+        pw = w;
+        ph = h;
+    }
+    out
+}
+/// P3k: a backdrop lightmap as an R8 texture with a full mip chain, clamped, trilinear.
+pub fn lightmap_image(width: u32, height: u32, r8: &[u8]) -> Result<Image, String> {
+    if width == 0 || height == 0 || width > 4096 || height > 4096 {
+        return Err("Unsupported: lightmap extent".into());
+    }
+    if r8.len() != width as usize * height as usize {
+        return Err("Invalid: lightmap pixel count".into());
+    }
+    let levels = mip_count(width, height);
+    let mut image = Image::new(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        r8.to_vec(),
+        TextureFormat::R8Unorm,
+        RenderAssetUsages::default(),
+    );
+    if levels > 1 {
+        if let Some(base) = image.data.take() {
+            image.data = Some(with_mips_r8(width, height, base));
+        }
+        image.texture_descriptor.mip_level_count = levels;
+    }
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: ANISOTROPY,
+        ..default()
+    });
+    Ok(image)
+}
+/// P3l: a six-face RGBA cube map (faces +X, -X, +Y, -Y, +Z, -Z, tightly packed `rgba` per
+/// face) as a cube texture with a box-filtered mip chain per face, sRGB like the other
+/// reflection maps, clamped and trilinear. Faces must be square and equal.
+pub fn cube_image(size: u32, faces: &[&[u8]]) -> Result<Image, String> {
+    if faces.len() != 6 || size == 0 || size > 1024 {
+        return Err("Unsupported: cube map extent".into());
+    }
+    let face_bytes = size as usize * size as usize * 4;
+    if faces.iter().any(|f| f.len() != face_bytes) {
+        return Err("Invalid: cube map face size".into());
+    }
+    let levels = mip_count(size, size);
+    let mut image = Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 6,
+        },
+        TextureDimension::D2,
+        faces.concat(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    if levels > 1 {
+        // Layer-major: each face's whole chain, then the next face.
+        image.data = Some(
+            faces
+                .iter()
+                .flat_map(|f| with_mips(size, size, f.to_vec(), true))
+                .collect(),
+        );
+        image.texture_descriptor.mip_level_count = levels;
+    }
+    image.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::Cube),
+        ..default()
+    });
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        address_mode_w: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..default()
+    });
+    Ok(image)
+}
+fn image_axes_fmt(
+    width: u32,
+    height: u32,
+    pixels: Vec<u8>,
+    wrap: lbp_preview::TextureWrapping,
+    srgb: bool,
+) -> Result<Image, String> {
     let count = u64::from(width)
         .checked_mul(u64::from(height))
         .ok_or("Image size overflow")?;
@@ -176,6 +406,7 @@ pub fn image_axes(
     if width > 4096 || height > 4096 || count > lbp_texture::MAX_PIXELS as u64 {
         return Err("Unsupported: GPU texture budget (4 Mi pixels)".into());
     }
+    let levels = mip_count(width, height);
     let mut image = Image::new(
         Extent3d {
             width,
@@ -184,9 +415,20 @@ pub fn image_axes(
         },
         TextureDimension::D2,
         pixels,
-        TextureFormat::Rgba8UnormSrgb,
+        if srgb {
+            TextureFormat::Rgba8UnormSrgb
+        } else {
+            TextureFormat::Rgba8Unorm
+        },
         RenderAssetUsages::default(),
     );
+    // `Image::new` checks the base level only; the packed chain replaces the data after.
+    if levels > 1 {
+        if let Some(base) = image.data.take() {
+            image.data = Some(with_mips(width, height, base, srgb));
+        }
+        image.texture_descriptor.mip_level_count = levels;
+    }
     let address = |axis| match axis {
         lbp_preview::TextureAddress::Repeat => ImageAddressMode::Repeat,
         lbp_preview::TextureAddress::MirroredRepeat => ImageAddressMode::MirrorRepeat,
@@ -200,9 +442,21 @@ pub fn image_axes(
         address_mode_v: address(wrap.v),
         mag_filter: ImageFilterMode::Linear,
         min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: ANISOTROPY,
         ..default()
     });
     Ok(image)
+}
+/// Point sampling (the texture asks for it): no mip blending, no anisotropy (wgpu
+/// rejects anisotropy with non-linear filters).
+pub fn set_nearest(image: &mut Image) {
+    if let ImageSampler::Descriptor(s) = &mut image.sampler {
+        s.mag_filter = ImageFilterMode::Nearest;
+        s.min_filter = ImageFilterMode::Nearest;
+        s.mipmap_filter = ImageFilterMode::Nearest;
+        s.anisotropy_clamp = 1;
+    }
 }
 /// P2q: a data texture (bump map) sampled without the sRGB decode.
 pub fn linear_image(
@@ -211,9 +465,7 @@ pub fn linear_image(
     pixels: Vec<u8>,
     wrap: lbp_preview::TextureWrapping,
 ) -> Result<Image, String> {
-    let mut image = image_axes(width, height, pixels, wrap)?;
-    image.texture_descriptor.format = TextureFormat::Rgba8Unorm;
-    Ok(image)
+    image_axes_fmt(width, height, pixels, wrap, false)
 }
 /// Distinct material draws per mesh: lbp-preview's 64-load cap plus one neutral bucket.
 /// GPU image memory stays bounded by lbp-preview's 640 MiB retained-bytes budget.
@@ -460,5 +712,102 @@ mod tests {
             assert_eq!(s.mag_filter, ImageFilterMode::Linear);
             assert_eq!(s.min_filter, ImageFilterMode::Linear);
         }
+    }
+    #[test]
+    fn game_normals_replace_referenced_vertices_only() {
+        let positions = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.], [5., 5., 5.]];
+        let mut m = mesh(&positions, &[[0, 1, 2]], None).unwrap();
+        let game = [[0., 0., 2.], [0., 0., -1.], [0., 0.1, 0.], [1., 0., 0.]];
+        let (used, total, agree) = apply_game_normals(&mut m, &game);
+        // Vertex 2's stored normal is too short and keeps the generated one; vertex 3 is unreferenced.
+        assert_eq!((used, total), (2, 3));
+        assert!((agree - 1.).abs() < 1e-5);
+        let Some(VertexAttributeValues::Float32x3(n)) = m.attribute(Mesh::ATTRIBUTE_NORMAL) else {
+            panic!()
+        };
+        assert_eq!(n[0], [0., 0., 1.]);
+        assert_eq!(n[1], [0., 0., -1.]);
+        assert_eq!(n[2], [0., 0., 1.]);
+        assert_eq!(apply_game_normals(&mut m, &game[..2]), (0, 0, 0.));
+    }
+    #[test]
+    fn r8_mip_chain_averages_stored_values() {
+        let chain = with_mips_r8(2, 2, vec![0, 100, 200, 255]);
+        assert_eq!(chain.len(), 5);
+        assert_eq!(chain[4], 139);
+        let chain = with_mips_r8(4, 1, vec![10, 20, 30, 40]);
+        assert_eq!(chain.len(), 4 + 2 + 1);
+        assert!(lightmap_image(2, 2, &[0; 3]).is_err());
+        let image = lightmap_image(8, 8, &[7; 64]).unwrap();
+        assert_eq!(image.texture_descriptor.mip_level_count, 4);
+        assert_eq!(image.data.as_ref().unwrap().len(), 64 + 16 + 4 + 1);
+    }
+
+    #[test]
+    fn cube_image_is_six_layers_with_a_chain_per_face() {
+        let face = vec![9u8; 4 * 4 * 4];
+        let faces = [face.as_slice(); 6];
+        let image = cube_image(4, &faces).unwrap();
+        assert_eq!(image.texture_descriptor.size.depth_or_array_layers, 6);
+        assert_eq!(image.texture_descriptor.mip_level_count, 3);
+        assert_eq!(image.data.as_ref().unwrap().len(), 6 * (64 + 16 + 4));
+        assert_eq!(
+            image.texture_view_descriptor.as_ref().unwrap().dimension,
+            Some(TextureViewDimension::Cube)
+        );
+        assert!(cube_image(4, &faces[..5]).is_err());
+        assert!(cube_image(4, &[&face[..8]; 6]).is_err());
+    }
+
+    #[test]
+    fn mip_chain_sizes_and_linear_light_average() {
+        assert_eq!(mip_count(1, 1), 1);
+        assert_eq!(mip_count(4, 2), 3);
+        assert_eq!(mip_count(5, 3), 3);
+        assert_eq!(mip_count(512, 512), 10);
+        // 2x2 black/white checker: the 1x1 level is linear-light mid grey (188), not 128.
+        let px = vec![
+            0, 0, 0, 255, 255, 255, 255, 255, 255, 255, 255, 255, 0, 0, 0, 255,
+        ];
+        let chain = with_mips(2, 2, px.clone(), true);
+        assert_eq!(chain.len(), 16 + 4);
+        assert!((i32::from(chain[16]) - 188).abs() <= 1, "{}", chain[16]);
+        assert_eq!(chain[19], 255);
+        // Data textures average the stored values.
+        let chain = with_mips(2, 2, px, false);
+        assert_eq!(chain[16], 128);
+        // Total size over odd, non-square extents matches the declared levels.
+        let (w, h) = (5u32, 3u32);
+        let chain = with_mips(w, h, vec![200; (w * h * 4) as usize], true);
+        let (mut cw, mut ch, mut total) = (w, h, 0u32);
+        for _ in 0..mip_count(w, h) {
+            total += cw * ch * 4;
+            cw = (cw / 2).max(1);
+            ch = (ch / 2).max(1);
+        }
+        assert_eq!(chain.len() as u32, total);
+        let i = image(8, 8, vec![255; 8 * 8 * 4], true).unwrap();
+        assert_eq!(i.texture_descriptor.mip_level_count, 4);
+        let ImageSampler::Descriptor(s) = &i.sampler else {
+            panic!()
+        };
+        assert_eq!(s.mipmap_filter, ImageFilterMode::Linear);
+        assert_eq!(s.anisotropy_clamp, ANISOTROPY);
+        let mut n = image(8, 8, vec![255; 8 * 8 * 4], true).unwrap();
+        set_nearest(&mut n);
+        let ImageSampler::Descriptor(s) = &n.sampler else {
+            panic!()
+        };
+        assert_eq!(
+            (s.min_filter, s.mipmap_filter, s.anisotropy_clamp),
+            (ImageFilterMode::Nearest, ImageFilterMode::Nearest, 1)
+        );
+        assert_eq!(
+            image(1, 1, vec![255; 4], true)
+                .unwrap()
+                .texture_descriptor
+                .mip_level_count,
+            1
+        );
     }
 }

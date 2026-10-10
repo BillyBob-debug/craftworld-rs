@@ -17,6 +17,17 @@ pub struct Fog {
     pub end: f32,
 }
 
+/// P2x: the game's output-space fog from a level's settings (level units). The game's
+/// vertex shader makes `f = (depth - (FogNear + bias)) / (FogFar - FogNear)` (PC Ghidra
+/// read, oracles/results/2026-10-09-shading-ghidra.md); the colour is FogColor divided by
+/// its own w when that is non-zero. The bias is script-set (the Pod's SetDOFAndFog), 0 here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameFog {
+    pub color: Vec3,
+    pub near: f32,
+    pub span: f32,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreviewLight {
     /// Unit direction toward the light (display space = world space up to scale).
@@ -24,6 +35,11 @@ pub struct PreviewLight {
     pub key: Vec3,
     pub ambient: Vec3,
     pub fog: Option<Fog>,
+    /// P2x: the level's own game fog (None without usable settings).
+    pub game_fog: Option<GameFog>,
+    /// P2x: the Pod scenes use the live game's values (GAME_FOG_*, Puter-driven start)
+    /// because pod_planets.bin's stored settings differ from the live ones.
+    pub pod_fog: bool,
     pub from_level: bool,
     /// P2l: level values before the preview fit (key = sun colour x multiplier).
     pub raw_key: Vec3,
@@ -34,9 +50,19 @@ pub struct PreviewLight {
     pub exposure: f32,
     /// P2l: LBP-shaped mode (`lbp`); off = D121 Lambert preview.
     pub lbp: bool,
+    /// P3g: the sun term is multiplied by the dynamic sun-shadow map (LBP mode, level
+    /// meshes only: the Pod draws with fragment variant 8, which has no shadow).
+    pub shadows: bool,
     /// P2q: the scalar (.w) the game sends with the sun, ambient and rim colours; it
     /// weights the gloss term (brdf.cg `light.w`). Zero outside LBP mode.
-    pub scales: Vec3,
+    pub scales: Vec4,
+    /// P3f: the stored .w of the sun, ambient, rim and rim2 colours (1 when unusable). The
+    /// game's .w is stored w x the same factor as the rgb (Moon oracle, #110); it only
+    /// weights the gloss term, the rgb is not multiplied by it.
+    pub stored_w: [f32; 4],
+    /// P3k: baked AO tweak (scale, bias) from the level settings; the backdrop lightmap
+    /// gives `ao = map * scale + bias` (oracles 2026-10-10-baked-ao). (1, 0) when unset.
+    pub baked_ao: [f32; 2],
     /// P2q: level sun multiplier (already folded into `raw_key`); 1 without settings.
     pub multiplier: f32,
     /// P2t: display units per level unit (scene normalization), for the game fog.
@@ -74,13 +100,18 @@ impl PreviewLight {
             key: Vec3::splat(0.65),
             ambient: Vec3::splat(0.35),
             fog: None,
+            game_fog: None,
+            pod_fog: false,
             from_level: false,
             raw_key: Vec3::splat(0.65),
             raw_ambient: Vec3::splat(0.35),
             rim: [Vec3::ZERO; 2],
             exposure: 1.,
             lbp: false,
-            scales: Vec3::ZERO,
+            shadows: false,
+            scales: Vec4::ZERO,
+            stored_w: [1.; 4],
+            baked_ao: [1., 0.],
             multiplier: 1.,
             display_scale: 1.,
             pod_t: 0.,
@@ -119,6 +150,13 @@ impl PreviewLight {
             finite_rgb(s.rim_color).unwrap_or(Vec3::ZERO),
             finite_rgb(s.rim_color2).unwrap_or(Vec3::ZERO),
         ];
+        let stored_w = [
+            s.sun_color[3],
+            s.ambient_color[3],
+            s.rim_color[3],
+            s.rim_color2[3],
+        ]
+        .map(|w| if w.is_finite() && w > 0. { w } else { 1. });
         let (raw_key, raw_ambient) = (key, ambient);
         let (key, ambient, fitted) = fit(key, ambient);
         let fog = finite_rgb(s.fog_color)
@@ -164,20 +202,44 @@ impl PreviewLight {
             ),
             None => "fog not used (unusable colour or range)".into(),
         });
+        let game_fog = (s.fog_near.is_finite() && s.fog_far.is_finite() && s.fog_far > s.fog_near)
+            .then(|| {
+                // The game divides the stored colour by its own w when w is non-zero.
+                let w = s.fog_color[3];
+                let divisor = if w.is_finite() && w > 0. { w } else { 1. };
+                finite_rgb(s.fog_color).map(|c| GameFog {
+                    color: c / divisor,
+                    near: s.fog_near,
+                    span: s.fog_far - s.fog_near,
+                })
+            })
+            .flatten();
         Ok(Self {
             toward_light: toward,
             key,
             ambient,
             fog,
+            game_fog,
+            pod_fog: false,
             from_level: true,
             raw_key,
             raw_ambient,
             rim,
+            stored_w,
+            baked_ao: if s.baked_ao_scale.is_finite()
+                && s.baked_ao_scale > 0.
+                && s.baked_ao_bias.is_finite()
+            {
+                [s.baked_ao_scale, s.baked_ao_bias]
+            } else {
+                [1., 0.]
+            },
             exposure: Some(s.exposure)
                 .filter(|e| e.is_finite() && *e > 0.)
                 .unwrap_or(1.),
             lbp: false,
-            scales: Vec3::ZERO,
+            shadows: false,
+            scales: Vec4::ZERO,
             multiplier,
             display_scale: if scale.is_finite() && scale > 0. {
                 scale
@@ -205,14 +267,17 @@ impl PreviewLight {
         let mut light = self.clone();
         let e = self.exposure;
         light.lbp = true;
+        light.shadows = true;
         // P2p: the scales the game sends with each colour (D-RSX capture of the Pod).
         light.key = self.raw_key * GAME_SUN_SCALE * e;
         light.ambient = self.raw_ambient * GAME_AMBIENT_SCALE * e;
         light.rim = self.rim.map(|r| r * GAME_RIM_SCALE * e);
-        light.scales = Vec3::new(
-            GAME_SUN_SCALE * self.multiplier * e,
-            GAME_AMBIENT_SCALE * e,
-            GAME_RIM_SCALE * e,
+        let w = self.stored_w;
+        light.scales = Vec4::new(
+            GAME_SUN_SCALE * self.multiplier * e * w[0],
+            GAME_AMBIENT_SCALE * e * w[1],
+            GAME_RIM_SCALE * e * w[2],
+            GAME_RIM_SCALE * e * w[3],
         );
         light.toward_light = (turn * self.toward_light).normalize_or_zero();
         light.notes.push(format!(
@@ -228,6 +293,15 @@ impl PreviewLight {
         if !self.lbp {
             return Vec4::ZERO;
         }
+        // P2x: a level's own FogNear/FogFar; the Pod keeps the live-game constants.
+        if let (false, Some(f)) = (self.pod_fog, self.game_fog) {
+            return Vec4::new(
+                f.near * self.display_scale,
+                1. / (f.span * self.display_scale),
+                GAME_FOG_CC,
+                1.,
+            );
+        }
         let t = self.pod_t.clamp(0., 1.);
         let start = GAME_FOG_START[0] + (GAME_FOG_START[1] - GAME_FOG_START[0]) * t;
         Vec4::new(
@@ -236,6 +310,14 @@ impl PreviewLight {
             GAME_FOG_CC,
             1.,
         )
+    }
+
+    /// P2x: fog colour in output space (the level's FogColor, or the Pod's live value).
+    pub fn lbp_fog_color(&self) -> Vec3 {
+        match (self.pod_fog, self.game_fog) {
+            (false, Some(f)) => f.color,
+            _ => Vec3::from(GAME_FOG_COLOR),
+        }
     }
 
     /// CPU mirror of the shader's `preview_light` for an already oriented unit normal.
@@ -248,13 +330,20 @@ impl PreviewLight {
     /// unit direction from the surface to the viewer.
     #[allow(dead_code)] // shader mirror, exercised by tests
     pub fn lbp_factor(&self, normal: Vec3, to_view: Vec3) -> Vec3 {
+        self.lbp_factor_baked(normal, to_view, 1., 1.)
+    }
+
+    /// P3k mirror (fpdec v0/v3 arithmetic): ambient x ao, sun x baked x ao, rim x baked, where
+    /// `ao` = bakedAOScale + bakedAOBias and `baked` is the lightmap texel (shadowmap.x).
+    #[allow(dead_code)] // shader mirror, exercised by tests
+    pub fn lbp_factor_baked(&self, normal: Vec3, to_view: Vec3, ao: f32, baked: f32) -> Vec3 {
         let up = (normal.y + 1.) / 2.;
         // V from the eye: 0 facing the viewer, 0.81 at grazing. P2m tried V toward the
         // eye; D203 measured the room 2.8x too bright with it, so it was reverted (P2n).
         let rim = (normal.dot(-to_view) + 0.9).clamp(0., 1.).powi(2);
-        self.ambient * (normal.y * 0.15 + 0.5)
-            + self.key * normal.dot(self.toward_light).max(0.)
-            + self.rim[0].lerp(self.rim[1], up) * rim
+        self.ambient * (normal.y * 0.15 + 0.5) * ao
+            + self.key * (normal.dot(self.toward_light).max(0.) * baked * ao)
+            + self.rim[0].lerp(self.rim[1], up) * rim * baked
     }
 }
 
@@ -349,9 +438,37 @@ mod tests {
             fog_far: 300.,
             rim_color: [0.; 4],
             rim_color2: [0.; 4],
+            baked_ao_bias: 0.,
+            baked_ao_scale: 1.,
             presets: 0,
             backdrop_mesh: None,
         }
+    }
+
+    #[test]
+    fn baked_ao_tweak_follows_settings_and_the_mirror_splits_ao_from_the_texel() {
+        let mut st = settings();
+        st.baked_ao_scale = 0.5;
+        st.baked_ao_bias = 0.25;
+        let light = PreviewLight::from_settings(&st, Vec3::ZERO, 1.);
+        assert_eq!(light.baked_ao, [0.5, 0.25]);
+        // Unset (default 0/0) and unusable values fall back to the identity tweak.
+        st.baked_ao_scale = 0.;
+        assert_eq!(
+            PreviewLight::from_settings(&st, Vec3::ZERO, 1.).baked_ao,
+            [1., 0.]
+        );
+        let mut lit =
+            PreviewLight::from_settings(&settings(), Vec3::ZERO, 1.).lbp_shaped(Quat::IDENTITY);
+        lit.rim = [Vec3::splat(0.5); 2];
+        let (n, v) = (Vec3::Y, Vec3::Z);
+        let full = lit.lbp_factor(n, v);
+        assert_eq!(full, lit.lbp_factor_baked(n, v, 1., 1.));
+        // ao scales ambient and sun only; the texel scales sun and rim only.
+        let no_ao = lit.lbp_factor_baked(n, v, 0., 1.);
+        assert!(no_ao.x > 0. && no_ao.x < full.x, "rim survives");
+        let dark = lit.lbp_factor_baked(n, v, 1., 0.);
+        assert!(dark.x > 0. && dark.x < full.x, "ambient survives");
     }
 
     #[test]
@@ -425,11 +542,18 @@ mod tests {
         let key = Vec3::new(2., 1., 0.5) * 0.6;
         assert!((light.key - key).length() < 1e-5);
         // P2q: the scalars the game sends in .w (sun x multiplier, ambient, rim).
-        assert!((light.scales - Vec3::new(1.2, 0.9, 1.2)).length() < 1e-5);
+        assert!((light.scales - Vec4::new(1.2, 0.9, 1.2, 1.2)).length() < 1e-5);
+        // P3f: a stored rim .w of 1.5 weights that rim's gloss only.
+        let mut s2 = s;
+        s2.rim_color[3] = 1.5;
+        let l2 = PreviewLight::from_settings(&s2, Vec3::ZERO, 1.).lbp_shaped(Quat::IDENTITY);
+        assert!((l2.scales.z - 1.8).abs() < 1e-5 && (l2.scales.w - 1.2).abs() < 1e-5);
+        assert!((l2.rim[0] - light.rim[0]).length() < 1e-6);
         // P2t: fog start follows the Puter progress, in display units.
         let mut fog = light.clone();
         fog.display_scale = 2.;
         fog.pod_t = 1.;
+        fog.pod_fog = true;
         let f = fog.lbp_fog();
         assert!((f.x - 5810. * 2.).abs() < 1e-2 && (f.y - 1. / 52648. / 2.).abs() < 1e-9);
         assert_eq!(PreviewLight::generic().lbp_fog(), Vec4::ZERO);
@@ -453,6 +577,13 @@ mod tests {
     }
 
     #[test]
+    fn shadows_follow_lbp_mode_only() {
+        let plain = PreviewLight::from_settings(&settings(), Vec3::ZERO, 1.);
+        assert!(!plain.shadows);
+        assert!(plain.lbp_shaped(Quat::IDENTITY).shadows);
+    }
+
+    #[test]
     fn summary_labels_never_claim_game_lighting() {
         for light in [
             PreviewLight::generic(),
@@ -462,5 +593,46 @@ mod tests {
             assert!(lines[0].contains("not game"));
             assert!(lines.last().unwrap().contains("2 of 5"));
         }
+    }
+
+    #[test]
+    fn level_fog_uses_its_own_near_far_and_colour_unless_pod() {
+        let mut s = LevelSettings {
+            sun_position: [0., 1., 0.],
+            sun_position_scale: 1000.,
+            sun_color: [1.; 4],
+            ambient_color: [0.5; 4],
+            sun_multiplier: 1.,
+            exposure: 1.,
+            fog_color: [0.4, 0.2, 0.1, 0.5],
+            fog_near: 1000.,
+            fog_far: 5000.,
+            rim_color: [0.; 4],
+            rim_color2: [0.; 4],
+            baked_ao_bias: 0.,
+            baked_ao_scale: 1.,
+            ..LevelSettings::default()
+        };
+        let base = PreviewLight::from_settings(&s, Vec3::ZERO, 0.01);
+        let lit = PreviewLight {
+            display_scale: 0.01,
+            ..base.lbp_shaped(Quat::IDENTITY)
+        };
+        let f = lit.lbp_fog();
+        assert!((f.x - 10.).abs() < 1e-4, "{f:?}");
+        assert!((f.y - 1. / 40.).abs() < 1e-6, "{f:?}");
+        assert_eq!(f.w, 1.);
+        // Stored colour is divided by its own w (0.5).
+        assert!((lit.lbp_fog_color() - Vec3::new(0.8, 0.4, 0.2)).length() < 1e-6);
+        let pod = PreviewLight {
+            pod_fog: true,
+            ..lit.clone()
+        };
+        assert_eq!(pod.lbp_fog_color(), Vec3::from(GAME_FOG_COLOR));
+        assert!((pod.lbp_fog().x - 25810. * 0.01).abs() < 1e-3);
+        // An unusable range leaves the Pod constants.
+        s.fog_far = s.fog_near;
+        let bad = PreviewLight::from_settings(&s, Vec3::ZERO, 0.01);
+        assert!(bad.game_fog.is_none());
     }
 }

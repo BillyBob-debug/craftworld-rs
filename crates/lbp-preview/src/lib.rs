@@ -28,6 +28,7 @@ pub use grid_graph::{
 pub use offgrid::OffGrid;
 pub mod census;
 pub mod level_backdrop;
+pub mod level_list;
 pub mod level_scene;
 pub mod popit;
 pub mod runtime_texture;
@@ -133,6 +134,10 @@ pub const MAX_VERTICES: usize = 1_000_000;
 pub struct GroupedMesh {
     pub geometry: lbp_mesh::Geometry,
     pub bindings: Vec<Result<std::sync::Arc<MaterialAsset>, String>>,
+    /// P2v: the mesh's decoded per-vertex normals (one per position, mesh space), when
+    /// the skin streams decode. `None` after per-bone skinning (positions moved, normals
+    /// not rotated) or when the stream is unusable; the viewer then generates normals.
+    pub normals: Option<Vec<[f32; 3]>>,
 }
 /// D66: at most 64 distinct material loads per mesh, and the retained display bytes
 /// of successful loads (decoded + derived pixels and coordinate arrays) may total at
@@ -221,7 +226,15 @@ pub fn load_mesh_groups_with_options(
     }
     control.check()?;
     source.check_stable()?;
-    Ok(GroupedMesh { geometry, bindings })
+    let normals = lbp_mesh::decode_skin(&data, || control.check().is_err())
+        .ok()
+        .map(|skin| skin.normals)
+        .filter(|n| n.len() == geometry.positions.len());
+    Ok(GroupedMesh {
+        geometry,
+        bindings,
+        normals,
+    })
 }
 
 /// D188: neutral reason for a material-less primitive (see [`is_materialless`]).

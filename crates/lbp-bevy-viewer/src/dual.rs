@@ -88,6 +88,17 @@ pub struct SecondTexture {
     /// D189: `lbp_preview::FragmentStep::param` per step.
     #[uniform(128)]
     graph_param: [Vec4; 32],
+    /// P3l: the reflection graph's cube map (sample steps with channel 2).
+    #[texture(140, dimension = "cube")]
+    #[sampler(141)]
+    pub cube_image: Option<Handle<Image>>,
+    /// P3k: backdrop baked-AO lightmap (R8, UV1).
+    #[texture(129)]
+    #[sampler(130)]
+    pub lightmap: Option<Handle<Image>>,
+    /// P3k: x = bakedAOScale, y = bakedAOBias, z = 1 when a lightmap is bound and lit.
+    #[uniform(131)]
+    ao_params: Vec4,
     /// D121: generated normals passed `adapter::normal_trust`; otherwise stays unlit.
     pub normals_trusted: bool,
 }
@@ -174,6 +185,65 @@ pub fn enable_bump(material: &mut ViewerMaterial, image: Handle<Image>, level: f
     material.extension.bump_image = Some(image);
     material.extension.bump_params = Vec4::new(level, 1., 0., 0.);
 }
+/// P3d: gloss colour map on `graph_image5` (free unless a D189 graph is bound) with the
+/// static gloss white; `uv_mode` 1 = primary UV, 2 = UV1. Call only without a graph.
+pub fn enable_spec_map(material: &mut ViewerMaterial, image: Handle<Image>, uv_mode: u32) {
+    material.extension.graph_image5 = Some(image);
+    material.extension.graph_info.y = uv_mode;
+}
+/// P3a: alpha cut-out: fragments whose colour alpha is below `level` are discarded (LBP
+/// mode materials with a stored AlphaTestLevel, docs/p3a-alpha-test.md).
+pub fn enable_alpha_test(material: &mut ViewerMaterial, level: f32) {
+    material.extension.bump_params.z = level;
+}
+/// P3h: unlit glow added to the lit colour. `color` multiplies the optional map (graph slot
+/// 4, sRGB like the diffuse); `mode` 2 = primary UV, 3 = UV1. Rides graph_info.w and the
+/// last graph_param row, so it needs no per-fragment graph (slots shared).
+pub fn enable_glow(
+    material: &mut ViewerMaterial,
+    color: [f32; 3],
+    map: Option<(Handle<Image>, u32)>,
+) {
+    let ext = &mut material.extension;
+    let blur = ext.graph_param[31].w;
+    ext.graph_param[31] = Vec4::new(color[0], color[1], color[2], blur);
+    ext.graph_info.w = match map {
+        Some((image, mode)) => {
+            ext.graph_image4 = Some(image);
+            mode
+        }
+        None => 1,
+    };
+}
+/// P3i: reflection graph sampled at R.xy with LOD bias `blur` (docs/p3i-reflection.md).
+/// `images[k]` is graph texture k (at most 4, graph slots 0..=3), `steps` at most 31 rows
+/// from row 0; the count rides graph_info.z >> 8 and the blur graph_param[31].w. Needs no
+/// diffuse graph or second/third/fourth sample (the slots are shared).
+pub fn enable_reflection(
+    material: &mut ViewerMaterial,
+    images: Vec<Option<Handle<Image>>>,
+    cube: Option<Handle<Image>>,
+    steps: &[lbp_preview::FragmentStep],
+    blur: f32,
+) -> Result<(), String> {
+    if images.is_empty() || images.len() > 4 || steps.is_empty() || steps.len() > 31 {
+        return Err("Invalid: reflection graph budget".into());
+    }
+    let ext = &mut material.extension;
+    let mut images = images.into_iter();
+    ext.image = images.next().flatten();
+    ext.third_image = images.next().flatten();
+    ext.fourth_image = images.next().flatten();
+    ext.graph_image3 = images.next().flatten();
+    ext.cube_image = cube;
+    for (k, step) in steps.iter().enumerate() {
+        ext.graph_code[k] = UVec4::from_array(step.code);
+        ext.graph_param[k] = Vec4::from_array(step.param);
+    }
+    ext.graph_param[31].w = blur;
+    ext.graph_info.z = (ext.graph_info.z & 1) | ((steps.len() as u32) << 8);
+    Ok(())
+}
 /// P2q: static gloss colour with exponent `power` (CosinePower).
 pub fn enable_gloss(material: &mut ViewerMaterial, color: [f32; 3], power: f32) {
     material.extension.gloss = Vec3::from(color).extend(power.max(1.));
@@ -198,9 +268,16 @@ pub fn set_lighting(
             ext.light_key = l.key.extend(l.scales.x);
             ext.light_ambient = l.ambient.extend(l.scales.y);
             ext.rim_low = l.rim[0].extend(l.scales.z);
-            ext.rim_high = l.rim[1].extend(l.scales.z);
+            ext.rim_high = l.rim[1].extend(l.scales.w);
             ext.lbp_fog = l.lbp_fog();
-            ext.lbp_fog_color = Vec3::from(crate::lighting::GAME_FOG_COLOR).extend(1.);
+            ext.graph_info.z = (ext.graph_info.z & !1) | u32::from(l.shadows);
+            ext.ao_params = Vec4::new(
+                l.baked_ao[0],
+                l.baked_ao[1],
+                f32::from(u8::from(l.lbp && ext.lightmap.is_some())),
+                0.,
+            );
+            ext.lbp_fog_color = l.lbp_fog_color().extend(1.);
             true
         }
         None => {
@@ -210,9 +287,16 @@ pub fn set_lighting(
             ext.rim_low = Vec4::ZERO;
             ext.rim_high = Vec4::ZERO;
             ext.lbp_fog = Vec4::ZERO;
+            ext.graph_info.z &= !1;
+            ext.ao_params = Vec4::ZERO;
             false
         }
     }
+}
+/// P3k: binds the backdrop lightmap; the AO scale/bias and the on flag come from
+/// `set_lighting` (LBP mode only).
+pub fn enable_lightmap(material: &mut ViewerMaterial, image: Handle<Image>) {
+    material.extension.lightmap = Some(image);
 }
 pub struct DualPlugin;
 impl Plugin for DualPlugin {
@@ -230,7 +314,7 @@ impl Plugin for DualPlugin {
 // Independently authored preview shader; imported Bevy interfaces are pinned by Cargo.lock.
 const SOURCE: &str = r#"
 #import bevy_pbr::mesh_view_bindings::view
-#import bevy_pbr::{forward_io::{VertexOutput, FragmentOutput}, pbr_fragment::pbr_input_from_standard_material, pbr_functions::main_pass_post_lighting_processing}
+#import bevy_pbr::{forward_io::{VertexOutput, FragmentOutput}, pbr_fragment::pbr_input_from_standard_material, pbr_functions::main_pass_post_lighting_processing, shadows::fetch_directional_shadow}
 @group(#{MATERIAL_BIND_GROUP}) @binding(100) var second_image: texture_2d<f32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(101) var second_sampler: sampler;
 @group(#{MATERIAL_BIND_GROUP}) @binding(102) var<uniform> enabled: vec4<f32>;
@@ -268,6 +352,11 @@ struct BumpInput {
 @group(#{MATERIAL_BIND_GROUP}) @binding(126) var<uniform> graph_info: vec4<u32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(127) var<uniform> graph_code: array<vec4<u32>, 32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(128) var<uniform> graph_param: array<vec4<f32>, 32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(140) var cube_image: texture_cube<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(141) var cube_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(129) var lightmap_image: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(130) var lightmap_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(131) var<uniform> ao_params: vec4<f32>;
 // D189 graph texture k at uv with explicit gradients (non-uniform control flow).
 fn graph_texture(k: u32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec4<f32> {
     switch k {
@@ -289,9 +378,10 @@ fn graph_lane(v: vec4<f32>, code: u32) -> vec4<f32> {
 }
 // D189 per-fragment D100 program (mirrors lbp_preview::evaluate_fragment): linear texels,
 // MULTIPLY/ADD per lane, MIX (r - l) * f + l, BLEND l + (r - l) * clamp((m.x - p0)/(p1 - p0)).
-fn graph_color(uv0: vec2<f32>, uv1: vec2<f32>, d0: vec4<f32>, d1: vec4<f32>) -> vec4<f32> {
+// P3l: `dir` and its gradients feed sample steps on channel 2 (the cube map); other callers pass zero.
+fn graph_color(count_in: u32, uv0: vec2<f32>, uv1: vec2<f32>, d0: vec4<f32>, d1: vec4<f32>, dir: vec3<f32>, ddx3: vec3<f32>, ddy3: vec3<f32>) -> vec4<f32> {
     var values: array<vec4<f32>, 32>;
-    let count = min(graph_info.x, 32u);
+    let count = min(count_in, 32u);
     for (var k = 0u; k < count; k++) {
         let code = graph_code[k];
         let p = graph_param[k];
@@ -301,13 +391,17 @@ fn graph_color(uv0: vec2<f32>, uv1: vec2<f32>, d0: vec4<f32>, d1: vec4<f32>) -> 
         var v = vec4<f32>(0.0);
         switch code.x {
             case 1u: {
-                var base = uv0;
-                var d = d0;
-                if code.z == 1u {
-                    base = uv1;
-                    d = d1;
+                if code.z == 2u {
+                    v = textureSampleGrad(cube_image, cube_sampler, dir, ddx3, ddy3);
+                } else {
+                    var base = uv0;
+                    var d = d0;
+                    if code.z == 1u {
+                        base = uv1;
+                        d = d1;
+                    }
+                    v = graph_texture(code.y, base * p.xy + p.zw, d.xy * p.xy, d.zw * p.xy);
                 }
-                v = graph_texture(code.y, base * p.xy + p.zw, d.xy * p.xy, d.zw * p.xy);
             }
             case 2u: { v = p; }
             case 3u: { v = a * b; }
@@ -329,7 +423,7 @@ fn graph_color(uv0: vec2<f32>, uv1: vec2<f32>, d0: vec4<f32>, d1: vec4<f32>) -> 
 // D121 preview Lambert factor (mirrors lighting::PreviewLight::factor/facing_normal).
 // Double-sided: the smooth normal is turned into the hemisphere of the face normal that
 // points at the viewer, so back faces and mirrored instances light like front faces.
-fn preview_light(n: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
+fn preview_light(n: vec3<f32>, to_view: vec3<f32>, shadow: f32, ao: f32, baked: f32) -> vec3<f32> {
     if dot(n, n) <= 0.0 {
         return vec3<f32>(1.0);
     }
@@ -338,9 +432,11 @@ fn preview_light(n: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
         // grazing rim lerped by N.y (P2n: P2m's eye-facing rim reverted, D203); squared
         // for the game's square-then-sqrt combine.
         let rim = pow(clamp(dot(n, -to_view) + 0.9, 0.0, 1.0), 2.0);
-        let f = light_ambient.rgb * (n.y * 0.15 + 0.5)
-            + light_key.rgb * max(dot(n, light_dir.xyz), 0.0)
-            + mix(rim_low.rgb, rim_high.rgb, (n.y + 1.0) * 0.5) * rim;
+        // P3k (fpdec v0/v3, CONFIRMED arithmetic): ambient x ao, sun x shadowmap.x x ao,
+        // rim x shadowmap.x. `baked` is the lightmap texel as shadowmap.x (INFERRED binding).
+        let f = light_ambient.rgb * (n.y * 0.15 + 0.5) * ao
+            + light_key.rgb * (max(dot(n, light_dir.xyz), 0.0) * shadow * baked * ao)
+            + mix(rim_low.rgb, rim_high.rgb, (n.y + 1.0) * 0.5) * rim * baked;
         return f * f;
     }
     return light_ambient.rgb + light_key.rgb * max(dot(n, light_dir.xyz), 0.0);
@@ -349,16 +445,16 @@ fn preview_light(n: vec3<f32>, to_view: vec3<f32>) -> vec3<f32> {
 // sums the game's per-light scalars with the same weights as the colours, light^2 is
 // the squared factor, spec = gloss colour x pow(saturate(R.L), CosinePower) with R the
 // mirrored view ray.
-fn gloss_term(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>) -> vec3<f32> {
+fn gloss_term(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>, tint: vec3<f32>, shadow: f32) -> vec3<f32> {
     if light_dir.w < 1.5 || gloss.w <= 0.0 || dot(n, n) <= 0.0 {
         return vec3<f32>(0.0);
     }
     let rim = pow(clamp(dot(n, -to_view) + 0.9, 0.0, 1.0), 2.0);
     let w = light_ambient.w * (n.y * 0.15 + 0.5)
-        + light_key.w * max(dot(n, light_dir.xyz), 0.0)
+        + light_key.w * (max(dot(n, light_dir.xyz), 0.0) * shadow)
         + mix(rim_low.w, rim_high.w, (n.y + 1.0) * 0.5) * rim;
     let r = reflect(-to_view, n);
-    let spec = gloss.rgb * pow(clamp(dot(r, light_dir.xyz), 0.0, 1.0), gloss.w);
+    let spec = gloss.rgb * tint * (pow(clamp(dot(r, light_dir.xyz), 0.0, 1.0), gloss.w) * shadow);
     return 2.0 * w * factor * spec;
 }
 // Facing normal, tilted by the bump offset in a cotangent frame built from the
@@ -434,7 +530,7 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
     let graph_d0 = vec4<f32>(dpdx(in.uv), dpdy(in.uv));
     let graph_d1 = vec4<f32>(dpdx(in.uv_b), dpdy(in.uv_b));
     if graph_info.x > 0u {
-        let g = graph_color(in.uv, in.uv_b, graph_d0, graph_d1);
+        let g = graph_color(graph_info.x, in.uv, in.uv_b, graph_d0, graph_d1, vec3<f32>(0.0), vec3<f32>(0.0), vec3<f32>(0.0));
         color = vec4<f32>(clamp(g.rgb, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     }
 #endif
@@ -468,13 +564,75 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
 #endif
     }
 #endif
+    if bump_params.z > 0.0 && color.a < bump_params.z {
+        discard;
+    }
     var rgb = color.rgb;
     if light_dir.w > 0.5 {
         // P2s: mode 3 (untrusted smooth normals) shades with the face normal.
         let shading = select(in.world_normal, face, light_dir.w > 2.5);
         let n = lit_normal(shading, face, pbr.V, bump);
-        let factor = preview_light(n, pbr.V);
-        rgb = rgb * factor + gloss_term(n, pbr.V, factor);
+        // P3g: Bevy's cascaded sun-shadow map (one directional light, set up by the viewer),
+        // LBP-lit level meshes only; 1 = lit.
+        var shadow = 1.0;
+        if light_dir.w > 1.5 && (graph_info.z & 1u) > 0u {
+            let view_z = (view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
+            shadow = fetch_directional_shadow(0u, in.world_position, in.world_normal, view_z, in.position.xy);
+        }
+        // P3k: backdrop lightmap (B8, UV1). A B8 texel reads as A = one in RPCS3, so aomap.w is
+        // 1 and ao = bakedAOScale + bakedAOBias for the whole mesh; the texel reaches the
+        // light as shadowmap.x (sun and rim). Which unit the lightmap binds to is INFERRED
+        // (PC review of #117: reading the texel as aomap.w darkened Bravery to x0.2-0.45).
+        var ao = 1.0;
+        var baked = 1.0;
+#ifdef VERTEX_UVS_B
+        if ao_params.z > 0.5 && light_dir.w > 1.5 {
+            ao = ao_params.x + ao_params.y;
+            baked = textureSample(lightmap_image, lightmap_sampler, in.uv_b).r;
+        }
+#endif
+        let factor = preview_light(n, pbr.V, shadow, ao, baked);
+        // P3d: gloss colour map (port 2 sampler) on graph slot 5, unused without a graph.
+        var spec_tint = vec3<f32>(1.0);
+#ifdef VERTEX_UVS_A
+        if graph_info.y == 1u {
+            spec_tint = textureSample(graph_image5, graph_sampler5, in.uv).rgb;
+        }
+#endif
+#ifdef VERTEX_UVS_B
+        if graph_info.y == 2u {
+            spec_tint = textureSample(graph_image5, graph_sampler5, in.uv_b).rgb;
+        }
+#endif
+        rgb = rgb * factor + gloss_term(n, pbr.V, factor, spec_tint, shadow * baked);
+        // P3i: reflection graph sampled at the world-orientation reflection vector (the game's
+        // TC4 is the camera-translated world position, not view-rotated; world axes INFERRED to
+        // match ours), scaled by the luminance of the lit light.
+        let refl_count = graph_info.z >> 8u;
+        if light_dir.w > 1.5 && refl_count > 0u && graph_info.x == 0u && dot(n, n) > 0.0 {
+            let rv = reflect(-pbr.V, n);
+            let bias = exp2(graph_param[31].w);
+            let gx = dpdx(rv.xy) * bias;
+            let gy = dpdy(rv.xy) * bias;
+            let d = vec4<f32>(gx.x, gx.y, gy.x, gy.y);
+            let refl = graph_color(refl_count, rv.xy, rv.xy, d, d, rv, dpdx(rv) * bias, dpdy(rv) * bias);
+            rgb += refl.rgb * dot(factor, vec3<f32>(0.299, 0.587, 0.114));
+        }
+        // P3h: glow is added unlit before the square-root output (INFERRED scale 1).
+        if light_dir.w > 1.5 && graph_info.w > 0u && graph_info.x == 0u {
+            var glow = graph_param[31].rgb;
+#ifdef VERTEX_UVS_A
+            if graph_info.w == 2u {
+                glow *= textureSample(graph_image4, graph_sampler4, in.uv).rgb;
+            }
+#endif
+#ifdef VERTEX_UVS_B
+            if graph_info.w == 3u {
+                glow *= textureSample(graph_image4, graph_sampler4, in.uv_b).rgb;
+            }
+#endif
+            rgb += glow;
+        }
         if light_dir.w > 1.5 {
             let depth = -(view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
             rgb = lbp_output(rgb, depth);
@@ -516,10 +674,52 @@ fn pbr_input_from_standard_material(in: VertexOutput, front: bool) -> PbrInputSt
     p.V = vec3<f32>(0.0, 0.0, 1.0);
     return p;
 }
+fn fetch_directional_shadow(id: u32, p: vec4<f32>, n: vec3<f32>, z: f32, xy: vec2<f32>) -> f32 {
+    return 1.0;
+}
 fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32> {
     return c;
 }
 "#;
+    /// P3h: glow rides graph_info.w (1 = colour, 2/3 = map on UV0/UV1) and the last param row.
+    #[test]
+    fn glow_uses_the_free_graph_slots() {
+        use bevy::prelude::*;
+        let mut m = super::material(StandardMaterial::default());
+        super::enable_glow(&mut m, [0.2, 0.4, 0.6], None);
+        assert_eq!(m.extension.graph_info.w, 1);
+        assert_eq!(m.extension.graph_param[31], Vec4::new(0.2, 0.4, 0.6, 0.));
+        assert!(m.extension.graph_image4.is_none());
+        let h = Handle::<Image>::default();
+        super::enable_glow(&mut m, [1.; 3], Some((h, 3)));
+        assert_eq!(m.extension.graph_info.w, 3);
+        assert!(m.extension.graph_image4.is_some());
+    }
+    /// P3i: reflection packs its step count above the shadow bit and its blur next to glow.
+    #[test]
+    fn reflection_packs_beside_shadow_and_glow() {
+        use bevy::prelude::*;
+        let mut m = super::material(StandardMaterial::default());
+        m.extension.graph_info.z = 1; // shadow bit
+        let step = lbp_preview::FragmentStep {
+            code: [2, 0, 0, 0],
+            param: [1.; 4],
+        };
+        let h = Handle::<Image>::default();
+        super::enable_reflection(&mut m, vec![Some(h.clone())], None, &[step, step], 0.45).unwrap();
+        assert_eq!(m.extension.graph_info.z, 1 | (2 << 8));
+        assert_eq!(m.extension.graph_param[31].w, 0.45);
+        super::enable_glow(&mut m, [0.5; 3], None);
+        assert_eq!(m.extension.graph_param[31].w, 0.45, "glow keeps the blur");
+        assert!(
+            super::enable_reflection(&mut m, vec![Some(h.clone()); 5], None, &[step], 0.).is_err()
+        );
+        // A cube map rides its own binding and leaves a placeholder in its graph slot.
+        super::enable_reflection(&mut m, vec![None], Some(h), &[step], 0.).unwrap();
+        assert!(m.extension.cube_image.is_some() && m.extension.image.is_none());
+        // Lighting changes only the shadow bit.
+        assert!(super::enable_reflection(&mut m, vec![], None, &[step], 0.).is_err());
+    }
     /// D121: the authored shader (all `#ifdef` blocks enabled, imports stubbed) parses
     /// and validates headlessly. Bevy's own composition is exercised only at run time.
     #[test]
@@ -530,9 +730,12 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .map(|l| l.replace("#{MATERIAL_BIND_GROUP}", "2") + "\n")
             .collect();
         assert!(body.contains("lit_normal(shading, face, pbr.V, bump)"));
-        assert!(body.contains("gloss_term(n, pbr.V, factor)"));
+        assert!(body.contains("preview_light(n, pbr.V, shadow, ao, baked)"));
+        assert!(body.contains("gloss_term(n, pbr.V, factor, spec_tint, shadow * baked)"));
         assert!(body.contains("rgb = lbp_output(rgb, depth);"));
-        assert!(body.contains("graph_color(in.uv, in.uv_b, graph_d0, graph_d1)"));
+        assert!(body.contains("rgb += glow;"));
+        assert!(body.contains("graph_color(refl_count, rv.xy, rv.xy, d, d, rv,"));
+        assert!(body.contains("graph_color(graph_info.x, in.uv, in.uv_b, graph_d0, graph_d1, "));
         let source = format!("{STUBS}{body}");
         let module = naga::front::wgsl::parse_str(&source)
             .unwrap_or_else(|e| panic!("{}", e.emit_to_string(&source)));

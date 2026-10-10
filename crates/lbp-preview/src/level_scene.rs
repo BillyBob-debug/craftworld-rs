@@ -75,6 +75,24 @@ pub struct LevelSceneOptions {
 
 /// D191: `PRenderMesh.editorColor` (packed ARGB, -1 = opaque white) as an RGBA tint.
 pub const EDITOR_COLOR_WHITE: u32 = 0xffff_ffff;
+/// Default opaque white ARGB (`PRenderMesh.editorColor` and `PShape.color` default -1).
+pub const WHITE_ARGB: u32 = 0xffff_ffff;
+
+/// D194: `PShape.color` as packed ARGB. Floats (revisions up to 0x389) are clamped to
+/// 0..1 and rounded to bytes; non-finite components count as 1.
+pub fn shape_color_argb(color: &lbp_level::parts::ShapeColor) -> u32 {
+    match color {
+        lbp_level::parts::ShapeColor::Packed(argb) => *argb,
+        lbp_level::parts::ShapeColor::Vector([r, g, b, a]) => {
+            let byte = |v: f32| {
+                let v = if v.is_finite() { v.clamp(0., 1.) } else { 1. };
+                (v * 255.).round() as u32
+            };
+            byte(*a) << 24 | byte(*r) << 16 | byte(*g) << 8 | byte(*b)
+        }
+    }
+}
+
 pub fn editor_color_tint(argb: u32) -> crate::DiffuseTint {
     let channel = |shift: u32| (((argb >> shift) & 0xff) as f32 / 255.).to_bits();
     crate::DiffuseTint {
@@ -109,8 +127,12 @@ pub enum MeshSource {
     /// Model mesh named only by SHA-1 (lowercase hex).
     Sha1(String),
     /// Merged world-space shape extrusions sharing one gfx material GUID (None = no
-    /// GUID); `batch` numbers the chunks of that material.
-    Shapes { material: Option<u32>, batch: usize },
+    /// GUID) and `PShape.color` (D194, ARGB); `batch` numbers the chunks of that pair.
+    Shapes {
+        material: Option<u32>,
+        color: u32,
+        batch: usize,
+    },
     /// D160: STICKERS decal overlays merged per decal texture (GUID hex or SHA-1 hex).
     Decals { texture: String, batch: usize },
     /// D119: static backdrop mesh primitives (mesh GUID) merged per gfx material GUID.
@@ -140,9 +162,18 @@ impl MeshSource {
         match self {
             Self::Guid(g) => format!("{g:08x}"),
             Self::Sha1(h) => format!("sha1 {h}"),
-            Self::Shapes { material, batch } => format!(
-                "shapes gfx {} batch {batch}",
-                material.map_or("none".into(), |g| format!("{g:08x}"))
+            Self::Shapes {
+                material,
+                color,
+                batch,
+            } => format!(
+                "shapes gfx {}{} batch {batch}",
+                material.map_or("none".into(), |g| format!("{g:08x}")),
+                if *color == WHITE_ARGB {
+                    String::new()
+                } else {
+                    format!(" colour {color:08x}")
+                }
             ),
             Self::Backdrop {
                 mesh,
@@ -191,6 +222,8 @@ pub struct SceneItem {
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct ShapeBatch {
     pub material: Option<u32>,
+    /// D194: the merged shapes' `PShape.color` (packed ARGB); batches split per colour.
+    pub color: u32,
     pub positions: Vec<[f32; 3]>,
     pub uv0: Vec<[f32; 2]>,
     pub triangles: Vec<[u32; 3]>,
@@ -439,6 +472,9 @@ pub struct LevelScene<T> {
     pub settings: Option<LevelSettings>,
     /// P2l: the same holder's stored presets (for `--lighting-preset`).
     pub settings_presets: Vec<LevelSettings>,
+    /// P3b: presets of the PLevelSettings holder inside the backdrop plan. The Pod's live
+    /// lighting is this holder's preset 0 (probe #105), not the level's own holder.
+    pub backdrop_presets: Vec<LevelSettings>,
     /// P2c: Things with a CHECKPOINT part and a valid POS (Thing index, world matrix), in
     /// reader order. The player spawns at a checkpoint.
     pub checkpoints: Vec<(usize, [f32; 16])>,
@@ -452,6 +488,7 @@ impl<T> Default for LevelScene<T> {
             counts: SceneCounts::default(),
             settings: None,
             settings_presets: Vec::new(),
+            backdrop_presets: Vec::new(),
             checkpoints: Vec::new(),
         }
     }
@@ -1507,7 +1544,9 @@ pub fn add_shapes_with<T>(
     mut wrap: impl FnMut(ShapeBatch) -> (T, Result<(), String>),
     local_bounds: impl Fn(&T) -> Option<[[f32; 3]; 2]>,
 ) {
-    let mut groups: BTreeMap<Option<u32>, Vec<(usize, MaterialPart)>> = BTreeMap::new();
+    // (gfx material GUID, PShape.color ARGB) -> (Thing index, extruded part).
+    type ShapeKey = (Option<u32>, u32);
+    let mut groups: BTreeMap<ShapeKey, Vec<(usize, MaterialPart)>> = BTreeMap::new();
     let bevel_options = BevelOptions::default();
     let mut vertices = 0usize;
     let roles = shape_mesh::ColliderRoles::new(things);
@@ -1552,9 +1591,14 @@ pub fn add_shapes_with<T>(
                     };
                     *c.shape_bevel_outcomes.entry(key).or_default() += 1;
                 }
+                let color = t
+                    .data
+                    .shape
+                    .as_ref()
+                    .map_or(WHITE_ARGB, |s| shape_color_argb(&s.color));
                 for part in m.material_parts() {
                     groups
-                        .entry(part.material_guid())
+                        .entry((part.material_guid(), color))
                         .or_default()
                         .push((t.index, part));
                 }
@@ -1571,9 +1615,10 @@ pub fn add_shapes_with<T>(
         }
     }
     let mut placed = std::collections::HashSet::new();
-    for (material, shapes) in groups {
+    for ((material, color), shapes) in groups {
         let mut batches = vec![ShapeBatch {
             material,
+            color,
             ..Default::default()
         }];
         for (thing, m) in shapes {
@@ -1583,6 +1628,7 @@ pub fn add_shapes_with<T>(
             {
                 batches.push(ShapeBatch {
                     material,
+                    color,
                     ..Default::default()
                 });
             }
@@ -1622,6 +1668,7 @@ pub fn add_shapes_with<T>(
             scene.meshes.push(SceneMesh {
                 source: MeshSource::Shapes {
                     material,
+                    color,
                     batch: batch_index,
                 },
                 bounds: local_bounds(&payload),
@@ -1650,6 +1697,9 @@ pub enum ScenePayload {
     Backdrop {
         batch: crate::level_backdrop::BackdropBatch,
         material: Result<std::sync::Arc<MaterialAsset>, String>,
+        /// P3k: the static mesh's baked-AO lightmap (shared by every batch of the mesh); the
+        /// batch's `uv1` is its unwrap.
+        lightmap: Option<std::sync::Arc<Lightmap>>,
     },
     /// D160: world-space sticker decal overlays sharing one decal texture (drawn with
     /// alpha blending; `material` is a plain clamped texture, no gfx material graph).
@@ -1657,6 +1707,55 @@ pub enum ScenePayload {
         batch: DecalBatch,
         material: std::sync::Arc<MaterialAsset>,
     },
+}
+
+/// P3k: a backdrop static mesh's baked-AO lightmap, one byte per texel (top mip only; the
+/// GTF is B8, read as the byte before the remap).
+#[derive(Debug, PartialEq, Eq)]
+pub struct Lightmap {
+    pub width: u32,
+    pub height: u32,
+    pub r8: Vec<u8>,
+}
+
+/// P3k: decodes the static mesh's lightmap texture (B8 GTF, <= 16 Mi texels) to one byte per
+/// texel. A texture that is not a plain 2D map of at most 4096 x 4096 is refused.
+fn load_lightmap(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    descriptor: &lbp_mesh::static_mesh::StaticDescriptor,
+    control: &LoadControl,
+) -> Result<Lightmap, String> {
+    let hash = descriptor
+        .sha1
+        .map(|h| h.iter().map(|b| format!("{b:02x}")).collect::<String>());
+    let key = resolve(catalog, descriptor.guid, hash.as_deref())?;
+    let texture = lbp_texture::decode_reader(
+        key.size,
+        |offset, count| {
+            source
+                .read_hex_checked(&key, offset, count, control)
+                .map(|p| p.bytes)
+                .map_err(lbp_texture::Error::Input)
+        },
+        || control.check().is_err(),
+    )
+    .map_err(|e| e.to_string())?;
+    let (width, height) = (texture.header.width, texture.header.height);
+    if width == 0 || height == 0 || width > 4096 || height > 4096 {
+        return Err(format!("Unsupported: lightmap extent {width}x{height}"));
+    }
+    let r8: Vec<u8> = texture
+        .rgba
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .map(|p| p[0])
+        .collect();
+    if r8.len() != width as usize * height as usize {
+        return Err("Invalid: lightmap pixel count".into());
+    }
+    Ok(Lightmap { width, height, r8 })
 }
 
 /// D160: merged world-space decal overlay triangles for one decal texture.
@@ -1969,19 +2068,32 @@ fn uses_instance_color(g: &GroupedMesh) -> bool {
         .any(|b| b.instance_projection().is_some())
 }
 
-/// `--level-report`: the distinct binding errors behind a model's neutral groups, with
-/// how many non-empty groups each one leaves neutral (empty for other payloads).
+/// `--level-report`: the distinct binding errors behind a mesh's neutral groups, with
+/// how many non-empty groups each one leaves neutral. A shape or backdrop batch is one
+/// group: its gfx material error, when the batch has triangles (empty for decals).
 pub fn neutral_reasons(p: &ScenePayload) -> Vec<(String, usize)> {
     let mut out: Vec<(String, usize)> = Vec::new();
-    if let ScenePayload::Model(g) = p {
-        for (range, b) in g.geometry.primitive_triangles.iter().zip(&g.bindings) {
-            if let (false, Err(e)) = (range.is_empty(), b) {
-                match out.iter_mut().find(|(r, _)| r == e) {
-                    Some((_, n)) => *n += 1,
-                    None => out.push((e.clone(), 1)),
+    match p {
+        ScenePayload::Model(g) => {
+            for (range, b) in g.geometry.primitive_triangles.iter().zip(&g.bindings) {
+                if let (false, Err(e)) = (range.is_empty(), b) {
+                    match out.iter_mut().find(|(r, _)| r == e) {
+                        Some((_, n)) => *n += 1,
+                        None => out.push((e.clone(), 1)),
+                    }
                 }
             }
         }
+        ScenePayload::Shapes {
+            batch,
+            material: Err(e),
+        } if !batch.triangles.is_empty() => out.push((e.clone(), 1)),
+        ScenePayload::Backdrop {
+            batch,
+            material: Err(e),
+            ..
+        } if !batch.triangles.is_empty() => out.push((e.clone(), 1)),
+        _ => {}
     }
     out
 }
@@ -2110,11 +2222,12 @@ pub fn load_level_scene_with_options(
         .iter()
         .map(|r| (*r, Default::default()))
         .collect();
-    // D191: explicit inputs win; shapes keep the explicit colour only (PShape.color is
-    // not wired here), the backdrop takes the standalone white.
+    // D191: explicit inputs win; the backdrop takes the standalone white. D194: shapes
+    // take their own PShape.color when the instance default is on.
     let explicit_color = options.instance_color;
     let (options, _) = scene_options.defaults.apply(options);
     let thing_colors = scene_options.defaults.instance_white && explicit_color.is_none();
+    let shape_colors = thing_colors;
     let shape_options = PreviewOptions {
         instance_color: explicit_color,
         ..options
@@ -2184,6 +2297,8 @@ pub fn load_level_scene_with_options(
                 let mut copy = GroupedMesh {
                     geometry: m.geometry.clone(),
                     bindings: m.bindings.clone(),
+                    // Positions moved by the bone matrices; the stored normals no longer match.
+                    normals: None,
                 };
                 copy.geometry.positions = positions;
                 ScenePayload::Model(Box::new(copy))
@@ -2215,6 +2330,7 @@ pub fn load_level_scene_with_options(
                     let mut copy = GroupedMesh {
                         geometry: m.geometry.clone(),
                         bindings: m.bindings.clone(),
+                        normals: None,
                     };
                     copy.geometry.positions = positions;
                     ScenePayload::Model(Box::new(copy))
@@ -2246,6 +2362,12 @@ pub fn load_level_scene_with_options(
                     .material
                     .ok_or("Unsupported: GENERATED_MESH without gfx material GUID")?;
                 let key = resolve(catalog, Some(guid), None)?;
+                // D194: with the level defaults on, a shape's own PShape.color is its
+                // instance colour (THING_COLOR link INFERRED, docs/d194-shape-color.md).
+                let mut shape_options = shape_options;
+                if shape_colors {
+                    shape_options.instance_color = Some(editor_color_tint(batch.color));
+                }
                 let asset = crate::linked::load_material(
                     source,
                     catalog,
@@ -2480,6 +2602,27 @@ fn load_backdrop(
                     MeshSource::Guid(g) => Some(*g),
                     _ => None,
                 };
+                // P3k: baked AO. A failure leaves the mesh unlit by AO and is counted.
+                let lightmap = match mesh.lightmaps[0].as_ref() {
+                    Some(d) => match control
+                        .check()
+                        .and_then(|_| load_lightmap(source, catalog, d, control))
+                    {
+                        Ok(l) => match charge(l.r8.len()) {
+                            Ok(()) => Some(std::sync::Arc::new(l)),
+                            Err(e) => {
+                                counts.errors.push(format!("lightmap: {e}"));
+                                None
+                            }
+                        },
+                        Err(e) => {
+                            counts.errors.push(format!("lightmap: {e}"));
+                            None
+                        }
+                    },
+                    None => None,
+                };
+                control.check()?;
                 bd::add_backdrop_mesh(
                     scene,
                     &mut counts,
@@ -2514,7 +2657,14 @@ fn load_backdrop(
                             Ok(std::sync::Arc::new(asset))
                         })();
                         let selected = material.as_ref().map(|_| ()).map_err(Clone::clone);
-                        (ScenePayload::Backdrop { batch, material }, selected)
+                        (
+                            ScenePayload::Backdrop {
+                                batch,
+                                material,
+                                lightmap: lightmap.clone(),
+                            },
+                            selected,
+                        )
                     },
                     payload_bounds,
                 );
@@ -2535,6 +2685,9 @@ fn load_backdrop(
             .map_err(|e| format!("plan wrapper: {e}"))
         })();
         control.check()?;
+        if let Ok(r) = &report {
+            scene.backdrop_presets = LevelSettings::find_presets(&r.things).to_vec();
+        }
         match report {
             Ok(r) if r.stop.is_none() => bd::add_backdrop_plan(
                 scene,
@@ -2641,6 +2794,7 @@ mod tests {
                 skeleton: Default::default(),
             },
             bindings: vec![Err(crate::MATERIALLESS_REASON.into()), second],
+            normals: None,
         }
     }
 
@@ -2659,6 +2813,34 @@ mod tests {
         let mut only = two_group_mesh(Err("x".into()));
         only.geometry.primitive_triangles = vec![0..2, 2..2];
         assert!(!grouped_neutral(&only));
+    }
+
+    #[test]
+    fn shape_batch_neutral_reason_is_its_material_error() {
+        let batch = ShapeBatch {
+            material: Some(0x12ba7),
+            color: WHITE_ARGB,
+            positions: vec![[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]],
+            uv0: vec![[0., 0.]; 3],
+            triangles: vec![[0, 1, 2]],
+            things: vec![7],
+        };
+        let failed = ScenePayload::Shapes {
+            batch: batch.clone(),
+            material: Err("Unsupported: x".into()),
+        };
+        assert_eq!(
+            neutral_reasons(&failed),
+            vec![("Unsupported: x".to_string(), 1)]
+        );
+        let empty = ScenePayload::Shapes {
+            batch: ShapeBatch {
+                triangles: Vec::new(),
+                ..batch
+            },
+            material: Err("Unsupported: x".into()),
+        };
+        assert!(neutral_reasons(&empty).is_empty());
     }
     use lbp_level::parts::{GeneratedMesh, Joint, PartData, Pos, RenderMesh, Shape, ShapeColor};
     use lbp_level::serial::Descriptor;
@@ -3482,6 +3664,58 @@ mod tests {
             .lines()
             .iter()
             .any(|l| l.starts_with("Sticker decals drawn: 1 / 7")));
+    }
+
+    #[test]
+    fn shapes_split_per_shape_color_d194() {
+        let mut grey = shape_thing(1, Some(7), true, 500.);
+        grey.data.shape.as_mut().unwrap().color = ShapeColor::Packed(0xff4d_4d4d);
+        let things = vec![
+            shape_thing(0, Some(7), true, 0.),
+            grey,
+            shape_thing(2, Some(7), true, 1000.),
+        ];
+        let mut scene = LevelScene::<ShapeBatch>::default();
+        add_shapes(
+            &mut scene,
+            &things,
+            |b| (b, Ok(())),
+            |b| points_bounds(&b.positions),
+        );
+        assert_eq!(scene.counts.shape_batches, 2);
+        // Colour order within one material: 0xff4d4d4d before white.
+        let colors: Vec<_> = scene
+            .meshes
+            .iter()
+            .map(|m| (m.payload.color, m.payload.things.clone()))
+            .collect();
+        assert_eq!(
+            colors,
+            vec![(0xff4d_4d4d, vec![1]), (WHITE_ARGB, vec![0, 2])]
+        );
+        assert_eq!(
+            scene.meshes[0].source.label(),
+            "shapes gfx 00000007 colour ff4d4d4d batch 0"
+        );
+        assert_eq!(
+            scene.meshes[1].source.label(),
+            "shapes gfx 00000007 batch 0"
+        );
+    }
+
+    #[test]
+    fn shape_color_argb_packs_and_clamps_vectors() {
+        assert_eq!(
+            shape_color_argb(&ShapeColor::Packed(0x8011_2233)),
+            0x8011_2233
+        );
+        assert_eq!(
+            shape_color_argb(&ShapeColor::Vector([1., 0.5, -1., f32::NAN])),
+            0xffff_8000
+        );
+        let tint = editor_color_tint(0xff4d_4d4d);
+        assert_eq!(f32::from_bits(tint.bits[0]), 0x4d as f32 / 255.);
+        assert_eq!(f32::from_bits(tint.bits[3]), 1.);
     }
 
     #[test]

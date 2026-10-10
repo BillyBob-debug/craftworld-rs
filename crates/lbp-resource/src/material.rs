@@ -124,6 +124,18 @@ impl<'a> Reader<'a> {
 pub fn inspect(bytes: &[u8], cancel: impl Fn() -> bool) -> Result<MaterialInspection, Error> {
     decode_prefix(bytes, &cancel).map(|(metadata, _)| metadata)
 }
+/// The 10 compiled `CGB` shader programs' blob (header names included), from the expanded
+/// payload; opaque bytes for name scans only, never executed or decoded here.
+pub fn shader_blob(bytes: &[u8], cancel: impl Fn() -> bool) -> Result<Vec<u8>, Error> {
+    let (metadata, data) = decode_prefix(bytes, &cancel)?;
+    let start = metadata.prefix.blob_start;
+    let end = start
+        .checked_add(metadata.prefix.blob_bytes)
+        .ok_or(Error::Invalid("blob range"))?;
+    data.get(start..end)
+        .map(<[u8]>::to_vec)
+        .ok_or(Error::Invalid("blob range"))
+}
 fn decode_prefix(
     bytes: &[u8],
     cancel: &impl Fn() -> bool,

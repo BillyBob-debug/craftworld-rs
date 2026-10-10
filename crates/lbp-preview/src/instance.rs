@@ -828,7 +828,8 @@ mod tests {
         assert!(leaves.iter().all(|l| [4, 5].contains(l)));
         assert!(s.animation_base_more[1].is_none());
         // A nested (T × THING) × T folds the sampler (nested tint): one animated leaf
-        // keeps the existing D78 route, two animated leaves stay unsupported.
+        // keeps the existing D78 route; D194: two animated leaves take it too (the
+        // tinted product is commutative), alpha subtraction stays refused.
         let mut nested = graph(
             &[0, 10, 10, 2, 1, 1],
             vec![
@@ -847,7 +848,7 @@ mod tests {
         animate(&mut nested, 4);
         nested.boxes[4].animations[0].name_hex = "636400".into();
         let (d, q) = project_instance_color(&nested, color()).unwrap();
-        assert!(crate::select_instance_diffuse(&d, &q.unwrap(), true).is_err());
+        assert!(crate::select_instance_diffuse(&d, &q.unwrap(), true).is_ok());
     }
     #[test]
     fn d88_constant_thing_operand_folds_into_texture_tint() {
@@ -1079,5 +1080,38 @@ mod tests {
         let mut both = original.clone();
         animate(&mut both, 2);
         assert!(project_instance_color(&both, color()).is_err());
+    }
+    #[test]
+    fn d194_three_animated_samplers_under_a_nested_tint() {
+        // The 00018401 shape: (TEX a × THING) × (TEX b × TEX c), all three samplers
+        // animated. The nested rewrite folds `a` under the tint; the product of the
+        // three samples is tinted by THING (commutative, exact).
+        let mut original = graph(
+            &[0, 10, 10, 10, 2, 1, 1, 1],
+            vec![
+                edge(1, 0, 0),
+                edge(2, 1, 0),
+                edge(3, 1, 1),
+                edge(5, 2, 0),
+                edge(4, 2, 1),
+                edge(6, 3, 0),
+                edge(7, 3, 1),
+            ],
+        );
+        for (index, name) in [(5, "616100"), (6, "616200"), (7, "616300")] {
+            animate(&mut original, index);
+            original.boxes[index].animations[0].name_hex = name.into();
+        }
+        let (derived, p) = project_instance_color(&original, color()).unwrap();
+        let p = p.unwrap();
+        assert_eq!(p.folded_sampler, Some([2, 5]));
+        assert_eq!(p.nested_tint, Some(color()));
+        let s = crate::select_instance_diffuse(&derived, &p, true).unwrap();
+        assert!(s.second_sample.is_some() && s.third_sample.is_some());
+        assert!(s.animation_base_more[0].is_some());
+        // Alpha-subtracted samplers keep the D92 refusal (no oracle parity).
+        let mut subtracted = p.clone();
+        subtracted.alpha_subtract_samplers.push(6);
+        assert!(crate::select_instance_diffuse(&derived, &subtracted, true).is_err());
     }
 }
