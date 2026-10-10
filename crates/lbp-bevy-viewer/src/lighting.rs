@@ -52,7 +52,11 @@ pub struct PreviewLight {
     pub lbp: bool,
     /// P2q: the scalar (.w) the game sends with the sun, ambient and rim colours; it
     /// weights the gloss term (brdf.cg `light.w`). Zero outside LBP mode.
-    pub scales: Vec3,
+    pub scales: Vec4,
+    /// P3f: the stored .w of the sun, ambient, rim and rim2 colours (1 when unusable). The
+    /// game's .w is stored w x the same factor as the rgb (Moon oracle, #110); it only
+    /// weights the gloss term, the rgb is not multiplied by it.
+    pub stored_w: [f32; 4],
     /// P2q: level sun multiplier (already folded into `raw_key`); 1 without settings.
     pub multiplier: f32,
     /// P2t: display units per level unit (scene normalization), for the game fog.
@@ -98,7 +102,8 @@ impl PreviewLight {
             rim: [Vec3::ZERO; 2],
             exposure: 1.,
             lbp: false,
-            scales: Vec3::ZERO,
+            scales: Vec4::ZERO,
+            stored_w: [1.; 4],
             multiplier: 1.,
             display_scale: 1.,
             pod_t: 0.,
@@ -137,6 +142,13 @@ impl PreviewLight {
             finite_rgb(s.rim_color).unwrap_or(Vec3::ZERO),
             finite_rgb(s.rim_color2).unwrap_or(Vec3::ZERO),
         ];
+        let stored_w = [
+            s.sun_color[3],
+            s.ambient_color[3],
+            s.rim_color[3],
+            s.rim_color2[3],
+        ]
+        .map(|w| if w.is_finite() && w > 0. { w } else { 1. });
         let (raw_key, raw_ambient) = (key, ambient);
         let (key, ambient, fitted) = fit(key, ambient);
         let fog = finite_rgb(s.fog_color)
@@ -205,11 +217,12 @@ impl PreviewLight {
             raw_key,
             raw_ambient,
             rim,
+            stored_w,
             exposure: Some(s.exposure)
                 .filter(|e| e.is_finite() && *e > 0.)
                 .unwrap_or(1.),
             lbp: false,
-            scales: Vec3::ZERO,
+            scales: Vec4::ZERO,
             multiplier,
             display_scale: if scale.is_finite() && scale > 0. {
                 scale
@@ -241,10 +254,12 @@ impl PreviewLight {
         light.key = self.raw_key * GAME_SUN_SCALE * e;
         light.ambient = self.raw_ambient * GAME_AMBIENT_SCALE * e;
         light.rim = self.rim.map(|r| r * GAME_RIM_SCALE * e);
-        light.scales = Vec3::new(
-            GAME_SUN_SCALE * self.multiplier * e,
-            GAME_AMBIENT_SCALE * e,
-            GAME_RIM_SCALE * e,
+        let w = self.stored_w;
+        light.scales = Vec4::new(
+            GAME_SUN_SCALE * self.multiplier * e * w[0],
+            GAME_AMBIENT_SCALE * e * w[1],
+            GAME_RIM_SCALE * e * w[2],
+            GAME_RIM_SCALE * e * w[3],
         );
         light.toward_light = (turn * self.toward_light).normalize_or_zero();
         light.notes.push(format!(
@@ -474,7 +489,13 @@ mod tests {
         let key = Vec3::new(2., 1., 0.5) * 0.6;
         assert!((light.key - key).length() < 1e-5);
         // P2q: the scalars the game sends in .w (sun x multiplier, ambient, rim).
-        assert!((light.scales - Vec3::new(1.2, 0.9, 1.2)).length() < 1e-5);
+        assert!((light.scales - Vec4::new(1.2, 0.9, 1.2, 1.2)).length() < 1e-5);
+        // P3f: a stored rim .w of 1.5 weights that rim's gloss only.
+        let mut s2 = s;
+        s2.rim_color[3] = 1.5;
+        let l2 = PreviewLight::from_settings(&s2, Vec3::ZERO, 1.).lbp_shaped(Quat::IDENTITY);
+        assert!((l2.scales.z - 1.8).abs() < 1e-5 && (l2.scales.w - 1.2).abs() < 1e-5);
+        assert!((l2.rim[0] - light.rim[0]).length() < 1e-6);
         // P2t: fog start follows the Puter progress, in display units.
         let mut fog = light.clone();
         fog.display_scale = 2.;

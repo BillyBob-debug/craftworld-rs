@@ -22,14 +22,17 @@ pub fn select_instance_diffuse(
     // two-sample product below is exact; the existing selectors still decide.
     let selection = match crate::select_diffuse_with_animation_base(derived, animation_base) {
         // D92 (docs/d92-multi-animated.md): two or more animated leaves under a
-        // supplied color only as a direct ThingColor tint; not with a folded nested
-        // sampler or alpha subtraction (no oracle parity for those rewrites).
+        // supplied color only as a direct ThingColor tint or, since D194
+        // (docs/d194-shape-color.md), a nested tint over the product; not with alpha
+        // subtraction (no oracle parity for that rewrite).
         Ok(selection)
             if selection.animation_base_more[0].is_some()
-                && (projection.folded_sampler.is_some()
-                    || !projection.alpha_subtract_samplers.is_empty()) =>
+                && !projection.alpha_subtract_samplers.is_empty() =>
         {
-            return Err("Unsupported: several animated samplers under a folded or alpha-subtracted instance input".into());
+            return Err(
+                "Unsupported: several animated samplers under an alpha-subtracted instance input"
+                    .into(),
+            );
         }
         // D99 product trees fold static COLOR leaves only; no oracle parity under a
         // supplied instance color (docs/d99-product-trees.md).

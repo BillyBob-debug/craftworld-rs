@@ -1023,7 +1023,23 @@ fn load(
                 (false, Some(n)) => Some(n),
                 (false, None) => v.lighting.lbp.then_some(0),
             };
-            if let Some(n) = preset {
+            // P3b: the Pod's live light is the backdrop plan's preset (also for the plain
+            // `--preview-lighting`, whose main block would otherwise be the wrong holder).
+            let from_plan = v
+                .level
+                .pod
+                .and(preset.or((!v.level.lighting_main).then_some(0)))
+                .and_then(|n| level.scene.backdrop_presets.get(n).map(|p| (n, *p)));
+            if let Some((n, p)) = from_plan {
+                level.scene.settings = Some(p);
+                if let Some(shell) = level.shell.as_mut() {
+                    shell.settings = Some(p);
+                }
+                println!(
+                    "Lighting preset {n} of {} from the backdrop plan (Pod live source)",
+                    level.scene.backdrop_presets.len()
+                );
+            } else if let Some(n) = preset {
                 println!("{}", use_lighting_preset(&mut level.scene, n));
                 if let Some(shell) = level.shell.as_mut() {
                     println!("Shell: {}", use_lighting_preset(shell, n));
@@ -1314,6 +1330,10 @@ struct Prepared {
     bump: Option<(Image, f32)>,
     /// P2q: static gloss colour and CosinePower.
     gloss: Option<([f32; 3], f32)>,
+    /// P3d: gloss colour map (linear) and its UV mode (1 = primary UV, 2 = UV1).
+    spec_map: Option<(Image, u32)>,
+    /// P3a: AlphaTestLevel cut-out (0 = none), LBP-lighting materials only.
+    alpha_test: f32,
     /// D189: graph textures 1.. (texture 0 is `image`) and the encoded steps.
     graph: Option<(Vec<Image>, Vec<lbp_preview::FragmentStep>)>,
 }
@@ -1368,7 +1388,14 @@ fn prepare(
             range.len()
         ));
     }
-    prepare_buckets(&g.positions, buckets, normalize, evidence, details)
+    prepare_buckets(
+        &g.positions,
+        preview.normals.as_deref(),
+        buckets,
+        normalize,
+        evidence,
+        details,
+    )
 }
 /// D192: triangles and primitive ranges without the material-less groups. The game's
 /// per-primitive draw loop skips a primitive whose material is null (no bind, no draw;
@@ -1401,6 +1428,7 @@ fn drop_materialless(preview: &lbp_preview::GroupedMesh) -> Result<TriangleParti
 /// Material buckets over one position array (model mesh or merged shape batch).
 fn prepare_buckets(
     positions: &[[f32; 3]],
+    game_normals: Option<&[[f32; 3]]>,
     buckets: Vec<adapter::Bucket<lbp_preview::MaterialAsset>>,
     normalize: bool,
     evidence: &mut browser::PreviewEvidence,
@@ -1431,9 +1459,21 @@ fn prepare_buckets(
             }
             Err(e) => return Err(e),
         };
-        let normals_trusted = adapter::mesh_normals_trusted(&mesh);
+        let mut normals_trusted = adapter::mesh_normals_trusted(&mesh);
+        // P2v: the game's decoded normals replace ours; the draw is trusted when every
+        // referenced vertex took one.
+        if let Some(game) = game_normals {
+            let (used, total, agree) = adapter::apply_game_normals(&mut mesh, game);
+            if total > 0 {
+                details.push(format!(
+                    "Normals: game (decoded) on {used}/{total} referenced vertices, mean |dot| with generated {agree:.3}"
+                ));
+                normals_trusted = used == total;
+            }
+        }
         let surface = asset.as_ref().and_then(|a| a.surface());
         let gloss = surface.and_then(|s| s.specular.map(|c| (c, s.cosine_power)));
+        let alpha_test = surface.map_or(0., |s| s.alpha_test);
         let alpha_mix = asset
             .as_ref()
             .and_then(|a| a.texture())
@@ -1485,10 +1525,7 @@ fn prepare_buckets(
                 let mut image =
                     adapter::image_axes(width, height, a.display_pixels().to_vec(), a.wrap)?;
                 if a.nearest_sampling() {
-                    if let bevy::image::ImageSampler::Descriptor(s) = &mut image.sampler {
-                        s.mag_filter = bevy::image::ImageFilterMode::Nearest;
-                        s.min_filter = bevy::image::ImageFilterMode::Nearest;
-                    }
+                    adapter::set_nearest(&mut image);
                 }
                 Ok::<_, String>(image)
             })
@@ -1552,6 +1589,54 @@ fn prepare_buckets(
             }
             None => None,
         };
+        // P3d: the gloss map shares the diffuse UVs, or takes UV1 when that is free or holds
+        // the same coordinates (graph slot 5 carries the image, so no graph may be bound).
+        let mut gloss = gloss;
+        let spec_map = match surface.and_then(|s| s.spec_map.as_deref().map(|m| (m, s))) {
+            Some((m, s)) if graph.is_none() => {
+                let same_diffuse = asset
+                    .as_ref()
+                    .and_then(|a| a.sampling_uv())
+                    .is_some_and(|d| d == m.sampling_uv.as_slice());
+                let same_bump = surface
+                    .and_then(|s| s.bump.as_deref())
+                    .is_some_and(|b| bump.is_some() && b.sampling_uv == m.sampling_uv);
+                let mode = if same_diffuse {
+                    Some(1)
+                } else if same_bump {
+                    Some(2)
+                } else if second_image.is_none() && bump.is_none() {
+                    adapter::secondary_uv(&mut mesh, &m.sampling_uv)?;
+                    Some(2)
+                } else {
+                    None
+                };
+                match mode {
+                    Some(mode) => {
+                        gloss.get_or_insert(([1.; 3], s.cosine_power));
+                        Some((
+                            adapter::linear_image(
+                                m.texture.header.width,
+                                m.texture.header.height,
+                                m.texture.rgba.clone(),
+                                m.wrap,
+                            )?,
+                            mode,
+                        ))
+                    }
+                    None => {
+                        details.push("P3d: gloss map not drawn (UV1 is taken)".into());
+                        None
+                    }
+                }
+            }
+            Some(_) => {
+                details
+                    .push("P3d: gloss map not drawn (a per-fragment graph uses its slot)".into());
+                None
+            }
+            None => None,
+        };
         prepared.push(Prepared {
             mesh,
             image,
@@ -1564,6 +1649,8 @@ fn prepare_buckets(
             normals_trusted,
             bump,
             gloss,
+            spec_map,
+            alpha_test,
             graph,
         });
     }
@@ -1615,8 +1702,14 @@ fn upload(
             eprintln!("D189: {e}");
         }
     }
+    if p.alpha_test > 0. {
+        dual::enable_alpha_test(&mut surface, p.alpha_test);
+    }
     if let Some((color, power)) = p.gloss {
         dual::enable_gloss(&mut surface, color, power);
+    }
+    if let Some((map, mode)) = p.spec_map {
+        dual::enable_spec_map(&mut surface, images.add(map), mode);
     }
     surface.extension.normals_trusted = p.normals_trusted;
     (meshes.add(p.mesh), materials.add(surface), image)
@@ -1652,6 +1745,7 @@ fn plan_level(
                 // World-space batch; a material that did not select draws neutral grey.
                 level_scene::ScenePayload::Shapes { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
                     false,
                     &mut evidence,
@@ -1660,6 +1754,7 @@ fn plan_level(
                 // D119 backdrop batch (mesh space; the item matrix places it).
                 level_scene::ScenePayload::Backdrop { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(material.as_ref().ok().cloned(), batch.triangles.clone())],
                     false,
                     &mut evidence,
@@ -1668,6 +1763,7 @@ fn plan_level(
                 // D160 sticker decal overlays (world space, alpha blended).
                 level_scene::ScenePayload::Decals { batch, material } => prepare_buckets(
                     &batch.positions,
+                    None,
                     vec![(Some(material.clone()), batch.triangles.clone())],
                     false,
                     &mut evidence,
@@ -2493,16 +2589,17 @@ fn level_report(v: &Viewer) -> Result<(), String> {
             }
             if surface_on {
                 // P2q: displayed draws (entity × bucket) carrying each surface extra.
-                let (mut bump, mut gloss, mut total) = (0, 0, 0);
+                let (mut bump, mut gloss, mut alpha, mut total) = (0, 0, 0, 0);
                 for (mesh, _) in &plan.placed {
                     for p in plan.prepared[*mesh].iter().flatten() {
                         total += 1;
                         bump += usize::from(p.bump.is_some());
                         gloss += usize::from(p.gloss.is_some());
+                        alpha += usize::from(p.alpha_test > 0.);
                     }
                 }
                 lines.push(format!(
-                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy (drawn only under --lbp-lighting)"
+                    "P2q surface: {bump} of {total} displayed draws bump-mapped, {gloss} glossy, {alpha} alpha-tested (P3a; drawn only under --lbp-lighting)"
                 ));
             }
             lines.extend(plan.lines);
@@ -2523,6 +2620,27 @@ fn level_report(v: &Viewer) -> Result<(), String> {
                 ));
                 for (reason, groups) in level_scene::neutral_reasons(&m.payload) {
                     lines.push(format!("    neutral ({groups} groups): {reason}"));
+                }
+                // Which shapes a batch merges (reader order), to tie it to a visible object.
+                if let level_scene::ScenePayload::Shapes { batch, .. } = &m.payload {
+                    const SHOWN: usize = 16;
+                    let shown: Vec<String> = batch
+                        .things
+                        .iter()
+                        .take(SHOWN)
+                        .map(ToString::to_string)
+                        .collect();
+                    let more = batch.things.len().saturating_sub(SHOWN);
+                    lines.push(format!(
+                        "    shape Things ({}): {}{}",
+                        batch.things.len(),
+                        shown.join(", "),
+                        if more > 0 {
+                            format!(" (+{more} more)")
+                        } else {
+                            String::new()
+                        }
+                    ));
                 }
             }
             Ok(lines)
@@ -3030,10 +3148,7 @@ fn synthetic(
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, sampling_uv)
         .with_inserted_indices(bevy::mesh::Indices::U32(vec![0, 2, 1, 0, 3, 2]));
         let mut image = adapter::image(2, 2, rgba.clone(), repeat).unwrap();
-        if let bevy::image::ImageSampler::Descriptor(ref mut s) = image.sampler {
-            s.mag_filter = bevy::image::ImageFilterMode::Nearest;
-            s.min_filter = bevy::image::ImageFilterMode::Nearest;
-        }
+        adapter::set_nearest(&mut image);
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(dual::material(StandardMaterial {
