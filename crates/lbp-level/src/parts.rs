@@ -421,6 +421,72 @@ impl LevelSettings {
             None => &[],
         }
     }
+    /// P3m: linear blend `self * (1 - t) + other * t` of every lighting field (the game
+    /// blends the stored presets by PWorld `lighting`; live reads of Bravery Test and
+    /// tutorial_23 fit this to 4 digits, local-analysis 2026-10-10-live-level-lighting).
+    pub fn lerp(&self, other: &Self, t: f32) -> Self {
+        let f = |a: f32, b: f32| a + (b - a) * t;
+        let v3 = |a: [f32; 3], b: [f32; 3]| [f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2])];
+        let v4 = |a: [f32; 4], b: [f32; 4]| {
+            [f(a[0], b[0]), f(a[1], b[1]), f(a[2], b[2]), f(a[3], b[3])]
+        };
+        Self {
+            sun_position: v3(self.sun_position, other.sun_position),
+            sun_position_scale: f(self.sun_position_scale, other.sun_position_scale),
+            sun_color: v4(self.sun_color, other.sun_color),
+            ambient_color: v4(self.ambient_color, other.ambient_color),
+            sun_multiplier: f(self.sun_multiplier, other.sun_multiplier),
+            exposure: f(self.exposure, other.exposure),
+            fog_color: v4(self.fog_color, other.fog_color),
+            fog_near: f(self.fog_near, other.fog_near),
+            fog_far: f(self.fog_far, other.fog_far),
+            rim_color: v4(self.rim_color, other.rim_color),
+            rim_color2: v4(self.rim_color2, other.rim_color2),
+            baked_ao_bias: f(self.baked_ao_bias, other.baked_ao_bias),
+            baked_ao_scale: f(self.baked_ao_scale, other.baked_ao_scale),
+            presets: self.presets,
+            backdrop_mesh: self.backdrop_mesh,
+        }
+    }
+
+    /// P3m: the lighting the game applies to a level. `presets` are spread evenly over
+    /// PWorld `lighting` 0..1 (position `lighting x (n - 1)`, blended between the two
+    /// neighbours); PWorld `darkness` scales the exposure and the fog colour by
+    /// `1 - darkness`. Without presets `main` is used (darkness still applies).
+    /// Returns the settings and the preset position (`None` for the main block).
+    /// CONFIRMED_FROM_LOCAL_DATA on live reads of tutorial_23 (lighting 1.0 = preset 2,
+    /// darkness 0) and Bravery Test (lighting 0.6, darkness 0.19: 80% preset 1 + 20% preset 2,
+    /// exposure 1.0417 x 0.81 = 0.8437, fog x 0.81); spacing for 4 or more presets is
+    /// INFERRED from that rule, and so is the fog/exposure split of `darkness`.
+    pub fn at_lighting(
+        main: &Self,
+        presets: &[Self],
+        lighting: f32,
+        darkness: f32,
+    ) -> (Self, Option<f32>) {
+        let (mut s, at) = match presets {
+            [] => (*main, None),
+            [only] => (*only, Some(0.)),
+            _ => {
+                let lighting = if lighting.is_finite() {
+                    lighting.clamp(0., 1.)
+                } else {
+                    0.
+                };
+                let at = lighting * (presets.len() - 1) as f32;
+                let i = (at.floor() as usize).min(presets.len() - 2);
+                (presets[i].lerp(&presets[i + 1], at - i as f32), Some(at))
+            }
+        };
+        if darkness.is_finite() && darkness > 0. {
+            let k = (1. - darkness).clamp(0., 1.);
+            s.exposure *= k;
+            for c in &mut s.fog_color[..3] {
+                *c *= k;
+            }
+        }
+        (s, at)
+    }
     /// The world Thing's (PWorld holder) settings, else the first Thing carrying the
     /// part, with that Thing's index. Several holders are not merged.
     pub fn find(things: &[crate::thing::ThingRecord]) -> Option<(usize, &LevelSettings)> {

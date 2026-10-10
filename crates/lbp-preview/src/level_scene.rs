@@ -472,6 +472,9 @@ pub struct LevelScene<T> {
     pub settings: Option<LevelSettings>,
     /// P2l: the same holder's stored presets (for `--lighting-preset`).
     pub settings_presets: Vec<LevelSettings>,
+    /// P3m: PWorld `lighting`, `colourCorrection`, `fog`, `fogTint`, `darkness` (the game
+    /// blends the presets by `lighting` and dims by `darkness`; `LevelSettings::at_lighting`).
+    pub world_lighting: Option<[f32; 5]>,
     /// P3b: presets of the PLevelSettings holder inside the backdrop plan. The Pod's live
     /// lighting is this holder's preset 0 (probe #105), not the level's own holder.
     pub backdrop_presets: Vec<LevelSettings>,
@@ -488,6 +491,7 @@ impl<T> Default for LevelScene<T> {
             counts: SceneCounts::default(),
             settings: None,
             settings_presets: Vec::new(),
+            world_lighting: None,
             backdrop_presets: Vec::new(),
             checkpoints: Vec::new(),
         }
@@ -2417,6 +2421,11 @@ pub fn load_level_scene_with_options(
     scene.counts.reader_stop = report.stop.as_ref().map(|s| format!("{s:?}"));
     scene.settings = LevelSettings::find(&report.things).map(|(_, s)| *s);
     scene.settings_presets = LevelSettings::find_presets(&report.things).to_vec();
+    scene.world_lighting = report
+        .things
+        .iter()
+        .find_map(|t| t.data.world.as_ref())
+        .map(|w| w.lighting);
     scene.checkpoints = checkpoints(&report.things);
     Ok(scene)
 }

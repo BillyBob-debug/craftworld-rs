@@ -1079,7 +1079,8 @@ fn load(
             let preset = match (v.level.lighting_main, v.level.lighting_preset) {
                 (true, _) => None,
                 (false, Some(n)) => Some(n),
-                (false, None) => v.lighting.lbp.then_some(0),
+                // P3m: other levels follow their PWorld lighting (below).
+                (false, None) => (v.level.pod.is_some() && v.lighting.lbp).then_some(0),
             };
             // P3b: the Pod's live light is the backdrop plan's preset (also for the plain
             // `--preview-lighting`, whose main block would otherwise be the wrong holder).
@@ -1102,6 +1103,13 @@ fn load(
                 if let Some(shell) = level.shell.as_mut() {
                     println!("Shell: {}", use_lighting_preset(shell, n));
                 }
+            } else if v.level.pod.is_none()
+                && !v.level.lighting_main
+                && v.level.lighting_preset.is_none()
+            {
+                // P3m: the game lights a level with its stored presets blended by PWorld
+                // `lighting`, dimmed by `darkness`; the main block is not what it uses.
+                println!("{}", use_world_lighting(&mut level.scene));
             }
             let plan = plan_level(&level.scene, v.level.focus, v.level.pod)?;
             commands.insert_resource(sackboy_play::LevelDisplay(plan.normalize));
@@ -2048,6 +2056,27 @@ fn use_lighting_preset(scene: &mut LevelScene, n: usize) -> String {
         None => format!(
             "Lighting preset {n}: not stored ({} kept); main settings",
             scene.settings_presets.len()
+        ),
+    }
+}
+/// P3m: lights the level from its stored presets blended by PWorld `lighting` and dimmed
+/// by `darkness` (`LevelSettings::at_lighting`; live reads of tutorial_23 and Bravery
+/// Test). Without presets the main block stays (darkness applies).
+fn use_world_lighting(scene: &mut LevelScene) -> String {
+    let Some(main) = scene.settings else {
+        return "Lighting: no level settings read".into();
+    };
+    let [lighting, _, _, _, darkness] = scene.world_lighting.unwrap_or_default();
+    let (settings, at) =
+        level_scene::LevelSettings::at_lighting(&main, &scene.settings_presets, lighting, darkness);
+    scene.settings = Some(settings);
+    match at {
+        Some(at) => format!(
+            "Lighting: {} stored presets blended at position {at:.2} (PWorld lighting {lighting:.2}, darkness {darkness:.2})",
+            scene.settings_presets.len()
+        ),
+        None => format!(
+            "Lighting: no presets stored; main block (PWorld darkness {darkness:.2}; the live game's choice here is INFERRED)"
         ),
     }
 }
