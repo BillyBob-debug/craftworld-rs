@@ -7,6 +7,12 @@ with that colour as the instance colour. Targets the 68 grey shapes in Bravery T
 (gfx 00012ba7, 00018401). --level-report prints shape-batch reasons and Things.
 +0 viewable / +0 Complete expected; PC verifies.
 
+## 2026-10-09 — P2u mipmaps and anisotropic filtering
+
+Game textures get a CPU box-filtered mip chain (linear-light for colour) and a trilinear
+sampler (anisotropy 1, as the game); point-sampled textures stay nearest. Pure viewer change, +0 viewable /
++0 Complete. Sampler matches the Pod capture (docs/p2u-mipmaps.md); PC verifies shots.
+
 ## 2026-10-09 — D193 sampler port folds under the nested instance tint
 
 Folded sampler ports (D96) and the nested ThingColor tint now combine instead of refusing;
