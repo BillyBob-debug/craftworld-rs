@@ -11,6 +11,8 @@ const SPECULAR_PORT: u8 = 2;
 const BUMP_PORT: u8 = 3;
 /// P3h: glow (INFERRED from the decoded shaders: added unlit, oracles/results/2026-10-09-shading-fpdec.md).
 pub const GLOW_PORT: u8 = 4;
+/// GfxMaterial alpha mode of the refractive glass path (pod-fidelity README); its program has no glow add (INFERRED).
+pub const REFRACTIVE_ALPHA_MODE: u8 = 4;
 /// Upper bounds for untrusted material scalars before they reach a shader.
 const MAX_BUMP_LEVEL: f32 = 16.;
 const MAX_COSINE_POWER: f32 = 4096.;
