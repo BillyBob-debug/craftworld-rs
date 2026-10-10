@@ -1485,10 +1485,7 @@ fn prepare_buckets(
                 let mut image =
                     adapter::image_axes(width, height, a.display_pixels().to_vec(), a.wrap)?;
                 if a.nearest_sampling() {
-                    if let bevy::image::ImageSampler::Descriptor(s) = &mut image.sampler {
-                        s.mag_filter = bevy::image::ImageFilterMode::Nearest;
-                        s.min_filter = bevy::image::ImageFilterMode::Nearest;
-                    }
+                    adapter::set_nearest(&mut image);
                 }
                 Ok::<_, String>(image)
             })
@@ -3026,10 +3023,7 @@ fn synthetic(
         .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, sampling_uv)
         .with_inserted_indices(bevy::mesh::Indices::U32(vec![0, 2, 1, 0, 3, 2]));
         let mut image = adapter::image(2, 2, rgba.clone(), repeat).unwrap();
-        if let bevy::image::ImageSampler::Descriptor(ref mut s) = image.sampler {
-            s.mag_filter = bevy::image::ImageFilterMode::Nearest;
-            s.min_filter = bevy::image::ImageFilterMode::Nearest;
-        }
+        adapter::set_nearest(&mut image);
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(dual::material(StandardMaterial {
