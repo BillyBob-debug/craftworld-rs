@@ -6,6 +6,12 @@ Under --lbp-lighting port 4 is loaded through the diffuse route (port 4 stood in
 and added unlit before the sqrt output: a solid colour or one baked map on a free UV set.
 Docs: docs/p3h-glow.md. Not rendered in the cloud; PC verifies lamps/screens, census.
 
+## 2026-10-10 - P3j shader scalars (bump x2, cosine power x22)
+
+The shader constants are fixed transforms of the stored GfxMaterial scalars (PC CGB patch lists,
+644 gmats, 0 exceptions): BumpLevel = 2 x stored, CosinePower = 22 x stored (blur = stored - 1 lands
+with P3i). Surface now applies them; gloss powers and bump strength change. PC verifies.
+
 ## 2026-10-10 — P3g dynamic sun shadows
 
 `--lbp-lighting` adds one cascaded Bevy sun-shadow map (3 cascades, 1024) that darkens the

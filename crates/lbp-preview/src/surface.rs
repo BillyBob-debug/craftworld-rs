@@ -14,6 +14,11 @@ pub const GLOW_PORT: u8 = 4;
 /// Upper bounds for untrusted material scalars before they reach a shader.
 const MAX_BUMP_LEVEL: f32 = 16.;
 const MAX_COSINE_POWER: f32 = 4096.;
+/// The shader constant is a fixed transform of the stored GfxMaterial scalar (PC fpdec/CGB
+/// patch lists, 644 gmats, 0 exceptions; oracles 2026-10-10-glass-scalars): BumpLevel = 2 x
+/// stored, CosinePower = 22 x stored (reflection blur = stored - 1, see P3i).
+const BUMP_LEVEL_SCALE: f32 = 2.;
+const COSINE_POWER_SCALE: f32 = 22.;
 
 pub struct BumpMap {
     pub texture: lbp_texture::Texture,
@@ -246,6 +251,19 @@ pub fn select_routes(graph: &GraphMetadata) -> Result<SurfaceRoutes, String> {
     }
     Ok(routes)
 }
+/// Shader BumpLevel from the stored scalar (finite, 0..=MAX_BUMP_LEVEL; 0 when unusable).
+fn bump_level(bits: u32) -> f32 {
+    scalar(bits, 0., MAX_BUMP_LEVEL / BUMP_LEVEL_SCALE, 0.) * BUMP_LEVEL_SCALE
+}
+/// Shader CosinePower from the stored scalar (1..=MAX_COSINE_POWER; 22 when unusable).
+fn cosine_power(bits: u32) -> f32 {
+    scalar(
+        bits,
+        1. / COSINE_POWER_SCALE,
+        MAX_COSINE_POWER / COSINE_POWER_SCALE,
+        1.,
+    ) * COSINE_POWER_SCALE
+}
 fn scalar(bits: u32, lo: f32, hi: f32, fallback: f32) -> f32 {
     let v = f32::from_bits(bits);
     if v.is_finite() {
@@ -268,9 +286,9 @@ pub(crate) fn load(
     let scalars = &graph.material.prefix.scalars;
     let routes = select_routes(&graph.graph)?;
     let mut surface = Surface {
-        bump_level: scalar(scalars.bump_level_bits, 0., MAX_BUMP_LEVEL, 0.),
+        bump_level: bump_level(scalars.bump_level_bits),
         // CosinePower 22 is the decoded shaders' default (pod-fidelity README, D196).
-        cosine_power: scalar(scalars.cosine_power_bits, 1., MAX_COSINE_POWER, 22.),
+        cosine_power: cosine_power(scalars.cosine_power_bits),
         alpha_mode_raw: scalars.alpha_mode_raw,
         alpha_test: scalar(scalars.alpha_test_bits, 0., 1., 0.),
         specular: routes.specular,
@@ -467,5 +485,16 @@ mod tests {
             vec![wire(1, 0, GLOW_PORT)],
         );
         assert!(glow_in_program(&t, b""));
+    }
+
+    #[test]
+    fn shader_scalars_are_transforms_of_the_stored_ones() {
+        // glass: stored BumpLevel 0.12 -> listing 0.24; default stored CosinePower 1 -> 22
+        assert!((bump_level(0.12f32.to_bits()) - 0.24).abs() < 1e-6);
+        assert_eq!(cosine_power(1f32.to_bits()), 22.);
+        assert_eq!(cosine_power(2f32.to_bits()), 44.);
+        assert_eq!(cosine_power(f32::NAN.to_bits()), 22.);
+        assert_eq!(cosine_power(1e9f32.to_bits()), MAX_COSINE_POWER);
+        assert_eq!(bump_level(f32::NAN.to_bits()), 0.);
     }
 }
