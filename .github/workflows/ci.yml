@@ -51,10 +51,15 @@ jobs:
   # The viewers only compile here (no display). Runs on main pushes only to save
   # Actions minutes; the PC builds both viewers before every merge.
   viewers:
-    if: github.event_name == 'push'
+    if: github.event_name == 'push' || true # TEMP: verify on the PR
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      # System libraries the Bevy and egui dependency tree links against (fontconfig first).
+      - name: System libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libfontconfig1-dev libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
