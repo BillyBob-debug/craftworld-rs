@@ -286,8 +286,12 @@ fn level_settings_body(w: &mut W, base: f32) {
     for _ in 0..8 {
         w.f32(0.5); // rim colours
     }
-    for _ in 0..(6 + 1 + 3) {
-        w.f32(9.); // baked/DOF, dofFar, zEffect (read through)
+    // bakedShadowAmount, bakedShadowBlur, bakedAOBias, bakedAOScale, dynamicAOAmount, dofNear
+    for v in [0.1, 0.2, 0.25 * base, 0.75, 0.4, 9.] {
+        w.f32(v);
+    }
+    for _ in 0..(1 + 3) {
+        w.f32(9.); // dofFar, zEffect (read through)
     }
 }
 
@@ -318,12 +322,15 @@ fn level_settings_fields_and_presets() {
     assert_eq!((s.fog_near, s.fog_far), (1000., 4000.));
     assert_eq!((s.rim_color, s.rim_color2), ([0.5; 4], [0.5; 4]));
     assert_eq!(s.presets, 1);
+    // P3k: bakedAOBias / bakedAOScale sit after the shadow amount and blur.
+    assert_eq!((s.baked_ao_bias, s.baked_ao_scale), (0.25, 0.75));
     // P2l: the preset is kept, in order, with its own values.
     let kept = lbp_level::parts::LevelSettings::find_presets(&r.things);
     assert_eq!(kept.len(), 1);
     assert_eq!(kept[0].sun_position, [7., 8., 9.]);
     assert_eq!(kept[0].sun_color, [1., 0.9, 0.8, 1.].map(|v: f32| v * 7.));
     assert_eq!(kept[0].presets, 0);
+    assert_eq!(kept[0].baked_ao_bias, 0.25 * 7.);
     // Every truncation stops without panic and without settings claimed complete.
     for n in 0..w.b.len() {
         let mut t = W::new(1);

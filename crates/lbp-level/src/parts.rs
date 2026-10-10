@@ -394,6 +394,12 @@ pub struct LevelSettings {
     pub fog_far: f32,
     pub rim_color: [f32; 4],
     pub rim_color2: [f32; 4],
+    /// P3k: PLevelSettings bakedAOBias / bakedAOScale (file order after rimColor2: shadow
+    /// amount, shadow blur, AO bias, AO scale, dynamic AO, DOF near). The game's baked AO is
+    /// `lightmap * scale + bias` (oracles 2026-10-10-baked-ao). `Default` is 0/0; readers treat
+    /// a non-positive scale as unset (game default bias 0, scale 1).
+    pub baked_ao_bias: f32,
+    pub baked_ao_scale: f32,
     /// Number of stored preset LevelSettings (not projected).
     pub presets: usize,
     /// D119: `backdropMesh` resource (STATIC_MESH, head >= 0x2f3), after the presets and
@@ -2159,7 +2165,7 @@ fn stickers(r: &mut Reader) -> Result<(Vec<Decal>, usize)> {
 }
 
 fn level_settings(r: &mut Reader) -> Result<LevelSettings> {
-    let s = LevelSettings {
+    let mut s = LevelSettings {
         sun_position: r.v3()?,
         sun_position_scale: r.f32()?,
         sun_color: r.v4()?,
@@ -2171,10 +2177,15 @@ fn level_settings(r: &mut Reader) -> Result<LevelSettings> {
         fog_far: r.f32()?,
         rim_color: r.v4()?,
         rim_color2: r.v4()?,
+        baked_ao_bias: 0.,
+        baked_ao_scale: 0.,
         presets: 0,
         backdrop_mesh: None,
     };
-    r.skip_f32(6)?;
+    r.skip_f32(2)?;
+    s.baked_ao_bias = r.f32()?;
+    s.baked_ao_scale = r.f32()?;
+    r.skip_f32(2)?;
     r.f32()?;
     r.skip_f32(3)?;
     Ok(s)

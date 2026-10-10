@@ -88,6 +88,13 @@ pub struct SecondTexture {
     /// D189: `lbp_preview::FragmentStep::param` per step.
     #[uniform(128)]
     graph_param: [Vec4; 32],
+    /// P3k: backdrop baked-AO lightmap (R8, UV1).
+    #[texture(129)]
+    #[sampler(130)]
+    pub lightmap: Option<Handle<Image>>,
+    /// P3k: x = bakedAOScale, y = bakedAOBias, z = 1 when a lightmap is bound and lit.
+    #[uniform(131)]
+    ao_params: Vec4,
     /// D121: generated normals passed `adapter::normal_trust`; otherwise stays unlit.
     pub normals_trusted: bool,
 }
@@ -258,6 +265,12 @@ pub fn set_lighting(
             ext.rim_high = l.rim[1].extend(l.scales.w);
             ext.lbp_fog = l.lbp_fog();
             ext.graph_info.z = (ext.graph_info.z & !1) | u32::from(l.shadows);
+            ext.ao_params = Vec4::new(
+                l.baked_ao[0],
+                l.baked_ao[1],
+                f32::from(u8::from(l.lbp && ext.lightmap.is_some())),
+                0.,
+            );
             ext.lbp_fog_color = l.lbp_fog_color().extend(1.);
             true
         }
@@ -269,9 +282,15 @@ pub fn set_lighting(
             ext.rim_high = Vec4::ZERO;
             ext.lbp_fog = Vec4::ZERO;
             ext.graph_info.z &= !1;
+            ext.ao_params = Vec4::ZERO;
             false
         }
     }
+}
+/// P3k: binds the backdrop lightmap; the AO scale/bias and the on flag come from
+/// `set_lighting` (LBP mode only).
+pub fn enable_lightmap(material: &mut ViewerMaterial, image: Handle<Image>) {
+    material.extension.lightmap = Some(image);
 }
 pub struct DualPlugin;
 impl Plugin for DualPlugin {
@@ -327,6 +346,9 @@ struct BumpInput {
 @group(#{MATERIAL_BIND_GROUP}) @binding(126) var<uniform> graph_info: vec4<u32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(127) var<uniform> graph_code: array<vec4<u32>, 32>;
 @group(#{MATERIAL_BIND_GROUP}) @binding(128) var<uniform> graph_param: array<vec4<f32>, 32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(129) var lightmap_image: texture_2d<f32>;
+@group(#{MATERIAL_BIND_GROUP}) @binding(130) var lightmap_sampler: sampler;
+@group(#{MATERIAL_BIND_GROUP}) @binding(131) var<uniform> ao_params: vec4<f32>;
 // D189 graph texture k at uv with explicit gradients (non-uniform control flow).
 fn graph_texture(k: u32, uv: vec2<f32>, gx: vec2<f32>, gy: vec2<f32>) -> vec4<f32> {
     switch k {
@@ -388,7 +410,7 @@ fn graph_color(count_in: u32, uv0: vec2<f32>, uv1: vec2<f32>, d0: vec4<f32>, d1:
 // D121 preview Lambert factor (mirrors lighting::PreviewLight::factor/facing_normal).
 // Double-sided: the smooth normal is turned into the hemisphere of the face normal that
 // points at the viewer, so back faces and mirrored instances light like front faces.
-fn preview_light(n: vec3<f32>, to_view: vec3<f32>, shadow: f32) -> vec3<f32> {
+fn preview_light(n: vec3<f32>, to_view: vec3<f32>, shadow: f32, ao: f32) -> vec3<f32> {
     if dot(n, n) <= 0.0 {
         return vec3<f32>(1.0);
     }
@@ -397,8 +419,9 @@ fn preview_light(n: vec3<f32>, to_view: vec3<f32>, shadow: f32) -> vec3<f32> {
         // grazing rim lerped by N.y (P2n: P2m's eye-facing rim reverted, D203); squared
         // for the game's square-then-sqrt combine.
         let rim = pow(clamp(dot(n, -to_view) + 0.9, 0.0, 1.0), 2.0);
-        let f = light_ambient.rgb * (n.y * 0.15 + 0.5)
-            + light_key.rgb * (max(dot(n, light_dir.xyz), 0.0) * shadow)
+        // P3k: baked AO scales ambient and sun (INFERRED; the rim stays unoccluded).
+        let f = (light_ambient.rgb * (n.y * 0.15 + 0.5)
+            + light_key.rgb * (max(dot(n, light_dir.xyz), 0.0) * shadow)) * ao
             + mix(rim_low.rgb, rim_high.rgb, (n.y + 1.0) * 0.5) * rim;
         return f * f;
     }
@@ -542,7 +565,15 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool) -> FragmentOut
             let view_z = (view.view_from_world * vec4<f32>(in.world_position.xyz, 1.0)).z;
             shadow = fetch_directional_shadow(0u, in.world_position, in.world_normal, view_z, in.position.xy);
         }
-        let factor = preview_light(n, pbr.V, shadow);
+        // P3k: baked AO from the backdrop lightmap on UV1: map * scale + bias (oracles
+        // 2026-10-10-baked-ao; how it enters the light is INFERRED).
+        var ao = 1.0;
+#ifdef VERTEX_UVS_B
+        if ao_params.z > 0.5 && light_dir.w > 1.5 {
+            ao = textureSample(lightmap_image, lightmap_sampler, in.uv_b).r * ao_params.x + ao_params.y;
+        }
+#endif
+        let factor = preview_light(n, pbr.V, shadow, ao);
         // P3d: gloss colour map (port 2 sampler) on graph slot 5, unused without a graph.
         var spec_tint = vec3<f32>(1.0);
 #ifdef VERTEX_UVS_A
@@ -676,6 +707,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             .map(|l| l.replace("#{MATERIAL_BIND_GROUP}", "2") + "\n")
             .collect();
         assert!(body.contains("lit_normal(shading, face, pbr.V, bump)"));
+        assert!(body.contains("preview_light(n, pbr.V, shadow, ao)"));
         assert!(body.contains("gloss_term(n, pbr.V, factor, spec_tint, shadow)"));
         assert!(body.contains("rgb = lbp_output(rgb, depth);"));
         assert!(body.contains("rgb += glow;"));

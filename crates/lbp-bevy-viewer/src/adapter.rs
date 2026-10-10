@@ -274,6 +274,69 @@ pub fn with_mips(width: u32, height: u32, base: Vec<u8>, srgb: bool) -> Vec<u8> 
     }
     out
 }
+/// Single-channel box-filtered mip chain (mip 0 first, tightly packed), stored values
+/// averaged (data texture).
+pub fn with_mips_r8(width: u32, height: u32, base: Vec<u8>) -> Vec<u8> {
+    let levels = mip_count(width, height);
+    let mut out = base;
+    let (mut pw, mut ph) = (width as usize, height as usize);
+    let mut prev_start = 0usize;
+    for _ in 1..levels {
+        let (w, h) = ((pw / 2).max(1), (ph / 2).max(1));
+        let start = out.len();
+        out.reserve(w * h);
+        for y in 0..h {
+            let (y0, y1) = ((y * 2).min(ph - 1), (y * 2 + 1).min(ph - 1));
+            for x in 0..w {
+                let (x0, x1) = ((x * 2).min(pw - 1), (x * 2 + 1).min(pw - 1));
+                let at = |xx: usize, yy: usize| u32::from(out[prev_start + yy * pw + xx]);
+                let sum = at(x0, y0) + at(x1, y0) + at(x0, y1) + at(x1, y1);
+                out.push(((sum + 2) / 4) as u8);
+            }
+        }
+        prev_start = start;
+        pw = w;
+        ph = h;
+    }
+    out
+}
+/// P3k: a backdrop lightmap as an R8 texture with a full mip chain, clamped, trilinear.
+pub fn lightmap_image(width: u32, height: u32, r8: &[u8]) -> Result<Image, String> {
+    if width == 0 || height == 0 || width > 4096 || height > 4096 {
+        return Err("Unsupported: lightmap extent".into());
+    }
+    if r8.len() != width as usize * height as usize {
+        return Err("Invalid: lightmap pixel count".into());
+    }
+    let levels = mip_count(width, height);
+    let mut image = Image::new(
+        Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        r8.to_vec(),
+        TextureFormat::R8Unorm,
+        RenderAssetUsages::default(),
+    );
+    if levels > 1 {
+        if let Some(base) = image.data.take() {
+            image.data = Some(with_mips_r8(width, height, base));
+        }
+        image.texture_descriptor.mip_level_count = levels;
+    }
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        anisotropy_clamp: ANISOTROPY,
+        ..default()
+    });
+    Ok(image)
+}
 fn image_axes_fmt(
     width: u32,
     height: u32,
@@ -616,6 +679,19 @@ mod tests {
         assert_eq!(n[2], [0., 0., 1.]);
         assert_eq!(apply_game_normals(&mut m, &game[..2]), (0, 0, 0.));
     }
+    #[test]
+    fn r8_mip_chain_averages_stored_values() {
+        let chain = with_mips_r8(2, 2, vec![0, 100, 200, 255]);
+        assert_eq!(chain.len(), 5);
+        assert_eq!(chain[4], 139);
+        let chain = with_mips_r8(4, 1, vec![10, 20, 30, 40]);
+        assert_eq!(chain.len(), 4 + 2 + 1);
+        assert!(lightmap_image(2, 2, &[0; 3]).is_err());
+        let image = lightmap_image(8, 8, &[7; 64]).unwrap();
+        assert_eq!(image.texture_descriptor.mip_level_count, 4);
+        assert_eq!(image.data.as_ref().unwrap().len(), 64 + 16 + 4 + 1);
+    }
+
     #[test]
     fn mip_chain_sizes_and_linear_light_average() {
         assert_eq!(mip_count(1, 1), 1);

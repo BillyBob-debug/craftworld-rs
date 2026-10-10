@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-10 — P3k baked AO (backdrop lightmap)
+
+Under --lbp-lighting the backdrop static mesh's lightmap (B8 GTF, SMH UV1) is bound as an R8
+mipped texture; ao = map x bakedAOScale + bakedAOBias (PLevelSettings, now parsed) scales the
+ambient and sun terms. How AO enters the light is INFERRED. `--no-baked-ao` for A/B. A material
+that already uses UV1 keeps it and the AO is named, not drawn. Docs: docs/p3k-baked-ao.md.
+Not rendered in the cloud; PC verifies Bravery Test / tutorial_23 backdrops against RPCS3.
+
 ## 2026-10-10 — P3i reflection (output port 6)
 
 Under --lbp-lighting the port-6 graph is evaluated per fragment at the reflection vector R
