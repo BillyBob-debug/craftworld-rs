@@ -17,6 +17,9 @@ pub struct LevelEntry {
     pub name: String,
     /// True when `name` came from a story slot.
     pub named: bool,
+    /// False for 01.33 `.cpv` Vita crossplay levels, whose wrapper the reader refuses
+    /// (`DOUBLE11 branch payload`); listed, but not loadable.
+    pub supported: bool,
 }
 
 impl LevelEntry {
@@ -67,6 +70,7 @@ pub fn entries_from_rows<'a>(
             group,
             name: slot_name.cloned().unwrap_or_else(|| stem(&file)),
             named: slot_name.is_some(),
+            supported: !file.to_ascii_lowercase().ends_with(".cpv"),
         });
     }
     out.sort_by(|a, b| {
@@ -130,6 +134,9 @@ mod tests {
         let plain = e.iter().find(|x| x.guid == Some(0x10)).unwrap();
         assert!(!plain.named);
         assert_eq!(plain.name, "tutorial_1");
+        assert!(plain.supported);
+        let cpv = entries_from_rows([("x/cutscene_crossplayvita_03.CPV", "00000011")], &names);
+        assert!(!cpv[0].supported);
     }
 
     #[test]

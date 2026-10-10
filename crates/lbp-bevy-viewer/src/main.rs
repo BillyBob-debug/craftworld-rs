@@ -3854,6 +3854,7 @@ mod tests {
             group: "a/b".into(),
             name: "c".into(),
             named: false,
+            supported: true,
         });
         assert_eq!(
             (mode.guid, mode.path.as_deref()),
