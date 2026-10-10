@@ -1330,7 +1330,13 @@ fn load(
 /// P3h: glow colour (multiplies the map) and the optional map with its UV mode.
 type GlowDraw = ([f32; 3], Option<(Image, u32)>);
 /// P3i: reflection textures, encoded steps and ReflectionBlur.
-type ReflectionDraw = (Vec<Image>, Vec<lbp_preview::FragmentStep>, f32);
+/// P3i/P3l: 2D maps by graph slot (None = the cube slot), the cube map, steps, blur.
+type ReflectionDraw = (
+    Vec<Option<Image>>,
+    Option<Image>,
+    Vec<lbp_preview::FragmentStep>,
+    f32,
+);
 /// CPU-side display preparation shared by the single-mesh and level paths: one entry per
 /// supported material bucket (plus one neutral bucket). `normalize` centres and scales
 /// the mesh to unit size (single-mesh view); level scenes keep model coordinates.
@@ -1742,14 +1748,28 @@ fn prepare_buckets(
                     && third_image.is_none()
                     && fourth_image.is_none() =>
             {
+                let mut cube = None;
                 let images = r
                     .textures
                     .iter()
-                    .map(|(t, wrap)| {
-                        adapter::image_axes(t.header.width, t.header.height, t.rgba.clone(), *wrap)
+                    .map(|m| match m {
+                        lbp_preview::surface::ReflectionMap::Flat(t, wrap) => adapter::image_axes(
+                            t.header.width,
+                            t.header.height,
+                            t.rgba.clone(),
+                            *wrap,
+                        )
+                        .map(Some),
+                        lbp_preview::surface::ReflectionMap::Cube(c) => {
+                            let faces: Vec<&[u8]> = std::iter::once(c.texture.rgba.as_slice())
+                                .chain(c.extra_faces.iter().map(Vec::as_slice))
+                                .collect();
+                            cube = Some(adapter::cube_image(c.texture.header.width, &faces)?);
+                            Ok(None)
+                        }
                     })
                     .collect::<Result<Vec<_>, String>>()?;
-                Some((images, r.steps.clone(), r.blur))
+                Some((images, cube, r.steps.clone(), r.blur))
             }
             Some(_) => {
                 details.push(
@@ -1826,9 +1846,13 @@ fn upload(
             eprintln!("D189: {e}");
         }
     }
-    if let Some((textures, steps, blur)) = p.reflection {
-        let handles = textures.into_iter().map(|i| images.add(i)).collect();
-        if let Err(e) = dual::enable_reflection(&mut surface, handles, &steps, blur) {
+    if let Some((textures, cube, steps, blur)) = p.reflection {
+        let handles = textures
+            .into_iter()
+            .map(|i| i.map(|i| images.add(i)))
+            .collect();
+        let cube = cube.map(|i| images.add(i));
+        if let Err(e) = dual::enable_reflection(&mut surface, handles, cube, &steps, blur) {
             eprintln!("P3i: {e}");
         }
     }

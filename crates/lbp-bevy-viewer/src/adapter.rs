@@ -4,7 +4,10 @@ use bevy::{
     image::{ImageAddressMode, ImageFilterMode, ImageSampler, ImageSamplerDescriptor},
     mesh::Indices,
     prelude::*,
-    render::render_resource::{Extent3d, PrimitiveTopology, TextureDimension, TextureFormat},
+    render::render_resource::{
+        Extent3d, PrimitiveTopology, TextureDimension, TextureFormat, TextureViewDescriptor,
+        TextureViewDimension,
+    },
 };
 
 /// Bind-pose centre and largest extent; posed frames reuse it so the view stays still.
@@ -273,6 +276,54 @@ pub fn with_mips(width: u32, height: u32, base: Vec<u8>, srgb: bool) -> Vec<u8> 
         ph = h;
     }
     out
+}
+/// P3l: a six-face RGBA cube map (faces +X, -X, +Y, -Y, +Z, -Z, tightly packed `rgba` per
+/// face) as a cube texture with a box-filtered mip chain per face, sRGB like the other
+/// reflection maps, clamped and trilinear. Faces must be square and equal.
+pub fn cube_image(size: u32, faces: &[&[u8]]) -> Result<Image, String> {
+    if faces.len() != 6 || size == 0 || size > 1024 {
+        return Err("Unsupported: cube map extent".into());
+    }
+    let face_bytes = size as usize * size as usize * 4;
+    if faces.iter().any(|f| f.len() != face_bytes) {
+        return Err("Invalid: cube map face size".into());
+    }
+    let levels = mip_count(size, size);
+    let mut image = Image::new(
+        Extent3d {
+            width: size,
+            height: size,
+            depth_or_array_layers: 6,
+        },
+        TextureDimension::D2,
+        faces.concat(),
+        TextureFormat::Rgba8UnormSrgb,
+        RenderAssetUsages::default(),
+    );
+    if levels > 1 {
+        // Layer-major: each face's whole chain, then the next face.
+        image.data = Some(
+            faces
+                .iter()
+                .flat_map(|f| with_mips(size, size, f.to_vec(), true))
+                .collect(),
+        );
+        image.texture_descriptor.mip_level_count = levels;
+    }
+    image.texture_view_descriptor = Some(TextureViewDescriptor {
+        dimension: Some(TextureViewDimension::Cube),
+        ..default()
+    });
+    image.sampler = ImageSampler::Descriptor(ImageSamplerDescriptor {
+        address_mode_u: ImageAddressMode::ClampToEdge,
+        address_mode_v: ImageAddressMode::ClampToEdge,
+        address_mode_w: ImageAddressMode::ClampToEdge,
+        mag_filter: ImageFilterMode::Linear,
+        min_filter: ImageFilterMode::Linear,
+        mipmap_filter: ImageFilterMode::Linear,
+        ..default()
+    });
+    Ok(image)
 }
 fn image_axes_fmt(
     width: u32,
@@ -616,6 +667,22 @@ mod tests {
         assert_eq!(n[2], [0., 0., 1.]);
         assert_eq!(apply_game_normals(&mut m, &game[..2]), (0, 0, 0.));
     }
+    #[test]
+    fn cube_image_is_six_layers_with_a_chain_per_face() {
+        let face = vec![9u8; 4 * 4 * 4];
+        let faces = [face.as_slice(); 6];
+        let image = cube_image(4, &faces).unwrap();
+        assert_eq!(image.texture_descriptor.size.depth_or_array_layers, 6);
+        assert_eq!(image.texture_descriptor.mip_level_count, 3);
+        assert_eq!(image.data.as_ref().unwrap().len(), 6 * (64 + 16 + 4));
+        assert_eq!(
+            image.texture_view_descriptor.as_ref().unwrap().dimension,
+            Some(TextureViewDimension::Cube)
+        );
+        assert!(cube_image(4, &faces[..5]).is_err());
+        assert!(cube_image(4, &[&face[..8]; 6]).is_err());
+    }
+
     #[test]
     fn mip_chain_sizes_and_linear_light_average() {
         assert_eq!(mip_count(1, 1), 1);
