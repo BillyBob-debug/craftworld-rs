@@ -6,6 +6,12 @@ Model meshes are lit with the game's decoded normals instead of normals generate
 triangles (fallback per vertex; skinned per-bone copies and shapes unchanged). Per-mesh detail
 reports the agreement with generated normals. +0 viewable / +0 Complete; PC verifies shots.
 
+## 2026-10-09 — P2u mipmaps and anisotropic filtering
+
+Game textures get a CPU box-filtered mip chain (linear-light for colour) and a trilinear
+sampler (anisotropy 1, as the game); point-sampled textures stay nearest. Pure viewer change, +0 viewable /
++0 Complete. Sampler matches the Pod capture (docs/p2u-mipmaps.md); PC verifies shots.
+
 ## 2026-10-09 — D193 sampler port folds under the nested instance tint
 
 Folded sampler ports (D96) and the nested ThingColor tint now combine instead of refusing;
