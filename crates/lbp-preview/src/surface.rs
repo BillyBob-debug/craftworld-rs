@@ -278,6 +278,11 @@ pub fn select_routes(graph: &GraphMetadata) -> Result<SurfaceRoutes, String> {
     }
     Ok(routes)
 }
+/// Shader ReflectionBlur = stored - 1 (PC CGB patch lists, 124 gmats, 0 exceptions; stored
+/// 1.45 -> 0.45), clamped to 0..=MAX_REFLECTION_BLUR; 0 when unusable.
+fn reflection_blur(bits: u32) -> f32 {
+    (scalar(bits, 1., MAX_REFLECTION_BLUR + 1., 1.) - 1.).max(0.)
+}
 fn scalar(bits: u32, lo: f32, hi: f32, fallback: f32) -> f32 {
     let v = f32::from_bits(bits);
     if v.is_finite() {
@@ -401,12 +406,7 @@ fn load_reflection(
     Ok(Some(Reflection {
         textures: textures.into_iter().map(|(t, _, w)| (t, w)).collect(),
         steps,
-        blur: scalar(
-            graph.material.prefix.scalars.reflection_blur_bits,
-            0.,
-            MAX_REFLECTION_BLUR,
-            0.,
-        ),
+        blur: reflection_blur(graph.material.prefix.scalars.reflection_blur_bits),
     }))
 }
 /// Decodes the 2D texture bound to material slot `slot` (cube and volume maps error).
@@ -658,5 +658,12 @@ mod tests {
             vec![wire(1, 0, GLOW_PORT)],
         );
         assert!(glow_in_program(&t, b""));
+    }
+
+    #[test]
+    fn reflection_blur_is_the_stored_scalar_minus_one() {
+        assert!((reflection_blur(1.45f32.to_bits()) - 0.45).abs() < 1e-6);
+        assert_eq!(reflection_blur(0.5f32.to_bits()), 0.);
+        assert_eq!(reflection_blur(f32::NAN.to_bits()), 0.);
     }
 }

@@ -36,3 +36,6 @@ unchanged; surface-report counts of "reflection" draws on Bravery Test and tutor
 before/after at gameplay distance on metal and glass (proc_da_vinci_metal, proc_base_glass
 users); compare with an RPCS3 capture of the same object if one exists (decides view vs world
 space); check nothing else changes.
+
+Blur: the shader's ReflectionBlur is stored - 1 (glass: stored 1.45, listing 0.45; 124 gmats, 0
+exceptions, `2026-10-10-glass-scalars`), so the LOD bias is `exp2(stored - 1)`.
