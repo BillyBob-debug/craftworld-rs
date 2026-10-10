@@ -27,15 +27,33 @@ const MAX_REFLECTION_BLUR: f32 = 16.;
 const BUMP_LEVEL_SCALE: f32 = 2.;
 const COSINE_POWER_SCALE: f32 = 22.;
 
-/// P3i: a reflection graph sampled at the reflection vector instead of a UV: every sampler
-/// reads R.xy (2D textures only; cube maps are refused by the decoder) with LOD bias
-/// `blur` (GfxMaterial ReflectionBlur).
+/// P3i: a reflection graph sampled at the reflection vector instead of a UV: a 2D sampler
+/// reads R.xy, a cube sampler (P3l, one per graph) reads R.xyz, with LOD bias `blur`
+/// (GfxMaterial ReflectionBlur).
 pub struct Reflection {
-    pub textures: Vec<(lbp_texture::Texture, crate::TextureWrapping)>,
+    pub textures: Vec<ReflectionMap>,
     /// Encoded D100 steps (root last); sample steps use identity scale/offset, channel 0.
     pub steps: Vec<crate::FragmentStep>,
     pub blur: f32,
 }
+/// P3l: one decoded reflection sampler. A cube map keeps its six top-mip faces (BC1/BC3 GTF,
+/// face order +X, -X, +Y, -Y, +Z, -Z) and sample steps on it carry channel `CUBE_CHANNEL`.
+pub enum ReflectionMap {
+    Flat(lbp_texture::Texture, crate::TextureWrapping),
+    Cube(Box<lbp_texture::LayeredTexture>),
+}
+impl ReflectionMap {
+    fn rgba_bytes(&self) -> usize {
+        match self {
+            Self::Flat(t, _) => t.rgba.len(),
+            Self::Cube(c) => {
+                c.texture.rgba.len() + c.extra_faces.iter().map(Vec::len).sum::<usize>()
+            }
+        }
+    }
+}
+/// P3l: the UV-channel field of a reflection sample step that reads a cube map.
+pub const CUBE_CHANNEL: u32 = 2;
 /// Sampler slots in texture order and the encoded steps.
 pub(crate) type ReflectionProgram = (Vec<usize>, Vec<crate::FragmentStep>);
 pub struct BumpMap {
@@ -78,7 +96,10 @@ impl Surface {
             .map(|b| b.texture.rgba.len() + b.sampling_uv.len() * std::mem::size_of::<[f32; 2]>())
             .sum::<usize>()
             + self.reflection.as_deref().map_or(0, |r| {
-                r.textures.iter().map(|(t, _)| t.rgba.len()).sum::<usize>()
+                r.textures
+                    .iter()
+                    .map(ReflectionMap::rgba_bytes)
+                    .sum::<usize>()
             })
             + match self.glow.as_deref() {
                 Some(crate::MaterialAsset::Texture(a)) => {
@@ -421,13 +442,47 @@ fn load_reflection(
         .iter()
         .map(|&slot| load_slot(source, catalog, graph, slot, control))
         .collect::<Result<Vec<_>, _>>()?;
+    let mut steps = steps;
+    let mut maps = Vec::new();
+    let mut cubes = 0;
+    for (k, (layered, _, wrap)) in textures.into_iter().enumerate() {
+        match layered.layout {
+            "2d" => maps.push(ReflectionMap::Flat(layered.texture, wrap)),
+            "cube" => {
+                cubes += 1;
+                if cubes > 1 {
+                    return Err("Unsupported: several cube maps in one reflection graph".into());
+                }
+                let n = layered.texture.rgba.len();
+                if layered.extra_faces.len() != lbp_texture::CUBE_FACES - 1
+                    || layered.extra_faces.iter().any(|f| f.len() != n)
+                    || layered.texture.header.width != layered.texture.header.height
+                {
+                    return Err("Invalid: cube map faces".into());
+                }
+                for step in &mut steps {
+                    if step.code[0] == crate::fragment::FRAGMENT_SAMPLE
+                        && step.code[1] as usize == k
+                    {
+                        step.code[2] = CUBE_CHANNEL;
+                    }
+                }
+                maps.push(ReflectionMap::Cube(Box::new(layered)));
+            }
+            other => {
+                return Err(format!(
+                    "Unsupported: {other} texture in a reflection graph"
+                ))
+            }
+        }
+    }
     Ok(Some(Reflection {
-        textures: textures.into_iter().map(|(t, _, w)| (t, w)).collect(),
+        textures: maps,
         steps,
         blur: reflection_blur(graph.material.prefix.scalars.reflection_blur_bits),
     }))
 }
-/// Decodes the 2D texture bound to material slot `slot` (cube and volume maps error).
+/// Decodes the texture bound to material slot `slot`: 2D, or (P3l) a BC1/BC3 cube map.
 fn load_slot(
     source: &AttachedSource,
     catalog: &Catalog,
@@ -436,7 +491,7 @@ fn load_slot(
     control: &LoadControl,
 ) -> Result<
     (
-        lbp_texture::Texture,
+        lbp_texture::LayeredTexture,
         lbp_catalog::attachment::LocationKey,
         crate::TextureWrapping,
     ),
@@ -455,7 +510,7 @@ fn load_slot(
         prefix.wrap_t_raw.get(slot).copied(),
     )?;
     let texture_key = crate::resolve(catalog, descriptor.guid, descriptor.sha1.as_deref())?;
-    let texture = lbp_texture::decode_reader(
+    let texture = lbp_texture::decode_reader_layered(
         texture_key.size,
         |offset, count| {
             source

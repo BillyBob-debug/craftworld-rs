@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-10 — P3l cube-map reflections (output port 6)
+
+Reflection graphs with one BC1/BC3 cube map (59 graphs) now draw: six faces as a mipped cube
+texture, sample steps on it read R.xyz with the TXB bias as gradient scale. Face order, face
+orientation and handedness INFERRED. Several cubes in one graph are named, not drawn. Docs:
+docs/p3l-cube-reflection.md. Not rendered in the cloud; PC verifies a cube-map gmat.
+
 ## 2026-10-10 — P3k baked AO (backdrop lightmap)
 
 Under --lbp-lighting the backdrop static mesh's lightmap (B8 GTF, SMH UV1) is bound as an R8
