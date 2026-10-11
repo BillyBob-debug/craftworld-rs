@@ -840,6 +840,7 @@ pub(crate) fn show_sackboy(
     let [ex, ey, ez] = FOLLOW_EYE;
     if !*framed {
         *framed = true;
+        FRAMINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // The game's default camera: straight on, at its distance and FOV (orbit and zoom
         // stay free afterwards).
         orbit.yaw = 0.;
@@ -855,6 +856,9 @@ pub(crate) fn show_sackboy(
         .0
         .transform_point3(Vec3::new(p[0] + ex, p[1] + ey, slab.z));
 }
+
+/// Counts camera framings, so overlays that nudge `orbit.distance` re-apply after one.
+pub(crate) static FRAMINGS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
 #[cfg(test)]
 mod tests {

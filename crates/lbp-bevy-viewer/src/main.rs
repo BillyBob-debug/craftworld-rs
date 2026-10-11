@@ -783,6 +783,7 @@ fn options() -> Result<Viewer, String> {
             | "--level-scripts-flags"
             | "--play-sackboy-at"
             | "--popit-mode"
+            | "--popit-page"
             | "--play-sackboy-input"
             | "--qa-record" => {}
             _ => return Err(format!("Unknown option {flag}")),

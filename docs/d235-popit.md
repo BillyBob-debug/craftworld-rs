@@ -39,6 +39,22 @@ pad's West button toggles it, arrows move the focus while it is open. Code:
 - Sackboy shows his back to the camera while the Popit is open in both modes (create and play frames), untinted;
   the viewer turns him by pi over the open blend.
 
+## MEASURED pass 3: inventory pages (create mode, RPCS3 frames 18:12-18:13, Cross opens, Circle returns)
+- The pages (Body/costume, Stickers, Tools "Sounds" list, Community Objects) are native `DoInventoryGrid`, all with
+  the same chrome: panel x 918.5..1222.5, y 53.5..667.5 (304x614), same ramp as the card with the attach point
+  on the left edge at 0.57 of the height (cord ends there), title (handwritten font, 30 px) at (936,84),
+  "Functions" header y 133 with a dashed yellow rule at y 148, function tile centred (957,180) 64 px teal,
+  section headers (19 px bold) with rules, 6 icon columns at x 957 + 46*k, rows 46 px apart, page counter
+  "n/N" bottom centre (1070,646).
+- Left of the focused tile: yellow tooltip pill (right edge 8 px off the tile), "USE!" + Cross pill 62 px above
+  and "More!" + Square pill 55 px below, both tilted and 55-60 px left of the pill centre.
+- Camera: Sackboy turns to face the camera, stands centred with feet 165 px below the frame middle, about 270 px
+  tall (about 2.6x the gameplay camera); the cord runs from the panel's left edge to his hips. The Popit button
+  focus is remembered per page; the viewer only models the first page of each button.
+- Viewer: `--popit-page BUTTON` (6 costume, 0 stickers, 1 goodies, 5 tools, 4 community, 10 pod) starts there;
+  X / pad South opens, C / pad East closes. Icons come from the disc plans by category (the game shows the
+  profile inventory), section names are humanised tags, counts are not modelled.
+
 ## OPEN
 - Exact gradient colours/alpha (not in script, Gooey defaults), card anchor rule, bubble tail/cord geometry
   (yellow S-curve drawn as dots here), camera constants (no named data found), whether Sackboy turns/tints

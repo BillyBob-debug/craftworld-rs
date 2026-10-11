@@ -112,7 +112,32 @@ pub(crate) struct PopitAssets {
     items: Vec<Item>,
     square: Image,
     close: String,
+    pages: Vec<PageData>,
 }
+
+/// One inventory page behind a main-menu button: title and the first icons by category.
+struct PageData {
+    id: u32,
+    title: &'static str,
+    sections: Vec<(String, Vec<(String, Image)>)>,
+    message: Option<&'static str>,
+}
+
+/// Buttons that open an inventory page: (button, panel title, plan page, empty message).
+const PAGES: [(u32, &str, Option<&str>, Option<&str>); 6] = [
+    (6, "Body", Some("costume"), None),
+    (0, "Stickers", Some("sticker"), None),
+    (1, "Goodies", None, None),
+    (5, "Tools", None, None),
+    (
+        4,
+        "Community Objects",
+        None,
+        Some("Get your friends to send you objects, and they'll appear here."),
+    ),
+    (10, "Pod", None, None),
+];
+const PAGE_ICONS: usize = 36;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -129,7 +154,27 @@ struct Popit {
     focus: u32,
     clock: f32,
     spawned: bool,
+    /// Inventory page open behind this main-menu button, its eased blend, grid focus (row, col).
+    page: Option<u32>,
+    page_blend: f32,
+    cell: (usize, usize),
+    built: Option<(u32, usize, usize)>,
 }
+
+/// Inventory page layout, 720p px (MEASURED on RPCS3 create frames 18:12): panel rectangle,
+/// 6 icon columns, 46 px row pitch from the first grid row.
+const PANEL: [f32; 4] = [918.5, 53.5, 304., 614.];
+const GRID_X0: f32 = 957.;
+const GRID_PITCH: f32 = 46.;
+const GRID_COLS: usize = 6;
+/// Page camera: how much closer than the gameplay camera, and the aim drop (viewer fit).
+const PAGE_ZOOM: f32 = 2.6;
+const PAGE_AIM_DROP: f32 = 0.;
+/// Page view: Sackboy's feet sit this many px below the screen centre, centred horizontally.
+const PAGE_FEET_BELOW_CENTRE: f32 = 165.;
+
+#[derive(Component)]
+struct PageNode;
 
 #[derive(Component)]
 struct Part(Role);
@@ -189,11 +234,16 @@ fn image_from(w: u32, h: u32, rgba: Vec<u8>) -> Image {
 
 /// The card fill: rounded rectangle coloured by `CARD_RAMP` from the tail attach point.
 fn card_image(card: [f32; 2], attach_x: f32) -> Image {
+    card_image_at(card, [attach_x * card[0], card[1]], CARD_RADIUS)
+}
+
+/// As `card_image` with the attach point in card px and the corner radius.
+fn card_image_at(card: [f32; 2], attach: [f32; 2], radius: f32) -> Image {
     const SS: f32 = 2.;
     let (w, h) = ((card[0] * SS) as u32, (card[1] * SS) as u32);
-    let r = CARD_RADIUS * SS;
-    let (ax, ay) = (attach_x * card[0] * SS, h as f32);
-    let far = ((ax.max(w as f32 - ax)).powi(2) + ay * ay).sqrt();
+    let r = radius * SS;
+    let (ax, ay) = (attach[0] * SS, attach[1] * SS);
+    let far = ((ax.max(w as f32 - ax)).powi(2) + ay.max(h as f32 - ay).powi(2)).sqrt();
     let mut out = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
         for x in 0..w {
@@ -253,6 +303,46 @@ pub(crate) fn load_assets(
             label,
         });
     }
+    let popit = lbp_preview::popit::load_popit(source, catalog, control)?;
+    let mut pages = Vec::new();
+    for (id, title, plan_page, message) in PAGES {
+        let mut sections: Vec<(String, Vec<(String, Image)>)> = Vec::new();
+        let mut taken = 0;
+        if let Some(name) = plan_page {
+            for &ix in popit.pages.get(name).map_or(&[][..], Vec::as_slice) {
+                let item = &popit.items[ix];
+                let Some(key) = item.icon.filter(|_| item.icon_resolved) else {
+                    continue;
+                };
+                let Ok(icon) = decode_icon(source, catalog, key, control) else {
+                    continue;
+                };
+                let cat = humanize(item.category.as_deref().unwrap_or_default());
+                if cat.is_empty() {
+                    continue;
+                }
+                if sections.last().is_none_or(|(c, _)| *c != cat) {
+                    sections.push((cat, Vec::new()));
+                }
+                let img = image_from(icon.width, icon.height, icon.rgba);
+                sections
+                    .last_mut()
+                    .expect("section just pushed")
+                    .1
+                    .push((item.title.clone(), img));
+                taken += 1;
+                if taken >= PAGE_ICONS {
+                    break;
+                }
+            }
+        }
+        pages.push(PageData {
+            id,
+            title,
+            sections,
+            message,
+        });
+    }
     let sheet = decode_icon(source, catalog, ResourceKey::Guid(GLYPH_SHEET), control)?;
     // GI_SQUARE: column 3, row 0 of the 64 px cells.
     let mut square = Vec::new();
@@ -269,6 +359,7 @@ pub(crate) fn load_assets(
         items,
         square: image_from(64, 64, square),
         close,
+        pages,
     })
 }
 
@@ -278,11 +369,16 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
         .windows(2)
         .any(|w| w[0] == "--popit-mode" && w[1] == "play");
     let mode = if play { Mode::Play } else { Mode::Edit };
+    // `--popit-page BUTTON` (QA): start with that inventory page open.
+    let start_page = all
+        .windows(2)
+        .find(|w| w[0] == "--popit-page")
+        .and_then(|w| w[1].parse::<u32>().ok());
     app.insert_resource(assets)
         .insert_resource(Popit {
             mode,
-            open: all.iter().any(|a| a == "--popit-open"),
-            blend: if all.iter().any(|a| a == "--popit-open") {
+            open: all.iter().any(|a| a == "--popit-open") || start_page.is_some(),
+            blend: if all.iter().any(|a| a == "--popit-open") || start_page.is_some() {
                 1.
             } else {
                 0.
@@ -290,10 +386,14 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
             focus: if play { 6 } else { 2 },
             clock: 0.,
             spawned: false,
+            page: start_page,
+            page_blend: if start_page.is_some() { 1. } else { 0. },
+            cell: (0, 0),
+            built: None,
         })
         .add_systems(
             Update,
-            (popit_input, popit_turn, popit_layout)
+            (popit_input, popit_turn, popit_layout, popit_page_ui)
                 .chain()
                 .after(crate::sackboy_play::show_sackboy),
         );
@@ -326,6 +426,8 @@ fn popit_input(
     }
     p.clock += time.delta_secs();
     let step = time.delta_secs() / BLEND_SECONDS;
+    let pstep = if p.page.is_some() { step } else { -step };
+    p.page_blend = (p.page_blend + pstep).clamp(0., 1.);
     p.blend = if p.open {
         (p.blend + step).min(1.)
     } else {
@@ -348,6 +450,26 @@ fn popit_input(
         i32::from(dir(KeyCode::ArrowDown, GamepadButton::DPadDown))
             - i32::from(dir(KeyCode::ArrowUp, GamepadButton::DPadUp)),
     );
+    let confirm = keys.just_pressed(KeyCode::KeyX)
+        || pad.is_some_and(|g| g.just_pressed(GamepadButton::South));
+    let back = keys.just_pressed(KeyCode::KeyC)
+        || pad.is_some_and(|g| g.just_pressed(GamepadButton::East));
+    if p.page.is_some() {
+        if back {
+            p.page = None;
+        } else {
+            let (r, c) = p.cell;
+            let c2 = (c as i32 + dx).clamp(0, GRID_COLS as i32 - 1) as usize;
+            let r2 = (r as i32 + dy).clamp(0, 7) as usize;
+            p.cell = (r2, c2);
+        }
+        return;
+    }
+    if confirm && PAGES.iter().any(|(id, ..)| *id == p.focus) {
+        p.page = Some(p.focus);
+        p.cell = (0, 0);
+        return;
+    }
     if dx == 0 && dy == 0 {
         return;
     }
@@ -366,8 +488,27 @@ fn popit_input(
 
 /// Sackboy turns his back to the camera while the Popit is open (both modes, MEASURED on
 /// RPCS3 frames: back of the head and the cord wound round the body), eased like the card.
-fn popit_turn(p: Res<Popit>, mut figure: Query<&mut Transform, With<crate::sackboy_play::Figure>>) {
-    let turn = std::f32::consts::PI * smooth(p.blend);
+fn popit_turn(
+    p: Res<Popit>,
+    mut figure: Query<&mut Transform, With<crate::sackboy_play::Figure>>,
+    mut orbit: ResMut<crate::Orbit>,
+    cameras: Query<&Projection, With<Camera3d>>,
+) {
+    let pe = smooth(p.page_blend);
+    if pe > 0. {
+        // Page view: aim at a point above his feet so he stands centred, feet 165 px below the
+        // middle of the frame (MEASURED, create frames), whatever the follow lead was.
+        let fov = cameras.iter().find_map(|c| match c {
+            Projection::Perspective(pp) => Some(pp.fov),
+            _ => None,
+        });
+        if let (Some(fov), Ok(t)) = (fov, figure.single()) {
+            let per_px = 2. * orbit.distance * (fov / 2.).tan() / FRAME_H;
+            let want = t.translation + Vec3::Y * PAGE_FEET_BELOW_CENTRE * per_px;
+            orbit.target = orbit.target.lerp(want, pe);
+        }
+    }
+    let turn = std::f32::consts::PI * smooth(p.blend) * (1. - pe);
     if turn <= 0. {
         return;
     }
@@ -393,12 +534,21 @@ fn popit_layout(
     mut colours: Query<(&Part, &mut BackgroundColor)>,
     mut orbit: ResMut<crate::Orbit>,
     mut applied: Local<(f32, f32)>,
+    mut framings: Local<usize>,
 ) {
+    // The follow camera sets its distance once when it frames; re-apply our nudge after that.
+    let framed = crate::sackboy_play::FRAMINGS.load(std::sync::atomic::Ordering::Relaxed);
+    if framed != *framings {
+        *framings = framed;
+        *applied = (0., 0.);
+    }
     // Camera nudge, relative to what we applied last frame so zoom/orbit stay free.
     let e = smooth(p.blend);
     let (prev_zoom, prev_drop) = *applied;
-    let zoom = 1. + (1. / POPIT_ZOOM - 1.) * e;
-    let drop = POPIT_AIM_DROP * e;
+    let pe = smooth(p.page_blend);
+    let zoom_to = POPIT_ZOOM + (PAGE_ZOOM - POPIT_ZOOM) * pe;
+    let zoom = 1. + (1. / zoom_to - 1.) * e;
+    let drop = (POPIT_AIM_DROP + (PAGE_AIM_DROP - POPIT_AIM_DROP) * pe) * e;
     if prev_zoom != 0. {
         orbit.distance *= zoom / prev_zoom;
     } else {
@@ -444,8 +594,11 @@ fn popit_layout(
     let Ok(head) = camera.world_to_viewport(cam_tf, head_world) else {
         return;
     };
-    let _ = cam_tf;
-    let hidden = p.blend <= 0.;
+    let feet = camera
+        .world_to_viewport(cam_tf, fig.translation())
+        .unwrap_or(head + Vec2::Y * 80.);
+    let in_page = p.page_blend > 0.02;
+    let hidden = p.blend <= 0. || p.page_blend > 0.02;
     let card = if p.mode == Mode::Edit {
         EDIT_CARD
     } else {
@@ -644,11 +797,31 @@ fn popit_layout(
                 let t = (i as f32 + 1.) / CORD_DOTS as f32;
                 // From the card's bottom edge to Sackboy's chest: leaves downward, bows right,
                 // then turns left onto the body (MEASURED path, create and play frames).
-                let p0 = Vec2::new(left + w / 2. + 21. * scale, top + h);
-                let p3 = Vec2::new(cx - 14. * scale, head.y + 52. * scale);
+                let (p0, p3) = if in_page {
+                    // Page view: from the panel's left edge to Sackboy's hips.
+                    (
+                        Vec2::new(PANEL[0] * scale, (PANEL[1] + 0.57 * PANEL[3]) * scale),
+                        head.lerp(feet, 0.72) - Vec2::X * 0.1 * (feet.y - head.y),
+                    )
+                } else {
+                    (
+                        Vec2::new(left + w / 2. + 21. * scale, top + h),
+                        Vec2::new(cx - 14. * scale, head.y + 52. * scale),
+                    )
+                };
                 let span = p3.y - p0.y;
-                let p1 = p0 + Vec2::new(14. * scale, span * 0.45);
-                let p2 = p3 + Vec2::new(46. * scale, -span * 0.18);
+                let (p1, p2) = if in_page {
+                    let d = p3 - p0;
+                    (
+                        p0 + d * 0.35 + Vec2::Y * 12. * scale,
+                        p0 + d * 0.75 - Vec2::Y * 6. * scale,
+                    )
+                } else {
+                    (
+                        p0 + Vec2::new(14. * scale, span * 0.45),
+                        p3 + Vec2::new(46. * scale, -span * 0.18),
+                    )
+                };
                 let u = 1. - t;
                 let pt =
                     u * u * u * p0 + 3. * u * u * t * p1 + 3. * u * t * t * p2 + t * t * t * p3;
@@ -657,6 +830,8 @@ fn popit_layout(
                 // The cord grows out of the card with the blend.
                 if t > e {
                     *vis = Visibility::Hidden;
+                } else if in_page {
+                    *vis = Visibility::Inherited;
                 }
             }
         }
@@ -699,6 +874,220 @@ fn popit_layout(
             };
         }
     }
+}
+
+/// The inventory page: panel, title, section headers, icon grid, counter, tooltip pill and
+/// the USE!/More! prompts (rebuilt whenever the page or the focused cell changes).
+fn popit_page_ui(
+    mut commands: Commands,
+    mut p: ResMut<Popit>,
+    assets: Res<PopitAssets>,
+    mut images: ResMut<Assets<Image>>,
+    windows: Query<&Window>,
+    old: Query<Entity, With<PageNode>>,
+) {
+    let want = p
+        .page
+        .filter(|_| p.page_blend > 0.5)
+        .map(|id| (id, p.cell.0, p.cell.1));
+    if want == p.built {
+        return;
+    }
+    p.built = want;
+    for e in &old {
+        commands.entity(e).despawn();
+    }
+    let (Some((id, row, col)), Ok(window)) = (want, windows.single()) else {
+        return;
+    };
+    let Some(page) = assets.pages.iter().find(|pg| pg.id == id) else {
+        return;
+    };
+    let scale = window.height() / FRAME_H;
+    let node = |l: f32, t: f32, w: f32, h: f32| Node {
+        position_type: PositionType::Absolute,
+        left: Val::Px(l * scale),
+        top: Val::Px(t * scale),
+        width: Val::Px(w * scale),
+        height: Val::Px(h * scale),
+        ..default()
+    };
+    let text = |commands: &mut Commands, s: &str, x: f32, y: f32, size: f32, z: i32| {
+        commands.spawn((
+            PageNode,
+            Text::new(s),
+            TextFont {
+                font: bevy::text::FontSource::SansSerif,
+                weight: bevy::text::FontWeight::BOLD,
+                ..TextFont::from_font_size(size * scale)
+            },
+            TextColor(Color::WHITE),
+            Node {
+                position_type: PositionType::Absolute,
+                left: Val::Px(x * scale),
+                top: Val::Px((y - size * 0.62) * scale),
+                ..default()
+            },
+            GlobalZIndex(z),
+        ));
+    };
+    let [px, py, pw, ph] = PANEL;
+    let panel = images.add(card_image_at([pw, ph], [0., 0.57 * ph], 18.));
+    commands.spawn((
+        PageNode,
+        node(px, py, pw, ph),
+        ImageNode::new(panel),
+        GlobalZIndex(40),
+    ));
+    text(&mut commands, page.title, px + 18., 84., 30., 42);
+    let line = |commands: &mut Commands, y: f32| {
+        commands.spawn((
+            PageNode,
+            node(px + 18., y, pw - 36., 1.5),
+            BackgroundColor(Color::srgba(0.85, 0.72, 0.15, 0.8)),
+            GlobalZIndex(41),
+        ));
+    };
+    // Functions row: the page's own main-menu icon on the teal tile (focus at the first cell).
+    text(&mut commands, "Functions", px + 18., 133., 19., 42);
+    line(&mut commands, 148.);
+    let main = assets.items.iter().find(|i| i.id == id);
+    let focus_fn = row == 0 && col == 0;
+    let tile = |commands: &mut Commands, cx: f32, cy: f32, size: f32| {
+        commands.spawn((
+            PageNode,
+            Node {
+                border_radius: BorderRadius::all(Val::Px(size * 0.3 * scale)),
+                ..node(cx - size / 2., cy - size / 2., size, size)
+            },
+            BackgroundColor(TEAL),
+            GlobalZIndex(41),
+        ));
+    };
+    let mut focus_at = (GRID_X0, 180.);
+    let mut focus_title = main.map_or_else(String::new, |i| i.label.clone());
+    if focus_fn {
+        tile(&mut commands, GRID_X0, 180., 64.);
+    }
+    if let Some(img) = main.and_then(|i| i.frames.last().cloned()) {
+        let sz = if focus_fn { 52. } else { 38. };
+        commands.spawn((
+            PageNode,
+            node(GRID_X0 - sz / 2., 180. - sz / 2., sz, sz),
+            ImageNode::new(images.add(img)),
+            GlobalZIndex(42),
+        ));
+    }
+    if let Some(msg) = page.message {
+        let mut y = 392.;
+        for l in wrap(msg, 22) {
+            text(&mut commands, &l, px + 56., y, 21., 42);
+            y += 24.;
+        }
+    }
+    // Grid: section headers and 6-column icon rows below the functions row.
+    let mut y = 220.;
+    let mut idx = 0usize;
+    for (name, items) in &page.sections {
+        if y > 600. {
+            break;
+        }
+        text(&mut commands, name, px + 18., y, 19., 42);
+        line(&mut commands, y + 16.);
+        let rows_n = items.len().div_ceil(GRID_COLS);
+        let top = y + 45.;
+        for (k, (title, img)) in items.iter().enumerate() {
+            let (r, c) = (k / GRID_COLS, k % GRID_COLS);
+            let (cx, cy) = (GRID_X0 + c as f32 * GRID_PITCH, top + r as f32 * GRID_PITCH);
+            if cy > 628. {
+                idx += 1;
+                continue;
+            }
+            // Cell (0,0) is the functions tile; grid cells are numbered from row 1.
+            let focused = !focus_fn && idx + GRID_COLS == row * GRID_COLS + col;
+            let sz = if focused { 52. } else { 38. };
+            if focused {
+                tile(&mut commands, cx, cy, 64.);
+                focus_at = (cx, cy);
+                focus_title = title.clone();
+            }
+            commands.spawn((
+                PageNode,
+                node(cx - sz / 2., cy - sz / 2., sz, sz),
+                ImageNode::new(images.add(img.clone())),
+                GlobalZIndex(42),
+            ));
+            idx += 1;
+        }
+        y = top + rows_n as f32 * GRID_PITCH + 6.;
+    }
+    text(&mut commands, "1/1", px + pw / 2. - 14., 646., 20., 42);
+    // Tooltip pill left of the focus tile, tail pointing right; USE!/More! hints around it.
+    let chars = focus_title.chars().count().max(4) as f32;
+    let (lw, lh) = (chars * 13. - 2., PILL_H);
+    let (lx, ly) = (focus_at.0 - 32. - 8. - lw, focus_at.1 - 8. - lh / 2.);
+    commands.spawn((
+        PageNode,
+        Node {
+            border_radius: BorderRadius::all(Val::Px(lh / 2. * scale)),
+            ..node(lx, ly, lw, lh)
+        },
+        BackgroundColor(PILL),
+        GlobalZIndex(43),
+    ));
+    text(
+        &mut commands,
+        &focus_title,
+        lx + 10.,
+        ly + lh / 2. + 1.,
+        19.,
+        44,
+    );
+    let cx = lx + lw / 2.;
+    for (label, dx, dy, glyph) in [("USE!", -61., -62., "X"), ("More!", -51., 55., "[]")] {
+        let (hx, hy) = (cx + dx, ly + lh / 2. + dy);
+        commands.spawn((
+            PageNode,
+            Node {
+                border_radius: BorderRadius::all(Val::Px(18. * scale)),
+                ..node(hx - 62., hy - 20., 124., 36.)
+            },
+            BackgroundColor(Color::srgba(0.66, 0.6, 0.15, 0.9)),
+            GlobalZIndex(43),
+        ));
+        text(&mut commands, label, hx - 50., hy - 1., 24., 44);
+        text(&mut commands, glyph, hx + 34., hy - 1., 20., 44);
+    }
+}
+
+/// "COSTUME_FACE_GLASSES" -> "Face Glasses" (untranslated category tags).
+fn humanize(tag: &str) -> String {
+    tag.trim_start_matches("COSTUME_")
+        .split('_')
+        .map(|w| {
+            let mut c = w.chars();
+            c.next().map_or_else(String::new, |f| {
+                f.to_uppercase().collect::<String>() + &c.as_str().to_lowercase()
+            })
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn wrap(s: &str, width: usize) -> Vec<String> {
+    let mut out = vec![String::new()];
+    for w in s.split_whitespace() {
+        let last = out.last_mut().expect("never empty");
+        if !last.is_empty() && last.len() + 1 + w.len() > width {
+            out.push(w.to_owned());
+        } else {
+            if !last.is_empty() {
+                last.push(' ');
+            }
+            last.push_str(w);
+        }
+    }
+    out
 }
 
 fn label_font() -> TextFont {
