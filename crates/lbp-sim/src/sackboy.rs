@@ -11,9 +11,22 @@
 //! yet: the crouch/landing dips (about 35 units for 1-2 and 8 ticks; visual only), slopes,
 //! grabbing, swimming, terminal velocity, the 10 u/tick plateau seen once after landing.
 
-/// Gravity per tick² (2,424 u/s²). Rookie descent fit 2.693, Moon full jump 2.697 (0.15%
-/// apart; the Moon apex 260.1 and 30-tick air time match either).
-pub const GRAVITY_TICK: f32 = 2.693;
+/// Gravity per tick² (2,430 u/s²). Moon per-tick reads (d230): every airborne step is
+/// 2.70 +-0.01; Ghidra (2026-10-11) finds the same -2.7 at the normal gravity setting.
+/// Earlier fits gave 2.693 (Rookie) and 2.697 (Moon mean).
+pub const GRAVITY_TICK: f32 = 2.7;
+/// Horizontal speed kept per airborne tick (29.34 -> 29.23 over 15 ticks in d230, about
+/// -0.009 per tick at 29; Ghidra shows a matching unexplained 0.9996). Releasing the stick
+/// in the air does not slow Sackboy; only this tiny drag acts.
+pub const AIR_DRAG: f32 = 0.9997;
+/// Y offset from his resting position, per tick after touch-down: the legs compress to a
+/// hard stop 35 below rest (reached by every landing seen: jumps, a 18.9/tick spawn drop,
+/// a 29/tick fall) and spring back. Moon d230 (airrel-1/airrev-1), tick 0 = first tick
+/// with floor contact. Position only; the walking physics above are unaffected.
+pub const LANDING_DIP: [f32; 15] = [
+    -26.19, -35.0, -35.0, -31.75, -25.28, -15.57, -8.57, -4.27, -2.53, -1.48, -0.86, -0.49, -0.26,
+    -0.13, -0.05,
+];
 /// Ground acceleration and deceleration per tick² (linear: 3, 6, ... 30).
 pub const WALK_ACCEL: f32 = 3.0;
 /// Ground top speed per tick (900 u/s), reached in 10 ticks.
@@ -67,9 +80,16 @@ pub struct Sackboy {
     jump_tick: Option<usize>,
     was_grounded: bool,
     prev: Input,
+    /// Ticks since touch-down while the landing dip plays.
+    dip_tick: Option<usize>,
 }
 
 impl Sackboy {
+    /// Y offset of his position from rest this tick (0 outside a landing).
+    pub fn landing_dip(&self) -> f32 {
+        self.dip_tick.map_or(0., |t| LANDING_DIP[t])
+    }
+
     pub fn at_lane(z: f32) -> Self {
         Self {
             z,
@@ -128,6 +148,15 @@ impl Sackboy {
             if step != 0. && (contact.lane_has_floor)(self.lane + step) {
                 self.lane += step;
             }
+        }
+        // Air drag and the landing dip.
+        if !grounded {
+            self.vx *= AIR_DRAG;
+            self.dip_tick = None;
+        } else if !self.was_grounded {
+            self.dip_tick = Some(0);
+        } else if let Some(t) = self.dip_tick {
+            self.dip_tick = (t + 1 < LANDING_DIP.len()).then_some(t + 1);
         }
         let dz = approach(self.z, self.lane, LANE_SPEED) - self.z;
         self.z += dz;
@@ -228,7 +257,7 @@ mod tests {
         );
         let speed = |t: usize| path[t][0] - path[t - 1][0];
         assert!(
-            (speed(4) - 4.8).abs() < 1e-4 && speed(19) == 22.5,
+            (speed(4) - 4.8).abs() < 0.01 && (speed(19) - 22.5).abs() < 0.05,
             "{path:?}"
         );
         // Running jump: top speed 30 kept in the air.
@@ -240,7 +269,45 @@ mod tests {
             },
             30,
         );
-        assert_eq!(path[25][0] - path[24][0], 30.);
+        assert!((path[25][0] - path[24][0] - 30.).abs() < 0.2);
+    }
+
+    #[test]
+    fn air_drag_is_tiny_and_landing_plays_the_measured_dip() {
+        // Running jump, stick released in the air: speed barely changes (d230: -0.009/tick).
+        let path = run(
+            |t| Input {
+                x: if t < 22 { 1. } else { 0. },
+                jump: (16..=24).contains(&t),
+                ..Default::default()
+            },
+            40,
+        );
+        let speed = |t: usize| path[t][0] - path[t - 1][0];
+        assert!(
+            (speed(17) - speed(29)).abs() < 0.2 && speed(29) > 29.,
+            "{}",
+            speed(29)
+        );
+        // The dip starts on the first grounded tick and ends at rest.
+        let mut s = Sackboy::at_lane(0.);
+        let lanes = |_: f32| true;
+        let air = Contact {
+            grounded: false,
+            lane_has_floor: &lanes,
+        };
+        let floor = Contact {
+            grounded: true,
+            lane_has_floor: &lanes,
+        };
+        s.step(Input::default(), &air);
+        assert_eq!(s.landing_dip(), 0.);
+        s.step(Input::default(), &floor);
+        assert_eq!(s.landing_dip(), LANDING_DIP[0]);
+        for _ in 0..LANDING_DIP.len() {
+            s.step(Input::default(), &floor);
+        }
+        assert_eq!(s.landing_dip(), 0.);
     }
 
     #[test]

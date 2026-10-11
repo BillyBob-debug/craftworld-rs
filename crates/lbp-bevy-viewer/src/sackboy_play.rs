@@ -500,9 +500,11 @@ fn show_sackboy(
         } else if vx < -0.5 {
             f.facing = FACE_LEFT;
         }
-        let feet = display
-            .0
-            .transform_point3(Vec3::new(p[0], p[1] - FLOOR_REST, slab.z));
+        let feet = display.0.transform_point3(Vec3::new(
+            p[0],
+            p[1] - FLOOR_REST + body.controller.landing_dip(),
+            slab.z,
+        ));
         *t = Transform::from_matrix(
             Mat4::from_translation(feet) * Mat4::from_rotation_y(f.facing) * f.upright,
         );
