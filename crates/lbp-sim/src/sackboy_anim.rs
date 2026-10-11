@@ -7,8 +7,11 @@
 //! `local-analysis/results/2026-10-11-ghidra-sackboy-anim-rules.md`, function addresses on
 //! each constant): continuous walk weights over stand with one shared 13-tick phase, facing
 //! eased 0.4 per tick, the jump frame driven by vy, the land as the jump clip's tail, 5-tick
-//! stop/turn ramps, 3-tick lane ramps, the idle LCG chains and the blink overlay. What the
-//! pass did not resolve is marked INFERRED or OPEN where it is used.
+//! stop/turn ramps, 3-tick lane ramps, the idle LCG chains and the blink overlay. A second
+//! pass (`local-analysis/results/2026-10-11-ghidra-sackboy-anim-open-items.md`) settled the
+//! idle roll range, the layer order, "idle allowed", the seed, the first blink, the landing
+//! exponent and the walk_z sign. What neither pass resolved is marked INFERRED or OPEN where
+//! it is used.
 //!
 //! The output is a stack of [`Layer`]s applied in order, as the game does onto its final
 //! layer: the first sets the pose, each [`Blend::Lerp`] layer then lerps the pose toward its
@@ -29,15 +32,18 @@ pub enum ClipId {
     /// 0x300 / 0x304.
     WalkFastStop,
     WalkFastTurn,
-    /// 0x308: lane change with dz = lane - z > 0 (toward the camera in our z; which game
-    /// sign that is stays INFERRED).
+    /// 0x308: lane change with dz > 0 (FOUND, 0x21685c..0x216b74; here dz = lane - z, a
+    /// step toward the camera in our z. That the game's +z also points at the camera is
+    /// INFERRED from its camera eye at +1218 z).
     WalkZForwards,
     /// 0x30c: dz < 0.
     WalkZBackwards,
     /// 0x310 / 0x314.
     JumpStand,
     JumpWalk,
-    /// 0x36c: an additive spring pose in the game. Not driven yet (its input is OPEN).
+    /// 0x36c: an additive spring pose in the game, driven on the ground path by shape
+    /// overlap depth `max over contacts of min(depth / 350, 1)` (FOUND, 0x6c56c). Not
+    /// driven here: we model no body overlap.
     StretchCrouch,
     /// 0x408: additive eyelid overlay.
     Blink,
@@ -265,27 +271,39 @@ pub const JUMP_FALL_VY: f32 = 30.26;
 pub const JUMP_APEX_FRAME: f32 = 8.;
 pub const JUMP_FALL_FRAMES: f32 = 6.;
 /// Landing (FOUND): the jump clip plays on from `int((airFrame + 15) * 0.5)` at one frame
-/// per tick, weight times `clamp(1 - (f - 15) / (n - 15))^k`. k is INFERRED as 1.
+/// per tick, weight times `clamp(1 - (f - 15) / (n - 15))^k` with k = 1 (FOUND: the fade is
+/// Perlin's bias(t, 0.5) = t, 0x20a7fc..0x20a888).
 pub const LAND_FADE_FROM: f32 = 15.;
 pub const LAND_FADE_POW: f32 = 1.;
 /// Ticks between blinks: `30 + rand(70)` (FOUND, 0x2040a0).
 pub const BLINK_GAP: u32 = 30;
 pub const BLINK_GAP_RAND: u32 = 70;
+/// The LCG state the anim object's constructor stores (FOUND 0x2a at 0x1ff64c; shared by
+/// the idle roll and the blink gap).
+pub const LCG_SEED: u32 = 42;
+/// The idle roll's range: `mulli 0xfa` gives 0..249 (FOUND, 0x20e0ac..0x20e288).
+pub const IDLE_ROLL: u32 = 250;
+/// The sit loop's stand-up roll: `mulli 0x3e8`, 0..999, stands up when > 950 (FOUND,
+/// 0x20e044).
+pub const SIT_ROLL: u32 = 1000;
+pub const SIT_STAND_UP_ABOVE: u32 = 950;
+/// "Idle allowed" (0x1fb4a8) needs the no-input counter 0x75c above this many ticks
+/// (FOUND, 0x1fb51c..0x1fb59c): about 10 s.
+pub const IDLE_AFTER_TICKS: u32 = 300;
 
 /// The game's idle LCG step (FOUND, 0x20dee0): `seed * 0x2e90edd + 0xe908fc1`, 30 bits.
 pub fn lcg_next(seed: u32) -> u32 {
     seed.wrapping_mul(0x2e90edd).wrapping_add(0xe908fc1) & 0x3fff_ffff
 }
 
-/// `rand(n)` from a seed: `((seed >> 16) * n) >> 14`, 0..n-1. The rules note prints the
-/// idle roll's multiplier as 250 but its range as 0..999; this uses n = 1000 there so the
-/// stated thresholds keep their stated odds (OPEN).
+/// `rand(n)` from a seed: `((seed >> 16) * n) >> 14`, 0..n-1 (FOUND).
 pub fn lcg_rand(seed: u32, n: u32) -> u32 {
     ((seed >> 16) * n) >> 14
 }
 
-/// The idle the stand-cycle roll picks (FOUND table, 0x20dee0): 0..2 sit, 3..4 yawn, 5..6
-/// bored, 7..9 fidget, 10 shift_feet, otherwise one more stand cycle.
+/// The idle the stand-cycle roll (0..249) picks (FOUND table, 0x20dee0): 0..2 sit, 3..4
+/// yawn, 5..6 bored, 7..9 fidget, 10 shift_feet, otherwise one more stand cycle. Odds per
+/// roll: 3, 2, 2, 3 and 1 in 250.
 pub fn idle_for_roll(r: u32) -> ClipId {
     match r {
         0..=2 => ClipId::StandIIdleSit,
@@ -359,6 +377,8 @@ pub struct SackboyAnim {
     idle: ClipId,
     idle_frame: u32,
     idle_loops: u32,
+    /// Ticks with no input on the ground (the game's 0x75c).
+    quiet_ticks: u32,
     seed: u32,
     blink: Option<u32>,
     next_blink: u64,
@@ -371,7 +391,8 @@ impl Default for SackboyAnim {
 }
 
 impl SackboyAnim {
-    /// Standing, facing the camera. The starting seed and first blink time are INFERRED.
+    /// Standing, facing the camera, seed 42, first blink on the first tick (FOUND: the ctor
+    /// zeroes the blink start 0x750 and the tick counter 0x754, 0x1f9984/0x1f9988).
     pub fn new() -> Self {
         Self {
             now: 0,
@@ -390,9 +411,10 @@ impl SackboyAnim {
             idle: ClipId::Stand,
             idle_frame: 0,
             idle_loops: 0,
-            seed: 1,
+            quiet_ticks: 0,
+            seed: LCG_SEED,
             blink: None,
-            next_blink: u64::from(BLINK_GAP),
+            next_blink: 0,
         }
     }
 
@@ -412,13 +434,20 @@ impl SackboyAnim {
         self.now += 1;
         let airborne = !grounded || s.jump_tick().is_some();
         let vx = s.vx;
-        let stick = s.prev_input().x;
+        let input = s.prev_input();
+        let stick = input.x;
         let [w_slow, w_med, w_fast] = walk_weights(vx);
         let mut layers = Vec::with_capacity(8);
 
         // Base: stand or the idle chain (hard switches at clip ends, FOUND).
-        // INFERRED: idle is allowed (0x1fb4a8) when grounded, still, stick centred and in lane.
-        let idle_ok = !airborne && vx == 0. && stick == 0. && (s.lane - s.z).abs() < 1.;
+        // Idle allowed (0x1fb4a8, FOUND): creature state in {0, 1, 7, 10} (taken as
+        // grounded: INFERRED), no mood level above 0 (moods are not modelled, so always
+        // true here) and the no-input counter 0x75c > 300. The counter (0x20d3a0) counts
+        // ticks with no pad input in those states and resets otherwise; "no input" for the
+        // 0x7feff mask is taken as stick 0 and no jump/lane button (INFERRED).
+        let quiet = !airborne && stick == 0. && !input.jump && !input.back && !input.front;
+        self.quiet_ticks = if quiet { self.quiet_ticks + 1 } else { 0 };
+        let idle_ok = self.quiet_ticks > IDLE_AFTER_TICKS;
         layers.push(Layer {
             clip: self.idle,
             frame: self.idle_frame as f32,
@@ -456,41 +485,8 @@ impl SackboyAnim {
             }
         }
 
-        // Lane change: one clip per slide (re-armed once the slide is within the trigger;
-        // INFERRED), frame i + 3, 3-frame ramps (FOUND).
-        let dz = s.lane - s.z;
-        if dz.abs() < LANE_TRIGGER {
-            self.lane_armed = true;
-        } else if self.lane_armed && self.lane.is_none() && !airborne {
-            self.lane_armed = false;
-            self.lane = Some(Shot {
-                clip: if dz > 0. {
-                    ClipId::WalkZForwards
-                } else {
-                    ClipId::WalkZBackwards
-                },
-                i: 0,
-                mirror: false,
-            });
-        }
-        let lane_active = self.lane.is_some();
-        if let Some(mut l) = self.lane.take() {
-            let n = l.clip.frames();
-            let end = u32::from(n) - LANE_SKIP;
-            let weight = ((l.i + 1) as f32 / LANE_RAMP).clamp(0., 1.)
-                * ((end - l.i) as f32 / LANE_RAMP).clamp(0., 1.);
-            layers.push(Layer {
-                clip: l.clip,
-                frame: (l.i + LANE_SKIP) as f32,
-                weight,
-                mirror: false,
-                blend: Blend::Lerp,
-            });
-            l.i += 1;
-            if l.i < end {
-                self.lane = Some(l);
-            }
-        }
+        // Layer order after the walk (FOUND, dispatcher 0x20e28c): stop -> turn -> jump and
+        // landing tail -> lane.
 
         // walk_fast_stop / walk_fast_turn (FOUND triggers; INFERRED: cut short in the air).
         if airborne {
@@ -593,10 +589,49 @@ impl SackboyAnim {
             }
         }
 
-        // TODO(D232): stretch_crouch is an additive spring (FOUND mechanics, 0x2011d4) whose
-        // input 0x6c56c is OPEN; it is not layered until that input is traced.
+        // Lane change, after the jump (FOUND order): one clip per slide (re-armed once the
+        // slide is within the trigger; INFERRED), frame i + 3, 3-frame ramps (FOUND).
+        let dz = s.lane - s.z;
+        if dz.abs() < LANE_TRIGGER {
+            self.lane_armed = true;
+        } else if self.lane_armed && self.lane.is_none() && !airborne {
+            self.lane_armed = false;
+            self.lane = Some(Shot {
+                clip: if dz > 0. {
+                    ClipId::WalkZForwards
+                } else {
+                    ClipId::WalkZBackwards
+                },
+                i: 0,
+                mirror: false,
+            });
+        }
+        let lane_active = self.lane.is_some();
+        if let Some(mut l) = self.lane.take() {
+            let n = l.clip.frames();
+            let end = u32::from(n) - LANE_SKIP;
+            let weight = ((l.i + 1) as f32 / LANE_RAMP).clamp(0., 1.)
+                * ((end - l.i) as f32 / LANE_RAMP).clamp(0., 1.);
+            layers.push(Layer {
+                clip: l.clip,
+                frame: (l.i + LANE_SKIP) as f32,
+                weight,
+                mirror: false,
+                blend: Blend::Lerp,
+            });
+            l.i += 1;
+            if l.i < end {
+                self.lane = Some(l);
+            }
+        }
 
-        // Blink: additive frame i minus frame 0, weight 1, every 30 + rand(70) ticks (FOUND).
+        // stretch_crouch is an additive spring (FOUND, 0x2011d4) whose input 0x6c56c is shape
+        // overlap depth, max(min(depth / 350, 1)), on the ground path only (FOUND). We model
+        // no body overlap, so it stays at rest and is not layered.
+
+        // Blink: additive frame i minus frame 0, weight 1, first on tick 0, then every
+        // 30 + rand(70) ticks (FOUND). Its slot in the stack is INFERRED (last): 0x2040a0
+        // is reached through a pointer, not from the dispatcher.
         if self.blink.is_none() && self.now >= self.next_blink {
             self.blink = Some(0);
         }
@@ -653,11 +688,13 @@ impl SackboyAnim {
         self.idle_frame = 0;
         let current = self.idle;
         self.idle = match current {
-            ClipId::Stand if idle_ok => idle_for_roll(self.rand(1000)),
+            ClipId::Stand if idle_ok => idle_for_roll(self.rand(IDLE_ROLL)),
             ClipId::StandIIdleSit => ClipId::IdleSit,
             // Stands up 5 % of the loops, or when idle is no longer allowed.
             ClipId::IdleSit => {
-                if !idle_ok || self.rand(1000) > 950 {
+                if !idle_ok || self.rand(SIT_ROLL) > SIT_STAND_UP_ABOVE {
+                    // Standing up resets the no-input counter (FOUND, 0x20e05c).
+                    self.quiet_ticks = 0;
                     ClipId::IdleSitIStand
                 } else {
                     ClipId::IdleSit
@@ -762,8 +799,10 @@ mod tests {
             let want: Vec<f32> = (0..13).chain(0..1).map(|f| f as f32).collect();
             assert_eq!(frames, want, "vx {vx}");
         }
-        // At 15 u/tick: stand, slow 1, medium 1, fast 0.1667; all at the same frame.
-        let f = SackboyAnim::new().tick(&moving(15.), true);
+        // At 15 u/tick: stand, slow 1, medium 1, fast 0.1667; all at the same frame (the
+        // tick-0 blink, additive, dropped).
+        let mut f = SackboyAnim::new().tick(&moving(15.), true);
+        f.layers.retain(|l| l.blend == Blend::Lerp);
         let clips: Vec<ClipId> = f.layers.iter().map(|l| l.clip).collect();
         assert_eq!(
             clips,
@@ -960,6 +999,55 @@ mod tests {
         assert!(lcg_next(u32::MAX) < 1 << 30);
         assert_eq!(lcg_rand(0x3fff_ffff, 1000), 999);
         assert_eq!(lcg_rand(0, 1000), 0);
+        // The idle roll is 0..249 (mulli 0xfa).
+        assert_eq!(lcg_rand(0x3fff_ffff, IDLE_ROLL), 249);
+        // Over the LCG from seed 42, the five idles take about 11 rolls in 250.
+        let mut seed = LCG_SEED;
+        let n = 100_000;
+        let idles = (0..n)
+            .filter(|_| {
+                seed = lcg_next(seed);
+                idle_for_roll(lcg_rand(seed, IDLE_ROLL)) != ClipId::Stand
+            })
+            .count();
+        let rate = idles as f32 / n as f32;
+        assert!((rate - 11. / 250.).abs() < 0.005, "{rate}");
+    }
+
+    #[test]
+    fn idle_waits_for_300_quiet_ticks() {
+        // Standing with no input: stand only until the counter passes 300, then the chain.
+        let mut a = SackboyAnim::new();
+        let still = moving(0.);
+        let first_idle = (0..5_000u32)
+            .find(|_| a.tick(&still, true).layers[0].clip != ClipId::Stand)
+            .unwrap();
+        assert!(first_idle > IDLE_AFTER_TICKS, "{first_idle}");
+        // Any input (here the stick, at zero speed) resets the counter: no idle ever starts.
+        let mut a = SackboyAnim::new();
+        let pushing = holding(0., 1.);
+        for t in 0..5_000u32 {
+            let s = if t % 250 == 0 { &pushing } else { &still };
+            assert_eq!(a.tick(s, true).layers[0].clip, ClipId::Stand, "tick {t}");
+        }
+    }
+
+    #[test]
+    fn layers_run_walk_stop_jump_then_lane() {
+        // Start a lane change toward +z (dz > 0: walk_z_forwards), then fall while it plays.
+        let mut a = SackboyAnim::new();
+        let mut s = moving(0.);
+        s.lane = 200.;
+        let f = a.tick(&s, true);
+        assert!(layer(&f, ClipId::WalkZForwards).is_some());
+        s.vy = -25.;
+        s.vx = 10.;
+        let f = a.tick(&s, false);
+        let at = |c: ClipId| f.layers.iter().position(|l| l.clip == c).unwrap();
+        assert!(at(ClipId::Stand) < at(ClipId::WalkSlow));
+        assert!(at(ClipId::WalkSlow) < at(ClipId::JumpStand));
+        assert!(at(ClipId::JumpStand) < at(ClipId::WalkZForwards));
+        assert!(at(ClipId::WalkZForwards) < at(ClipId::Blink));
     }
 
     #[test]
@@ -994,17 +1082,18 @@ mod tests {
             assert!(ok, "{:?} -> {:?}", w[0], w[1]);
         }
         assert!(bases.len() > 3, "{bases:?}");
-        // First blink at tick 30; the next starts 30 + rand(70) ticks after the last
+        // First blink on the first tick; the next starts 30 + rand(70) ticks after the last
         // blink frame (12 ticks after its start).
-        assert_eq!(blinks[0], 29);
+        assert_eq!(blinks[0], 0);
         for w in blinks.windows(2) {
             let gap = w[1] - w[0];
             assert!((42..=111).contains(&gap), "{gap}");
         }
-        // Walking stops the chain at the next stand end.
+        // Walking with the stick held never starts the chain.
         let mut a = SackboyAnim::new();
-        for _ in 0..200 {
-            let f = a.tick(&moving(30.), true);
+        let run = holding(30., 1.);
+        for _ in 0..1_000 {
+            let f = a.tick(&run, true);
             assert_eq!(f.layers[0].clip, ClipId::Stand);
         }
     }

@@ -116,4 +116,5 @@ wall-art side panels, in-use camera match RPCS3; FOV hfov 88.3 deg; menu uses Pl
 Script VM 512/513; threads (D171); viewer --level-scripts (D172). STATUS.md D160-D175.
 Latest (2026-10-11): D231 play mode draws Sackboy (0000043f) with his own stand/walk/lane/jump/land
 clips; D232 blends them by the EBOOT layer rules with eased facing (docs/d232-sackboy-anim-rules.md).
-Next: stretch_crouch spring input, bone mirror map, emotes/head look.
+D232 pass 2: idle roll 0..249, lane after jump, idle after 300 quiet ticks, seed 42.
+Next: camera lead (live memory diff), emotes/head look.

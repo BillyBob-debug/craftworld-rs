@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-11 — D232 open items from Ghidra pass 2
+
+Idle roll 0..249, lane layered after jump, idle only after 300 quiet ticks, seed 42 and a
+tick-0 blink (all FOUND); landing k = 1 and walk_z sign confirmed. Crouch input, emotes and
+head look traced, not implemented. docs/d232-sackboy-anim-rules.md. +0 / +0.
+
 ## 2026-10-11 — D232 QA fixes: Sackboy facing, mirror, landing, blank spawn
 
 Clip root rotation (the facing channel, +90 in walk/idle clips) is held at bind so the

@@ -34,28 +34,65 @@ INFERRED = our choice; OPEN = not traced, not used or stubbed.
 | Facing | target `clamp(vx/30) * 90 deg`; `yaw += 0.4 * (target - yaw)` per tick; lane change +-72 deg (sign = side already faced, INFERRED; 0x1128 scale taken as 1) | 0x2002ac, 0x201cc0 |
 | Stop | stick \|x\| < 0.1 with w_fast > 0.5: walk_fast_stop 21 frames, weight min(i/5, (n-i)/5); mirrored if vx < 0 | 0x20afc0 |
 | Turn | stick opposite to vx, \|x\| > 0.9, w_fast > 0.5: walk_fast_turn 19 frames, same ramps; end resets walk phase and idle frame. Input-mask test (0x1018) OPEN, treated as passing | 0x20ad14 |
-| Lane | \|lane - z\| >= 100: walk_z_forwards if dz > 0 else backwards; frame i+3, weight clamp((i+1)/3) * clamp((n-3-i)/3), 10 ticks. One clip per slide (INFERRED); the dot test is OPEN | 0x216b0c, 0x201418 |
+| Lane | \|lane - z\| >= 100: walk_z_forwards if dz > 0 else backwards (sign FOUND 0x21685c..0x216b74; game +z toward the camera INFERRED); frame i+3, weight clamp((i+1)/3) * clamp((n-3-i)/3), 10 ticks. One clip per slide (INFERRED); the dot test is OPEN | 0x216b0c, 0x201418 |
 | Jump weight | clamp(peak/10), peak = \|vy\| follower easing 0.125 per tick (rises at once: INFERRED), times clamp(airTicks / (1 + 4\|vx\|/20)); also used for an off-ledge fall (INFERRED) | 0x20a5f4 |
 | Jump clip | lerp(jump_stand, jump_walk, clamp(\|vx\|*0.045)) as two sequential lerps; jump_walk mirrored if vx < 0 | 0x209fc8 |
 | Jump frame | take-off ticks 1..5: frame = tick; rising 8(1 - clamp(vy/73)); falling 8 + 6 clamp(-vy/30.26) | 0x20a5f4 |
-| Landing | jump clip plays on from int((airFrame + 15) / 2), 1 per tick to 30, weight x clamp(1 - (f-15)/16)^k, k = 1 INFERRED. No separate land clip; stretch_crouch is no longer a hard-cut squash | 0x20a5f4 |
-| Idle chain | at each stand end, if idle allowed: LCG `seed*0x2e90edd + 0xe908fc1 & 0x3fffffff`, roll 0..999: 0-2 sit, 3-4 yawn, 5-6 bored, 7-9 fidget, 10 shift_feet, else stand. Sit stands up 5 % of loops or when idle stops; bored after > 10 loops or when idle stops. "Idle allowed" (0x1fb4a8) = grounded, vx 0, stick 0, in lane (INFERRED); seed 1 (INFERRED) | 0x20dee0 |
-| Blink | additive (frame i minus frame 0), weight 1, 13 frames, next at +30 + rand(70) ticks; first at tick 30 (INFERRED) | 0x2040a0 |
+| Landing | jump clip plays on from int((airFrame + 15) / 2), 1 per tick to 30, weight x clamp(1 - (f-15)/16)^k, k = 1 (FOUND pass 2: bias(t, 0.5) = t, 0x20a7fc..0x20a888). No separate land clip; stretch_crouch is no longer a hard-cut squash | 0x20a5f4 |
+| Idle chain | at each stand end, if idle allowed: LCG `seed*0x2e90edd + 0xe908fc1 & 0x3fffffff`, roll 0..249 (`mulli 0xfa`, pass 2, 0x20e0ac..0x20e288): 0-2 sit, 3-4 yawn, 5-6 bored, 7-9 fidget, 10 shift_feet, else stand (odds 3/2/2/3/1 in 250). Sit stands up when a 0..999 roll > 950 (0x20e044) or when idle stops, and resets the no-input counter (0x20e05c); bored after > 10 loops or when idle stops. Seed 42 (ctor 0x1ff5d4 stores 0x2a at 0x1ff64c) | 0x20dee0 |
+| Idle allowed | creature state +0xc14 in {0, 1, 7, 10}, no mood level 0x894[0..3] > 0, and the no-input counter 0x75c > 300 (about 10 s); forced idle flag 0x1704 short-cuts it. The counter (0x20d3a0..0x20d3d8) +1 per tick with no input (0x1fd3dc, mask 0x7feff) in those states, else 0. Here: state = grounded, no input = stick 0 and no jump/lane button (both INFERRED); moods and the forced flag are not modelled | 0x1fb4a8 |
+| Blink | additive (frame i minus frame 0), weight 1, 13 frames, next at +30 + rand(70) ticks; first at tick 0 (ctor zeroes 0x750/0x754 at 0x1f9984/0x1f9988) | 0x2040a0 |
 
-Order of the stack (INFERRED): base (stand/idle) -> walk slow/medium/fast -> lane ->
-stop/turn -> jump -> blink. Additive rotation is applied as `bone * (ref^-1 * frame)^w`,
+Order of the stack (FOUND pass 2, dispatcher 0x20e28c via 0x20f140 -> 0x20eee0 ->
+0x20f078/0x20f084 -> 0x20eef4/0x20ef00): base (stand/idle) -> walk slow/medium/fast ->
+stop -> turn -> jump and landing tail -> lane -> blink (blink slot INFERRED: 0x2040a0 is
+reached through a pointer). The game then runs the grab/override blend, the crouch spring,
+arms and head look, none of which are layered here. Additive rotation is applied as `bone * (ref^-1 * frame)^w`,
 scale as a ratio (INFERRED; 0x1eafc0 not traced). Clips a layer does not drive keep the
 pose built so far; bones no clip drives stay at bind.
 
+## Open items pass 2 (2026-10-11)
+
+Source: read-only Ghidra pass `local-analysis/results/2026-10-11-ghidra-sackboy-anim-open-items.md`
+(not committed). Moved to FOUND and applied in `sackboy_anim.rs` (rows above): idle roll
+0..249, the layer order (lane after jump), idle allowed after 300 quiet ticks, seed 42 and
+the first blink at tick 0, landing k = 1, the walk_z test sign (dz > 0 = forwards).
+New tests: `idle_waits_for_300_quiet_ticks`, `layers_run_walk_stop_jump_then_lane`, the
+roll rate over 100,000 LCG steps (11/250 +- 0.005).
+
+Traced but not implemented (FOUND in the pass, out of scope here):
+
+- Crouch spring input 0x6c56c: E = max over contacts of min(overlap depth / 350, 1), on the
+  ground path only (0 when phys+0x41 picks the air path); `this+0x960 = sqrt(E)` feeds the
+  spring at 0x2011d4 (s850 = 0.75v, s858 = -0.25v, bias(x, 0.2)). It is a squash from
+  overlapping bodies, not a landing squash; there is no other landing squash. We model no
+  body overlap, so stretch_crouch stays unused.
+- Emotes and mood stands: mood slots happy/sad/angry/scared (0x894 level, 0x8a4 weight
+  easing 0.1 per tick), the anticipation -> emote -> to_neutral sequence (0x203cdc..0x204094),
+  `stand_<mood>` picks at 0x2022b8 and per-mood lerps at 0x201fb8.
+- Head look 0x2007e4: three additive axes (updown 0x340, leftright 0x33c, roll 0x344),
+  input = wrapped angle / (pi/4) x 1.3, smoothed 0.1 per tick (0x200ecc..0x20104c); its
+  target 0x1fb6dc is untraced.
+- Mirror: `0x1ebb48(engine, 5, src)` queues command type 3 (mirror-copy into scratch
+  layer 5), 37 call sites.
+
 ## OPEN / not done
 
-- stretch_crouch spring (additive, FOUND mechanics at 0x2011d4) has no input: 0x6c56c is
-  untraced. TODO in `sackboy_anim.rs`; the clip stays in the bank, unused.
-- Mirror flag: applied since the QA fix pass (below); flip types and mirror morphs unused.
-- LCG range: the note prints the roll multiplier as 250 but the range as 0..999;
-  `lcg_rand(seed, n) = ((seed>>16)*n)>>14` with n = 1000 keeps the stated odds.
-- Not modelled: jump_small_* (flag 0x78a), grab_jump_*, bouncepad, jump_jet, mood stands,
-  wall idle, head look, arms, emotes, the riding/holding walk-weight gate (0x64dc4).
+- Mirror / flip maths: command type 3 runs in the anim job dispatched by 0x1e9b78
+  (probably SPU), not traced; flip types and mirror morphs unused (the viewer's mirror
+  table reflection from the QA fix pass stays).
+- Camera lead: camera-box field names (BoxSmoothVelX/Y, BiasVector, BiasPersistentXTarget,
+  TransientBiasX/Y) suggest a velocity-driven x bias, but no reader or field offsets were
+  found. A live memory diff of the follow camera against vx is the cheaper route.
+- GroundTurnSpeed / FootAnimationSpeed: no reader found after `lwz ..,0xbf4`; the walk
+  phase stays the fixed 13 ticks.
+- Arms: arms_* clips 0x348..0x368 are used in the grab paths 0x208488 / 0x2086c0 /
+  0x2072dc; the mapping is not traced.
+- Face morph readers: not found. `this+0x960 > 0.01` calls 0x1f8d9c (untraced).
+- The game's "input" mask 0x7feff and states {0, 1, 7, 10} are mapped to our controller
+  as above (INFERRED); the stand-path counter reset at 0x20e100 is not modelled.
+- Not modelled: jump_small_* (flag 0x78a), grab_jump_*, bouncepad, jump_jet, wall idle,
+  the riding/holding walk-weight gate (0x64dc4), plus the traced items above.
 
 ## Verification
 
@@ -77,9 +114,9 @@ pose built so far; bones no clip drives stay at bind.
 
 ## Not verified
 
-No RPCS3 comparison of the blended poses, facing timing or idle odds. The landing fade
-exponent, the peak follower's rise, the additive composition, the lane yaw sign and the
-idle-allowed condition are guesses (above).
+No RPCS3 comparison of the blended poses, facing timing or idle odds. The peak
+follower's rise, the additive composition and the lane yaw sign are guesses (above);
+the landing exponent and the idle-allowed condition are FOUND since pass 2.
 
 ## QA fix pass (2026-10-11, PR 127 review)
 
@@ -113,8 +150,8 @@ A QA pass (`local-analysis/sackboy-clips-2026-10-11/`) found four defects. Cause
    frame now only moves on, so the tail starts at 13-14 (FOUND formula). The legs-forward
    air pose is the clip itself at the FOUND frames 6..13 (one contact tick still shows it).
    The running landing still covers the walk layers for ~2 ticks at weight 1, then fades
-   1/16 per frame (FOUND rule, k = 1 INFERRED): OPEN whether the game fades faster or
-   stacks the tail under the walk (layer order INFERRED).
+   1/16 per frame (FOUND rule; k = 1 and the jump-over-walk order FOUND in pass 2, so
+   this is the game's own behaviour).
 4. **Back lane did nothing in the blank level.** Not a controller bug and not a physics
    vs visual floor mismatch (both have the floor top at 1655): the Rookie Test spawn
    offset (-208 in y) put his feet at 1520, 136 inside the floor slab, so the lane probe

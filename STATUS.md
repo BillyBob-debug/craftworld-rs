@@ -4025,3 +4025,18 @@ Next: stretch_crouch spring input (0x6c56c) and bone mirror map; then emotes/hea
 - Captures: local-analysis/sackboy-clips-2026-10-11b/ (5 clips, hidden, no focus change).
 - OPEN: running-landing fade exponent, camera lead when walking left, mirror flip types.
 - Details: docs/d232-sackboy-anim-rules.md (QA fix pass).
+## 2026-10-11 - D232 open items, Ghidra pass 2
+
+- Applied the FOUND results of local-analysis/results/2026-10-11-ghidra-sackboy-anim-open-items.md
+  in lbp-sim sackboy_anim: idle roll 0..249 (mulli 0xfa, was 0..999), layer order walk ->
+  stop/turn -> jump/landing -> lane (lane was before stop), idle allowed after > 300 ticks
+  with no input (0x1fb4a8/0x75c; sit stand-up resets it), seed 42, first blink at tick 0,
+  landing k = 1 and walk_z dz > 0 = forwards (comments only).
+- Traced, not implemented: crouch spring input (overlap depth / 350, ground only), emotes,
+  mood stands, head look. Still OPEN: mirror maths (SPU job), camera lead, GroundTurnSpeed /
+  FootAnimationSpeed readers, arms, face morphs. docs/d232-sackboy-anim-rules.md.
+- cargo test -q -p lbp-sim -p lbp-preview -p lbp-bevy-viewer: pass (2 new picker tests).
+- cargo clippy -q (same crates) --all-targets -D warnings: pass; fmt clean; python -m unittest: 36 OK (1 skipped).
+- Not tested: play run or RPCS3 comparison of idle timing.
+**+0 newly viewable / +0 newly Complete (runtime feature).**
+Next: camera lead via a live memory diff; emotes/head look (plan 7-8).
