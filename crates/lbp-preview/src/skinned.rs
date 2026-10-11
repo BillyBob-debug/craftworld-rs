@@ -139,6 +139,12 @@ impl Rig {
         Self::new(bones, animation_hashes)
     }
 
+    /// The same mesh bones bound to another animation's bone list (clip banks share one
+    /// mesh rig across clips).
+    pub fn rebind(&self, animation_hashes: &[u32]) -> Result<Self, String> {
+        Self::new(self.bones.clone(), animation_hashes)
+    }
+
     pub fn bone_count(&self) -> usize {
         self.bones.len()
     }
@@ -287,6 +293,35 @@ pub struct ClipReport {
     pub looped: bool,
 }
 
+/// One animation bound to a [`SkinnedClip`]'s mesh rig, ready to [`SkinnedClip::swap`] in.
+pub struct BoundAnimation {
+    pub rig: Rig,
+    pub animation: Animation,
+    pub report: ClipReport,
+}
+
+fn bound_report(
+    rig: &Rig,
+    skin: &SkinStreams,
+    animation: &Animation,
+) -> Result<ClipReport, String> {
+    if rig.matched_bones() == 0 {
+        return Err("Unsupported: animation drives none of this mesh's bones".into());
+    }
+    let p = &animation.inspection.prefix;
+    Ok(ClipReport {
+        mesh_bones: rig.bone_count(),
+        animation_bones: animation.bones.len(),
+        matched_bones: rig.matched_bones(),
+        unmatched_animation_bones: rig.unmatched_animation_bones,
+        mesh_morphs: skin.morphs.len(),
+        animation_morphs: usize::from(p.morph_count_raw_u8),
+        frames: animation.frame_count(),
+        fps: p.fps_raw_u16,
+        looped: p.loop_start_raw_u16 < animation.frame_count(),
+    })
+}
+
 /// A mesh's skin streams bound to one animation.
 pub struct SkinnedClip {
     pub rig: Rig,
@@ -307,21 +342,7 @@ impl SkinnedClip {
         }
         let hashes: Vec<u32> = animation.bones.iter().map(|b| b.anim_hash).collect();
         let rig = Rig::from_skeleton(&geometry.skeleton, &hashes)?;
-        if rig.matched_bones() == 0 {
-            return Err("Unsupported: animation drives none of this mesh's bones".into());
-        }
-        let p = &animation.inspection.prefix;
-        let report = ClipReport {
-            mesh_bones: rig.bone_count(),
-            animation_bones: hashes.len(),
-            matched_bones: rig.matched_bones(),
-            unmatched_animation_bones: rig.unmatched_animation_bones,
-            mesh_morphs: skin.morphs.len(),
-            animation_morphs: usize::from(p.morph_count_raw_u8),
-            frames: animation.frame_count(),
-            fps: p.fps_raw_u16,
-            looped: p.loop_start_raw_u16 < animation.frame_count(),
-        };
+        let report = bound_report(&rig, &skin, &animation)?;
         Ok(Self {
             rig,
             skin,
@@ -329,6 +350,28 @@ impl SkinnedClip {
             bind_positions: geometry.positions.clone(),
             report,
         })
+    }
+
+    /// Binds another animation to this clip's mesh rig and skin (clip bank entry).
+    pub fn bind(&self, animation: Animation) -> Result<BoundAnimation, String> {
+        let hashes: Vec<u32> = animation.bones.iter().map(|b| b.anim_hash).collect();
+        let rig = self.rig.rebind(&hashes)?;
+        let report = bound_report(&rig, &self.skin, &animation)?;
+        Ok(BoundAnimation {
+            rig,
+            animation,
+            report,
+        })
+    }
+
+    /// Plays `next` from now on and returns the animation it replaces. The mesh, skin
+    /// and bind positions stay (a GPU joint hierarchy built from the rig stays valid).
+    pub fn swap(&mut self, next: BoundAnimation) -> BoundAnimation {
+        BoundAnimation {
+            rig: std::mem::replace(&mut self.rig, next.rig),
+            animation: std::mem::replace(&mut self.animation, next.animation),
+            report: std::mem::replace(&mut self.report, next.report),
+        }
     }
 
     /// Resolved frame and pose for a running frame number (see `frame_positions`).
@@ -375,6 +418,41 @@ pub fn load_clip(
     let (geometry, mesh_bytes) = crate::read_mesh(source, mesh_key, control)?;
     let skin = lbp_mesh::decode_skin(&mesh_bytes, || control.check().is_err())
         .map_err(|e| format!("Skin streams: {e}"))?;
+    let animation = read_animation(source, animation_key, control)?;
+    SkinnedClip::new(&geometry, skin, animation)
+}
+
+/// Clip bank (Sackboy animation slice 2): the mesh read once and bound to the first
+/// animation, plus each further animation bound to the same rig (per-GUID result, so one
+/// unreadable clip does not drop the rest).
+pub fn load_clip_bank(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    mesh_key: &LocationKey,
+    guids: &[u32],
+    control: &LoadControl,
+) -> Result<(SkinnedClip, Vec<Result<BoundAnimation, String>>), String> {
+    let (&first, rest) = guids.split_first().ok_or("Empty clip bank")?;
+    let key = resolve_animation(catalog, first)?;
+    let clip = load_clip(source, mesh_key, &key, control)?;
+    let bound = rest
+        .iter()
+        .map(|&g| {
+            control.check()?;
+            let key = resolve_animation(catalog, g)?;
+            clip.bind(read_animation(source, &key, control)?)
+                .map_err(|e| format!("{g:08x}: {e}"))
+        })
+        .collect();
+    Ok((clip, bound))
+}
+
+/// Reads and decodes one animation (read-only, budgeted).
+pub fn read_animation(
+    source: &AttachedSource,
+    animation_key: &LocationKey,
+    control: &LoadControl,
+) -> Result<Animation, String> {
     if animation_key.size > animation::MAX_INPUT as u64 {
         return Err("Animation budget exceeded".into());
     }
@@ -394,7 +472,7 @@ pub fn load_clip(
         .map_err(|e| format!("Animation: {e}"))?;
     control.check()?;
     source.check_stable()?;
-    SkinnedClip::new(&geometry, skin, animation)
+    Ok(animation)
 }
 
 /// Resolves an animation GUID and checks its confirmed type.
@@ -444,6 +522,17 @@ mod tests {
 
     fn close(a: [f32; 3], b: [f32; 3]) -> bool {
         a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-5)
+    }
+
+    #[test]
+    fn rebind_keeps_the_mesh_bones_and_matches_the_new_order() {
+        let a = rig(&[10, 20]);
+        let b = a.rebind(&[20, 99]).unwrap();
+        assert_eq!(b.bone_count(), 2);
+        assert_eq!(b.parents(), a.parents());
+        assert_eq!(b.inverse_binds(), a.inverse_binds());
+        assert_eq!(b.driven_by, [None, Some(0)]);
+        assert_eq!(b.unmatched_animation_bones, 1);
     }
 
     #[test]

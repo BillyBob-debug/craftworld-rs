@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-11 — D231 Sackboy plays his own clips in play mode
+
+--play-sackboy draws mesh 0000043f by default and picks stand / walk bands / lane / jump / land
+squash per tick (lbp-sim sackboy_anim, rules INFERRED) from a 9-clip bank on one rig; hard cuts.
+Replaces the Sackbot walk 0001a697. docs/d231-sackboy-animations.md. +0 viewable / +0 Complete.
+
 ## 2026-10-10 — P3m levels are lit by their presets blended by PWorld lighting
 
 Stored presets are spread over PWorld `lighting` and blended; `darkness` scales exposure and fog colour.

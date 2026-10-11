@@ -14,6 +14,7 @@ use bevy::prelude::*;
 
 pub mod character;
 pub mod sackboy;
+pub mod sackboy_anim;
 pub mod scene;
 
 pub use avian2d;

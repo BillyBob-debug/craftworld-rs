@@ -251,6 +251,11 @@ scaled by |vx| / 30 while grounded and returns to frame 0 otherwise (INFERRED pa
 idle or jump clip yet). Root motion in the clip, if any, is not cancelled. Not tested on
 game data (PC capture against RPCS3 pending).
 
+D231 (2026-10-11): without `--select-guid` the figure is 0000043f, and without
+`--play-animation` he plays his own clips (stand, walk bands, lane, jump, land squash)
+picked per tick by `lbp_sim::sackboy_anim` from a clip bank on one rig; the Sackbot walk
+0001a697 is no longer the default. Rules INFERRED; docs/d231-sackboy-animations.md.
+
 ## Next
 
 - Joint animation (motion patterns, winch and piston targets), strength and breaking.

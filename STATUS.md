@@ -3980,3 +3980,20 @@ levels, baseline D149 0) / +0 newly Complete.**
 - Tests: lbp-level thing test level_lighting_blends_presets_by_world_lighting_and_darkness.
 - Not settled: 4-5 preset spacing, darkness split, Moon/Pod fog colour (script driven).
 **+0 newly viewable / +0 newly Complete.**
+
+## D231 - Sackboy plays his own clips in play mode (2026-10-11)
+- Animation plan slices 1+2 (local-analysis/results/2026-10-11-sackboy-animation-plan.md).
+  --play-sackboy draws mesh 0000043f by default (no --select-guid) and picks stand, walk
+  slow/medium/fast, walk_z fwd/back, jump_stand/jump_walk, stretch_crouch per tick from the
+  controller (lbp-sim sackboy_anim::pick_clip, Bevy-free). Clip bank: mesh read once, all 9
+  clips bound to one rig (lbp-preview load_clip_bank, Rig::rebind, SkinnedClip::swap);
+  hard cuts. Replaces the Sackbot walk 0001a697. Every state->clip rule INFERRED.
+  docs/d231-sackboy-animations.md.
+- cargo test -q -p lbp-sim -p lbp-bevy-viewer -p lbp-preview: pass (9 new tests).
+- cargo clippy -q (same crates) --all-targets -D warnings: pass; fmt clean.
+- Rookie Test play run (d68 0133 snapshot): clip bank 9/9 bound; scripted log shows
+  stand/walk bands/jump_walk/squash/ledge fall/lane/jump_stand in order. QA capture
+  local-analysis/d231-sackboy-anim-rookie.png (gameplay distance, stand; not committed).
+- Not tested: RPCS3 comparison of thresholds, pacing, loop/hold, fall entry frame.
+**+0 newly viewable / +0 newly Complete (runtime feature).**
+Next: slice 3 (Ghidra: readers of the anim fields r30+0x290..0x6c0, BlendFrames).

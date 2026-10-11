@@ -92,6 +92,22 @@ impl Sackboy {
         self.dip_tick.map_or(0., |t| LANDING_DIP[t])
     }
 
+    /// Ticks of the jump profile played so far (`Some(1)` right after the take-off tick);
+    /// `None` once gravity has taken over or on the ground. Read by the animation picker.
+    pub fn jump_tick(&self) -> Option<usize> {
+        self.jump_tick
+    }
+
+    /// Ticks since touch-down while the landing dip plays (`Some(0)` on the landing tick).
+    pub fn dip_tick(&self) -> Option<usize> {
+        self.dip_tick
+    }
+
+    /// The pad state of the last tick.
+    pub fn prev_input(&self) -> Input {
+        self.prev
+    }
+
     pub fn at_lane(z: f32) -> Self {
         Self {
             z,

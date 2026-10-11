@@ -2,10 +2,13 @@
 //! avian world (lbp-sim, material rules by MAP path) and Sackboy as the kinematic capsule
 //! driven by the RPCS3-measured movement rules at 30 Hz. Arrow keys or the left stick walk
 //! and change lanes (Up = lane behind, Down = lane in front), Space or the South button
-//! jumps; the camera follows him as the game's default camera does (Moon level measurement). With `--select-guid` naming the Sackboy mesh he is drawn
-//! as that mesh standing on the capsule (feet at its bottom), turned to the walk direction,
-//! and `--play-animation` (a walk clip) cycles at the walk speed; otherwise as a placeholder
-//! capsule. The level's own dynamic objects are simulated but not redrawn.
+//! jumps; the camera follows him as the game's default camera does (Moon level measurement).
+//! He is drawn as his own body mesh ([`SACKBOY_MESH`], or the `--select-guid` mesh) standing
+//! on the capsule (feet at its bottom), turned to the walk direction, playing the clip
+//! `lbp_sim::sackboy_anim::pick_clip` chooses each tick from a clip bank sharing one rig
+//! (D231, docs/d231-sackboy-animations.md; every state -> clip rule INFERRED). With
+//! `--play-animation` that one clip cycles at the walk speed instead; without a mesh, a
+//! placeholder capsule. The level's own dynamic objects are simulated but not redrawn.
 //!
 //! `--play-sackboy-at X,Y,Z` sets the spawn (level units, his position: 69.9 above the feet); otherwise the
 //! first CHECKPOINT's POS plus [`SPAWN_OFFSET`]. `--play-sackboy-input STEPS` replaces the pad with a script of
@@ -14,12 +17,14 @@
 use bevy::prelude::*;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::level_scene;
+use lbp_preview::skinned::{BoundAnimation, SkinnedClip};
 use lbp_sim::avian2d::prelude::*;
 use lbp_sim::character::{
     spawn_sackboy, SackboyBody, SackboyPlugin, CENTRE_ABOVE, FLOOR_REST, HALF_SEGMENT, HEIGHT,
     RADIUS,
 };
 use lbp_sim::sackboy::{Input, WALK_SPEED};
+use lbp_sim::sackboy_anim::{pick_clip, AnimState, ClipId};
 use lbp_sim::scene::{material_rule_for_path, MaterialRule};
 use lbp_sim::{
     build_scene_with, build_spawn_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin,
@@ -44,12 +49,34 @@ struct Marker;
 
 /// The Sackboy mesh standing on the capsule: `upright` turns the raw Z-up model to the
 /// display (feet at the origin, level-unit scale); `facing` is the turn about the display Y
-/// axis; `phase` the walk clip's frame.
+/// axis; `phase` the `--play-animation` clip's frame. With the clip bank, `current` is the
+/// clip in `Playing`, `bank` holds the others by [`ClipId::index`] (None for the current
+/// one or one that failed to load) and `anim` is the picker's state for this tick.
 #[derive(Component)]
 pub(crate) struct Figure {
     upright: Mat4,
     facing: f32,
     phase: f32,
+    current: Option<ClipId>,
+    bank: Vec<Option<BoundAnimation>>,
+    anim: Option<AnimState>,
+}
+
+/// Sackboy's body mesh, the play figure when `--select-guid` is not given: `0000043f`
+/// `gamedata/mesh_library/player_character/sack_boy.mol` (FOUND, MAP and the EBOOT GUID
+/// block). The default "naked" costume pieces add no geometry (INFERRED; plan section 1).
+pub(crate) const SACKBOY_MESH: &str = "0000043f";
+
+/// Reads the mesh once and binds every [`ClipId::ALL`] clip to its rig; the first
+/// (stand) is the playing clip, the rest come back in order. Runs on the load worker.
+pub(crate) fn load_bank(
+    source: &AttachedSource,
+    catalog: &lbp_catalog::Catalog,
+    mesh_key: &lbp_catalog::attachment::LocationKey,
+    control: &LoadControl,
+) -> Result<(SkinnedClip, Vec<Result<BoundAnimation, String>>), String> {
+    let guids = ClipId::ALL.map(ClipId::guid);
+    lbp_preview::skinned::load_clip_bank(source, catalog, mesh_key, &guids, control)
 }
 
 /// True when the viewer was started with `--play-sackboy`.
@@ -77,7 +104,10 @@ pub(crate) fn spawn_figure(
     bindposes: &mut Assets<bevy::mesh::skinning::SkinnedMeshInverseBindposes>,
     k: f32,
     preview: &lbp_preview::GroupedMesh,
-    clip: Option<crate::ClipResult>,
+    (clip, bank): (
+        Option<crate::ClipResult>,
+        Option<Vec<Result<BoundAnimation, String>>>,
+    ),
 ) -> Result<String, String> {
     let [lo, hi] =
         crate::adapter_bounds(&preview.geometry.positions).ok_or("Unsupported: empty figure")?;
@@ -89,6 +119,36 @@ pub(crate) fn spawn_figure(
     ));
     let upright =
         Mat4::from_scale(Vec3::splat(k)) * Mat4::from_quat(crate::model_up(true)) * origin;
+    // Clip bank: stand plays first; the others wait by ClipId index.
+    let banked = bank.is_some() && matches!(clip, Some(Ok(_)));
+    let mut slots: Vec<Option<BoundAnimation>> = ClipId::ALL.iter().map(|_| None).collect();
+    let mut bank_line = String::new();
+    if let (true, Some(bank)) = (banked, bank) {
+        let mut missing = Vec::new();
+        let mut odd = Vec::new();
+        for (id, bound) in ClipId::ALL[1..].iter().zip(bank) {
+            match bound {
+                Ok(b) => {
+                    if b.report.frames != id.frames() {
+                        odd.push(format!("{} {} frames", id.name(), b.report.frames));
+                    }
+                    slots[id.index()] = Some(b);
+                }
+                Err(e) => missing.push(format!("{} {e}", id.name())),
+            }
+        }
+        bank_line = format!(
+            "; clip bank {}/{} bound to one rig (picker rules inferred)",
+            ClipId::ALL.len() - missing.len(),
+            ClipId::ALL.len()
+        );
+        if !missing.is_empty() {
+            bank_line += &format!("; not loaded: {}", missing.join(", "));
+        }
+        if !odd.is_empty() {
+            bank_line += &format!("; frame counts differ from the census: {}", odd.join(", "));
+        }
+    }
     let figure = commands
         .spawn((
             Transform::from_matrix(upright),
@@ -97,6 +157,9 @@ pub(crate) fn spawn_figure(
                 upright,
                 facing: FACE_RIGHT,
                 phase: 0.,
+                current: banked.then_some(ClipId::Stand),
+                bank: slots,
+                anim: None,
             },
         ))
         .id();
@@ -125,8 +188,8 @@ pub(crate) fn spawn_figure(
         .map(|s| (s.0, s.1.clone()))
         .collect();
     match clip {
-        None => line += "; no walk clip (--play-animation)",
-        Some(Err(e)) => line += &format!("; walk clip not played: {e}"),
+        None => line += "; no clip",
+        Some(Err(e)) => line += &format!("; clip not played: {e}"),
         Some(Ok(clip)) => {
             // Raw model units: the identity display frame.
             let frame = ([0.; 3], 1.);
@@ -149,8 +212,10 @@ pub(crate) fn spawn_figure(
                 })
             };
             line += &format!(
-                "; walk clip {} frames at {} fps",
-                clip.report.frames, clip.report.fps
+                "; {} clip {} frames at {} fps{bank_line}",
+                if banked { "stand" } else { "--play-animation" },
+                clip.report.frames,
+                clip.report.fps
             );
             v.animation_frame = Some(0);
             v.playing = Some(crate::Playing {
@@ -389,7 +454,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         })
         .add_systems(Update, (spawn_world, read_pad, show_sackboy).chain())
         .add_systems(FixedFirst, script_input)
-        .add_systems(FixedLast, log_scripted);
+        .add_systems(FixedLast, (tick_anim, log_scripted).chain());
     Ok(())
 }
 
@@ -453,10 +518,21 @@ fn script_input(play: Res<Play>, mut sackboy: Query<&mut SackboyBody>) {
     }
 }
 
-/// With a script, Sackboy's position after each tick (1-based).
+/// The clip bank's pick for this tick, after the controller step (slice 1 picker).
+fn tick_anim(sackboy: Query<&SackboyBody>, mut figure: Query<&mut Figure>) {
+    let (Ok(body), Ok(mut f)) = (sackboy.single(), figure.single_mut()) else {
+        return;
+    };
+    if f.current.is_some() {
+        f.anim = Some(pick_clip(&body.controller, body.grounded, f.anim));
+    }
+}
+
+/// With a script, Sackboy's position after each tick (1-based), and the picked clip.
 fn log_scripted(
     mut play: ResMut<Play>,
     sackboy: Query<(&SackboyBody, &Position, &lbp_sim::ZSlab)>,
+    figure: Query<&Figure>,
 ) {
     if play.script.is_none() {
         return;
@@ -466,8 +542,14 @@ fn log_scripted(
     };
     play.tick += 1;
     let p = to_level(pos.0);
+    let clip = figure
+        .single()
+        .ok()
+        .and_then(|f| f.anim)
+        .map(|a| format!(" clip {} frame {:.1}", a.clip.name(), a.frame))
+        .unwrap_or_default();
     println!(
-        "sackboy tick {} x {:.1} y {:.1} z {:.1} vx {:.2} vy {:.2} grounded {}",
+        "sackboy tick {} x {:.1} y {:.1} z {:.1} vx {:.2} vy {:.2} grounded {}{clip}",
         play.tick, p[0], p[1], slab.z, body.controller.vx, body.controller.vy, body.grounded
     );
 }
@@ -508,7 +590,24 @@ fn show_sackboy(
         *t = Transform::from_matrix(
             Mat4::from_translation(feet) * Mat4::from_rotation_y(f.facing) * f.upright,
         );
-        if let Some(fps) = v
+        if let (Some(cur), Some(a)) = (f.current, f.anim) {
+            // Clip bank: hard cut to the picked clip (one rig, so only the animation swaps).
+            if cur != a.clip {
+                if let (Some(next), Some(playing)) = (f.bank[a.clip.index()].take(), &mut v.playing)
+                {
+                    let old = playing.clip.swap(next);
+                    f.bank[cur.index()] = Some(old);
+                    f.current = Some(a.clip);
+                    playing.shown = None;
+                    if let Some(gpu) = &mut playing.gpu {
+                        gpu.morphs = !playing.clip.skin.morphs.is_empty()
+                            && playing.clip.report.animation_morphs > 0;
+                    }
+                }
+            }
+            // A clip that failed to load keeps the last one playing at this frame (wraps).
+            v.animation_frame = Some(a.frame as i64);
+        } else if let Some(fps) = v
             .playing
             .as_ref()
             .map(|p| f32::from(p.clip.report.fps.max(1)))
