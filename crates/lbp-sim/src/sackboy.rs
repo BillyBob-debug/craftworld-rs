@@ -59,6 +59,44 @@ pub struct Input {
     pub back: bool,
     /// Lane in front (+z), the S key.
     pub front: bool,
+    /// The mood d-pad direction held this tick (the animation takes its press edge; the
+    /// movement rules ignore it).
+    pub mood: Option<Mood>,
+}
+
+/// The four moods, in the EBOOT's slot order (FOUND, 0x1f6450..0x1f6480). The d-pad
+/// direction of each is INFERRED from the button masks: up happy, down sad, right angry,
+/// left scared (D233, docs/d233-sackboy-moods-headlook.md).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Mood {
+    Happy,
+    Sad,
+    Angry,
+    Scared,
+}
+
+impl Mood {
+    pub const ALL: [Mood; 4] = [Mood::Happy, Mood::Sad, Mood::Angry, Mood::Scared];
+
+    /// The slot index i (0..3).
+    pub fn index(self) -> usize {
+        self as usize
+    }
+
+    /// The mood that cancels this one: slot `i ^ 1` (FOUND, 0x1ffe58): happy <-> sad,
+    /// angry <-> scared.
+    pub fn opposite(self) -> Mood {
+        Mood::ALL[self.index() ^ 1]
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Mood::Happy => "happy",
+            Mood::Sad => "sad",
+            Mood::Angry => "angry",
+            Mood::Scared => "scared",
+        }
+    }
 }
 
 /// What the world says this tick.

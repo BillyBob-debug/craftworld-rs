@@ -17,8 +17,15 @@
 //! layer: the first sets the pose, each [`Blend::Lerp`] layer then lerps the pose toward its
 //! clip by its weight, and each [`Blend::Additive`] layer adds its frame minus a reference
 //! frame. One clip frame per tick (30 fps clips, 30 Hz ticks).
+//!
+//! D233 (docs/d233-sackboy-moods-headlook.md, Ghidra pass 3
+//! `local-analysis/results/2026-10-11-ghidra-sackboy-moods-headlook.md`) adds the four moods
+//! (d-pad press edges, levels 1-3, anticipation -> emote -> to_neutral, mood stands) and the
+//! three additive head-look layers.
 use crate::sackboy::{Sackboy, WALK_SPEED};
 use std::f32::consts::FRAC_PI_2;
+
+pub use crate::sackboy::Mood;
 
 /// The clips the picker uses (EBOOT anim-object fields in the doc of each variant).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -59,11 +66,50 @@ pub enum ClipId {
     StandIIdleSit,
     IdleSit,
     IdleSitIStand,
+    /// 0x418: played before every emote (D233).
+    EmoteAnticipation,
+    /// Emote clips 0x8c4[i] + 2 * level - 2 and their to_neutral clips
+    /// 0x8d4[i] - 2 + 2 * level (FOUND, 0x203cdc / 0x1f7844).
+    EmoteHappy,
+    EmoteHappy2,
+    EmoteHappy3,
+    EmoteHappyToNeutral,
+    EmoteHappy2ToNeutral,
+    EmoteHappy3ToNeutral,
+    /// Sad levels 2 and 3 loop: `_2_loop` repeats, `_3_into` leads into `_3_loop`.
+    EmoteSad,
+    EmoteSad2Loop,
+    EmoteSad3Into,
+    EmoteSad3Loop,
+    EmoteSadToNeutral,
+    EmoteSad2ToNeutral,
+    EmoteSad3ToNeutral,
+    EmoteAngry,
+    EmoteAngry2,
+    EmoteAngry3,
+    EmoteAngryToNeutral,
+    EmoteAngry2ToNeutral,
+    EmoteAngry3ToNeutral,
+    EmoteScared,
+    EmoteScared2,
+    EmoteScared3,
+    EmoteScaredToNeutral,
+    EmoteScared2ToNeutral,
+    EmoteScared3ToNeutral,
+    /// 0x294 + i: the mood stands.
+    StandHappy,
+    StandSad,
+    StandAngry,
+    StandScared,
+    /// 0x340 / 0x33c / 0x344: additive head-look axes.
+    LookUpdown,
+    LookLeftright,
+    LookRoll,
 }
 
 impl ClipId {
     /// Stand first: the viewer's clip bank binds the rest to stand's rig.
-    pub const ALL: [ClipId; 21] = [
+    pub const ALL: [ClipId; 54] = [
         ClipId::Stand,
         ClipId::WalkSlow,
         ClipId::WalkMedium,
@@ -85,6 +131,39 @@ impl ClipId {
         ClipId::StandIIdleSit,
         ClipId::IdleSit,
         ClipId::IdleSitIStand,
+        ClipId::EmoteAnticipation,
+        ClipId::EmoteHappy,
+        ClipId::EmoteHappy2,
+        ClipId::EmoteHappy3,
+        ClipId::EmoteHappyToNeutral,
+        ClipId::EmoteHappy2ToNeutral,
+        ClipId::EmoteHappy3ToNeutral,
+        ClipId::EmoteSad,
+        ClipId::EmoteSad2Loop,
+        ClipId::EmoteSad3Into,
+        ClipId::EmoteSad3Loop,
+        ClipId::EmoteSadToNeutral,
+        ClipId::EmoteSad2ToNeutral,
+        ClipId::EmoteSad3ToNeutral,
+        ClipId::EmoteAngry,
+        ClipId::EmoteAngry2,
+        ClipId::EmoteAngry3,
+        ClipId::EmoteAngryToNeutral,
+        ClipId::EmoteAngry2ToNeutral,
+        ClipId::EmoteAngry3ToNeutral,
+        ClipId::EmoteScared,
+        ClipId::EmoteScared2,
+        ClipId::EmoteScared3,
+        ClipId::EmoteScaredToNeutral,
+        ClipId::EmoteScared2ToNeutral,
+        ClipId::EmoteScared3ToNeutral,
+        ClipId::StandHappy,
+        ClipId::StandSad,
+        ClipId::StandAngry,
+        ClipId::StandScared,
+        ClipId::LookUpdown,
+        ClipId::LookLeftright,
+        ClipId::LookRoll,
     ];
 
     /// Index into [`ClipId::ALL`] (for clip banks).
@@ -116,6 +195,39 @@ impl ClipId {
             ClipId::StandIIdleSit => 0x2ff5,
             ClipId::IdleSit => 0x301d,
             ClipId::IdleSitIStand => 0x301c,
+            ClipId::EmoteAnticipation => 0x25bf,
+            ClipId::EmoteHappy => 0x25c0,
+            ClipId::EmoteHappy2 => 0x43a5,
+            ClipId::EmoteHappy3 => 0x43a6,
+            ClipId::EmoteHappyToNeutral => 0x25c1,
+            ClipId::EmoteHappy2ToNeutral => 0x42c7,
+            ClipId::EmoteHappy3ToNeutral => 0x42c8,
+            ClipId::EmoteSad => 0x25c2,
+            ClipId::EmoteSad2Loop => 0x43a7,
+            ClipId::EmoteSad3Into => 0x43a8,
+            ClipId::EmoteSad3Loop => 0x43a9,
+            ClipId::EmoteSadToNeutral => 0x25c3,
+            ClipId::EmoteSad2ToNeutral => 0x42c9,
+            ClipId::EmoteSad3ToNeutral => 0x42cb,
+            ClipId::EmoteAngry => 0x25bd,
+            ClipId::EmoteAngry2 => 0x42c2,
+            ClipId::EmoteAngry3 => 0x42c3,
+            ClipId::EmoteAngryToNeutral => 0x25be,
+            ClipId::EmoteAngry2ToNeutral => 0x42c6,
+            ClipId::EmoteAngry3ToNeutral => 0x42c5,
+            ClipId::EmoteScared => 0x25c4,
+            ClipId::EmoteScared2 => 0x43aa,
+            ClipId::EmoteScared3 => 0x43ab,
+            ClipId::EmoteScaredToNeutral => 0x25c5,
+            ClipId::EmoteScared2ToNeutral => 0x42cd,
+            ClipId::EmoteScared3ToNeutral => 0x42ce,
+            ClipId::StandHappy => 0x128a,
+            ClipId::StandSad => 0x128b,
+            ClipId::StandAngry => 0x1289,
+            ClipId::StandScared => 0x128c,
+            ClipId::LookUpdown => 0x124c,
+            ClipId::LookLeftright => 0x124b,
+            ClipId::LookRoll => 0x124d,
         }
     }
 
@@ -136,6 +248,34 @@ impl ClipId {
             ClipId::StandIIdleSit => 22,
             ClipId::IdleSit => 17,
             ClipId::IdleSitIStand => 21,
+            ClipId::EmoteAnticipation => 6,
+            ClipId::EmoteSad | ClipId::EmoteSad3Into => 14,
+            ClipId::EmoteHappy
+            | ClipId::EmoteAngry2
+            | ClipId::EmoteHappyToNeutral
+            | ClipId::EmoteHappy2ToNeutral
+            | ClipId::EmoteHappy3ToNeutral
+            | ClipId::EmoteSadToNeutral
+            | ClipId::EmoteSad2ToNeutral
+            | ClipId::EmoteSad3ToNeutral
+            | ClipId::EmoteAngryToNeutral
+            | ClipId::EmoteAngry2ToNeutral
+            | ClipId::EmoteAngry3ToNeutral
+            | ClipId::EmoteScaredToNeutral
+            | ClipId::EmoteScared2ToNeutral
+            | ClipId::EmoteScared3ToNeutral => 16,
+            ClipId::StandHappy
+            | ClipId::StandSad
+            | ClipId::StandAngry
+            | ClipId::StandScared
+            | ClipId::LookRoll => 17,
+            ClipId::EmoteHappy2 | ClipId::EmoteScared | ClipId::EmoteScared2 => 18,
+            ClipId::EmoteSad2Loop | ClipId::EmoteAngry => 19,
+            ClipId::EmoteAngry3 => 23,
+            ClipId::EmoteScared3 => 26,
+            ClipId::EmoteHappy3 => 31,
+            ClipId::EmoteSad3Loop => 51,
+            ClipId::LookUpdown | ClipId::LookLeftright => 9,
             _ => 13,
         }
     }
@@ -164,8 +304,179 @@ impl ClipId {
             ClipId::StandIIdleSit => "stand_i_idle_sit",
             ClipId::IdleSit => "idle_sit",
             ClipId::IdleSitIStand => "idle_sit_i_stand",
+            ClipId::EmoteAnticipation => "emote_anticipation",
+            ClipId::EmoteHappy => "emote_happy",
+            ClipId::EmoteHappy2 => "emote_happy_2",
+            ClipId::EmoteHappy3 => "emote_happy_3",
+            ClipId::EmoteHappyToNeutral => "emote_happy_to_neutral",
+            ClipId::EmoteHappy2ToNeutral => "emote_happy_2_to_neutral",
+            ClipId::EmoteHappy3ToNeutral => "emote_happy_3_to_neutral",
+            ClipId::EmoteSad => "emote_sad",
+            ClipId::EmoteSad2Loop => "emote_sad_2_loop",
+            ClipId::EmoteSad3Into => "emote_sad_3_into",
+            ClipId::EmoteSad3Loop => "emote_sad_3_loop",
+            ClipId::EmoteSadToNeutral => "emote_sad_to_neutral",
+            ClipId::EmoteSad2ToNeutral => "emote_sad_2_to_neutral",
+            ClipId::EmoteSad3ToNeutral => "emote_sad_3_to_neutral",
+            ClipId::EmoteAngry => "emote_angry",
+            ClipId::EmoteAngry2 => "emote_angry_2",
+            ClipId::EmoteAngry3 => "emote_angry_3",
+            ClipId::EmoteAngryToNeutral => "emote_angry_to_neutral",
+            ClipId::EmoteAngry2ToNeutral => "emote_angry_2_to_neutral",
+            ClipId::EmoteAngry3ToNeutral => "emote_angry_3_to_neutral",
+            ClipId::EmoteScared => "emote_scared",
+            ClipId::EmoteScared2 => "emote_scared_2",
+            ClipId::EmoteScared3 => "emote_scared_3",
+            ClipId::EmoteScaredToNeutral => "emote_scared_to_neutral",
+            ClipId::EmoteScared2ToNeutral => "emote_scared_2_to_neutral",
+            ClipId::EmoteScared3ToNeutral => "emote_scared_3_to_neutral",
+            ClipId::StandHappy => "stand_happy",
+            ClipId::StandSad => "stand_sad",
+            ClipId::StandAngry => "stand_angry",
+            ClipId::StandScared => "stand_scared",
+            ClipId::LookUpdown => "look_updown",
+            ClipId::LookLeftright => "look_leftright",
+            ClipId::LookRoll => "look_roll",
         }
     }
+}
+
+/// The emote clip of a mood level 1..=3 (FOUND layout `0x8c4[i] + 2 * level - 2`; the
+/// names per slot from the MAP).
+pub fn emote_clip(mood: Mood, level: u8) -> ClipId {
+    match (mood, level) {
+        (Mood::Happy, 1) => ClipId::EmoteHappy,
+        (Mood::Happy, 2) => ClipId::EmoteHappy2,
+        (Mood::Happy, _) => ClipId::EmoteHappy3,
+        (Mood::Sad, 1) => ClipId::EmoteSad,
+        (Mood::Sad, 2) => ClipId::EmoteSad2Loop,
+        (Mood::Sad, _) => ClipId::EmoteSad3Into,
+        (Mood::Angry, 1) => ClipId::EmoteAngry,
+        (Mood::Angry, 2) => ClipId::EmoteAngry2,
+        (Mood::Angry, _) => ClipId::EmoteAngry3,
+        (Mood::Scared, 1) => ClipId::EmoteScared,
+        (Mood::Scared, 2) => ClipId::EmoteScared2,
+        (Mood::Scared, _) => ClipId::EmoteScared3,
+    }
+}
+
+/// The to_neutral clip for the level a mood leaves (`0x8d4[i] - 2 + 2 * level`).
+pub fn to_neutral_clip(mood: Mood, level: u8) -> ClipId {
+    match (mood, level) {
+        (Mood::Happy, 1) => ClipId::EmoteHappyToNeutral,
+        (Mood::Happy, 2) => ClipId::EmoteHappy2ToNeutral,
+        (Mood::Happy, _) => ClipId::EmoteHappy3ToNeutral,
+        (Mood::Sad, 1) => ClipId::EmoteSadToNeutral,
+        (Mood::Sad, 2) => ClipId::EmoteSad2ToNeutral,
+        (Mood::Sad, _) => ClipId::EmoteSad3ToNeutral,
+        (Mood::Angry, 1) => ClipId::EmoteAngryToNeutral,
+        (Mood::Angry, 2) => ClipId::EmoteAngry2ToNeutral,
+        (Mood::Angry, _) => ClipId::EmoteAngry3ToNeutral,
+        (Mood::Scared, 1) => ClipId::EmoteScaredToNeutral,
+        (Mood::Scared, 2) => ClipId::EmoteScared2ToNeutral,
+        (Mood::Scared, _) => ClipId::EmoteScared3ToNeutral,
+    }
+}
+
+/// `stand_<mood>` by slot (clip field 0x294 + i).
+pub const MOOD_STANDS: [ClipId; 4] = [
+    ClipId::StandHappy,
+    ClipId::StandSad,
+    ClipId::StandAngry,
+    ClipId::StandScared,
+];
+/// The head-look clips in argument order of 0x2007e4: up/down, left/right, roll.
+pub const LOOK_CLIPS: [ClipId; 3] = [ClipId::LookUpdown, ClipId::LookLeftright, ClipId::LookRoll];
+
+/// The loop a sad emote chains into after its first clip (FOUND: sad level >= 2 chains into
+/// the 0x47c loop; which clip that is per level is INFERRED from the names: level 2 repeats
+/// `_2_loop`, level 3 goes `_3_into` -> `_3_loop`).
+fn sad_loop(mood: Mood, level: u8) -> Option<ClipId> {
+    match (mood, level) {
+        (Mood::Sad, 2) => Some(ClipId::EmoteSad2Loop),
+        (Mood::Sad, 3) => Some(ClipId::EmoteSad3Loop),
+        _ => None,
+    }
+}
+
+/// Where the emote sequence is (the game's 0x890: 0, 1, 2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmoteState {
+    Anticipation,
+    Emote,
+    ToNeutral,
+}
+
+impl EmoteState {
+    pub fn name(self) -> &'static str {
+        match self {
+            EmoteState::Anticipation => "anticipation",
+            EmoteState::Emote => "emote",
+            EmoteState::ToNeutral => "to_neutral",
+        }
+    }
+}
+
+/// The running emote sequence: `level` picks the clips (for to_neutral, the level left).
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Emote {
+    mood: Mood,
+    level: u8,
+    state: EmoteState,
+    frame: u32,
+    /// A sad emote that has chained into its loop clip.
+    looping: bool,
+}
+
+impl Emote {
+    fn clip(&self) -> ClipId {
+        match self.state {
+            EmoteState::Anticipation => ClipId::EmoteAnticipation,
+            EmoteState::Emote => match sad_loop(self.mood, self.level) {
+                Some(clip) if self.looping => clip,
+                _ => emote_clip(self.mood, self.level),
+            },
+            EmoteState::ToNeutral => to_neutral_clip(self.mood, self.level),
+        }
+    }
+
+    /// The emote clip has reached its last frame and holds it (the game's
+    /// `0x764 >= len - 1`); the sad loops never do.
+    fn finished(&self) -> bool {
+        self.state == EmoteState::Emote
+            && sad_loop(self.mood, self.level).is_none()
+            && self.frame + 1 >= u32::from(self.clip().frames())
+    }
+}
+
+/// The three head-look values (up/down, left/right, roll), each clamped to [-1, 1] (FOUND,
+/// 0x200aa0 -> 0x2007e4). `look` = the blended look inputs (p, y, r); `tilt` = the relative
+/// angle term f25; `w` the attention weight; `wf` the walk factor
+/// 0.2 w_slow + 0.8 w_fast; `sgn` the sign of the anim speed; `yaw` the eased facing.
+pub fn look_axes(look: [f32; 3], tilt: f32, w: f32, wf: f32, sgn: f32, yaw: f32) -> [f32; 3] {
+    let [p, mut y, r] = look;
+    // Yaw compensation: looking the way he already faces is reduced by yaw / (pi/2).
+    if y > 0. && yaw > 0. {
+        y = (y - yaw / FRAC_PI_2).clamp(0., 1.);
+    } else if y < 0. && yaw < 0. {
+        y = (y - yaw / FRAC_PI_2).clamp(-1., 0.);
+    }
+    let wf = wf.clamp(0., 1.);
+    [
+        0.5 * sgn * wf.sqrt() * tilt * w + p,
+        y,
+        // The 2 * [0x808] * cfg[0xa8] * ([0x810] - 0.5) term is OPEN and left out.
+        tilt * w * (1. - wf).sqrt() + r,
+    ]
+    .map(|v| v.clamp(-1., 1.))
+}
+
+/// The frame of a look clip for value `v` and its reference (neutral) frame: additive of
+/// frame `(0.5 v + 0.5) n` minus frame `0.5 n` (FOUND, 0x2007e4). n is taken as the last
+/// frame index so that v = 1 is the last frame and the neutral the middle key (INFERRED).
+pub fn look_frames(clip: ClipId, v: f32) -> (f32, f32) {
+    let n = f32::from(clip.frames() - 1);
+    ((0.5 * v.clamp(-1., 1.) + 0.5) * n, 0.5 * n)
 }
 
 /// How a layer combines with the pose built so far.
@@ -290,6 +601,17 @@ pub const SIT_STAND_UP_ABOVE: u32 = 950;
 /// "Idle allowed" (0x1fb4a8) needs the no-input counter 0x75c above this many ticks
 /// (FOUND, 0x1fb51c..0x1fb59c): about 10 s.
 pub const IDLE_AFTER_TICKS: u32 = 300;
+/// Mood levels of plain Sackboy: the same button cycles 1, 2, 3, off (FOUND, 0x1f7844:
+/// `(level + 1) mod 4`; the 0x1124 model variants have one level and are not modelled).
+pub const MOOD_LEVELS: u8 = 3;
+/// Mood layer weights 0x8a4[i] ease this much per tick toward 1 (level > 0) or 0 (FOUND
+/// 0.1, 0x203cdc; taken as a fraction of the remaining distance like the facing: INFERRED).
+pub const MOOD_EASE: f32 = 0.1;
+/// A mood layer below this weight is not applied (FOUND 0.01, 0x2022b8).
+pub const MOOD_MIN_WEIGHT: f32 = 0.01;
+/// The head-look attention weight 0x884 eases this fraction per tick toward 1 - S (FOUND,
+/// 0x200f28).
+pub const LOOK_EASE: f32 = 0.1;
 
 /// The game's idle LCG step (FOUND, 0x20dee0): `seed * 0x2e90edd + 0xe908fc1`, 30 bits.
 pub fn lcg_next(seed: u32) -> u32 {
@@ -382,6 +704,16 @@ pub struct SackboyAnim {
     seed: u32,
     blink: Option<u32>,
     next_blink: u64,
+    /// Mood levels 0x894[i] and layer weights 0x8a4[i] (slot order of [`Mood::ALL`]).
+    levels: [u8; 4],
+    weights: [f32; 4],
+    emote: Option<Emote>,
+    /// The mood whose stand is lerped over the base (set when its emote has finished).
+    mood_stand: Option<Mood>,
+    /// The d-pad direction held last tick, for the press edge.
+    mood_held: Option<Mood>,
+    /// Head-look attention weight 0x884.
+    attention: f32,
 }
 
 impl Default for SackboyAnim {
@@ -415,12 +747,151 @@ impl SackboyAnim {
             seed: LCG_SEED,
             blink: None,
             next_blink: 0,
+            levels: [0; 4],
+            weights: [0.; 4],
+            emote: None,
+            mood_stand: None,
+            mood_held: None,
+            attention: 0.,
         }
     }
 
     /// The eased facing angle (radians, see [`AnimFrame::yaw`]).
     pub fn yaw(&self) -> f32 {
         self.yaw
+    }
+
+    /// The active mood and its level 1..=3 (moods are exclusive).
+    pub fn mood(&self) -> Option<(Mood, u8)> {
+        Mood::ALL
+            .into_iter()
+            .zip(self.levels)
+            .find(|&(_, level)| level > 0)
+    }
+
+    /// The mood layer weights, in [`Mood::ALL`] order.
+    pub fn mood_weights(&self) -> [f32; 4] {
+        self.weights
+    }
+
+    /// The emote sequence's mood, state and frame while one runs (a held last frame
+    /// included).
+    pub fn emote(&self) -> Option<(Mood, EmoteState, u32)> {
+        self.emote.map(|e| (e.mood, e.state, e.frame))
+    }
+
+    /// True once the emote clip holds its last frame (the mood stand is then lerped on).
+    pub fn emote_held(&self) -> bool {
+        self.emote.is_some_and(|e| e.finished())
+    }
+
+    /// The head-look attention weight (1 = calm and standing, 0 = moving).
+    pub fn attention(&self) -> f32 {
+        self.attention
+    }
+
+    /// One press of a mood's d-pad direction (FOUND, 0x1ffe58..0x1ffe74 and 0x1f7844): the
+    /// opposite mood, if on, is ended and nothing starts; otherwise the level steps
+    /// 1, 2, 3, off, a level above 0 switching every other mood off. [`Self::tick`] calls
+    /// this on the press edge of [`crate::sackboy::Input::mood`].
+    pub fn press_mood(&mut self, mood: Mood) {
+        let (i, o) = (mood.index(), mood.opposite().index());
+        if self.levels[o] > 0 {
+            self.end_emote(mood.opposite());
+            return;
+        }
+        let level = (self.levels[i] + 1) % (MOOD_LEVELS + 1);
+        if level == 0 {
+            self.end_emote(mood);
+            return;
+        }
+        self.levels = [0; 4];
+        self.levels[i] = level;
+        // 0x1f7844 stores state 1 and frame 0 here while the playback's state 0 is the
+        // anticipation; pass 3 reads this as "the anticipation restarts", which is what
+        // plays here on every step to a level above 0 (INFERRED numbering).
+        self.emote = Some(Emote {
+            mood,
+            level,
+            state: EmoteState::Anticipation,
+            frame: 0,
+            looping: false,
+        });
+        self.mood_stand = None;
+    }
+
+    /// 0x1f65b0: level off, the to_neutral clip of the level left from frame 0.
+    fn end_emote(&mut self, mood: Mood) {
+        let level = std::mem::take(&mut self.levels[mood.index()]);
+        self.emote = Some(Emote {
+            mood,
+            level,
+            state: EmoteState::ToNeutral,
+            frame: 0,
+            looping: false,
+        });
+    }
+
+    /// The mood layers for this tick, over the base (FOUND playback 0x203cdc; the emote is
+    /// the base the walk and jump blends go over). While a sequence runs its clip covers
+    /// the base; `stand_<mood>` is lerped on by the mood's weight (0x201fb8) once the emote
+    /// holds its last frame (0x2022b8's `0x764 >= len - 1` test, FOUND there under the
+    /// 0x1124 flag; applying it to plain Sackboy, and keeping the stand while its weight
+    /// fades under to_neutral, is INFERRED).
+    fn mood_layers(&mut self, layers: &mut Vec<Layer>) {
+        for (w, level) in self.weights.iter_mut().zip(self.levels) {
+            let target = if level > 0 { 1. } else { 0. };
+            *w += MOOD_EASE * (target - *w);
+        }
+        if let Some(mut e) = self.emote.take() {
+            let clip = e.clip();
+            let n = u32::from(clip.frames());
+            layers.push(Layer {
+                clip,
+                frame: e.frame.min(n - 1) as f32,
+                weight: 1.,
+                mirror: false,
+                blend: Blend::Lerp,
+            });
+            if e.finished() {
+                self.mood_stand = Some(e.mood);
+            }
+            e.frame += 1;
+            let mut done = false;
+            if e.frame >= n {
+                match e.state {
+                    EmoteState::Anticipation => {
+                        e.state = EmoteState::Emote;
+                        e.frame = 0;
+                    }
+                    // No end handling: the last frame holds (FOUND); sad 2 and 3 loop.
+                    EmoteState::Emote if sad_loop(e.mood, e.level).is_some() => {
+                        e.looping = true;
+                        e.frame = 0;
+                    }
+                    EmoteState::Emote => e.frame = n - 1,
+                    // Then 0x890, 0x888 and 0x764 are reset (FOUND).
+                    EmoteState::ToNeutral => done = true,
+                }
+            }
+            self.emote = (!done).then_some(e);
+        }
+        if let Some(m) = self.mood_stand {
+            let weight = self.weights[m.index()];
+            if weight > MOOD_MIN_WEIGHT {
+                let clip = MOOD_STANDS[m.index()];
+                layers.push(Layer {
+                    clip,
+                    // Its own loop, phase from the tick counter (INFERRED).
+                    frame: (self.now % u64::from(clip.frames())) as f32,
+                    weight,
+                    mirror: false,
+                    blend: Blend::Lerp,
+                });
+            } else {
+                self.mood_stand = None;
+            }
+        }
     }
 
     fn rand(&mut self, n: u32) -> u32 {
@@ -441,13 +912,20 @@ impl SackboyAnim {
 
         // Base: stand or the idle chain (hard switches at clip ends, FOUND).
         // Idle allowed (0x1fb4a8, FOUND): creature state in {0, 1, 7, 10} (taken as
-        // grounded: INFERRED), no mood level above 0 (moods are not modelled, so always
-        // true here) and the no-input counter 0x75c > 300. The counter (0x20d3a0) counts
-        // ticks with no pad input in those states and resets otherwise; "no input" for the
-        // 0x7feff mask is taken as stick 0 and no jump/lane button (INFERRED).
+        // grounded: INFERRED), no mood level above 0 and the no-input counter 0x75c > 300.
+        // The counter (0x20d3a0) counts ticks with no pad input in those states and resets
+        // otherwise; "no input" for the 0x7feff mask is taken as stick 0 and no jump/lane
+        // button (INFERRED; the mood d-pad bits are outside the mask, FOUND).
+        // Mood press edge (FOUND 0x388358: down now, not down last tick), before the
+        // playback as in the creature tick. The gates on the loop (0x965, creature states,
+        // sad skipped while the Popit global is set) are not modelled.
+        if let Some(mood) = input.mood.filter(|&m| self.mood_held != Some(m)) {
+            self.press_mood(mood);
+        }
+        self.mood_held = input.mood;
         let quiet = !airborne && stick == 0. && !input.jump && !input.back && !input.front;
         self.quiet_ticks = if quiet { self.quiet_ticks + 1 } else { 0 };
-        let idle_ok = self.quiet_ticks > IDLE_AFTER_TICKS;
+        let idle_ok = self.quiet_ticks > IDLE_AFTER_TICKS && self.mood().is_none();
         layers.push(Layer {
             clip: self.idle,
             frame: self.idle_frame as f32,
@@ -456,6 +934,7 @@ impl SackboyAnim {
             blend: Blend::Lerp,
         });
         self.advance_idle(idle_ok);
+        self.mood_layers(&mut layers);
 
         // Walk: continuous weights over the base, shared 13-tick phase (FOUND).
         if (vx < 0.) != self.backwards {
@@ -673,6 +1152,37 @@ impl SackboyAnim {
             facing_target(vx)
         };
         self.yaw += FACING_EASE * (target - self.yaw);
+
+        // Head look (FOUND, 0x200aa0 -> 0x2007e4), last in the stack: the dispatcher runs
+        // it after the arms. Attention w eases 0.1 toward 1 - S and is then scaled in place
+        // by clamp(1 - |0x6d4| / scale). S = P + |v - cfg[0xc]| / scale (0x1fb6dc) is taken
+        // as |vx| / WalkMax: v / scale is the anim-speed pair (FOUND), cfg[0xc] = 0, the
+        // strain term P = 0 and 0x6d4 = vx are INFERRED. Not modelled, so 0 here: the look
+        // inputs (right stick A, target B with the creature+0xc20 object) and the relative
+        // tilt term f25; with those at 0 every axis sits on its neutral frame. The skip
+        // states (c14 0xc, 2 with +0xf20 = 2) and the L3 free-look toggle are not modelled.
+        let r = vx.abs() / WALK_MAX_DESIRED;
+        self.attention += LOOK_EASE * ((1. - r) - self.attention);
+        self.attention *= (1. - r).clamp(0., 1.);
+        let sgn = if vx < 0. { -1. } else { 1. };
+        let look = look_axes(
+            [0.; 3],
+            0.,
+            self.attention,
+            0.2 * w_slow + 0.8 * w_fast,
+            sgn,
+            self.yaw,
+        );
+        for (clip, v) in LOOK_CLIPS.into_iter().zip(look) {
+            let (frame, reference) = look_frames(clip, v);
+            layers.push(Layer {
+                clip,
+                frame,
+                weight: 1.,
+                mirror: false,
+                blend: Blend::Additive { reference },
+            });
+        }
         AnimFrame {
             layers,
             yaw: self.yaw,
@@ -766,7 +1276,17 @@ mod tests {
     #[test]
     fn clip_table() {
         let guids: Vec<u32> = ClipId::ALL.iter().map(|c| c.guid()).collect();
-        assert_eq!(guids.len(), 21);
+        assert_eq!(guids.len(), 54);
+        let mut unique = guids.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), 54);
+        assert_eq!(ClipId::EmoteAnticipation.guid(), 0x25bf);
+        assert_eq!(ClipId::EmoteSad3Loop.frames(), 51);
+        assert_eq!(
+            MOOD_STANDS.map(ClipId::guid),
+            [0x128a, 0x128b, 0x1289, 0x128c]
+        );
         assert_eq!(guids[..4], [0x1241, 0x1242, 0x1243, 0x1244]);
         assert_eq!(ClipId::ALL[0], ClipId::Stand);
         for (i, c) in ClipId::ALL.iter().enumerate() {
@@ -1096,6 +1616,262 @@ mod tests {
             let f = a.tick(&run, true);
             assert_eq!(f.layers[0].clip, ClipId::Stand);
         }
+    }
+
+    /// Standing with the mood d-pad direction held (or released).
+    fn dpad(mood: Option<Mood>) -> Sackboy {
+        let lanes = |_: f32| true;
+        let mut s = Sackboy::at_lane(0.);
+        s.step(
+            Input {
+                mood,
+                ..Default::default()
+            },
+            &Contact {
+                grounded: true,
+                lane_has_floor: &lanes,
+            },
+        );
+        s
+    }
+
+    /// One press: the direction down for a tick, then released for `after` ticks.
+    fn press(a: &mut SackboyAnim, mood: Mood, after: usize) -> Vec<AnimFrame> {
+        let mut out = vec![a.tick(&dpad(Some(mood)), true)];
+        out.extend((0..after).map(|_| a.tick(&dpad(None), true)));
+        out
+    }
+
+    #[test]
+    fn same_mood_cycles_levels_one_two_three_off() {
+        let mut a = SackboyAnim::new();
+        assert_eq!(a.mood(), None);
+        let mut seen = Vec::new();
+        for _ in 0..5 {
+            press(&mut a, Mood::Angry, 2);
+            seen.push(a.mood());
+        }
+        let on = |l| Some((Mood::Angry, l));
+        assert_eq!(seen, [on(1), on(2), on(3), None, on(1)]);
+        // Holding the direction is one press (edge), and there is no timeout.
+        let mut a = SackboyAnim::new();
+        for _ in 0..2_000 {
+            a.tick(&dpad(Some(Mood::Scared)), true);
+        }
+        assert_eq!(a.mood(), Some((Mood::Scared, 1)));
+        // Movement and a jump do not cancel it.
+        a.tick(&holding(30., 1.), true);
+        a.tick(&holding(30., 1.), false);
+        assert_eq!(a.mood(), Some((Mood::Scared, 1)));
+        // Stepping off from level 3 plays that level's to_neutral clip.
+        let mut a = SackboyAnim::new();
+        for _ in 0..3 {
+            press(&mut a, Mood::Happy, 1);
+        }
+        let f = press(&mut a, Mood::Happy, 0);
+        assert!(layer(&f[0], ClipId::EmoteHappy3ToNeutral).is_some());
+    }
+
+    #[test]
+    fn opposite_mood_cancels_and_another_replaces() {
+        assert_eq!(Mood::Happy.opposite(), Mood::Sad);
+        assert_eq!(Mood::Scared.opposite(), Mood::Angry);
+        let mut a = SackboyAnim::new();
+        press(&mut a, Mood::Happy, 1);
+        press(&mut a, Mood::Happy, 1);
+        // Sad ends happy through happy's level-2 to_neutral and does not start itself.
+        let f = press(&mut a, Mood::Sad, 1);
+        assert_eq!(a.mood(), None);
+        assert_eq!(
+            a.emote().map(|e| (e.0, e.1)),
+            Some((Mood::Happy, EmoteState::ToNeutral))
+        );
+        let l = layer(&f[0], ClipId::EmoteHappy2ToNeutral).unwrap();
+        assert_eq!(l.frame, 0.);
+        // The next sad press starts sad.
+        press(&mut a, Mood::Sad, 1);
+        assert_eq!(a.mood(), Some((Mood::Sad, 1)));
+        // A mood that is not the opposite replaces it at level 1, from the anticipation.
+        press(&mut a, Mood::Sad, 1);
+        let f = press(&mut a, Mood::Scared, 0);
+        assert_eq!(a.mood(), Some((Mood::Scared, 1)));
+        let l = layer(&f[0], ClipId::EmoteAnticipation).unwrap();
+        assert_eq!(l.frame, 0.);
+    }
+
+    #[test]
+    fn emote_plays_anticipation_then_the_clip_then_holds_under_the_mood_stand() {
+        let mut a = SackboyAnim::new();
+        let frames = press(&mut a, Mood::Happy, 39);
+        let seq: Vec<(ClipId, f32)> = frames
+            .iter()
+            .map(|f| (f.layers[1].clip, f.layers[1].frame))
+            .collect();
+        // 6 anticipation frames, the 16 emote frames, then the last frame held.
+        let want: Vec<(ClipId, f32)> = (0..6)
+            .map(|i| (ClipId::EmoteAnticipation, i as f32))
+            .chain((0..16).map(|i| (ClipId::EmoteHappy, i as f32)))
+            .chain((0..18).map(|_| (ClipId::EmoteHappy, 15.)))
+            .collect();
+        assert_eq!(seq, want);
+        assert!(frames.iter().all(|f| f.layers[0].clip == ClipId::Stand));
+        assert!(frames.iter().all(|f| f.layers[1].weight == 1.));
+        // stand_happy comes on by the mood weight once the emote is on its last frame.
+        for (t, f) in frames.iter().enumerate() {
+            let stand = layer(f, ClipId::StandHappy);
+            assert_eq!(stand.is_some(), t >= 21, "tick {t}");
+            if let Some(s) = stand {
+                assert!(close(s.weight, 1. - 0.9f32.powi(t as i32 + 1)));
+                assert_eq!(f.layers[2].clip, ClipId::StandHappy);
+            }
+        }
+        assert_eq!(a.emote(), Some((Mood::Happy, EmoteState::Emote, 15)));
+        assert!(a.emote_held());
+        // Level 2 restarts from the anticipation into emote_happy_2 (18 frames).
+        let frames = press(&mut a, Mood::Happy, 30);
+        assert_eq!(frames[0].layers[1].clip, ClipId::EmoteAnticipation);
+        assert!(layer(&frames[0], ClipId::StandHappy).is_none());
+        assert_eq!(frames[6].layers[1].clip, ClipId::EmoteHappy2);
+        assert_eq!(frames[30].layers[1].frame, 17.);
+    }
+
+    #[test]
+    fn to_neutral_plays_through_then_the_mood_resets() {
+        let mut a = SackboyAnim::new();
+        press(&mut a, Mood::Angry, 40);
+        let frames = press(&mut a, Mood::Scared, 80);
+        let tail: Vec<f32> = frames
+            .iter()
+            .filter_map(|f| layer(f, ClipId::EmoteAngryToNeutral).map(|l| l.frame))
+            .collect();
+        assert_eq!(tail, (0..16).map(|i| i as f32).collect::<Vec<_>>());
+        // stand_angry fades with the weight (x 0.9 per tick), then leaves the stack.
+        let w0 = layer(&frames[0], ClipId::StandAngry).unwrap().weight;
+        let w5 = layer(&frames[5], ClipId::StandAngry).unwrap().weight;
+        assert!(close(w5, w0 * 0.9f32.powi(5)));
+        assert_eq!(a.emote(), None);
+        assert_eq!(a.mood(), None);
+        let last = frames.last().unwrap();
+        let lerps: Vec<ClipId> = last
+            .layers
+            .iter()
+            .filter(|l| l.blend == Blend::Lerp)
+            .map(|l| l.clip)
+            .collect();
+        assert_eq!(lerps, [ClipId::Stand]);
+    }
+
+    #[test]
+    fn mood_weights_ease_a_tenth_per_tick() {
+        let mut a = SackboyAnim::new();
+        press(&mut a, Mood::Sad, 0);
+        assert!(close(a.mood_weights()[1], 0.1));
+        a.tick(&dpad(None), true);
+        assert!(close(a.mood_weights()[1], 0.19));
+        for _ in 0..8 {
+            a.tick(&dpad(None), true);
+        }
+        assert!(close(a.mood_weights()[1], 1. - 0.9f32.powi(10)));
+        assert_eq!(a.mood_weights()[0], 0.);
+        // Replaced by angry: sad falls by a tenth of itself, angry rises.
+        let w = a.mood_weights()[1];
+        press(&mut a, Mood::Angry, 0);
+        assert!(close(a.mood_weights()[1], 0.9 * w));
+        assert!(close(a.mood_weights()[2], 0.1));
+    }
+
+    #[test]
+    fn sad_levels_two_and_three_loop() {
+        let clips = |frames: &[AnimFrame]| -> Vec<(ClipId, f32)> {
+            frames
+                .iter()
+                .map(|f| (f.layers[1].clip, f.layers[1].frame))
+                .collect()
+        };
+        let mut a = SackboyAnim::new();
+        press(&mut a, Mood::Sad, 1);
+        let two = clips(&press(&mut a, Mood::Sad, 6 + 19 + 2));
+        assert_eq!(two[6], (ClipId::EmoteSad2Loop, 0.));
+        assert_eq!(two[6 + 18], (ClipId::EmoteSad2Loop, 18.));
+        assert_eq!(two[6 + 19], (ClipId::EmoteSad2Loop, 0.));
+        let three = clips(&press(&mut a, Mood::Sad, 6 + 14 + 51 + 2));
+        assert_eq!(three[6], (ClipId::EmoteSad3Into, 0.));
+        assert_eq!(three[6 + 13], (ClipId::EmoteSad3Into, 13.));
+        assert_eq!(three[6 + 14], (ClipId::EmoteSad3Loop, 0.));
+        assert_eq!(three[6 + 14 + 50], (ClipId::EmoteSad3Loop, 50.));
+        assert_eq!(three[6 + 14 + 51], (ClipId::EmoteSad3Loop, 0.));
+    }
+
+    #[test]
+    fn a_mood_blocks_the_idle_chain() {
+        let mut a = SackboyAnim::new();
+        press(&mut a, Mood::Happy, 0);
+        let still = moving(0.);
+        for _ in 0..5_000 {
+            assert_eq!(a.tick(&still, true).layers[0].clip, ClipId::Stand);
+        }
+        assert_eq!(a.mood(), Some((Mood::Happy, 1)));
+        // Mood off again: the chain starts as before.
+        press(&mut a, Mood::Sad, 0);
+        let mut idle = false;
+        for _ in 0..5_000 {
+            idle |= a.tick(&still, true).layers[0].clip != ClipId::Stand;
+        }
+        assert!(idle);
+    }
+
+    #[test]
+    fn look_layers_close_the_stack_on_their_reference_frames() {
+        let mut a = SackboyAnim::new();
+        for s in [moving(0.), moving(30.), moving(-12.)] {
+            let f = a.tick(&s, true);
+            let look = &f.layers[f.layers.len() - 3..];
+            let clips: Vec<ClipId> = look.iter().map(|l| l.clip).collect();
+            assert_eq!(clips, LOOK_CLIPS);
+            // No look input is modelled: each axis sits on its neutral frame 0.5 n.
+            for (l, want) in look.iter().zip([4., 4., 8.]) {
+                assert_eq!(l.blend, Blend::Additive { reference: want });
+                assert_eq!((l.frame, l.weight, l.mirror), (want, 1., false));
+            }
+        }
+        assert_eq!(look_frames(ClipId::LookUpdown, 1.), (8., 4.));
+        assert_eq!(look_frames(ClipId::LookLeftright, -1.), (0., 4.));
+        assert_eq!(look_frames(ClipId::LookRoll, 0.5), (12., 8.));
+        assert_eq!(look_frames(ClipId::LookRoll, 7.), (16., 8.));
+    }
+
+    #[test]
+    fn look_axes_follow_the_found_formula() {
+        // Standing (wf 0): the tilt term goes to the roll, the inputs pass through.
+        let v = look_axes([0.2, 0.5, 0.1], 0.5, 1., 0., 1., 0.);
+        assert!(close(v[0], 0.2) && close(v[1], 0.5) && close(v[2], 0.6));
+        // Full walk left (wf 1, sgn -1): half the tilt on up/down, none on the roll.
+        let v = look_axes([0.2, 0.5, 0.1], 0.5, 1., 1., -1., 0.);
+        assert!(close(v[0], -0.05) && close(v[2], 0.1));
+        // Attention scales the tilt term; outputs clamp to [-1, 1].
+        assert!(close(look_axes([0.; 3], 0.5, 0.4, 0., 1., 0.)[2], 0.2));
+        assert_eq!(look_axes([3., -3., 0.], 9., 1., 0., 1., 0.), [1., -1., 1.]);
+        // Looking the way he faces is reduced by yaw / 90 degrees; the other way is not.
+        let side = |y: f32, yaw: f32| look_axes([0., y, 0.], 0., 1., 0., 1., yaw)[1];
+        assert!(close(side(0.5, FRAC_PI_2 / 2.), 0.));
+        assert!(close(side(-0.5, -FRAC_PI_2 / 4.), -0.25));
+        assert!(close(side(-0.5, FRAC_PI_2), -0.5));
+    }
+
+    #[test]
+    fn attention_rises_standing_and_drops_with_speed() {
+        let mut a = SackboyAnim::new();
+        a.tick(&moving(0.), true);
+        assert!(close(a.attention(), 0.1));
+        for _ in 0..200 {
+            a.tick(&moving(0.), true);
+        }
+        assert!(a.attention() > 0.999);
+        // Half speed: 0.1 of the way toward 0.5, then scaled by 0.5.
+        a.tick(&moving(15.), true);
+        assert!(close(a.attention(), 0.95 * 0.5), "{}", a.attention());
+        a.tick(&moving(30.), true);
+        assert_eq!(a.attention(), 0.);
     }
 
     /// Drives the real controller over a flat floor; returns the per-tick frames.

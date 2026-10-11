@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-11 — D233 Sackboy moods, emotes and head look (not compiled yet)
+
+Mood d-pad presses (levels 1-3, opposite cancels), anticipation -> emote -> to_neutral, mood
+stands by eased weight, three additive look layers (neutral: no look inputs modelled). 33
+new clips. cargo/python were refused by the session gate: fmt, clippy and tests still to
+run. docs/d233-sackboy-moods-headlook.md. +0 / +0.
+
 ## 2026-10-11 — D232 open items from Ghidra pass 2
 
 Idle roll 0..249, lane layered after jump, idle only after 300 quiet ticks, seed 42 and a

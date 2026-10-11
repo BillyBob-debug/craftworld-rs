@@ -4040,3 +4040,22 @@ Next: stretch_crouch spring input (0x6c56c) and bone mirror map; then emotes/hea
 - Not tested: play run or RPCS3 comparison of idle timing.
 **+0 newly viewable / +0 newly Complete (runtime feature).**
 Next: camera lead via a live memory diff; emotes/head look (plan 7-8).
+## 2026-10-11 - D233 Sackboy moods, emotes and head look (NOT compiled yet)
+
+- Rules from Ghidra pass 3 (local-analysis/results/2026-10-11-ghidra-sackboy-moods-headlook.md)
+  and pass 2 section 4. lbp-sim: Mood + Input::mood (d-pad direction held); SackboyAnim takes
+  the press edge: same mood cycles 1, 2, 3, off, the opposite (i ^ 1) cancels through
+  to_neutral, another replaces at level 1, no timeout; anticipation -> emote (last frame
+  holds, sad 2/3 loop) -> to_neutral; weights ease 0.1 per tick; stand_<mood> lerped on by
+  weight once the emote holds; idle chain blocked. Three additive look layers close the
+  stack (neutral: right stick, c20 target and tilt term are 0 here). 33 new clips (54).
+- Viewer: I/K/L/J = mood up/down/right/left; --play-sackboy-input letters U D R L; log line
+  shows `mood <name> <level> <state>`. Details: docs/d233-sackboy-moods-headlook.md.
+- BLOCKER: the session's permission gate refused every cargo, python and git add command,
+  so nothing was compiled or committed (uncommitted in the lbp2-wt-moods worktree). cargo fmt --all --check: not run. cargo test -q -p lbp-sim
+  -p lbp-preview -p lbp-bevy-viewer: not run (10 new picker tests written). cargo clippy
+  (same crates) -D warnings: not run. Play run: not run.
+- Not tested: everything above; RPCS3 comparison of the d-pad mapping and emote timing.
+**+0 newly viewable / +0 newly Complete (runtime feature).**
+Next: run fmt / clippy / tests on this branch and fix what they report, then the scripted
+play run in the D233 doc; after that camera lead (live memory diff) and the look inputs.

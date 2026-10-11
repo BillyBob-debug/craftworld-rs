@@ -14,6 +14,10 @@
 //! first CHECKPOINT's POS plus [`SPAWN_OFFSET`]. `--play-sackboy-input STEPS` replaces the pad with a script of
 //! `keys:ticks` steps (keys from `l r j b f`, `-` for none; e.g. `r:40,rj:12,-:30`) and prints
 //! Sackboy's position every tick, for comparing paths against RPCS3.
+//!
+//! Moods (D233, docs/d233-sackboy-moods-headlook.md): I / K / L / J are the mood d-pad up
+//! (happy) / down (sad) / right (angry) / left (scared); in a script the capitals `U D R L`
+//! hold that direction (one press per step: `U:1,-:40,U:1`).
 use bevy::prelude::*;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::level_scene;
@@ -23,7 +27,7 @@ use lbp_sim::character::{
     spawn_sackboy, SackboyBody, SackboyPlugin, CENTRE_ABOVE, FLOOR_REST, HALF_SEGMENT, HEIGHT,
     RADIUS,
 };
-use lbp_sim::sackboy::{Input, WALK_SPEED};
+use lbp_sim::sackboy::{Input, Mood, WALK_SPEED};
 use lbp_sim::sackboy_anim::{AnimFrame, Blend, ClipId, SackboyAnim};
 use lbp_sim::scene::{material_rule_for_path, MaterialRule};
 use lbp_sim::{
@@ -358,6 +362,10 @@ fn parse_script(text: &str) -> Result<Vec<(Input, usize)>, String> {
                     'j' => input.jump = true,
                     'b' => input.back = true,
                     'f' => input.front = true,
+                    'U' => input.mood = Some(Mood::Happy),
+                    'D' => input.mood = Some(Mood::Sad),
+                    'R' => input.mood = Some(Mood::Angry),
+                    'L' => input.mood = Some(Mood::Scared),
                     '-' => {}
                     _ => return Err(format!("--play-sackboy-input: unknown key {c:?}")),
                 }
@@ -611,11 +619,22 @@ fn read_pad(
     if held(KeyCode::ArrowRight, GamepadButton::DPadRight) {
         x = 1.;
     }
+    // Moods (D233): I/K/L/J as the mood d-pad up/down/right/left. The pad's own d-pad
+    // already walks and changes lanes here, so it is not the mood pad.
+    let mood = [
+        (KeyCode::KeyI, Mood::Happy),
+        (KeyCode::KeyK, Mood::Sad),
+        (KeyCode::KeyL, Mood::Angry),
+        (KeyCode::KeyJ, Mood::Scared),
+    ]
+    .into_iter()
+    .find_map(|(k, m)| keys.pressed(k).then_some(m));
     let input = Input {
         x,
         jump: held(KeyCode::Space, GamepadButton::South),
         back: held(KeyCode::ArrowUp, GamepadButton::DPadUp),
         front: held(KeyCode::ArrowDown, GamepadButton::DPadDown),
+        mood,
     };
     for mut body in &mut sackboy {
         body.input = input;
@@ -661,6 +680,8 @@ fn layer_summary(a: &AnimFrame) -> String {
         .zip(share)
         .filter_map(|(l, w)| match l.blend {
             Blend::Lerp if w > 0.01 => Some(format!("{}@{:.1}*{w:.2}", l.clip.name(), l.frame)),
+            // A look layer on its neutral frame adds nothing: left out.
+            Blend::Additive { reference } if l.frame == reference => None,
             Blend::Additive { .. } => {
                 Some(format!("+{}@{:.1}*{:.2}", l.clip.name(), l.frame, l.weight))
             }
@@ -668,6 +689,20 @@ fn layer_summary(a: &AnimFrame) -> String {
         })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// The mood for the scripted log: `happy 2 emote` (level, emote state), `happy 1 held`
+/// once the emote holds, `happy off to_neutral` while an ended mood plays out, `-` for none.
+fn mood_summary(picker: &SackboyAnim) -> String {
+    let level = picker.mood().map(|(m, l)| format!("{} {l}", m.name()));
+    match (level, picker.emote()) {
+        (None, None) => "-".into(),
+        (None, Some((m, state, _))) => format!("{} off {}", m.name(), state.name()),
+        (Some(level), Some((_, state, _))) if !picker.emote_held() => {
+            format!("{level} {}", state.name())
+        }
+        (Some(level), _) => format!("{level} held"),
+    }
 }
 
 /// With a script, Sackboy's position after each tick (1-based), and the picked clip.
@@ -687,8 +722,15 @@ fn log_scripted(
     let clip = figure
         .single()
         .ok()
-        .and_then(|f| f.anim.as_ref())
-        .map(|a| format!(" yaw {:.1} layers {}", a.yaw.to_degrees(), layer_summary(a)))
+        .and_then(|f| f.anim.as_ref().map(|a| (f, a)))
+        .map(|(f, a)| {
+            format!(
+                " mood {} yaw {:.1} layers {}",
+                mood_summary(&f.picker),
+                a.yaw.to_degrees(),
+                layer_summary(a)
+            )
+        })
         .unwrap_or_default();
     println!(
         "sackboy tick {} x {:.1} y {:.1} z {:.1} vx {:.2} vy {:.2} grounded {}{clip}",
