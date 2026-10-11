@@ -3,6 +3,7 @@ mod dual;
 mod gooey_ui;
 mod pod_menu;
 mod popit_browser;
+mod popit_play;
 mod puter;
 mod slot_browser;
 mod text_browser;
@@ -630,6 +631,10 @@ fn options() -> Result<Viewer, String> {
             v.level.report = true;
             continue;
         }
+        if flag == "--popit-open" {
+            // Read by popit_play.rs.
+            continue;
+        }
         if flag == "--level-scripts" {
             // Read by level_play.rs.
             continue;
@@ -777,6 +782,7 @@ fn options() -> Result<Viewer, String> {
             | "--ui-script-function"
             | "--level-scripts-flags"
             | "--play-sackboy-at"
+            | "--popit-mode"
             | "--play-sackboy-input"
             | "--qa-record" => {}
             _ => return Err(format!("Unknown option {flag}")),

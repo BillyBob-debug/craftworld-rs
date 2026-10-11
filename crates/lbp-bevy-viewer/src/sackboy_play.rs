@@ -49,7 +49,7 @@ struct Play {
 }
 
 #[derive(Component)]
-struct Marker;
+pub(crate) struct Marker;
 
 /// The Sackboy mesh standing on the capsule: `upright` turns the raw Z-up model to the
 /// display (feet at the origin, level-unit scale); `facing` is the turn about the display Y
@@ -455,7 +455,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         .map(|s| parse_script(&s))
         .transpose()?;
     // The level reader recurses deeply: same worker stack as the level scene.
-    let (scene, checkpoints, header) = std::thread::Builder::new()
+    let (scene, checkpoints, header, popit) = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
         .spawn(move || -> Result<_, String> {
             let control = LoadControl::default();
@@ -481,7 +481,13 @@ pub fn install(app: &mut App) -> Result<(), String> {
                 r.rejected.values().sum::<usize>(),
                 r.joints
             );
-            Ok((scene, level_scene::checkpoints(&report.things), header))
+            let popit = crate::popit_play::load_assets(&source, &catalog, &control)?;
+            Ok((
+                scene,
+                level_scene::checkpoints(&report.things),
+                header,
+                popit,
+            ))
         })
         .map_err(|e| format!("play sackboy thread: {e}"))?
         .join()
@@ -516,6 +522,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         spawn[1],
         spawn[2]
     );
+    crate::popit_play::install(app, popit);
     app.add_plugins((SimPlugin::default(), SackboyPlugin))
         .insert_resource(Play {
             scene: Some(scene),
@@ -762,7 +769,7 @@ fn log_scripted(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn show_sackboy(
+pub(crate) fn show_sackboy(
     mut commands: Commands,
     display: Option<Res<LevelDisplay>>,
     time: Res<Time>,

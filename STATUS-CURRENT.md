@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D233, 2026-10-11
+# Current state (overwrite each milestone) — after D235, 2026-10-11
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D234 animation fitted to game vertices (2026-10-11)
+## Latest: D235 Popit overlay (2026-10-11)
+- D234 merged (#132). `--play-sackboy` now draws the Popit (`popit_play.rs`, `--popit-mode edit|play`,
+  `--popit-open`, Z toggles): item order/icons/labels from poppet.ff, layout/colours measured on RPCS3 frames.
+  `docs/d235-popit.md` (FOUND / MEASURED / OPEN). Open: gradient/camera constants, cord shape, Sackboy turn/tint,
+  real D-pad Down binding, pixel compare against more frames.
+
+## Before: D234 animation fitted to game vertices (2026-10-11)
 - D233 moods/emotes/head look merged (#130, compiled, tests pass).
 - D234: RPCS3's skinned Sackboy vertices read from memory and fitted to our poses
   (`crates/lbp-preview/examples/pose_fit.rs`, `scripts/rpcs3_vdump.py`, viewer env
@@ -42,7 +48,7 @@ Movement: D230 fall drag / gravity; Moon handoff `docs/handoff-pc-2026-10-11*.md
 
 ## Next
 1. Arms / stop / turn poses (tick-aligned vertex captures); emote clip frames vs game.
-2. Popit open sequence in play mode (Z/Square): card, cord, cursor, Sackboy turns to camera.
+2. Popit: compare more frames, cursor mode, inventory grid pages (submode 11).
 3. Camera lead, slopes (paused by the owner).
 
 ## Environment

@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-11 — D235 Popit overlay (create and play menus)
+
+`--play-sackboy` draws the Popit: gradient card, SDF icon grid in the script's order (create 3x3 with
+the cursor focused, play 6/4,0/7,3), focus tile, tooltip pill, "Close Popit" prompt, cord, 10-tick
+smoothstep open and a camera nudge. Item data from poppet.ff (Ghidra pass); sizes/colours measured
+on RPCS3 frames. docs/d235-popit.md. +0 / +0.
+
 ## 2026-10-11 — D234 Sackboy animation fitted to the game's own vertices
 
 RPCS3's CPU-skinned Sackboy vertices fitted to our clips and blended play poses (pose_fit,
