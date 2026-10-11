@@ -631,7 +631,7 @@ fn options() -> Result<Viewer, String> {
             v.level.report = true;
             continue;
         }
-        if flag == "--popit-open" {
+        if flag == "--popit-open" || flag == "--popit-cursor" {
             // Read by popit_play.rs.
             continue;
         }

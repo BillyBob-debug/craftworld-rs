@@ -55,6 +55,13 @@ pad's West button toggles it, arrows move the focus while it is open. Code:
   X / pad South opens, C / pad East closes. Icons come from the disc plans by category (the game shows the
   profile inventory), section names are humanised tags, counts are not modelled.
 
+## MEASURED pass 4: cursor mode (create frame 18:35:20)
+- Square (Z) opens the Popit in create mode as well; Cross on the Popit Cursor button closes it and starts cursor
+  mode: a 22 px yellow ring (2 px stroke, centre dot) at the frame centre (639,358), a thin yellow cord from
+  Sackboy's hips to the ring, bottom prompt "Set Camera" with the R3 glyph (same pill as Close Popit). Camera
+  stays the gameplay camera. Viewer: `--popit-cursor` (QA), WASD / left stick move the ring, C / Circle leave,
+  Z / Square leave and reopen the Popit.
+
 ## OPEN
 - Exact gradient colours/alpha (not in script, Gooey defaults), card anchor rule, bubble tail/cord geometry
   (yellow S-curve drawn as dots here), camera constants (no named data found), whether Sackboy turns/tints

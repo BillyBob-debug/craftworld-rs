@@ -159,7 +159,14 @@ struct Popit {
     page_blend: f32,
     cell: (usize, usize),
     built: Option<(u32, usize, usize)>,
+    /// Cursor mode (Popit Cursor button): cursor position in 720p screen px.
+    cursor: Option<Vec2>,
 }
+
+/// Cursor mode: starts at the frame centre (MEASURED 639,358); ring 22 px, speed px/s.
+const CURSOR_START: Vec2 = Vec2::new(640., 358.);
+const CURSOR_SPEED: f32 = 320.;
+const CURSOR_PROMPT: &str = "Set Camera";
 
 /// Inventory page layout, 720p px (MEASURED on RPCS3 create frames 18:12): panel rectangle,
 /// 6 icon columns, 46 px row pitch from the first grid row.
@@ -196,6 +203,8 @@ enum Role {
     Prompt,
     PromptText,
     Glyph,
+    CursorRing,
+    CursorDot,
     Tail(usize),
     Cord(usize),
 }
@@ -390,6 +399,10 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
             page_blend: if start_page.is_some() { 1. } else { 0. },
             cell: (0, 0),
             built: None,
+            cursor: all
+                .iter()
+                .any(|a| a == "--popit-cursor")
+                .then_some(CURSOR_START),
         })
         .add_systems(
             Update,
@@ -420,6 +433,35 @@ fn popit_input(
     mut sackboy: Query<&mut lbp_sim::character::SackboyBody>,
 ) {
     let pad = pads.iter().next();
+    if let Some(at) = p.cursor {
+        // Cursor mode: the left stick (WASD) moves the ring, Circle/Square leave it (Square
+        // brings the Popit back); Sackboy stands still.
+        for mut body in &mut sackboy {
+            body.input = Default::default();
+        }
+        let axis = |neg: KeyCode, pos: KeyCode| {
+            f32::from(keys.pressed(pos)) - f32::from(keys.pressed(neg))
+        };
+        let (mut dx, mut dy) = (
+            axis(KeyCode::KeyA, KeyCode::KeyD),
+            axis(KeyCode::KeyW, KeyCode::KeyS),
+        );
+        if let Some(g) = pad {
+            dx += g.get(GamepadAxis::LeftStickX).unwrap_or(0.);
+            dy -= g.get(GamepadAxis::LeftStickY).unwrap_or(0.);
+        }
+        let v = Vec2::new(dx, dy).clamp_length_max(1.) * CURSOR_SPEED * time.delta_secs();
+        p.cursor = Some((at + v).clamp(Vec2::ZERO, Vec2::new(1280., 720.)));
+        let square = keys.just_pressed(KeyCode::KeyZ)
+            || pad.is_some_and(|g| g.just_pressed(GamepadButton::West));
+        let circle = keys.just_pressed(KeyCode::KeyC)
+            || pad.is_some_and(|g| g.just_pressed(GamepadButton::East));
+        if square || circle {
+            p.cursor = None;
+            p.open = square;
+        }
+        return;
+    }
     if keys.just_pressed(KeyCode::KeyZ) || pad.is_some_and(|g| g.just_pressed(GamepadButton::West))
     {
         p.open = !p.open;
@@ -463,6 +505,11 @@ fn popit_input(
             let r2 = (r as i32 + dy).clamp(0, 7) as usize;
             p.cell = (r2, c2);
         }
+        return;
+    }
+    if confirm && p.focus == 2 && p.open {
+        p.open = false;
+        p.cursor = Some(CURSOR_START);
         return;
     }
     if confirm && PAGES.iter().any(|(id, ..)| *id == p.focus) {
@@ -598,6 +645,7 @@ fn popit_layout(
         .world_to_viewport(cam_tf, fig.translation())
         .unwrap_or(head + Vec2::Y * 80.);
     let in_page = p.page_blend > 0.02;
+    let cursor_at = p.cursor.map(|c| c * scale);
     let hidden = p.blend <= 0. || p.page_blend > 0.02;
     let card = if p.mode == Mode::Edit {
         EDIT_CARD
@@ -771,7 +819,18 @@ fn popit_layout(
                     ),
                 }
             }
+            Role::CursorRing | Role::CursorDot => {
+                let sz = if part.0 == Role::CursorRing { 22. } else { 5. } * scale;
+                if let Some(c) = cursor_at {
+                    set(&mut node, c.x - sz / 2., c.y - sz / 2., sz, sz);
+                    node.border_radius = BorderRadius::all(Val::Px(sz / 2.));
+                    *vis = Visibility::Inherited;
+                }
+            }
             Role::Prompt => {
+                if cursor_at.is_some() {
+                    *vis = Visibility::Inherited;
+                }
                 let (pw, ph) = (165. * scale, 27. * scale);
                 set(
                     &mut node,
@@ -783,6 +842,9 @@ fn popit_layout(
                 node.border_radius = BorderRadius::all(Val::Px(ph / 2.));
             }
             Role::Glyph => {
+                if cursor_at.is_some() {
+                    *vis = Visibility::Inherited;
+                }
                 let sz = 22. * scale;
                 set(
                     &mut node,
@@ -792,12 +854,19 @@ fn popit_layout(
                     sz,
                 );
             }
-            Role::LabelText | Role::PromptText => {}
+            Role::LabelText => {}
+            Role::PromptText => {
+                if cursor_at.is_some() {
+                    *vis = Visibility::Inherited;
+                }
+            }
             Role::Cord(i) => {
                 let t = (i as f32 + 1.) / CORD_DOTS as f32;
                 // From the card's bottom edge to Sackboy's chest: leaves downward, bows right,
                 // then turns left onto the body (MEASURED path, create and play frames).
-                let (p0, p3) = if in_page {
+                let (p0, p3) = if let Some(c) = cursor_at {
+                    (c, head.lerp(feet, 0.62))
+                } else if in_page {
                     // Page view: from the panel's left edge to Sackboy's hips.
                     (
                         Vec2::new(PANEL[0] * scale, (PANEL[1] + 0.57 * PANEL[3]) * scale),
@@ -810,7 +879,13 @@ fn popit_layout(
                     )
                 };
                 let span = p3.y - p0.y;
-                let (p1, p2) = if in_page {
+                let (p1, p2) = if cursor_at.is_some() {
+                    let d = p3 - p0;
+                    (
+                        p0 + d * 0.3 + Vec2::Y * 8. * scale,
+                        p0 + d * 0.7 + Vec2::Y * 6. * scale,
+                    )
+                } else if in_page {
                     let d = p3 - p0;
                     (
                         p0 + d * 0.35 + Vec2::Y * 12. * scale,
@@ -828,7 +903,9 @@ fn popit_layout(
                 let sz = 3. * scale;
                 set(&mut node, pt.x - sz / 2., pt.y - sz / 2., sz, sz);
                 // The cord grows out of the card with the blend.
-                if t > e {
+                if cursor_at.is_some() {
+                    *vis = Visibility::Inherited;
+                } else if t > e {
                     *vis = Visibility::Hidden;
                 } else if in_page {
                     *vis = Visibility::Inherited;
@@ -858,15 +935,22 @@ fn popit_layout(
                     }
                 }
             }
-            Role::PromptText if text.0 != assets.close => {
-                text.0 = assets.close.clone();
+            Role::PromptText => {
+                let want = if p.cursor.is_some() {
+                    CURSOR_PROMPT
+                } else {
+                    &assets.close
+                };
+                if text.0 != want {
+                    text.0 = want.to_owned();
+                }
             }
             _ => {}
         }
     }
     for (part, mut bg) in &mut colours {
         if part.0 == Role::Label || part.0 == Role::Prompt || matches!(part.0, Role::Tail(_)) {
-            let a = e;
+            let a = if p.cursor.is_some() { 1. } else { e };
             bg.0 = if part.0 != Role::Prompt {
                 PILL.with_alpha(a)
             } else {
@@ -1190,6 +1274,24 @@ fn spawn_nodes(
         ImageNode::new(square).with_color(Color::srgb(0.88, 0.55, 0.65)),
         BackgroundColor(Color::srgba(0.08, 0.06, 0.06, 0.85)),
         GlobalZIndex(44),
+        Visibility::Hidden,
+    ));
+    commands.spawn((
+        Part(Role::CursorRing),
+        Node {
+            position_type: PositionType::Absolute,
+            border: UiRect::all(Val::Px(2.)),
+            ..default()
+        },
+        BorderColor::all(CORD),
+        GlobalZIndex(45),
+        Visibility::Hidden,
+    ));
+    commands.spawn((
+        Part(Role::CursorDot),
+        abs(),
+        BackgroundColor(CORD),
+        GlobalZIndex(45),
         Visibility::Hidden,
     ));
     for i in 0..CORD_DOTS {
