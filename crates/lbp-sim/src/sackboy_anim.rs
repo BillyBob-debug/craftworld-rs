@@ -569,9 +569,13 @@ pub const LANE_TRIGGER: f32 = 100.;
 pub const LANE_SKIP: u32 = 3;
 pub const LANE_RAMP: f32 = 3.;
 /// Jump layer (FOUND, 0x20a5f4): weight = clamp(peak/10), the peak |vy| follower eases at
-/// 0.125 per tick (how it follows a rising |vy| is INFERRED: it jumps up at once).
+/// 0.125 per tick (superseded in the air by JUMP_AIR_*, see below).
 pub const JUMP_PEAK_FULL: f32 = 10.;
 pub const JUMP_PEAK_EASE: f32 = 0.125;
+/// Jump layer weight in the air (D234, RPCS3 vertex fits): 0.7 at take-off to 0.9 over 30 ticks.
+pub const JUMP_AIR_START: f32 = 0.7;
+pub const JUMP_AIR_END: f32 = 0.9;
+pub const JUMP_AIR_RAMP: f32 = 30.;
 /// Stand-vs-walk jump mix per |vx| in the air (FOUND 0.045, full at 22.2).
 pub const JUMP_MIX_PER_VX: f32 = 0.045;
 /// Jump frame (FOUND): take-off ticks 1..5 show frame = tick; rising
@@ -1005,11 +1009,12 @@ impl SackboyAnim {
 
         // Jump layer: vy-driven frame in the air, the clip's tail after landing (FOUND).
         let vy = s.vy.abs();
-        self.peak = if vy > self.peak {
-            vy
-        } else {
-            self.peak + JUMP_PEAK_EASE * (vy - self.peak)
-        };
+        // D234: the game's jump layer is not at full weight in the air: RPCS3 vertex fits
+        // (standing jump) put 10-40% stand under it, 0.7 at take-off rising to 0.9 over the
+        // first 30 air ticks, whatever |vy| does. The |vy| follower below only keeps the
+        // value for the landing tail (INFERRED from one capture; the 0x20a5f4 follower
+        // reading is not reconciled with it).
+        let _ = (vy, JUMP_PEAK_EASE);
         let mut jump = None;
         if airborne {
             let air = self.air.get_or_insert(Air {
@@ -1033,8 +1038,11 @@ impl SackboyAnim {
             self.land = None;
             self.jump_mix = (vx * JUMP_MIX_PER_VX).abs().min(1.);
             self.jump_mirror = vx < 0.;
-            let w = (self.peak / JUMP_PEAK_FULL).clamp(0., 1.)
-                * (air.since as f32 / air.blend_in).clamp(0., 1.);
+            let level = JUMP_AIR_START
+                + (JUMP_AIR_END - JUMP_AIR_START)
+                    * (air.since as f32 / JUMP_AIR_RAMP).clamp(0., 1.);
+            self.peak = level * JUMP_PEAK_FULL;
+            let w = level * (air.since as f32 / air.blend_in).clamp(0., 1.);
             jump = Some((air.frame, w));
         } else if let Some(air) = self.air.take() {
             self.land = Some(((air.frame + LAND_FADE_FROM) * 0.5).floor());
@@ -1914,7 +1922,9 @@ mod tests {
         let first: Vec<f32> = jump[..5].iter().map(|j| j.1).collect();
         assert_eq!(first, [1., 2., 3., 4., 5.]);
         assert_eq!(jump[0].0, 5);
-        assert!(jump[..5].iter().all(|j| j.2 == 1.));
+        // D234: 0.7 at take-off, rising slowly (was full weight at once).
+        assert!(jump[0].2 > 0.69 && jump[0].2 < 0.75, "{:?}", jump[0]);
+        assert!(jump[..4].windows(2).all(|p| p[0].2 < p[1].2));
         // The frame reaches the apex (8) and the full-fall range, never past 14 in the air.
         let air_max = jump
             .iter()
@@ -1972,8 +1982,12 @@ mod tests {
             .iter()
             .map(|f| weight_of(f, ClipId::JumpWalk))
             .collect();
-        assert!(close(w[0], 1. / 7.), "{w:?}");
-        assert!(close(w[6], 1.), "{w:?}");
+        // Blend-in ramp times the air level (0.7..0.9, D234): rising, 0.7 x 7/7 at tick 7.
+        assert!(
+            w[0] < 1. / 7. && w.windows(2).all(|p| p[0] <= p[1]),
+            "{w:?}"
+        );
+        assert!(w[6] > 0.7 && w[6] < 0.75, "{w:?}");
         // Full-speed walk under it, facing right.
         assert!(close(weight_of(&frames[19], ClipId::WalkFast), 1.));
         assert!(frames[30].yaw > 1.4);

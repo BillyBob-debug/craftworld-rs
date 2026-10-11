@@ -705,6 +705,29 @@ fn mood_summary(picker: &SackboyAnim) -> String {
     }
 }
 
+/// QA (`LBP_DUMP_VERTS=FILE`): appends each shown pose's skinned vertices (mesh space,
+/// little-endian f32 xyz) so `pose_fit` can compare them with the game's buffer (D234).
+fn dump_pose(positions: &[[f32; 3]]) {
+    use std::io::Write;
+    let Ok(path) = std::env::var("LBP_DUMP_VERTS") else {
+        return;
+    };
+    let Ok(mut f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+    else {
+        return;
+    };
+    let mut buf = Vec::with_capacity(positions.len() * 12);
+    for p in positions {
+        for c in p {
+            buf.extend_from_slice(&c.to_le_bytes());
+        }
+    }
+    let _ = f.write_all(&buf);
+}
+
 /// With a script, Sackboy's position after each tick (1-based), and the picked clip.
 fn log_scripted(
     mut play: ResMut<Play>,
@@ -779,7 +802,9 @@ fn show_sackboy(
             // Clip bank: one blended pose per picked tick (stand stays the playing clip).
             if f.posed != f.picked {
                 if let (Some(a), Some(playing)) = (&f.anim, &mut v.playing) {
-                    playing.blended = Some(blend_frame(&playing.clip, &f.bank, a));
+                    let pose = blend_frame(&playing.clip, &f.bank, a);
+                    dump_pose(&playing.clip.blended_positions(&pose));
+                    playing.blended = Some(pose);
                 }
                 f.posed = f.picked;
             }

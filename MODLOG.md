@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-11 — D234 Sackboy animation fitted to the game's own vertices
+
+RPCS3's CPU-skinned Sackboy vertices fitted to our clips and blended play poses (pose_fit,
+LBP_DUMP_VERTS). Walk right 0.8 and walk left 1.5 match; the jump layer sat at full weight in
+the air where the game shows 0.7-0.9, so the air weight is now 0.7 rising to 0.9 (jump fit
+2.4-2.9 -> 1.3-1.5, landing arms 12 -> 2). docs/d234-anim-vertex-fit.md. +0 / +0.
+
 ## 2026-10-11 — D233 Sackboy moods, emotes and head look (not compiled yet)
 
 Mood d-pad presses (levels 1-3, opposite cancels), anticipation -> emote -> to_neutral, mood
