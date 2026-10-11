@@ -9,15 +9,16 @@ Ghidra (EBOOT 01.33): `local-analysis/results/2026-10-11-ghidra-sackboy-movement
 
 | Quantity | Game | Ours before | Ours now |
 | --- | --- | --- | --- |
-| Gravity per tick^2 | 2.70 (every airborne step 2.69-2.71; Ghidra -2.7) | 2.693 | 2.7 |
+| Fall (vy per tick) | `vy = vy*0.9997 - 2.698`, rms 0.015 over a 65-tick fall from y 7572 (fly-1); ends at -173.7 with no clamp | `vy - 2.693` | drag + 2.698 |
 | Walk accel / top (A key) | 3 / 30 (D key 29.34, keyboard quantisation) | 3 / 30 | unchanged |
 | Ground reversal at 29.3 | -3.0 per tick straight through zero | same | unchanged |
 | Air accel / cap | 2.4 per tick, cap 22.5; reversal at 29.2 also -2.4 per tick | same | unchanged |
-| Stick released in air | speed kept, -0.009 per tick at 29 (ratio ~0.9997) | no drag | `AIR_DRAG` 0.9997 |
+| Stick released in air | speed kept, -0.009 per tick at 29 (ratio ~0.9997) | no drag | `AIR_DRAG` 0.9997 (x and y) |
 | Jump release | next vy = previous - 2.7 (24.83 -> 22.13) | same | unchanged |
 | Landing, no stick | ground decel -3 per tick from touch-down | same | unchanged |
 | Landing dip | -26.2, -35.0, -35.0, then -31.8 ... 0 over 15 ticks; same depth for 19 and 29 per tick impact | none | `LANDING_DIP` (render offset only) |
-| Walk-speed analog, terminal fall, slopes, walls | Ghidra: world MaxVel 100/tick, slope limit ~55 deg; not measured in RPCS3 (blank Moon has no walls, fall from hover is ~400) | not modelled | unchanged |
+| Terminal fall | none reached: 173.7/tick at 65 ticks (Ghidra MaxVel 100 does not clamp); limit by drag ~9,000 | not modelled | via drag |
+| Slopes, walls, analog stick | Ghidra: slope limit ~55 deg; not measured (blank Moon) | not modelled | unchanged |
 
 The dip is applied to the figure's drawn position (`SackboyBody::controller.landing_dip()`),
 not to the capsule, so collision and lanes behave as before. Impact-speed dependence below

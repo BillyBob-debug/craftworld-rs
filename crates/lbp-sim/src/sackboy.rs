@@ -11,13 +11,15 @@
 //! yet: the crouch/landing dips (about 35 units for 1-2 and 8 ticks; visual only), slopes,
 //! grabbing, swimming, terminal velocity, the 10 u/tick plateau seen once after landing.
 
-/// Gravity per tick² (2,430 u/s²). Moon per-tick reads (d230): every airborne step is
-/// 2.70 +-0.01; Ghidra (2026-10-11) finds the same -2.7 at the normal gravity setting.
-/// Earlier fits gave 2.693 (Rookie) and 2.697 (Moon mean).
-pub const GRAVITY_TICK: f32 = 2.7;
-/// Horizontal speed kept per airborne tick (29.34 -> 29.23 over 15 ticks in d230, about
-/// -0.009 per tick at 29; Ghidra shows a matching unexplained 0.9996). Releasing the stick
-/// in the air does not slow Sackboy; only this tiny drag acts.
+/// Gravity per tick². A 65-tick fall from the Moon's top (d230 fly-1, 173.7 per tick at the
+/// end, no clamp) fits `vy = vy * AIR_DRAG - GRAVITY_TICK` with 2.698 to 0.015 rms; Ghidra
+/// finds the same -2.7 at the normal gravity setting. Earlier fits: 2.693 (Rookie), 2.697.
+pub const GRAVITY_TICK: f32 = 2.698;
+/// Speed kept per airborne tick on both axes (the fall fit gives 0.9997; the horizontal
+/// carry loses about 0.009 per tick at 29, the same ratio; Ghidra shows a matching 0.9996).
+/// Releasing the stick in the air does not slow Sackboy; only this drag acts. It makes the
+/// terminal fall speed about 9,000 per tick, so the world MaxVel of 100 seen in the code
+/// never applied (173.7 was reached).
 pub const AIR_DRAG: f32 = 0.9997;
 /// Y offset from his resting position, per tick after touch-down: the legs compress to a
 /// hard stop 35 below rest (reached by every landing seen: jumps, a 18.9/tick spawn drop,
@@ -131,7 +133,11 @@ impl Sackboy {
             }
             _ => {
                 self.jump_tick = None;
-                self.vy = if grounded { 0. } else { self.vy - GRAVITY_TICK };
+                self.vy = if grounded {
+                    0.
+                } else {
+                    self.vy * AIR_DRAG - GRAVITY_TICK
+                };
             }
         }
         // Lanes: a press on the ground, or a key held on the landing tick (an air press
@@ -308,6 +314,26 @@ mod tests {
             s.step(Input::default(), &floor);
         }
         assert_eq!(s.landing_dip(), 0.);
+    }
+
+    #[test]
+    fn free_fall_matches_the_moon_drop_without_a_clamp() {
+        // d230 fly-1: dy per tick -2.7, -5.4, -8.1 ... -173.66 on the 65th tick.
+        let mut s = Sackboy::at_lane(0.);
+        let lanes = |_: f32| true;
+        let air = Contact {
+            grounded: false,
+            lane_has_floor: &lanes,
+        };
+        let mut v = Vec::new();
+        for _ in 0..65 {
+            v.push(s.step(Input::default(), &air)[1]);
+        }
+        assert!(
+            (v[0] + 2.698).abs() < 0.01 && (v[2] + 8.09).abs() < 0.05,
+            "{v:?}"
+        );
+        assert!((v[64] + 173.66).abs() < 0.6, "{}", v[64]);
     }
 
     #[test]
