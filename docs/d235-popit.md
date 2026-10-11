@@ -25,6 +25,20 @@ pad's West button toggles it, arrows move the focus while it is open. Code:
 - Play card 109x146 px (rows 1,2,2), focus tile on the costume button, label "Customize Character" above.
 - Camera on open (create): about 1.1x closer, scene drops 58 px; the viewer applies zoom 1.1 and an aim drop.
 
+## MEASURED pass 2 (RPCS3 create frames 12:56:41-45, play frames 16:37-16:38, 1280x720)
+- Card 170x177 (edges at half intensity: x 554..724, y 260..436); fill is **radial from the tail attach point**
+  on the bottom edge (x = 0.547 of the width in create, about 0.51 in play), yellow (205,178,40) at the point to
+  pink (183,100,143) at the farthest top corner; ramp table `CARD_RAMP` (t = distance / farthest corner).
+  Matches the `GRADIENT_TETHER` guess (gradient style 7). Play frames fit the same ramp within 4/255.
+- Tooltip pill 30 px tall, width about 13 px per character; stacked tail 11 px wide x 13 px long (8 long when
+  it points sideways). Top row: pill above, tail down, tip 19 px above the tile. Middle row (create): pill to the
+  right of the tile, tail tip 8 px off the tile edge, pill centre 4 px below the tile centre. Bottom row mirrors
+  the top (INFERRED). Pill centre sits 5 px right of the tail tip.
+- Cord: 2-3 px yellow, leaves the card bottom 21 px right of its centre going down, bows right, then turns left
+  onto Sackboy's chest; it wiggles (animated wave), the viewer draws one static cubic.
+- Sackboy shows his back to the camera while the Popit is open in both modes (create and play frames), untinted;
+  the viewer turns him by pi over the open blend.
+
 ## OPEN
 - Exact gradient colours/alpha (not in script, Gooey defaults), card anchor rule, bubble tail/cord geometry
   (yellow S-curve drawn as dots here), camera constants (no named data found), whether Sackboy turns/tints

@@ -13,7 +13,6 @@
 //! keys move the focus instead of walking. `--popit-mode edit|play` picks the menu (default
 //! edit, the Moon's create mode). `--popit-open` starts it open (QA captures).
 use bevy::prelude::*;
-use bevy::ui::{ColorStop, Gradient, LinearGradient};
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::story::{decode_icon, load_strings, ResourceKey};
 
@@ -59,13 +58,46 @@ const ABOVE_HEAD: f32 = 40.;
 const POPIT_ZOOM: f32 = 1.1;
 const POPIT_AIM_DROP: f32 = 0.0879;
 
-const CARD_TOP: Color = Color::srgba(0.752, 0.382, 0.506, 0.92);
-const CARD_BOTTOM: Color = Color::srgba(0.737, 0.565, 0.380, 0.92);
+/// Card colour ramp (MEASURED on RPCS3 create-mode frames): the fill is a function of the
+/// distance `t` from the tail's attach point on the card's bottom edge, 0 at the attach point
+/// (the player-colour yellow) and 1 at the farthest top corner (pink). Linear between stops.
+const CARD_RAMP: [(f32, [u8; 3]); 20] = [
+    (0.00, [205, 178, 40]),
+    (0.05, [202, 173, 49]),
+    (0.10, [199, 168, 59]),
+    (0.15, [196, 164, 68]),
+    (0.20, [193, 160, 77]),
+    (0.25, [190, 156, 85]),
+    (0.30, [186, 153, 95]),
+    (0.35, [185, 149, 100]),
+    (0.40, [183, 145, 107]),
+    (0.45, [182, 142, 111]),
+    (0.50, [181, 138, 116]),
+    (0.55, [181, 134, 120]),
+    (0.60, [180, 130, 123]),
+    (0.65, [181, 126, 126]),
+    (0.70, [181, 121, 129]),
+    (0.75, [181, 117, 133]),
+    (0.80, [181, 112, 136]),
+    (0.85, [183, 105, 138]),
+    (0.90, [182, 102, 142]),
+    (1.00, [183, 100, 143]),
+];
+/// Where the tail attaches along the card's bottom edge (fraction of the width, measured).
+const CARD_ATTACH_X: f32 = 0.547;
+const PLAY_ATTACH_X: f32 = 0.51;
+const CARD_RADIUS: f32 = 24.;
+/// Tooltip pill: height, text size, per-character width estimate (px at 720p, measured).
+const PILL_H: f32 = 30.;
+const PILL_CHAR_W: f32 = 13.;
+const TAIL_LEN_V: f32 = 13.;
+const TAIL_LEN_H: f32 = 8.;
+const TAIL_STEPS: usize = 5;
 const TEAL: Color = Color::srgb(0.271, 0.796, 0.722);
 const PILL: Color = Color::srgb(0.808, 0.706, 0.141);
 const PROMPT: Color = Color::srgba(0.745, 0.647, 0.118, 0.72);
 const CORD: Color = Color::srgb(0.84, 0.74, 0.16);
-const CORD_DOTS: usize = 30;
+const CORD_DOTS: usize = 70;
 
 /// One main-menu button: its animated icon (every frame as white-on-alpha) and its label.
 pub(crate) struct Item {
@@ -102,6 +134,13 @@ struct Popit {
 #[derive(Component)]
 struct Part(Role);
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Place {
+    Above,
+    Below,
+    Right,
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Role {
     Card,
@@ -112,6 +151,7 @@ enum Role {
     Prompt,
     PromptText,
     Glyph,
+    Tail(usize),
     Cord(usize),
 }
 
@@ -145,6 +185,41 @@ fn image_from(w: u32, h: u32, rgba: Vec<u8>) -> Image {
         bevy::render::render_resource::TextureFormat::Rgba8UnormSrgb,
         bevy::asset::RenderAssetUsages::RENDER_WORLD,
     )
+}
+
+/// The card fill: rounded rectangle coloured by `CARD_RAMP` from the tail attach point.
+fn card_image(card: [f32; 2], attach_x: f32) -> Image {
+    const SS: f32 = 2.;
+    let (w, h) = ((card[0] * SS) as u32, (card[1] * SS) as u32);
+    let r = CARD_RADIUS * SS;
+    let (ax, ay) = (attach_x * card[0] * SS, h as f32);
+    let far = ((ax.max(w as f32 - ax)).powi(2) + ay * ay).sqrt();
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        for x in 0..w {
+            let (px, py) = (x as f32 + 0.5, y as f32 + 0.5);
+            // Signed distance to the rounded rectangle.
+            let qx = (px - w as f32 / 2.).abs() - (w as f32 / 2. - r);
+            let qy = (py - h as f32 / 2.).abs() - (h as f32 / 2. - r);
+            let sd = qx.max(0.).hypot(qy.max(0.)) + qx.max(qy).min(0.) - r;
+            let a = (0.5 - sd).clamp(0., 1.);
+            let t = (((px - ax).powi(2) + (py - ay).powi(2)).sqrt() / far).clamp(0., 1.);
+            let c = ramp(t);
+            out.extend_from_slice(&[c[0], c[1], c[2], (a * 255.) as u8]);
+        }
+    }
+    image_from(w, h, out)
+}
+
+fn ramp(t: f32) -> [u8; 3] {
+    let i = CARD_RAMP
+        .iter()
+        .position(|(s, _)| *s >= t)
+        .unwrap_or(CARD_RAMP.len() - 1)
+        .max(1);
+    let ((t0, c0), (t1, c1)) = (CARD_RAMP[i - 1], CARD_RAMP[i]);
+    let f = ((t - t0) / (t1 - t0)).clamp(0., 1.);
+    [0, 1, 2].map(|k| (f32::from(c0[k]) + (f32::from(c1[k]) - f32::from(c0[k])) * f) as u8)
 }
 
 /// Reads every atlas, the tooltips and the Square glyph (load worker).
@@ -218,7 +293,7 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
         })
         .add_systems(
             Update,
-            (popit_input, popit_layout)
+            (popit_input, popit_turn, popit_layout)
                 .chain()
                 .after(crate::sackboy_play::show_sackboy),
         );
@@ -289,6 +364,18 @@ fn popit_input(
     p.clock = 0.;
 }
 
+/// Sackboy turns his back to the camera while the Popit is open (both modes, MEASURED on
+/// RPCS3 frames: back of the head and the cord wound round the body), eased like the card.
+fn popit_turn(p: Res<Popit>, mut figure: Query<&mut Transform, With<crate::sackboy_play::Figure>>) {
+    let turn = std::f32::consts::PI * smooth(p.blend);
+    if turn <= 0. {
+        return;
+    }
+    for mut t in &mut figure {
+        t.rotation = Quat::from_rotation_y(turn) * t.rotation;
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn popit_layout(
     mut commands: Commands,
@@ -331,7 +418,13 @@ fn popit_layout(
             hs.push((item.id, v));
         }
         let square = images.add(assets.square.clone());
-        spawn_nodes(&mut commands, &assets, &hs, square);
+        let (card, attach) = if p.mode == Mode::Edit {
+            (EDIT_CARD, CARD_ATTACH_X)
+        } else {
+            (PLAY_CARD, PLAY_ATTACH_X)
+        };
+        let card = images.add(card_image(card, attach));
+        spawn_nodes(&mut commands, &assets, &hs, square, card);
         commands.insert_resource(IconHandles(hs));
         p.spawned = true;
         return;
@@ -389,6 +482,58 @@ fn popit_layout(
         node.height = Val::Px(h);
     };
     let _ = px;
+    // Tooltip pill and tail: above the top row, below the bottom row, else to the right of the
+    // tile; the tail points at the tile (MEASURED on create and play frames).
+    let (tile_c, tile_half) = {
+        let c = cell_centre(focus_pos.0, focus_pos.1, focus_pos.2);
+        (
+            Vec2::new(left + c[0] * scale * grow, top + c[1] * scale * grow),
+            FOCUS_TILE_PX * scale * grow / 2.,
+        )
+    };
+    let place = if focus_pos.0 == 0 {
+        Place::Above
+    } else if focus_pos.0 + 1 == rows(p.mode).len() {
+        Place::Below
+    } else {
+        Place::Right
+    };
+    let chars = assets
+        .items
+        .iter()
+        .find(|i| i.id == p.focus)
+        .map_or(10, |i| i.label.chars().count());
+    let (pw, ph) = ((chars as f32 * PILL_CHAR_W - 2.) * scale, PILL_H * scale);
+    let (pill, tail_at) = match place {
+        Place::Above => {
+            let tip = Vec2::new(tile_c.x + 3. * scale, tile_c.y - tile_half - 19. * scale);
+            (
+                (
+                    tip.x + 5. * scale - pw / 2.,
+                    tip.y - TAIL_LEN_V * scale - ph,
+                    pw,
+                    ph,
+                ),
+                tip,
+            )
+        }
+        Place::Below => {
+            let tip = Vec2::new(tile_c.x + 3. * scale, tile_c.y + tile_half + 19. * scale);
+            (
+                (
+                    tip.x + 5. * scale - pw / 2.,
+                    tip.y + TAIL_LEN_V * scale,
+                    pw,
+                    ph,
+                ),
+                tip,
+            )
+        }
+        Place::Right => {
+            let tip = Vec2::new(tile_c.x + tile_half + 8. * scale, tile_c.y + 4. * scale);
+            ((tip.x + TAIL_LEN_H * scale, tip.y - ph / 2., pw, ph), tip)
+        }
+    };
     for (part, mut node, mut vis) in &mut parts {
         *vis = if hidden {
             Visibility::Hidden
@@ -436,28 +581,42 @@ fn popit_layout(
                 }
             }
             Role::Label => {
-                let c = cell_centre(focus_pos.0, focus_pos.1, focus_pos.2);
-                let text_w = assets
-                    .items
-                    .iter()
-                    .find(|i| i.id == p.focus)
-                    .map_or(100., |i| i.label.chars().count() as f32 * 12.8 + 20.);
-                let (lw, lh) = (text_w * scale, 27. * scale);
-                let above = focus_pos.0 == 0;
-                let ly = if above {
-                    top - 30. * scale - lh + 27. * scale
-                } else {
-                    bottom + 14. * scale
+                set(&mut node, pill.0, pill.1, pill.2, pill.3);
+                node.border_radius = BorderRadius::all(Val::Px(pill.3 / 2.));
+            }
+            Role::Tail(i) => {
+                // Stacked bars narrowing to the tip; pointing at the focused tile.
+                let k = i as f32;
+                let n = TAIL_STEPS as f32;
+                let width = (11. - k * 2.) * scale;
+                let (len, tip_len) = match place {
+                    Place::Right => (TAIL_LEN_H * scale / n, TAIL_LEN_H * scale),
+                    _ => (TAIL_LEN_V * scale / n, TAIL_LEN_V * scale),
                 };
-                let ly = if above { top - 30. * scale } else { ly };
-                set(
-                    &mut node,
-                    left + c[0] * scale * grow - lw / 2. + 3. * scale,
-                    ly,
-                    lw,
-                    lh,
-                );
-                node.border_radius = BorderRadius::all(Val::Px(lh / 2.));
+                let _ = tip_len;
+                match place {
+                    Place::Above => set(
+                        &mut node,
+                        tail_at.x - width / 2.,
+                        pill.1 + pill.3 - 1. * scale + k * len,
+                        width,
+                        len + 1.,
+                    ),
+                    Place::Below => set(
+                        &mut node,
+                        tail_at.x - width / 2.,
+                        pill.1 + 1. * scale - (k + 1.) * len,
+                        width,
+                        len + 1.,
+                    ),
+                    Place::Right => set(
+                        &mut node,
+                        pill.0 + 1. * scale - (k + 1.) * len,
+                        tail_at.y - width / 2.,
+                        len + 1.,
+                        width,
+                    ),
+                }
             }
             Role::Prompt => {
                 let (pw, ph) = (165. * scale, 27. * scale);
@@ -483,15 +642,17 @@ fn popit_layout(
             Role::LabelText | Role::PromptText => {}
             Role::Cord(i) => {
                 let t = (i as f32 + 1.) / CORD_DOTS as f32;
-                // Cubic S-curve from the card's bottom edge to Sackboy's chest (measured).
-                let p0 = Vec2::new(cx + 8. * scale, bottom);
-                let p1 = p0 + Vec2::new(26., 42.) * scale;
-                let p2 = p0 + Vec2::new(-34., 82.) * scale;
-                let p3 = Vec2::new(cx + 18. * scale, head.y + 30. * scale);
+                // From the card's bottom edge to Sackboy's chest: leaves downward, bows right,
+                // then turns left onto the body (MEASURED path, create and play frames).
+                let p0 = Vec2::new(left + w / 2. + 21. * scale, top + h);
+                let p3 = Vec2::new(cx - 14. * scale, head.y + 52. * scale);
+                let span = p3.y - p0.y;
+                let p1 = p0 + Vec2::new(14. * scale, span * 0.45);
+                let p2 = p3 + Vec2::new(46. * scale, -span * 0.18);
                 let u = 1. - t;
                 let pt =
                     u * u * u * p0 + 3. * u * u * t * p1 + 3. * u * t * t * p2 + t * t * t * p3;
-                let sz = 3.5 * scale;
+                let sz = 3. * scale;
                 set(&mut node, pt.x - sz / 2., pt.y - sz / 2., sz, sz);
                 // The cord grows out of the card with the blend.
                 if t > e {
@@ -529,9 +690,9 @@ fn popit_layout(
         }
     }
     for (part, mut bg) in &mut colours {
-        if part.0 == Role::Label || part.0 == Role::Prompt {
+        if part.0 == Role::Label || part.0 == Role::Prompt || matches!(part.0, Role::Tail(_)) {
             let a = e;
-            bg.0 = if part.0 == Role::Label {
+            bg.0 = if part.0 != Role::Prompt {
                 PILL.with_alpha(a)
             } else {
                 PROMPT.with_alpha(PROMPT.alpha() * a)
@@ -540,11 +701,20 @@ fn popit_layout(
     }
 }
 
+fn label_font() -> TextFont {
+    TextFont {
+        font: bevy::text::FontSource::SansSerif,
+        weight: bevy::text::FontWeight::BOLD,
+        ..TextFont::from_font_size(19.)
+    }
+}
+
 fn spawn_nodes(
     commands: &mut Commands,
     assets: &PopitAssets,
     handles: &[(u32, Vec<Handle<Image>>)],
     square: Handle<Image>,
+    card: Handle<Image>,
 ) {
     let abs = || Node {
         position_type: PositionType::Absolute,
@@ -553,14 +723,7 @@ fn spawn_nodes(
     commands.spawn((
         Part(Role::Card),
         abs(),
-        BackgroundGradient(vec![Gradient::Linear(LinearGradient {
-            angle: LinearGradient::TO_BOTTOM,
-            stops: vec![
-                ColorStop::new(CARD_TOP, Val::Percent(0.)),
-                ColorStop::new(CARD_BOTTOM, Val::Percent(100.)),
-            ],
-            ..default()
-        })]),
+        ImageNode::new(card),
         GlobalZIndex(40),
         Visibility::Hidden,
     ));
@@ -580,29 +743,34 @@ fn spawn_nodes(
             Visibility::Hidden,
         ));
     }
-    commands
-        .spawn((
-            Part(Role::Label),
+    for i in 0..TAIL_STEPS {
+        commands.spawn((
+            Part(Role::Tail(i)),
             abs(),
             BackgroundColor(PILL),
             GlobalZIndex(43),
+            Visibility::Hidden,
+        ));
+    }
+    commands
+        .spawn((
+            Part(Role::Label),
+            Node {
+                position_type: PositionType::Absolute,
+                justify_content: JustifyContent::Center,
+                align_items: AlignItems::Center,
+                ..default()
+            },
+            BackgroundColor(PILL),
+            GlobalZIndex(44),
             Visibility::Hidden,
         ))
         .with_children(|c| {
             c.spawn((
                 Part(Role::LabelText),
                 Text::new(""),
-                TextFont {
-                    font_size: bevy::text::FontSize::Px(15.),
-                    ..default()
-                },
+                label_font(),
                 TextColor(Color::WHITE),
-                Node {
-                    position_type: PositionType::Absolute,
-                    left: Val::Px(10.),
-                    top: Val::Px(4.),
-                    ..default()
-                },
             ));
         });
     commands
@@ -617,10 +785,7 @@ fn spawn_nodes(
             c.spawn((
                 Part(Role::PromptText),
                 Text::new(assets.close.clone()),
-                TextFont {
-                    font_size: bevy::text::FontSize::Px(15.),
-                    ..default()
-                },
+                label_font(),
                 TextColor(Color::WHITE),
                 Node {
                     position_type: PositionType::Absolute,
