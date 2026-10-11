@@ -32,6 +32,9 @@ Loop vs hold is INFERRED (every clip has loopStart 0; the game decides in code).
 
 ## Rules (every one INFERRED; the EBOOT readers of the clip fields are not traced)
 
+Superseded by D232 (`docs/d232-sackboy-anim-rules.md`): weighted layers from the EBOOT
+rules, per-bone blending and eased facing replace the hard cuts below and `pick_clip`.
+
 1. Take-off tick (`jump_tick() == Some(1)`): jump_walk if |vx| > 5, else jump_stand, frame 0.
 2. Airborne: keep the jump clip, 1 frame per tick, hold frame 30; a fall without take-off
    enters jump_* at frame 15.

@@ -65,6 +65,11 @@ struct Playing {
     meshes: Vec<Handle<Mesh>>,
     /// P2d: the other Pod figure clip (standing / holding), swapped in by `pod_figure`.
     alt: Option<lbp_preview::skinned::SkinnedClip>,
+    /// D232: a pose blended from several clips (\--play-sackboy\ layers), applied once by
+    /// \nimate\ and then cleared.
+    blended: Option<lbp_preview::skinned::BlendPose>,
+    /// D232: posed only from \lended\ (the frame clock is ignored).
+    layered: bool,
 }
 /// Re: joint entities under a root carrying the display normalisation; the standard
 /// vertex shader skins. Mesh positions stay in display space (see `gpu_rig`).
@@ -660,7 +665,7 @@ fn options() -> Result<Viewer, String> {
         if flag == "--help" {
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: local animation base-row snapshot (not game time; also levels)\n--no-animation-base, --no-instance-default: turn off the D188 single-mesh defaults (animation base values; white instance color 1,1,1,1 when no Thing supplies one) and the D191 level defaults (animation base values; each Thing's editorColor as its instance color, inferred)\n--instance-rgba R,G,B,A: supplied linear instance color (overrides the white default)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit (window shown without taking focus)
 --no-activate: show the window without taking focus or the foreground (interactive runs)
---qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N|main: with a level, light from its stored preset N instead of the main settings (P2l; --lbp-lighting defaults to preset 0 when one is stored, main forces the main block)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l); on by default in level mode (P2w), --no-lbp-lighting draws levels unlit, --preview-lighting keeps the older Lambert preview\n--no-glow: skip material glow (output port 4; P3h A/B)\n--no-baked-ao: skip the backdrop lightmap baked AO under --lbp-lighting (P3k A/B)\n--bump-gloss / --no-bump-gloss: material bump maps (output port 3) and static gloss colours (port 2) under --lbp-lighting, on with it by default (P2q; offsets and frame inferred)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open; --pod-figure-data: closed spot from the shell's data (checkpoint + spawn offset, dropped to the floor) instead of the RPCS3 fit (both are reported)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\n--play-sackboy: with a level, its shapes as a physics world and Sackboy at the first checkpoint, drawn as his mesh (0000043f unless --select-guid) with stand/walk/lane/jump/land clips picked from his state (rules inferred; --play-animation HEX plays one clip instead) (arrows walk and change lanes, Space jumps; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f) with the position printed each tick\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N|main: with a level, light from its stored preset N instead of the main settings (P2l; --lbp-lighting defaults to preset 0 when one is stored, main forces the main block)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l); on by default in level mode (P2w), --no-lbp-lighting draws levels unlit, --preview-lighting keeps the older Lambert preview\n--no-glow: skip material glow (output port 4; P3h A/B)\n--no-baked-ao: skip the backdrop lightmap baked AO under --lbp-lighting (P3k A/B)\n--bump-gloss / --no-bump-gloss: material bump maps (output port 3) and static gloss colours (port 2) under --lbp-lighting, on with it by default (P2q; offsets and frame inferred)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels show the room wall art 0001f3b9 (inferred; --no-pod-wall: plain); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open; --pod-figure-data: closed spot from the shell's data (checkpoint + spawn offset, dropped to the floor) instead of the RPCS3 fit (both are reported)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts; --level-scripts-flags N,..: progression flags set on the profile\n--play-sackboy: with a level, its shapes as a physics world and Sackboy at the first checkpoint, drawn as his mesh (0000043f unless --select-guid) with stand/walk/lane/jump/land clips picked from his state (rules inferred; --play-animation HEX plays one clip instead) (arrows walk and change lanes, Space jumps; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f) with the position printed each tick; --qa-record DIR,START,END[,SPEED] (QA only) saves one PNG per scripted tick START..END into a new local-analysis DIR, game time at SPEED (default 0.25), then exits\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -772,7 +777,8 @@ fn options() -> Result<Viewer, String> {
             | "--ui-script-function"
             | "--level-scripts-flags"
             | "--play-sackboy-at"
-            | "--play-sackboy-input" => {}
+            | "--play-sackboy-input"
+            | "--qa-record" => {}
             _ => return Err(format!("Unknown option {flag}")),
         }
     }
@@ -943,7 +949,7 @@ pub(crate) fn activate_on_show() -> bool {
     activate_on_show_for(std::env::args().skip(1))
 }
 fn activate_on_show_for(mut args: impl Iterator<Item = String>) -> bool {
-    !args.any(|a| a == "--qa-capture" || a == "--no-activate")
+    !args.any(|a| a == "--qa-capture" || a == "--no-activate" || a == "--qa-record")
 }
 // Keep test/launcher windows hidden until positioned on a non-primary display.
 pub(crate) fn place_on_second_monitor(
@@ -1374,6 +1380,8 @@ fn load(
                     gpu,
                     meshes: v.scene.iter().map(|s| s.1.clone()).collect(),
                     alt: None,
+                    blended: None,
+                    layered: false,
                 });
                 format!("{text} • skinning: {path}")
             }
@@ -2529,6 +2537,8 @@ fn spawn_figure(
                 gpu,
                 meshes: scene.into_iter().map(|s| s.1).collect(),
                 alt: hold,
+                blended: None,
+                layered: false,
             });
         }
     }
@@ -3030,6 +3040,32 @@ fn animate(
     let Some(playing) = v.playing.as_mut() else {
         return;
     };
+    if playing.layered {
+        // D232: a blended pose from the play figure's layers, once per new pose.
+        let Some(pose) = playing.blended.take() else {
+            return;
+        };
+        let posed = if let Some(gpu) = &playing.gpu {
+            for (joint, m) in gpu.joints.iter().zip(pose.local_matrices()) {
+                if let Ok(mut t) = transforms.get_mut(*joint) {
+                    *t = Transform::from_matrix(Mat4::from_cols_array(&m));
+                }
+            }
+            if !gpu.morphs {
+                return;
+            }
+            playing.clip.morphed_bind_weights(&pose.morphs)
+        } else {
+            playing.clip.blended_positions(&pose)
+        };
+        let display = adapter::to_display(&posed, playing.frame);
+        for handle in &playing.meshes {
+            if let Some(mut mesh) = meshes.get_mut(handle) {
+                mesh.insert_attribute(Mesh::ATTRIBUTE_POSITION, display.clone());
+            }
+        }
+        return;
+    }
     let now = time.elapsed_secs();
     if playing.started < 0. {
         playing.started = now;

@@ -3997,3 +3997,31 @@ levels, baseline D149 0) / +0 newly Complete.**
 - Not tested: RPCS3 comparison of thresholds, pacing, loop/hold, fall entry frame.
 **+0 newly viewable / +0 newly Complete (runtime feature).**
 Next: slice 3 (Ghidra: readers of the anim fields r30+0x290..0x6c0, BlendFrames).
+## D232 - Sackboy animation from the EBOOT rules (2026-10-11)
+- Plan slices 3-6 from the Ghidra rules note (local-analysis/results/2026-10-11-ghidra-sackboy-anim-rules.md).
+  lbp-sim SackboyAnim::tick replaces pick_clip: weighted layers (walk slow/medium/fast over
+  stand, one 13-tick phase), facing eased 0.4/tick (0 / +-90 / +-72 lane), vy-driven jump
+  frame, landing = jump tail with fade, stop/turn 5-frame and lane 3-frame ramps, idle LCG
+  chains, additive blink. lbp-preview BlendPose (per-bone lerp/nlerp, additive, sub-frame).
+  Viewer blends the 21-clip bank per tick; facing interpolated, no snap. docs/d232-sackboy-anim-rules.md.
+- OPEN: stretch_crouch spring input (TODO), mirror flag not applied, LCG multiplier 250 vs range 999.
+- cargo test -q -p lbp-sim -p lbp-preview -p lbp-bevy-viewer: pass (13 picker + 4 blend tests).
+- cargo clippy -q (same crates) --all-targets -D warnings: pass; fmt clean; python -m unittest: 36 OK (1 skipped).
+- Rookie Test scripted play run (hidden): clip bank 21/21 bound; log shows walk mix, yaw
+  24->90 deg, jump_walk ramp-in, apex frame 8, landing tail fade, stop, lane 72 deg, jump_stand.
+- Not tested: RPCS3 comparison of poses/timing; QA capture.
+**+0 newly viewable / +0 newly Complete (runtime feature).**
+Next: stretch_crouch spring input (0x6c56c) and bone mirror map; then emotes/head look (plan 7-8).
+
+## 2026-10-11 — D232 QA fix pass (PR 127)
+
+- Facing: clip root rotation held at bind (BlendPose::hold_root_rotation); mirror flag
+  applied (Rig::mirrored_trs, skeleton mirror table); stop/turn hold +-72 deg (0x2002ac).
+- Landing tail starts at 13-14 (frame no longer drops to the apex on the contact tick).
+- Blank level: spawn lifted out of the floor slab; back lane works (z -200 -> -400).
+- --qa-record cherry-picked (QA frame sequences).
+- fmt clean; tests lbp-sim/lbp-preview/lbp-bevy-viewer pass; clippy -D warnings clean;
+  python unittest OK.
+- Captures: local-analysis/sackboy-clips-2026-10-11b/ (5 clips, hidden, no focus change).
+- OPEN: running-landing fade exponent, camera lead when walking left, mirror flip types.
+- Details: docs/d232-sackboy-anim-rules.md (QA fix pass).

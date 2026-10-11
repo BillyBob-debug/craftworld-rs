@@ -115,4 +115,5 @@ D191 level Things use editorColor (PR #93). Earlier: D175 merged (lbp-sim physic
 wall-art side panels, in-use camera match RPCS3; FOV hfov 88.3 deg; menu uses PlanetsView 1.
 Script VM 512/513; threads (D171); viewer --level-scripts (D172). STATUS.md D160-D175.
 Latest (2026-10-11): D231 play mode draws Sackboy (0000043f) with his own stand/walk/lane/jump/land
-clips picked per tick (rules INFERRED; docs/d231-sackboy-animations.md). Next: animation plan slice 3.
+clips; D232 blends them by the EBOOT layer rules with eased facing (docs/d232-sackboy-anim-rules.md).
+Next: stretch_crouch spring input, bone mirror map, emotes/head look.

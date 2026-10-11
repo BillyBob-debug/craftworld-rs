@@ -1,5 +1,18 @@
 # Development log
 
+## 2026-10-11 — D232 QA fixes: Sackboy facing, mirror, landing, blank spawn
+
+Clip root rotation (the facing channel, +90 in walk/idle clips) is held at bind so the
+picker's yaw no longer doubles; left travel mirrors layers via the skeleton mirror table;
+stop/turn hold +-72 deg; landing tail starts at 13-14; spawn no longer inside the floor;
+--qa-record. docs/d232-sackboy-anim-rules.md. +0 / +0.
+
+## 2026-10-11 — D232 Sackboy animation follows the EBOOT rules
+
+Weighted walk layers over stand with one 13-tick phase, eased facing (0.4/tick), vy-driven jump
+frame and landing tail, stop/turn/lane ramps, idle chains and blink (lbp-sim SackboyAnim), blended
+per bone in the viewer (lbp-preview BlendPose). docs/d232-sackboy-anim-rules.md. +0 / +0.
+
 ## 2026-10-11 — D231 Sackboy plays his own clips in play mode
 
 --play-sackboy draws mesh 0000043f by default and picks stand / walk bands / lane / jump / land

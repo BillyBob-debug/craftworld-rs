@@ -52,6 +52,271 @@ pub fn trs(t: [f32; 3], q: [f32; 4], s: [f32; 3]) -> Mat4 {
     m
 }
 
+/// One bone's local translation, rotation (unit quaternion x, y, z, w) and scale.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Trs {
+    pub t: [f32; 3],
+    pub r: [f32; 4],
+    pub s: [f32; 3],
+}
+
+impl Trs {
+    pub fn matrix(&self) -> Mat4 {
+        trs(self.t, self.r, self.s)
+    }
+
+    /// Splits a translation × rotation × scale matrix (no shear) back into its parts; a
+    /// mirrored basis gets a negative x scale.
+    pub fn from_matrix(m: &Mat4) -> Self {
+        let col = |c: usize| [m[c * 4], m[c * 4 + 1], m[c * 4 + 2]];
+        let len = |v: [f32; 3]| (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+        let (c0, c1, c2) = (col(0), col(1), col(2));
+        let det = c0[0] * (c1[1] * c2[2] - c1[2] * c2[1]) - c1[0] * (c0[1] * c2[2] - c0[2] * c2[1])
+            + c2[0] * (c0[1] * c1[2] - c0[2] * c1[1]);
+        let mut s = [len(c0), len(c1), len(c2)];
+        if det < 0. {
+            s[0] = -s[0];
+        }
+        // r[row][col] of the pure rotation.
+        let r = |row: usize, c: usize| {
+            if s[c] == 0. {
+                f32::from(u8::from(row == c))
+            } else {
+                m[c * 4 + row] / s[c]
+            }
+        };
+        let trace = r(0, 0) + r(1, 1) + r(2, 2);
+        let q = if trace > 0. {
+            let k = (trace + 1.).sqrt() * 2.;
+            [
+                (r(2, 1) - r(1, 2)) / k,
+                (r(0, 2) - r(2, 0)) / k,
+                (r(1, 0) - r(0, 1)) / k,
+                0.25 * k,
+            ]
+        } else if r(0, 0) > r(1, 1) && r(0, 0) > r(2, 2) {
+            let k = (1. + r(0, 0) - r(1, 1) - r(2, 2)).max(0.).sqrt() * 2.;
+            [
+                0.25 * k,
+                (r(0, 1) + r(1, 0)) / k,
+                (r(0, 2) + r(2, 0)) / k,
+                (r(2, 1) - r(1, 2)) / k,
+            ]
+        } else if r(1, 1) > r(2, 2) {
+            let k = (1. + r(1, 1) - r(0, 0) - r(2, 2)).max(0.).sqrt() * 2.;
+            [
+                (r(0, 1) + r(1, 0)) / k,
+                0.25 * k,
+                (r(1, 2) + r(2, 1)) / k,
+                (r(0, 2) - r(2, 0)) / k,
+            ]
+        } else {
+            let k = (1. + r(2, 2) - r(0, 0) - r(1, 1)).max(0.).sqrt() * 2.;
+            [
+                (r(0, 2) + r(2, 0)) / k,
+                (r(1, 2) + r(2, 1)) / k,
+                0.25 * k,
+                (r(1, 0) - r(0, 1)) / k,
+            ]
+        };
+        Self {
+            t: [m[12], m[13], m[14]],
+            r: normalize(q),
+            s,
+        }
+    }
+}
+
+fn normalize(q: [f32; 4]) -> [f32; 4] {
+    let n = q.iter().map(|v| v * v).sum::<f32>().sqrt();
+    if n > 0. && n.is_finite() {
+        q.map(|v| v / n)
+    } else {
+        [0., 0., 0., 1.]
+    }
+}
+
+fn q_mul(a: [f32; 4], b: [f32; 4]) -> [f32; 4] {
+    let [ax, ay, az, aw] = a;
+    let [bx, by, bz, bw] = b;
+    [
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ]
+}
+
+/// Normalised lerp along the shorter arc.
+pub fn nlerp(a: [f32; 4], b: [f32; 4], w: f32) -> [f32; 4] {
+    let dot: f32 = a.iter().zip(&b).map(|(x, y)| x * y).sum();
+    let sign = if dot < 0. { -1. } else { 1. };
+    normalize(std::array::from_fn(|i| a[i] + (b[i] * sign - a[i]) * w))
+}
+
+fn lerp3(a: [f32; 3], b: [f32; 3], w: f32) -> [f32; 3] {
+    std::array::from_fn(|i| a[i] + (b[i] - a[i]) * w)
+}
+
+fn lerp_morphs(dst: &mut Vec<f32>, src: &[f32], w: f32) {
+    if dst.len() < src.len() {
+        dst.resize(src.len(), 0.);
+    }
+    for (i, d) in dst.iter_mut().enumerate() {
+        let s = src.get(i).copied().unwrap_or(0.);
+        *d += (s - *d) * w;
+    }
+}
+
+/// The pose a blend of several clips writes into: one local [`Trs`] per mesh bone plus
+/// morph weights. Starts at the bind pose, so a bone no layer drives stays at bind.
+#[derive(Debug, Clone, PartialEq)]
+pub struct BlendPose {
+    pub bones: Vec<Trs>,
+    pub morphs: Vec<f32>,
+}
+
+impl BlendPose {
+    pub fn bind(rig: &Rig) -> Self {
+        Self {
+            bones: rig.bind_local.iter().map(Trs::from_matrix).collect(),
+            morphs: Vec::new(),
+        }
+    }
+
+    /// Moves each bone `rig` drives `w` of the way toward `pose` (translation and scale
+    /// lerp, rotation nlerp; morph weights lerp). `rig` binds the pose's animation to the
+    /// same mesh bones as this pose.
+    pub fn lerp(&mut self, rig: &Rig, pose: &Pose, w: f32) {
+        if w <= 0. || !w.is_finite() {
+            return;
+        }
+        let w = w.min(1.);
+        for (i, b) in self.bones.iter_mut().enumerate() {
+            if let Some(p) = rig.pose_trs(pose, i) {
+                b.t = lerp3(b.t, p.t, w);
+                b.r = nlerp(b.r, p.r, w);
+                b.s = lerp3(b.s, p.s, w);
+            }
+        }
+        lerp_morphs(&mut self.morphs, &pose.morphs, w);
+    }
+
+    /// [`BlendPose::lerp`] toward `pose` mirrored left/right ([`Rig::mirrored_trs`]).
+    /// Morph weights lerp unswapped (the mirror morph table is not used).
+    pub fn lerp_mirrored(&mut self, rig: &Rig, pose: &Pose, w: f32) {
+        if w <= 0. || !w.is_finite() {
+            return;
+        }
+        let w = w.min(1.);
+        for (b, p) in self.bones.iter_mut().zip(rig.mirrored_trs(pose)) {
+            if let Some(p) = p {
+                b.t = lerp3(b.t, p.t, w);
+                b.r = nlerp(b.r, p.r, w);
+                b.s = lerp3(b.s, p.s, w);
+            }
+        }
+        lerp_morphs(&mut self.morphs, &pose.morphs, w);
+    }
+
+    /// Adds `w` times the difference `pose` minus `reference` (both from `rig`'s
+    /// animation): translation and morph deltas add, scale ratios multiply, and the local
+    /// rotation delta `reference⁻¹ · pose` is applied after the bone's rotation. The
+    /// game's own composition (`0x1eafc0`) is not traced: INFERRED.
+    pub fn add(&mut self, rig: &Rig, pose: &Pose, reference: &Pose, w: f32) {
+        if w <= 0. || !w.is_finite() {
+            return;
+        }
+        for (i, b) in self.bones.iter_mut().enumerate() {
+            let (Some(p), Some(r)) = (rig.pose_trs(pose, i), rig.pose_trs(reference, i)) else {
+                continue;
+            };
+            for c in 0..3 {
+                b.t[c] += w * (p.t[c] - r.t[c]);
+                if r.s[c].abs() > 1e-6 {
+                    b.s[c] *= 1. + w * (p.s[c] / r.s[c] - 1.);
+                }
+            }
+            let [x, y, z, qw] = r.r;
+            let delta = q_mul([-x, -y, -z, qw], p.r);
+            b.r = normalize(q_mul(b.r, nlerp([0., 0., 0., 1.], delta, w)));
+        }
+        let n = pose.morphs.len().max(reference.morphs.len());
+        if self.morphs.len() < n {
+            self.morphs.resize(n, 0.);
+        }
+        for (i, m) in self.morphs.iter_mut().enumerate().take(n) {
+            let a = pose.morphs.get(i).copied().unwrap_or(0.);
+            let b = reference.morphs.get(i).copied().unwrap_or(0.);
+            *m += w * (a - b);
+        }
+    }
+
+    /// Puts the root bones' (parent -1) rotation back to bind, keeping their translation
+    /// and scale: the clips' root rotation is a facing channel (Sackboy: 0 in stand,
+    /// jump_stand and the lane clips, +90 degrees about the model up axis in the walk, stop,
+    /// jump_walk and idle-chain clips, a 90 to -90 sweep in walk_fast_turn) that the game
+    /// replaces with its own facing angle (D232 fix, INFERRED from that data and the
+    /// sin/cos built from the eased yaw at 0x201b18).
+    pub fn hold_root_rotation(&mut self, rig: &Rig) {
+        for (i, b) in self.bones.iter_mut().enumerate() {
+            if rig.bones.get(i).is_some_and(|r| r.parent == -1) {
+                b.r = Trs::from_matrix(&rig.bind_local[i]).r;
+            }
+        }
+    }
+
+    pub fn local_matrices(&self) -> Vec<Mat4> {
+        self.bones.iter().map(Trs::matrix).collect()
+    }
+}
+
+/// The pose at a fractional frame: the two neighbouring frames blended (translation and
+/// scale lerp, rotation nlerp, morph lerp). The frame is clamped to the clip.
+pub fn sample_pose(animation: &Animation, frame: f32) -> Option<Pose> {
+    let last = animation.frame_count().checked_sub(1)?;
+    let f = if frame.is_finite() {
+        frame.clamp(0., f32::from(last))
+    } else {
+        0.
+    };
+    let f0 = f.floor() as u16;
+    let t = f - f32::from(f0);
+    let a = animation.pose(f0)?;
+    if t <= 0. || f0 >= last {
+        return Some(a);
+    }
+    let b = animation.pose(f0 + 1)?;
+    Some(lerp_pose(&a, &b, t))
+}
+
+/// `a` moved `t` of the way toward `b` (same bone lists).
+pub fn lerp_pose(a: &Pose, b: &Pose, t: f32) -> Pose {
+    let mut morphs = a.morphs.clone();
+    lerp_morphs(&mut morphs, &b.morphs, t);
+    Pose {
+        rotations: a
+            .rotations
+            .iter()
+            .zip(&b.rotations)
+            .map(|(x, y)| nlerp(*x, *y, t))
+            .collect(),
+        positions: a
+            .positions
+            .iter()
+            .zip(&b.positions)
+            .map(|(x, y)| lerp3(*x, *y, t))
+            .collect(),
+        scales: a
+            .scales
+            .iter()
+            .zip(&b.scales)
+            .map(|(x, y)| lerp3(*x, *y, t))
+            .collect(),
+        morphs,
+    }
+}
+
 fn transform(m: &Mat4, p: [f32; 3]) -> [f32; 3] {
     std::array::from_fn(|r| m[r] * p[0] + m[4 + r] * p[1] + m[8 + r] * p[2] + m[12 + r])
 }
@@ -76,7 +341,15 @@ pub struct Rig {
     pub driven_by: Vec<Option<usize>>,
     /// Animation bones with no mesh bone of the same hash.
     pub unmatched_animation_bones: usize,
+    /// Each bone's left/right partner (the skeleton's mirror table; itself on the centre
+    /// line, and for every bone when the table is missing or out of range).
+    pub mirror: Vec<usize>,
 }
+
+/// Reflection across the model's x = 0 plane (left/right; Z-up, front -Y).
+const MIRROR_X: Mat4 = [
+    -1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1.,
+];
 
 impl Rig {
     pub fn new(bones: Vec<RigBone>, animation_hashes: &[u32]) -> Result<Self, String> {
@@ -116,13 +389,33 @@ impl Rig {
             .iter()
             .filter(|&&h| !bones.iter().any(|b| b.anim_hash == h))
             .count();
+        let mirror = (0..bones.len()).collect();
         Ok(Self {
             bones,
             chains,
             bind_local,
             driven_by,
             unmatched_animation_bones,
+            mirror,
         })
+    }
+
+    /// Sets the left/right partner table (`Skeleton::mirror_bones`); ignored unless it has
+    /// one in-range entry per bone and pairs up both ways.
+    pub fn with_mirror(mut self, table: &[i16]) -> Self {
+        let n = self.bones.len();
+        let map: Option<Vec<usize>> = (table.len() == n)
+            .then(|| {
+                table
+                    .iter()
+                    .map(|&m| usize::try_from(m).ok().filter(|&m| m < n))
+                    .collect()
+            })
+            .flatten();
+        if let Some(map) = map.filter(|m: &Vec<usize>| (0..n).all(|i| m[m[i]] == i)) {
+            self.mirror = map;
+        }
+        self
     }
 
     pub fn from_skeleton(skeleton: &Skeleton, animation_hashes: &[u32]) -> Result<Self, String> {
@@ -136,13 +429,62 @@ impl Rig {
                 inv_skin_pose: b.inv_skin_pose,
             })
             .collect();
-        Self::new(bones, animation_hashes)
+        Ok(Self::new(bones, animation_hashes)?.with_mirror(&skeleton.mirror_bones))
     }
 
     /// The same mesh bones bound to another animation's bone list (clip banks share one
     /// mesh rig across clips).
     pub fn rebind(&self, animation_hashes: &[u32]) -> Result<Self, String> {
-        Self::new(self.bones.clone(), animation_hashes)
+        let mut rig = Self::new(self.bones.clone(), animation_hashes)?;
+        rig.mirror = self.mirror.clone();
+        Ok(rig)
+    }
+
+    fn worlds(&self, local: &[Mat4]) -> Vec<Mat4> {
+        self.chains
+            .iter()
+            .map(|chain| {
+                chain.iter().fold(IDENTITY, |acc, &j| {
+                    mul(&acc, local.get(j).unwrap_or(&self.bind_local[j]))
+                })
+            })
+            .collect()
+    }
+
+    /// `pose` mirrored left/right (the game's layer mirror flag, `0x1ebb48` mode 5): bone
+    /// i takes its partner j's motion reflected across x = 0, so its skinning matrix is
+    /// `X * S_j * X` (S = world x inverse bind). That is the world `X W_j B_j^-1 X B_i`,
+    /// returned as local transforms; None where neither bone is driven. Assumes a
+    /// left/right symmetric bind (INFERRED for Sackboy; the flip-type table is not used).
+    pub fn mirrored_trs(&self, pose: &Pose) -> Vec<Option<Trs>> {
+        let world = self.worlds(&self.local_matrices(Some(pose)));
+        let mirrored: Vec<Mat4> = (0..self.bones.len())
+            .map(|i| {
+                let j = self.mirror[i];
+                let skin = mul(&world[j], &self.bones[j].inv_skin_pose);
+                mul(
+                    &mul(&mul(&MIRROR_X, &skin), &MIRROR_X),
+                    &self.bones[i].skin_pose,
+                )
+            })
+            .collect();
+        (0..self.bones.len())
+            .map(|i| {
+                let j = self.mirror[i];
+                if self.driven_by[i].is_none() && self.driven_by[j].is_none() {
+                    return None;
+                }
+                let local = match self.bones[i].parent {
+                    -1 => mirrored[i],
+                    p => {
+                        let inv =
+                            crate::level_backdrop::affine_inverse(&mirrored[p as usize]).ok()?;
+                        mul(&inv, &mirrored[i])
+                    }
+                };
+                Some(Trs::from_matrix(&local))
+            })
+            .collect()
     }
 
     pub fn bone_count(&self) -> usize {
@@ -156,12 +498,18 @@ impl Rig {
     /// Per mesh bone: world(pose) × inverse skin pose. Undriven bones keep their bind
     /// local transform, so a pose without matches reproduces the bind pose.
     pub fn skin_matrices(&self, pose: Option<&Pose>) -> Vec<Mat4> {
-        let local = self.local_matrices(pose);
+        self.skin_matrices_from_locals(&self.local_matrices(pose))
+    }
+
+    /// Per mesh bone: world (from these local transforms) × inverse skin pose.
+    pub fn skin_matrices_from_locals(&self, local: &[Mat4]) -> Vec<Mat4> {
         self.chains
             .iter()
             .zip(&self.bones)
             .map(|(chain, bone)| {
-                let world = chain.iter().fold(IDENTITY, |acc, &j| mul(&acc, &local[j]));
+                let world = chain.iter().fold(IDENTITY, |acc, &j| {
+                    mul(&acc, local.get(j).unwrap_or(&self.bind_local[j]))
+                });
                 mul(&world, &bone.inv_skin_pose)
             })
             .collect()
@@ -184,6 +532,16 @@ impl Rig {
                 .unwrap_or(self.bind_local[i])
             })
             .collect()
+    }
+
+    /// Mesh bone `i`'s local transform in `pose`, when this rig's animation drives it.
+    pub fn pose_trs(&self, pose: &Pose, i: usize) -> Option<Trs> {
+        let a = (*self.driven_by.get(i)?)?;
+        Some(Trs {
+            t: *pose.positions.get(a)?,
+            r: *pose.rotations.get(a)?,
+            s: *pose.scales.get(a)?,
+        })
     }
 
     pub fn parents(&self) -> Vec<i32> {
@@ -390,6 +748,20 @@ impl SkinnedClip {
         let mut base = self.bind_positions.clone();
         apply_morphs(&mut base, &self.skin, &pose.morphs);
         base
+    }
+
+    /// Bind positions with these morph weights applied (a [`BlendPose`]'s morphs).
+    pub fn morphed_bind_weights(&self, morphs: &[f32]) -> Vec<[f32; 3]> {
+        let mut base = self.bind_positions.clone();
+        apply_morphs(&mut base, &self.skin, morphs);
+        base
+    }
+
+    /// Skinned positions for a blended pose (CPU path).
+    pub fn blended_positions(&self, pose: &BlendPose) -> Vec<[f32; 3]> {
+        let base = self.morphed_bind_weights(&pose.morphs);
+        let matrices = self.rig.skin_matrices_from_locals(&pose.local_matrices());
+        skin_positions(&base, &self.skin.joints, &self.skin.weights, &matrices)
     }
 
     /// Skinned positions for a running frame number. Clips with a loop range wrap into
@@ -626,6 +998,190 @@ mod tests {
         assert!((w[0][0] - 2. / 3.).abs() < 1e-6 && (w[0][1] - 1. / 3.).abs() < 1e-6);
         assert_eq!((j[1], w[1]), ([2, 0, 0, 0], [1., 0., 0., 0.]));
         assert_eq!((j[2], w[2]), ([2, 0, 0, 0], [1., 0., 0., 0.]));
+    }
+
+    fn pose1(r: [f32; 4], t: [f32; 3], s: [f32; 3], morphs: Vec<f32>) -> Pose {
+        Pose {
+            rotations: vec![r],
+            positions: vec![t],
+            scales: vec![s],
+            morphs,
+        }
+    }
+
+    #[test]
+    fn trs_round_trips_through_a_matrix() {
+        let q = normalize([0.3, -0.5, 0.2, 0.7]);
+        for s in [[1., 2., 0.5], [-1., 1., 1.]] {
+            let back = Trs::from_matrix(&trs([1., -2., 3.], q, s));
+            assert!(close(back.t, [1., -2., 3.]));
+            assert!(close(back.s, s), "{:?}", back.s);
+            let m = back.matrix();
+            assert!(m
+                .iter()
+                .zip(trs([1., -2., 3.], q, s))
+                .all(|(a, b)| (a - b).abs() < 1e-5));
+        }
+        // Bind pose of the two-bone rig: identity root, child up 1.
+        let b = BlendPose::bind(&rig(&[10, 20]));
+        assert!(close(b.bones[1].t, [0., 1., 0.]));
+        assert!(close(b.bones[1].s, [1.; 3]));
+    }
+
+    #[test]
+    fn lerp_layers_blend_per_bone_and_skip_undriven_bones() {
+        // The animation drives only the child (hash 20).
+        let r = rig(&[20]);
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        let quarter = pose1([0., 0., half, half], [2., 1., 0.], [3.; 3], vec![1., 0.5]);
+        let mut b = BlendPose::bind(&r);
+        b.lerp(&r, &quarter, 0.5);
+        // Root untouched; child halfway in translation, scale and rotation (45 degrees).
+        assert_eq!(b.bones[0], BlendPose::bind(&r).bones[0]);
+        assert!(close(b.bones[1].t, [1., 1., 0.]));
+        assert!(close(b.bones[1].s, [2.; 3]));
+        let a = std::f32::consts::FRAC_PI_8;
+        let want = [0., 0., a.sin(), a.cos()];
+        assert!(b.bones[1]
+            .r
+            .iter()
+            .zip(want)
+            .all(|(x, y)| (x - y).abs() < 1e-5));
+        assert_eq!(b.morphs, [0.5, 0.25]);
+        // A full-weight layer replaces; a zero weight changes nothing.
+        let mut c = b.clone();
+        c.lerp(&r, &quarter, 0.);
+        assert_eq!(c, b);
+        c.lerp(&r, &quarter, 1.);
+        assert!(close(c.bones[1].t, [2., 1., 0.]));
+        // Opposite-sign quaternions take the short way.
+        let mut d = BlendPose::bind(&r);
+        d.lerp(
+            &r,
+            &pose1([0., 0., 0., -1.], [0., 1., 0.], [1.; 3], vec![]),
+            0.5,
+        );
+        assert!((d.bones[1].r[3].abs() - 1.).abs() < 1e-5);
+    }
+
+    #[test]
+    fn additive_layer_adds_the_difference_from_its_reference() {
+        let r = rig(&[20]);
+        let half = std::f32::consts::FRAC_1_SQRT_2;
+        let reference = pose1([0., 0., 0., 1.], [0., 1., 0.], [1.; 3], vec![0.2]);
+        let blink = pose1([0., 0., half, half], [0.5, 1., 0.], [2.; 3], vec![0.7]);
+        let mut b = BlendPose::bind(&r);
+        b.lerp(
+            &r,
+            &pose1([0., 0., 0., 1.], [1., 1., 0.], [1.; 3], vec![]),
+            1.,
+        );
+        b.add(&r, &blink, &reference, 1.);
+        assert!(close(b.bones[1].t, [1.5, 1., 0.]));
+        assert!(close(b.bones[1].s, [2.; 3]));
+        assert!(b.bones[1]
+            .r
+            .iter()
+            .zip([0., 0., half, half])
+            .all(|(x, y)| (x - y).abs() < 1e-5));
+        assert!((b.morphs[0] - 0.5).abs() < 1e-6);
+        // Frame equal to its reference: no change.
+        let before = b.clone();
+        b.add(&r, &reference, &reference, 1.);
+        assert!(close(b.bones[1].t, before.bones[1].t));
+    }
+
+    #[test]
+    fn blended_locals_match_skin_matrices_for_a_single_pose() {
+        let r = rig(&[10, 20]);
+        let pose = Pose {
+            rotations: vec![[0., 0., 0.6, 0.8], [0.6, 0., 0., 0.8]],
+            positions: vec![[1., 2., 3.], [0., 1., 0.]],
+            scales: vec![[1.; 3], [0.5; 3]],
+            morphs: vec![],
+        };
+        let mut b = BlendPose::bind(&r);
+        b.lerp(&r, &pose, 1.);
+        let blended = r.skin_matrices_from_locals(&b.local_matrices());
+        for (m, n) in blended.iter().zip(r.skin_matrices(Some(&pose))) {
+            assert!(m.iter().zip(n).all(|(a, b)| (a - b).abs() < 1e-5));
+        }
+    }
+
+    #[test]
+    fn hold_root_rotation_keeps_only_the_roots_translation() {
+        let r = rig(&[10, 20]);
+        let pose = Pose {
+            rotations: vec![[0., 0., 0.6, 0.8], [0.6, 0., 0., 0.8]],
+            positions: vec![[1., 2., 3.], [0., 1., 0.]],
+            scales: vec![[1.; 3], [1.; 3]],
+            morphs: vec![],
+        };
+        let mut b = BlendPose::bind(&r);
+        b.lerp(&r, &pose, 1.);
+        b.hold_root_rotation(&r);
+        assert_eq!(b.bones[0].r, [0., 0., 0., 1.]);
+        assert!(close(b.bones[0].t, [1., 2., 3.]));
+        assert_eq!(b.bones[1].r, [0.6, 0., 0., 0.8]);
+    }
+
+    #[test]
+    fn mirrored_pose_swaps_partners_and_reflects_x() {
+        // Root at the origin, a left bone at x = +1 and a right bone at x = -1.
+        let side = |x: f32| RigBone {
+            parent: 0,
+            anim_hash: if x > 0. { 20 } else { 30 },
+            skin_pose: translate([x, 0., 0.]),
+            inv_skin_pose: translate([-x, 0., 0.]),
+        };
+        let root = RigBone {
+            parent: -1,
+            anim_hash: 10,
+            skin_pose: IDENTITY,
+            inv_skin_pose: IDENTITY,
+        };
+        let r = Rig::new(vec![root.clone(), side(1.), side(-1.)], &[10, 20, 30])
+            .unwrap()
+            .with_mirror(&[0, 2, 1]);
+        assert_eq!(r.mirror, [0, 2, 1]);
+        // A broken table is ignored.
+        assert_eq!(
+            Rig::new(vec![root], &[]).unwrap().with_mirror(&[5]).mirror,
+            [0]
+        );
+        // Root turned +z, the left bone raised and turned about y, the right at bind.
+        let (s, c) = (0.3f32.sin(), 0.3f32.cos());
+        let pose = Pose {
+            rotations: vec![[0., 0., s, c], [0., s, 0., c], [0., 0., 0., 1.]],
+            positions: vec![[0.5, 0., 0.], [1., 0., 2.], [-1., 0., 0.]],
+            scales: vec![[1.; 3]; 3],
+            morphs: vec![],
+        };
+        let m = r.mirrored_trs(&pose);
+        let near = |a: [f32; 4], b: [f32; 4]| {
+            let d: f32 = a.iter().zip(b).map(|(x, y)| x * y).sum();
+            (d.abs() - 1.).abs() < 1e-5
+        };
+        let root = m[0].unwrap();
+        assert!(close(root.t, [-0.5, 0., 0.]) && near(root.r, [0., 0., -s, c]));
+        // The right bone now does what the left did, reflected; the left rests at bind.
+        let right = m[2].unwrap();
+        assert!(close(right.t, [-1., 0., 2.]), "{:?}", right.t);
+        assert!(near(right.r, [0., -s, 0., c]), "{:?}", right.r);
+        let left = m[1].unwrap();
+        assert!(close(left.t, [1., 0., 0.]) && near(left.r, [0., 0., 0., 1.]));
+        // Mirroring twice gives the pose back.
+        let back = Pose {
+            rotations: m.iter().map(|t| t.unwrap().r).collect(),
+            positions: m.iter().map(|t| t.unwrap().t).collect(),
+            scales: m.iter().map(|t| t.unwrap().s).collect(),
+            morphs: vec![],
+        };
+        let twice = r.mirrored_trs(&back);
+        for (t, (q, p)) in twice.iter().zip(pose.rotations.iter().zip(&pose.positions)) {
+            let t = t.unwrap();
+            assert!(close(t.t, *p) && near(t.r, *q));
+        }
     }
 
     #[test]

@@ -4,11 +4,11 @@
 //! and change lanes (Up = lane behind, Down = lane in front), Space or the South button
 //! jumps; the camera follows him as the game's default camera does (Moon level measurement).
 //! He is drawn as his own body mesh ([`SACKBOY_MESH`], or the `--select-guid` mesh) standing
-//! on the capsule (feet at its bottom), turned to the walk direction, playing the clip
-//! `lbp_sim::sackboy_anim::pick_clip` chooses each tick from a clip bank sharing one rig
-//! (D231, docs/d231-sackboy-animations.md; every state -> clip rule INFERRED). With
-//! `--play-animation` that one clip cycles at the walk speed instead; without a mesh, a
-//! placeholder capsule. The level's own dynamic objects are simulated but not redrawn.
+//! on the capsule (feet at its bottom), turned by the facing angle and posed from the
+//! weighted clip layers `lbp_sim::sackboy_anim::SackboyAnim` gives each tick (EBOOT rules,
+//! D232, docs/d231-sackboy-animations.md), blended per bone from a clip bank sharing one
+//! rig. With `--play-animation` that one clip cycles at the walk speed instead (facing
+//! still from the picker); without a mesh, a placeholder capsule. The level's own dynamic objects are simulated but not redrawn.
 //!
 //! `--play-sackboy-at X,Y,Z` sets the spawn (level units, his position: 69.9 above the feet); otherwise the
 //! first CHECKPOINT's POS plus [`SPAWN_OFFSET`]. `--play-sackboy-input STEPS` replaces the pad with a script of
@@ -17,14 +17,14 @@
 use bevy::prelude::*;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::level_scene;
-use lbp_preview::skinned::{BoundAnimation, SkinnedClip};
+use lbp_preview::skinned::{sample_pose, BlendPose, BoundAnimation, SkinnedClip};
 use lbp_sim::avian2d::prelude::*;
 use lbp_sim::character::{
     spawn_sackboy, SackboyBody, SackboyPlugin, CENTRE_ABOVE, FLOOR_REST, HALF_SEGMENT, HEIGHT,
     RADIUS,
 };
 use lbp_sim::sackboy::{Input, WALK_SPEED};
-use lbp_sim::sackboy_anim::{pick_clip, AnimState, ClipId};
+use lbp_sim::sackboy_anim::{AnimFrame, Blend, ClipId, SackboyAnim};
 use lbp_sim::scene::{material_rule_for_path, MaterialRule};
 use lbp_sim::{
     build_scene_with, build_spawn_scene_with, spawn_scene, to_level, PhysicsScene, SimPlugin,
@@ -49,17 +49,23 @@ struct Marker;
 
 /// The Sackboy mesh standing on the capsule: `upright` turns the raw Z-up model to the
 /// display (feet at the origin, level-unit scale); `facing` is the turn about the display Y
-/// axis; `phase` the `--play-animation` clip's frame. With the clip bank, `current` is the
-/// clip in `Playing`, `bank` holds the others by [`ClipId::index`] (None for the current
-/// one or one that failed to load) and `anim` is the picker's state for this tick.
+/// axis, eased between the picker's last two ticks (`yaw`); `phase` the `--play-animation`
+/// clip's frame. With the clip bank (`banked`), stand is `Playing`'s own clip and `bank`
+/// holds the others by [`ClipId::index`] (None for stand or a clip that failed to load);
+/// `anim` is the picker's output for the latest tick, `picked`/`posed` count the ticks
+/// picked and blended.
 #[derive(Component)]
 pub(crate) struct Figure {
     upright: Mat4,
     facing: f32,
     phase: f32,
-    current: Option<ClipId>,
+    banked: bool,
     bank: Vec<Option<BoundAnimation>>,
-    anim: Option<AnimState>,
+    picker: SackboyAnim,
+    anim: Option<AnimFrame>,
+    yaw: [f32; 2],
+    picked: u64,
+    posed: u64,
 }
 
 /// Sackboy's body mesh, the play figure when `--select-guid` is not given: `0000043f`
@@ -84,11 +90,51 @@ pub(crate) fn enabled() -> bool {
     std::env::args().any(|a| a == "--play-sackboy")
 }
 
-/// Turn about the display Y axis when walking right (+x) or left. The upright model faces
-/// the camera (+Z); a quarter turn shows him in profile. INFERRED from the Pod figure's
-/// front view; LBP2 may show him three-quarter on (RPCS3 capture to check).
-const FACE_RIGHT: f32 = std::f32::consts::FRAC_PI_2;
-const FACE_LEFT: f32 = -std::f32::consts::FRAC_PI_2;
+/// The pose for one tick's layers: from bind, each lerp layer moves the bones it drives
+/// toward its clip's (sub-frame) pose by its weight, each additive layer adds its frame
+/// minus its reference frame. Stand is the playing clip; a clip missing from the bank is
+/// skipped. A layer with the game's mirror flag is mirrored left/right through the
+/// skeleton's mirror table (moving left: walk, jump_walk, stop/turn).
+fn blend_frame(
+    stand: &SkinnedClip,
+    bank: &[Option<BoundAnimation>],
+    frame: &AnimFrame,
+) -> BlendPose {
+    let mut pose = BlendPose::bind(&stand.rig);
+    for (k, l) in frame.layers.iter().enumerate() {
+        let (rig, animation) = if l.clip == ClipId::Stand {
+            (&stand.rig, &stand.animation)
+        } else {
+            match bank.get(l.clip.index()) {
+                Some(Some(b)) => (&b.rig, &b.animation),
+                _ => continue,
+            }
+        };
+        let Some(p) = sample_pose(animation, l.frame) else {
+            continue;
+        };
+        match l.blend {
+            Blend::Lerp => {
+                let w = if k == 0 { 1. } else { l.weight };
+                if l.mirror {
+                    pose.lerp_mirrored(rig, &p, w);
+                } else {
+                    pose.lerp(rig, &p, w);
+                }
+            }
+            Blend::Additive { reference } => {
+                if let Some(r) = sample_pose(animation, reference) {
+                    pose.add(rig, &p, &r, l.weight);
+                }
+            }
+        }
+    }
+    // The clips' root rotation is the facing channel the game overwrites (stand 0, walk
+    // and idle-chain clips +90 degrees): kept, it doubled the picker's yaw (walking right
+    // showed his back) and snapped 90 degrees wherever stand met another clip.
+    pose.hold_root_rotation(&stand.rig);
+    pose
+}
 
 /// Spawns the Sackboy mesh (`--select-guid`) as the play figure and, with a clip, its rig
 /// and playback (frames chosen by [`show_sackboy`]). Model units are level units (as for
@@ -119,7 +165,7 @@ pub(crate) fn spawn_figure(
     ));
     let upright =
         Mat4::from_scale(Vec3::splat(k)) * Mat4::from_quat(crate::model_up(true)) * origin;
-    // Clip bank: stand plays first; the others wait by ClipId index.
+    // Clip bank: stand is the playing clip; the others are blended in by ClipId index.
     let banked = bank.is_some() && matches!(clip, Some(Ok(_)));
     let mut slots: Vec<Option<BoundAnimation>> = ClipId::ALL.iter().map(|_| None).collect();
     let mut bank_line = String::new();
@@ -138,7 +184,7 @@ pub(crate) fn spawn_figure(
             }
         }
         bank_line = format!(
-            "; clip bank {}/{} bound to one rig (picker rules inferred)",
+            "; clip bank {}/{} bound to one rig, blended by the EBOOT layer rules",
             ClipId::ALL.len() - missing.len(),
             ClipId::ALL.len()
         );
@@ -155,11 +201,16 @@ pub(crate) fn spawn_figure(
             Visibility::default(),
             Figure {
                 upright,
-                facing: FACE_RIGHT,
+                // Standing faces the camera (FOUND, rules note section 2).
+                facing: 0.,
                 phase: 0.,
-                current: banked.then_some(ClipId::Stand),
+                banked,
                 bank: slots,
+                picker: SackboyAnim::new(),
                 anim: None,
+                yaw: [0.; 2],
+                picked: 0,
+                posed: 0,
             },
         ))
         .id();
@@ -226,6 +277,8 @@ pub(crate) fn spawn_figure(
                 gpu,
                 meshes: scene.into_iter().map(|s| s.1).collect(),
                 alt: None,
+                blended: None,
+                layered: banked,
             });
         }
     }
@@ -427,11 +480,21 @@ pub fn install(app: &mut App) -> Result<(), String> {
         .map_err(|_| "play sackboy thread panicked".to_string())??;
     let spawn = match (at, checkpoints.first()) {
         (Some(p), _) => p,
-        (None, Some((_, m))) => [
-            m[12] + SPAWN_OFFSET[0],
-            m[13] + SPAWN_OFFSET[1],
-            m[14] + SPAWN_OFFSET[2],
-        ],
+        (None, Some((_, m))) => {
+            let mut p = [
+                m[12] + SPAWN_OFFSET[0],
+                m[13] + SPAWN_OFFSET[1],
+                m[14] + SPAWN_OFFSET[2],
+            ];
+            // The Rookie Test offset drops him 208 below the checkpoint; where the floor
+            // under the checkpoint is higher than that (blank level: top 1655, his feet at
+            // 1520), he would start inside it (no lane changes, drawn sunk into the floor):
+            // stand him on it instead.
+            if let Some(top) = scene.floor_below([p[0], m[13]], p[2]) {
+                p[1] = p[1].max(top + FLOOR_REST);
+            }
+            p
+        }
         (None, None) => return Err("--play-sackboy: no CHECKPOINT; give --play-sackboy-at".into()),
     };
     let points: Vec<String> = checkpoints
@@ -455,7 +518,67 @@ pub fn install(app: &mut App) -> Result<(), String> {
         .add_systems(Update, (spawn_world, read_pad, show_sackboy).chain())
         .add_systems(FixedFirst, script_input)
         .add_systems(FixedLast, (tick_anim, log_scripted).chain());
+    if let Some(spec) = value(&all, "--qa-record") {
+        let parts: Vec<&str> = spec.split(',').collect();
+        let num = |i: usize, d: f32| -> Result<f32, String> {
+            parts.get(i).map_or(Ok(d), |s| {
+                s.trim()
+                    .parse::<f32>()
+                    .map_err(|e| format!("--qa-record: {e}"))
+            })
+        };
+        let dir = std::path::PathBuf::from(parts[0]);
+        if !dir.starts_with("local-analysis") || dir.exists() {
+            return Err("--qa-record DIR must be a new directory under local-analysis".into());
+        }
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        app.insert_resource(Record {
+            dir,
+            start: num(1, 1300.)? as usize,
+            end: num(2, 1400.)? as usize,
+            speed: num(3, 0.25)?,
+            last: 0,
+        })
+        .add_systems(Update, record.after(show_sackboy));
+    }
     Ok(())
+}
+
+/// `--qa-record DIR,START,END[,SPEED]` (QA only): one screenshot per scripted tick in
+/// START..=END into DIR/tick_NNNN.png, game time slowed to SPEED meanwhile so every tick
+/// is drawn, then exit.
+#[derive(Resource)]
+struct Record {
+    dir: std::path::PathBuf,
+    start: usize,
+    end: usize,
+    speed: f32,
+    last: usize,
+}
+
+fn record(
+    mut commands: Commands,
+    play: Res<Play>,
+    mut rec: ResMut<Record>,
+    mut time: ResMut<Time<Virtual>>,
+    mut exit: MessageWriter<AppExit>,
+) {
+    use bevy::render::view::screenshot::{save_to_disk, Screenshot};
+    let t = play.tick;
+    if t + 30 >= rec.start && t <= rec.end {
+        time.set_relative_speed(rec.speed);
+    }
+    if t > rec.end + 10 {
+        exit.write(AppExit::Success);
+        return;
+    }
+    if t >= rec.start && t <= rec.end && t != rec.last {
+        rec.last = t;
+        let path = rec.dir.join(format!("tick_{t:04}.png"));
+        commands
+            .spawn(Screenshot::primary_window())
+            .observe(save_to_disk(path));
+    }
 }
 
 fn spawn_world(mut commands: Commands, mut play: ResMut<Play>) {
@@ -518,14 +641,33 @@ fn script_input(play: Res<Play>, mut sackboy: Query<&mut SackboyBody>) {
     }
 }
 
-/// The clip bank's pick for this tick, after the controller step (slice 1 picker).
+/// The picker's layers and facing for this tick, after the controller step.
 fn tick_anim(sackboy: Query<&SackboyBody>, mut figure: Query<&mut Figure>) {
     let (Ok(body), Ok(mut f)) = (sackboy.single(), figure.single_mut()) else {
         return;
     };
-    if f.current.is_some() {
-        f.anim = Some(pick_clip(&body.controller, body.grounded, f.anim));
-    }
+    let a = f.picker.tick(&body.controller, body.grounded);
+    f.yaw = [f.yaw[1], a.yaw];
+    f.anim = Some(a);
+    f.picked += 1;
+}
+
+/// The layers with a visible share, for the scripted log: `clip@frame*share` (additive
+/// layers show their weight with a `+`).
+fn layer_summary(a: &AnimFrame) -> String {
+    let share = a.effective_weights();
+    a.layers
+        .iter()
+        .zip(share)
+        .filter_map(|(l, w)| match l.blend {
+            Blend::Lerp if w > 0.01 => Some(format!("{}@{:.1}*{w:.2}", l.clip.name(), l.frame)),
+            Blend::Additive { .. } => {
+                Some(format!("+{}@{:.1}*{:.2}", l.clip.name(), l.frame, l.weight))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// With a script, Sackboy's position after each tick (1-based), and the picked clip.
@@ -545,8 +687,8 @@ fn log_scripted(
     let clip = figure
         .single()
         .ok()
-        .and_then(|f| f.anim)
-        .map(|a| format!(" clip {} frame {:.1}", a.clip.name(), a.frame))
+        .and_then(|f| f.anim.as_ref())
+        .map(|a| format!(" yaw {:.1} layers {}", a.yaw.to_degrees(), layer_summary(a)))
         .unwrap_or_default();
     println!(
         "sackboy tick {} x {:.1} y {:.1} z {:.1} vx {:.2} vy {:.2} grounded {}{clip}",
@@ -559,6 +701,7 @@ fn show_sackboy(
     mut commands: Commands,
     display: Option<Res<LevelDisplay>>,
     time: Res<Time>,
+    fixed: Res<Time<Fixed>>,
     mut v: ResMut<crate::Viewer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -576,12 +719,12 @@ fn show_sackboy(
     let at = display.0.transform_point3(Vec3::new(p[0], p[1], slab.z));
     let s = display.0.x_axis.length();
     if let Ok((mut t, mut f)) = figure.single_mut() {
+        let f = &mut *f;
         let vx = body.controller.vx;
-        if vx > 0.5 {
-            f.facing = FACE_RIGHT;
-        } else if vx < -0.5 {
-            f.facing = FACE_LEFT;
-        }
+        // The picker eases facing per tick (FOUND 0.4); between ticks the shown angle
+        // moves from the previous tick's to the latest by the fixed-step overstep.
+        let alpha = fixed.overstep_fraction().clamp(0., 1.);
+        f.facing = f.yaw[0] + (f.yaw[1] - f.yaw[0]) * alpha;
         let feet = display.0.transform_point3(Vec3::new(
             p[0],
             p[1] - FLOOR_REST + body.controller.landing_dip(),
@@ -590,23 +733,14 @@ fn show_sackboy(
         *t = Transform::from_matrix(
             Mat4::from_translation(feet) * Mat4::from_rotation_y(f.facing) * f.upright,
         );
-        if let (Some(cur), Some(a)) = (f.current, f.anim) {
-            // Clip bank: hard cut to the picked clip (one rig, so only the animation swaps).
-            if cur != a.clip {
-                if let (Some(next), Some(playing)) = (f.bank[a.clip.index()].take(), &mut v.playing)
-                {
-                    let old = playing.clip.swap(next);
-                    f.bank[cur.index()] = Some(old);
-                    f.current = Some(a.clip);
-                    playing.shown = None;
-                    if let Some(gpu) = &mut playing.gpu {
-                        gpu.morphs = !playing.clip.skin.morphs.is_empty()
-                            && playing.clip.report.animation_morphs > 0;
-                    }
+        if f.banked {
+            // Clip bank: one blended pose per picked tick (stand stays the playing clip).
+            if f.posed != f.picked {
+                if let (Some(a), Some(playing)) = (&f.anim, &mut v.playing) {
+                    playing.blended = Some(blend_frame(&playing.clip, &f.bank, a));
                 }
+                f.posed = f.picked;
             }
-            // A clip that failed to load keeps the last one playing at this frame (wraps).
-            v.animation_frame = Some(a.frame as i64);
         } else if let Some(fps) = v
             .playing
             .as_ref()
