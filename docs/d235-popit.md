@@ -84,6 +84,22 @@ pad's West button toggles it, arrows move the focus while it is open. Code:
 - Circle in cursor mode returns to the open Popit (focus Popit Cursor); returning from any page resets the focus
   to the Popit Cursor (the 2026-10-11 f handoff said "not reset": wrong).
 
+## MEASURED pass 6: Personal page tiles (RPCS3 frames 19:2x, create mode, tooltips read per tile)
+- "Tools and Used Objects" Functions row, reading order (6 per row, 46 px pitch from (957,180)): Popit Cursor,
+  Corner Editor (arrow), Advanced Glue Tool (splat), Material Changer (paint can), Sticker & Decoration Edit Tool,
+  Sticker Cutter (scissors) / UV Tool (checker), Capture Object, Electric Tool, Flame Tool, Plasma Tool (ring and
+  dots triangle; plan 10 is titled "Freezatron Tool"), Horrible Gas Tool / Unlethalize Tool, Slice 'N Dice.
+  Right does not wrap; Down from the last tile goes to the Gameplay Kits header.
+- The "Gameplay Kits" header is focusable: teal bar across the panel, prompts "Hide" (Cross) above and "More!"
+  (Square) below, no name pill, a fold arrow at the right end. Its item "Entrance" (plan palette_gameplay_579)
+  is a round photo icon; focused it gets a teal ring and the name pill.
+- Icon textures: the 64x64 A8R8G8B8 plan icons (guid 42406-42408, 42929, 42932-42936, same as the plan
+  thumbnails that "decode to placeholders"). R is a soft glyph field with two packing markers (an X and a "JU" box)
+  added in, B holds the markers alone: glyph = R - B, edge about 24/255. The Advanced Glue and Sticker Cutter
+  glyphs are the HUD sheet 0001cfb9 (splat, scissors; INFERRED same art), the Popit Cursor is the button sheet,
+  UV Tool, Slice 'N Dice are drawn (textures not located; scan of 64..256 px field-style textures found none).
+  Probe: `popit_pages_probe` (FIND=, DUMP=), `tool_icon_scan`.
+
 ## OPEN
 - Exact gradient colours/alpha (not in script, Gooey defaults), card anchor rule, bubble tail/cord geometry
   (yellow S-curve drawn as dots here), camera constants (no named data found), whether Sackboy turns/tints

@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-11 — D239 Popit Personal page tiles
+
+"Tools and Used Objects" now draws its 14 function tiles (names from the game's tooltips, icons from the
+64x64 plan textures: glyph = R - B) and the focusable Gameplay Kits header with its item.
+docs/d235-popit.md pass 6. +0 / +0.
+
 ## 2026-10-11 — D235 Popit overlay (create and play menus)
 
 `--play-sackboy` draws the Popit: gradient card, SDF icon grid in the script's order (create 3x3 with

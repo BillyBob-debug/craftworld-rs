@@ -13,6 +13,19 @@ fn run() -> Result<(), String> {
     let catalog = lbp_catalog::load(Path::new(&args[1]), &control)?;
     let source = AttachedSource::attach(Path::new(&args[2]), &catalog, &control)?;
     let popit = lbp_preview::popit::load_popit(&source, &catalog, &control)?;
+    if let Ok(pat) = std::env::var("FIND") {
+        for it in &popit.items {
+            if it.title.to_lowercase().contains(&pat.to_lowercase())
+                || it.paths.iter().any(|p| p.contains(&pat))
+            {
+                println!(
+                    "{:?} | {:?} | {:?} | {:?} {}",
+                    it.title, it.icon, it.icon_resolved, it.paths, it.sub_type
+                );
+            }
+        }
+        return Ok(());
+    }
     if let Ok(dir) = std::env::var("DUMP") {
         // DUMP=dir: write the icon of every plan whose path contains $MATCH as <name>_<w>x<h>.rgba.
         let pat = std::env::var("MATCH").unwrap_or_else(|_| "palette_tools_".into());
@@ -33,6 +46,7 @@ fn run() -> Result<(), String> {
                 .unwrap_or("x")
                 .trim_end_matches(".plan");
             let name = format!("{dir}/{stem}_{}x{}.rgba", icon.width, icon.height);
+            println!("{stem} {key:?}");
             std::fs::write(name, &icon.rgba).map_err(|e| e.to_string())?;
         }
         return Ok(());

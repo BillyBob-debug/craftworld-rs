@@ -123,6 +123,10 @@ struct PageData {
     message: Option<&'static str>,
     /// One-column list page (Tools = the "Sounds" list): rows of (label, icon).
     list: Vec<(String, Image)>,
+    /// Personal page: the function tiles (label, icon) in reading order, 6 per row.
+    functions: Vec<(String, Image)>,
+    /// Personal page: the focusable "Gameplay Kits" header's items (label, icon).
+    kits: Vec<(String, Image)>,
 }
 
 /// Buttons that open an inventory page: (button, panel title, plan page, empty message).
@@ -141,6 +145,25 @@ const PAGES: [(u32, &str, Option<&str>, Option<&str>); 6] = [
     (4, "Tools and Used Objects", None, None),
     (10, "Pod", None, None),
 ];
+const PERSONAL_BUTTON: u32 = 4;
+/// Function tile icons (MEASURED 2026-10-11 frames; tile order and names from the tooltips):
+/// (label, texture GUID of the 64x64 field icon). Popit Cursor comes from the button sheet;
+/// the glue and cutter glyphs are the HUD sheet's, UV Tool and Slice 'N Dice are drawn
+/// (their game textures are not located).
+const FUNCTION_TILES: [(&str, u32); 9] = [
+    ("Corner Editor", 42407),
+    ("Material Changer", 42406),
+    ("Sticker & Decoration Edit Tool", 42408),
+    ("Capture Object", 42929),
+    ("Electric Tool", 42932),
+    ("Flame Tool", 42933),
+    ("Plasma Tool", 42934),
+    ("Horrible Gas Tool", 42935),
+    ("Unlethalize Tool", 42936),
+];
+/// HUD glyph sheet (4x2 cells of 64, white in alpha): cell 5 = splat, cell 6 = scissors.
+const HUD_GLYPH_SHEET: u32 = 0x1cfb9;
+const KITS_PLAN: &str = "palette_gameplay_579.plan";
 const PAGE_ICONS: usize = 36;
 const TOOLS_BUTTON: u32 = 5;
 /// Sounds list (MEASURED, frame 18:12:52): first row centre y, row pitch, label x, visible rows.
@@ -235,6 +258,83 @@ fn sdf_cell(rgba: &[u8], sheet_w: u32, x0: u32, y0: u32, cell: u32) -> Image {
         }
     }
     image_from(cell, cell, out)
+}
+
+/// A 64x64 tool-icon texture (MEASURED): the glyph's soft field is in R with the packing
+/// markers (an X and a "JU" box) added into R and repeated alone in B, so the glyph is
+/// `R - B`; the thin-outline look of the game tiles fits an edge at 24/255 over 6/255.
+fn field_icon(rgba: &[u8], w: u32, h: u32) -> Image {
+    let mut out = Vec::with_capacity((w * h * 4) as usize);
+    for px in rgba.as_chunks::<4>().0 {
+        let v = f32::from(px[0]) - f32::from(px[2]) - 24.;
+        let t = (v / 6.).clamp(0., 1.);
+        out.extend_from_slice(&[255, 255, 255, (t * t * (3. - 2. * t) * 255.) as u8]);
+    }
+    image_from(w, h, out)
+}
+
+/// One cell of a white-in-alpha glyph sheet.
+fn alpha_cell(rgba: &[u8], sheet_w: u32, x0: u32, y0: u32, cell: u32) -> Image {
+    let mut out = Vec::with_capacity((cell * cell * 4) as usize);
+    for y in 0..cell {
+        for x in 0..cell {
+            let i = (((y0 + y) * sheet_w + x0 + x) * 4 + 3) as usize;
+            out.extend_from_slice(&[255, 255, 255, rgba[i]]);
+        }
+    }
+    image_from(cell, cell, out)
+}
+
+/// A 64x64 white-on-alpha mask from a per-pixel coverage function (0..1, texel centres).
+fn drawn(cover: impl Fn(f32, f32) -> f32) -> Image {
+    let mut out = Vec::with_capacity(64 * 64 * 4);
+    for y in 0..64 {
+        for x in 0..64 {
+            let a = cover(x as f32 + 0.5, y as f32 + 0.5).clamp(0., 1.);
+            out.extend_from_slice(&[255, 255, 255, (a * 255.) as u8]);
+        }
+    }
+    image_from(64, 64, out)
+}
+
+/// UV Tool: a 2x2 checker with the top-right and bottom-left squares filled, outlined
+/// (INFERRED from the frame; the game texture is not located).
+fn drawn_uv_tool() -> Image {
+    drawn(|x, y| {
+        let (u, v) = ((x - 12.) / 40., (y - 12.) / 40.);
+        if !(0. ..1.).contains(&u) || !(0. ..1.).contains(&v) {
+            return 0.;
+        }
+        let edge = (u.min(1. - u).min(v).min(1. - v) * 40.) < 3.;
+        let mid = ((u - 0.5).abs().min((v - 0.5).abs()) * 40.) < 1.5;
+        let filled = (u >= 0.5) != (v >= 0.5);
+        if edge || mid || filled {
+            1.
+        } else {
+            0.
+        }
+    })
+}
+
+/// Slice 'N Dice: a filled block and an outlined block split by a zigzag (INFERRED).
+fn drawn_slice() -> Image {
+    drawn(|x, y| {
+        if !(8. ..56.).contains(&y) || !(8. ..58.).contains(&x) {
+            return 0.;
+        }
+        let cut = 30.
+            + if ((y - 8.) / 8.).floor() as i32 % 2 == 0 {
+                0.
+            } else {
+                8.
+            };
+        let outline = ((x - 8.).min(58. - x).min(y - 8.).min(56. - y)) < 2.5;
+        if x < cut - 3. || outline && x >= cut + 3. {
+            1.
+        } else {
+            0.
+        }
+    })
 }
 
 fn image_from(w: u32, h: u32, rgba: Vec<u8>) -> Image {
@@ -381,6 +481,66 @@ pub(crate) fn load_assets(
                 ));
             }
         }
+        let mut functions = Vec::new();
+        let mut kits = Vec::new();
+        if id == PERSONAL_BUTTON {
+            let field = |guid: u32| -> Option<Image> {
+                let i = decode_icon(source, catalog, ResourceKey::Guid(guid), control).ok()?;
+                Some(field_icon(&i.rgba, i.width, i.height))
+            };
+            let glyph = |col: u32, row: u32| -> Option<Image> {
+                let i = decode_icon(source, catalog, ResourceKey::Guid(HUD_GLYPH_SHEET), control)
+                    .ok()?;
+                Some(alpha_cell(&i.rgba, i.width, col * 64, row * 64, 64))
+            };
+            let cursor = items
+                .iter()
+                .find(|i| i.id == 2)
+                .and_then(|i| i.frames.last().cloned());
+            let mut by_label: std::collections::HashMap<&str, Image> = FUNCTION_TILES
+                .iter()
+                .filter_map(|(l, g)| field(*g).map(|img| (*l, img)))
+                .collect();
+            let mut push = |label: &str, img: Option<Image>| {
+                if let Some(img) = img {
+                    functions.push((label.to_owned(), img));
+                }
+            };
+            push("Popit Cursor", cursor);
+            for (label, img) in [
+                ("Corner Editor", None),
+                ("Advanced Glue Tool", glyph(1, 1)),
+                ("Material Changer", None),
+                ("Sticker & Decoration Edit Tool", None),
+                ("Sticker Cutter", glyph(2, 1)),
+                ("UV Tool", Some(drawn_uv_tool())),
+                ("Capture Object", None),
+                ("Electric Tool", None),
+                ("Flame Tool", None),
+                ("Plasma Tool", None),
+                ("Horrible Gas Tool", None),
+                ("Unlethalize Tool", None),
+                ("Slice 'N Dice", Some(drawn_slice())),
+            ] {
+                let img = img.or_else(|| by_label.remove(label));
+                push(label, img);
+            }
+            if let Some(it) = popit
+                .items
+                .iter()
+                .find(|it| it.paths.iter().any(|p| p.ends_with(KITS_PLAN)))
+            {
+                if let Some(Ok(icon)) = it
+                    .icon
+                    .map(|key| decode_icon(source, catalog, key, control))
+                {
+                    kits.push((
+                        it.title.clone(),
+                        image_from(icon.width, icon.height, icon.rgba),
+                    ));
+                }
+            }
+        }
         pages.push(PageData {
             id,
             title: if id == TOOLS_BUTTON && !list.is_empty() {
@@ -391,6 +551,8 @@ pub(crate) fn load_assets(
             sections,
             message,
             list,
+            functions,
+            kits,
         });
     }
     let sheet = decode_icon(source, catalog, ResourceKey::Guid(GLYPH_SHEET), control)?;
@@ -547,12 +709,29 @@ fn popit_input(
             p.focus = 2;
         } else {
             let (r, c) = p.cell;
-            let list_len = assets
-                .pages
-                .iter()
-                .find(|pg| Some(pg.id) == p.page)
-                .map_or(0, |pg| pg.list.len());
-            if list_len > 0 {
+            let page = assets.pages.iter().find(|pg| Some(pg.id) == p.page);
+            let list_len = page.map_or(0, |pg| pg.list.len());
+            let (nf, nk) = page.map_or((0, 0), |pg| (pg.functions.len(), pg.kits.len()));
+            if nf > 0 {
+                // Function tiles (6 per row), then the focusable "Gameplay Kits" header
+                // (MEASURED: Cross there hides the section), then its items.
+                let fr = nf.div_ceil(GRID_COLS);
+                let last_row = if nk > 0 { fr + 1 } else { fr - 1 };
+                let r2 = (r as i32 + dy).clamp(0, last_row as i32) as usize;
+                let cols = if r2 < fr {
+                    (nf - r2 * GRID_COLS).min(GRID_COLS)
+                } else if r2 == fr {
+                    1
+                } else {
+                    nk
+                };
+                let c2 = if r2 == fr {
+                    0
+                } else {
+                    (c as i32 + dx).clamp(0, cols as i32 - 1) as usize
+                };
+                p.cell = (r2, c2);
+            } else if list_len > 0 {
                 let r2 = (r as i32 + dy).clamp(0, list_len as i32 - 1) as usize;
                 p.cell = (r2, 0);
             } else {
@@ -1100,8 +1279,11 @@ fn popit_page_ui(
     let main = assets
         .items
         .iter()
-        .find(|i| i.id == if id == 4 { 2 } else { id });
-    let focus_fn = !is_list && row == 0 && col == 0;
+        .find(|i| i.id == if id == PERSONAL_BUTTON { 2 } else { id });
+    let fn_page = !page.functions.is_empty();
+    let focus_fn = !is_list && !fn_page && row == 0 && col == 0;
+    let fn_rows = page.functions.len().div_ceil(GRID_COLS);
+    let header_focus = fn_page && !page.kits.is_empty() && row == fn_rows;
     let tile = |commands: &mut Commands, cx: f32, cy: f32, size: f32| {
         commands.spawn((
             PageNode,
@@ -1114,13 +1296,83 @@ fn popit_page_ui(
         ));
     };
     let mut focus_at = (GRID_X0, 180.);
-    let mut focus_title = main.map_or_else(String::new, |i| i.label.clone());
+    let mut focus_title = if fn_page {
+        String::new()
+    } else {
+        main.map_or_else(String::new, |i| i.label.clone())
+    };
+    if fn_page {
+        for (k, (title, img)) in page.functions.iter().enumerate() {
+            let (r, c) = (k / GRID_COLS, k % GRID_COLS);
+            let (cx, cy) = (
+                GRID_X0 + c as f32 * GRID_PITCH,
+                180. + r as f32 * GRID_PITCH,
+            );
+            let focused = r == row && c == col && !header_focus;
+            let sz = if focused { 52. } else { 38. };
+            if focused {
+                tile(&mut commands, cx, cy, 64.);
+                focus_at = (cx, cy);
+                focus_title = title.clone();
+            }
+            commands.spawn((
+                PageNode,
+                node(cx - sz / 2., cy - sz / 2., sz, sz),
+                ImageNode::new(images.add(img.clone())),
+                GlobalZIndex(42),
+            ));
+        }
+        if !page.kits.is_empty() {
+            // MEASURED: header 43 px under the last tile row (text y), rule 14 px below, items 45 px
+            // under the header; focused header is a teal bar across the panel.
+            let hy = 180. + (fn_rows as f32 - 1.) * GRID_PITCH + 43.;
+            if header_focus {
+                commands.spawn((
+                    PageNode,
+                    Node {
+                        border_radius: BorderRadius::all(Val::Px(14. * scale)),
+                        ..node(px + 12., hy - 15., pw - 24., 29.)
+                    },
+                    BackgroundColor(TEAL),
+                    GlobalZIndex(41),
+                ));
+                focus_at = (px - 20., hy);
+            }
+            text(&mut commands, "Gameplay Kits", px + 18., hy, 19., 42);
+            line(&mut commands, hy + 14.);
+            text(&mut commands, "^", px + pw - 30., hy, 16., 42);
+            for (k, (title, img)) in page.kits.iter().enumerate() {
+                let (cx, cy) = (GRID_X0 + k as f32 * GRID_PITCH, hy + 45.);
+                let focused = row == fn_rows + 1 && col == k;
+                if focused {
+                    commands.spawn((
+                        PageNode,
+                        Node {
+                            border_radius: BorderRadius::all(Val::Px(32. * scale)),
+                            ..node(cx - 32., cy - 32., 64., 64.)
+                        },
+                        BackgroundColor(TEAL),
+                        GlobalZIndex(41),
+                    ));
+                    focus_at = (cx, cy);
+                    focus_title = title.clone();
+                }
+                let sz = if focused { 52. } else { 32. };
+                commands.spawn((
+                    PageNode,
+                    node(cx - sz / 2., cy - sz / 2., sz, sz),
+                    ImageNode::new(images.add(img.clone())),
+                    GlobalZIndex(42),
+                ));
+            }
+        }
+    }
     if focus_fn {
         tile(&mut commands, GRID_X0, 180., 64.);
     }
     if let Some(img) = main
         .and_then(|i| i.frames.last().cloned())
-        .filter(|_| !is_list)
+        .filter(|_| !is_list && !fn_page)
     {
         let sz = if focus_fn { 52. } else { 38. };
         commands.spawn((
@@ -1217,42 +1469,57 @@ fn popit_page_ui(
         .max(4) as f32;
     let (lw, lh) = (widest * 13. - 2., PILL_H + (lines.len() as f32 - 1.) * 22.);
     let (lx, ly) = (focus_at.0 - 32. - 8. - lw, focus_at.1 - 8. - lh / 2.);
-    commands.spawn((
-        PageNode,
-        Node {
-            border_radius: BorderRadius::all(Val::Px(PILL_H / 2. * scale)),
-            ..node(lx, ly, lw, lh)
-        },
-        BackgroundColor(PILL),
-        GlobalZIndex(43),
-    ));
-    for k in 0..TAIL_STEPS {
-        let (len, h) = (TAIL_LEN_H / TAIL_STEPS as f32, 11. - 2. * k as f32);
+    if !header_focus {
         commands.spawn((
             PageNode,
-            node(
-                lx + lw - 1. + k as f32 * len,
-                ly + lh / 2. - h / 2.,
-                len + 1.,
-                h,
-            ),
+            Node {
+                border_radius: BorderRadius::all(Val::Px(PILL_H / 2. * scale)),
+                ..node(lx, ly, lw, lh)
+            },
             BackgroundColor(PILL),
             GlobalZIndex(43),
         ));
+        for k in 0..TAIL_STEPS {
+            let (len, h) = (TAIL_LEN_H / TAIL_STEPS as f32, 11. - 2. * k as f32);
+            commands.spawn((
+                PageNode,
+                node(
+                    lx + lw - 1. + k as f32 * len,
+                    ly + lh / 2. - h / 2.,
+                    len + 1.,
+                    h,
+                ),
+                BackgroundColor(PILL),
+                GlobalZIndex(43),
+            ));
+        }
+        for (i, l) in lines.iter().enumerate() {
+            text(
+                &mut commands,
+                l,
+                lx + 10.,
+                ly + PILL_H / 2. + 1. + i as f32 * 22.,
+                19.,
+                44,
+            );
+        }
     }
-    for (i, l) in lines.iter().enumerate() {
-        text(
-            &mut commands,
-            l,
-            lx + 10.,
-            ly + PILL_H / 2. + 1. + i as f32 * 22.,
-            19.,
-            44,
-        );
-    }
-    let cx = lx + lw / 2.;
-    for (label, dx, dy, glyph) in [("USE!", -61., -62., "X"), ("More!", -51., 55., "[]")] {
-        let (hx, hy) = (cx + dx, ly + lh / 2. + dy);
+    // The header's prompts are "Hide" above and "More!" below the bar (MEASURED).
+    let (cx, cy, prompts) = if header_focus {
+        (
+            926.,
+            focus_at.1,
+            [("Hide", -61., -47., "X"), ("More!", -51., 46., "[]")],
+        )
+    } else {
+        (
+            lx + lw / 2.,
+            ly + lh / 2.,
+            [("USE!", -61., -62., "X"), ("More!", -51., 55., "[]")],
+        )
+    };
+    for (label, dx, dy, glyph) in prompts {
+        let (hx, hy) = (cx + dx, cy + dy);
         commands.spawn((
             PageNode,
             Node {
