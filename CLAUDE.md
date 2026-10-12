@@ -19,6 +19,15 @@ MODLOG.md, docs/architecture.md, docs/formats.md and docs/roadmap.md are 30-50 K
 3. Read the one milestone doc under `docs/` for the area. Skip the others.
 4. Continue from the "Next:" line unless the user asks for something else.
 
+CLAUDE.md and AGENTS.md are already in context: never cat/Read/sed them again (19 recent
+sessions re-read them for ~43k tokens). A fresh session starts at ~92k tokens (harness,
+tool schemas, project prompt) before any work, and every turn re-reads all of it, so the
+cost driver is turns x context: batch independent reads into one command, answer from a
+single script instead of many `python -c` probes, and hand any step that needs more than
+~5 calls to a subagent. Never re-read a published Artifact; keep a local copy.
+Details and measurements: `docs/context-audit-2026-10-12.md`; re-measure with
+`python -I scripts/ctx_audit.py`.
+
 Do not open: `target/`, `*.zip`, `Cargo.lock`, `game-data/`, `references/**`
 (grep a pinned file instead), large `local-analysis/*.json` (summarize with a
 script; the snapshot is ~119 MB). View PNG captures only to answer a concrete

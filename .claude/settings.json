@@ -4,7 +4,23 @@
       "Read(./target/**)",
       "Read(./*.zip)",
       "Read(./Cargo.lock)",
-      "Read(./game-data/**)"
+      "Read(./game-data/**)",
+      "Workflow",
+      "ScheduleWakeup",
+      "ReportFindings",
+      "SearchPlugins",
+      "SuggestPluginInstall",
+      "SuggestSkills",
+      "mcp__Claude_Browser",
+      "mcp__visualize",
+      "mcp__1a59c906-04da-521d-bda7-7f71b9f9e01c",
+      "mcp__hearthbot__post_widget",
+      "mcp__hearthbot__switch_model",
+      "mcp__hearthbot__suggest_connectors",
+      "mcp__hearthbot__get_project_session_id",
+      "mcp__hearthbot__list_project_files",
+      "mcp__hearthbot__read_project_file",
+      "mcp__hearthbot__set_thread_label"
     ]
   }
 }
