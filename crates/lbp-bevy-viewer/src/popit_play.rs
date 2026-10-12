@@ -121,23 +121,33 @@ struct PageData {
     title: &'static str,
     sections: Vec<(String, Vec<(String, Image)>)>,
     message: Option<&'static str>,
+    /// One-column list page (Tools = the "Sounds" list): rows of (label, icon).
+    list: Vec<(String, Image)>,
 }
 
 /// Buttons that open an inventory page: (button, panel title, plan page, empty message).
 const PAGES: [(u32, &str, Option<&str>, Option<&str>); 6] = [
     (6, "Body", Some("costume"), None),
     (0, "Stickers", Some("sticker"), None),
-    (1, "Goodies", None, None),
-    (5, "Tools", None, None),
+    // MEASURED 2026-10-11 18:50: Goodies Bag opens "Community Objects", Personal opens
+    // "Tools and Used Objects", Tools Bag opens the Sounds list.
     (
-        4,
+        1,
         "Community Objects",
         None,
         Some("Get your friends to send you objects, and they'll appear here."),
     ),
+    (5, "Tools", None, None),
+    (4, "Tools and Used Objects", None, None),
     (10, "Pod", None, None),
 ];
 const PAGE_ICONS: usize = 36;
+const TOOLS_BUTTON: u32 = 5;
+/// Sounds list (MEASURED, frame 18:12:52): first row centre y, row pitch, label x, visible rows.
+const LIST_Y0: f32 = 140.;
+const LIST_PITCH: f32 = 46.;
+const LIST_LABEL_X: f32 = 1000.;
+const LIST_VISIBLE: usize = 11;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -345,11 +355,42 @@ pub(crate) fn load_assets(
                 }
             }
         }
+        // Tools opens the sound-object list: LBP2's own sound objects by name; the LBP1
+        // palette sounds and DLC packs are not in the game's list on the measured profile.
+        let mut list = Vec::new();
+        if id == TOOLS_BUTTON {
+            let mut rows_in: Vec<&lbp_preview::popit::PopitItem> = popit
+                .pages
+                .get("sound")
+                .map_or(&[][..], Vec::as_slice)
+                .iter()
+                .map(|&ix| &popit.items[ix])
+                .filter(|it| {
+                    it.icon_resolved && it.paths.iter().any(|p| p.contains("lbp2/unthemed/"))
+                })
+                .collect();
+            rows_in.sort_by(|a, b| a.title.cmp(&b.title));
+            for it in rows_in {
+                let Some(key) = it.icon else { continue };
+                let Ok(icon) = decode_icon(source, catalog, key, control) else {
+                    continue;
+                };
+                list.push((
+                    it.title.clone(),
+                    image_from(icon.width, icon.height, icon.rgba),
+                ));
+            }
+        }
         pages.push(PageData {
             id,
-            title,
+            title: if id == TOOLS_BUTTON && !list.is_empty() {
+                "Sounds"
+            } else {
+                title
+            },
             sections,
             message,
+            list,
         });
     }
     let sheet = decode_icon(source, catalog, ResourceKey::Guid(GLYPH_SHEET), control)?;
@@ -431,6 +472,7 @@ fn popit_input(
     time: Res<Time>,
     mut p: ResMut<Popit>,
     mut sackboy: Query<&mut lbp_sim::character::SackboyBody>,
+    assets: Res<PopitAssets>,
 ) {
     let pad = pads.iter().next();
     if let Some(at) = p.cursor {
@@ -457,8 +499,10 @@ fn popit_input(
         let circle = keys.just_pressed(KeyCode::KeyC)
             || pad.is_some_and(|g| g.just_pressed(GamepadButton::East));
         if square || circle {
+            // MEASURED 18:50: Circle also brings the Popit back, focus on the Popit Cursor.
             p.cursor = None;
-            p.open = square;
+            p.open = true;
+            p.focus = 2;
         }
         return;
     }
@@ -498,12 +542,24 @@ fn popit_input(
         || pad.is_some_and(|g| g.just_pressed(GamepadButton::East));
     if p.page.is_some() {
         if back {
+            // MEASURED 18:51: returning from a page resets the focus to the Popit Cursor.
             p.page = None;
+            p.focus = 2;
         } else {
             let (r, c) = p.cell;
-            let c2 = (c as i32 + dx).clamp(0, GRID_COLS as i32 - 1) as usize;
-            let r2 = (r as i32 + dy).clamp(0, 7) as usize;
-            p.cell = (r2, c2);
+            let list_len = assets
+                .pages
+                .iter()
+                .find(|pg| Some(pg.id) == p.page)
+                .map_or(0, |pg| pg.list.len());
+            if list_len > 0 {
+                let r2 = (r as i32 + dy).clamp(0, list_len as i32 - 1) as usize;
+                p.cell = (r2, 0);
+            } else {
+                let c2 = (c as i32 + dx).clamp(0, GRID_COLS as i32 - 1) as usize;
+                let r2 = (r as i32 + dy).clamp(0, 7) as usize;
+                p.cell = (r2, c2);
+            }
         }
         return;
     }
@@ -1023,7 +1079,9 @@ fn popit_page_ui(
         ImageNode::new(panel),
         GlobalZIndex(40),
     ));
-    text(&mut commands, page.title, px + 18., 84., 30., 42);
+    // The game's handwritten title is narrower than our sans: shrink long titles to the panel.
+    let title_px = (30. * 14. / page.title.chars().count().max(1) as f32).clamp(19., 30.);
+    text(&mut commands, page.title, px + 18., 84., title_px, 42);
     let line = |commands: &mut Commands, y: f32| {
         commands.spawn((
             PageNode,
@@ -1032,11 +1090,18 @@ fn popit_page_ui(
             GlobalZIndex(41),
         ));
     };
+    let is_list = !page.list.is_empty();
     // Functions row: the page's own main-menu icon on the teal tile (focus at the first cell).
-    text(&mut commands, "Functions", px + 18., 133., 19., 42);
-    line(&mut commands, 148.);
-    let main = assets.items.iter().find(|i| i.id == id);
-    let focus_fn = row == 0 && col == 0;
+    if !is_list {
+        text(&mut commands, "Functions", px + 18., 133., 19., 42);
+        line(&mut commands, 148.);
+    }
+    // Personal's first function tile is the Popit Cursor.
+    let main = assets
+        .items
+        .iter()
+        .find(|i| i.id == if id == 4 { 2 } else { id });
+    let focus_fn = !is_list && row == 0 && col == 0;
     let tile = |commands: &mut Commands, cx: f32, cy: f32, size: f32| {
         commands.spawn((
             PageNode,
@@ -1053,7 +1118,10 @@ fn popit_page_ui(
     if focus_fn {
         tile(&mut commands, GRID_X0, 180., 64.);
     }
-    if let Some(img) = main.and_then(|i| i.frames.last().cloned()) {
+    if let Some(img) = main
+        .and_then(|i| i.frames.last().cloned())
+        .filter(|_| !is_list)
+    {
         let sz = if focus_fn { 52. } else { 38. };
         commands.spawn((
             PageNode,
@@ -1067,6 +1135,35 @@ fn popit_page_ui(
         for l in wrap(msg, 22) {
             text(&mut commands, &l, px + 56., y, 21., 42);
             y += 24.;
+        }
+    }
+    // List page: one row per entry, the focused row on a teal bar with a large icon.
+    if is_list {
+        let first = row.saturating_sub(LIST_VISIBLE - 1);
+        for (k, (title, img)) in page.list.iter().enumerate().skip(first).take(LIST_VISIBLE) {
+            let cy = LIST_Y0 + (k - first) as f32 * LIST_PITCH;
+            let focused = k == row;
+            if focused {
+                commands.spawn((
+                    PageNode,
+                    Node {
+                        border_radius: BorderRadius::all(Val::Px(20. * scale)),
+                        ..node(GRID_X0 + 3., cy - 20., 1213. - GRID_X0 - 3., 40.)
+                    },
+                    BackgroundColor(TEAL),
+                    GlobalZIndex(41),
+                ));
+                focus_at = (GRID_X0, cy);
+                focus_title = title.clone();
+            }
+            let sz = if focused { 64. } else { 38. };
+            commands.spawn((
+                PageNode,
+                node(GRID_X0 - sz / 2., cy - sz / 2., sz, sz),
+                ImageNode::new(images.add(img.clone())),
+                GlobalZIndex(42),
+            ));
+            text(&mut commands, title, LIST_LABEL_X, cy, 21., 42);
         }
     }
     // Grid: section headers and 6-column icon rows below the functions row.
@@ -1106,27 +1203,53 @@ fn popit_page_ui(
         y = top + rows_n as f32 * GRID_PITCH + 6.;
     }
     text(&mut commands, "1/1", px + pw / 2. - 14., 646., 20., 42);
-    // Tooltip pill left of the focus tile, tail pointing right; USE!/More! hints around it.
-    let chars = focus_title.chars().count().max(4) as f32;
-    let (lw, lh) = (chars * 13. - 2., PILL_H);
+    // Tooltip pill left of the focus tile, tail pointing right; long titles wrap to two lines.
+    let lines = if focus_title.chars().count() > 22 {
+        wrap(&focus_title, 22)
+    } else {
+        vec![focus_title.clone()]
+    };
+    let widest = lines
+        .iter()
+        .map(|l| l.chars().count())
+        .max()
+        .unwrap_or(4)
+        .max(4) as f32;
+    let (lw, lh) = (widest * 13. - 2., PILL_H + (lines.len() as f32 - 1.) * 22.);
     let (lx, ly) = (focus_at.0 - 32. - 8. - lw, focus_at.1 - 8. - lh / 2.);
     commands.spawn((
         PageNode,
         Node {
-            border_radius: BorderRadius::all(Val::Px(lh / 2. * scale)),
+            border_radius: BorderRadius::all(Val::Px(PILL_H / 2. * scale)),
             ..node(lx, ly, lw, lh)
         },
         BackgroundColor(PILL),
         GlobalZIndex(43),
     ));
-    text(
-        &mut commands,
-        &focus_title,
-        lx + 10.,
-        ly + lh / 2. + 1.,
-        19.,
-        44,
-    );
+    for k in 0..TAIL_STEPS {
+        let (len, h) = (TAIL_LEN_H / TAIL_STEPS as f32, 11. - 2. * k as f32);
+        commands.spawn((
+            PageNode,
+            node(
+                lx + lw - 1. + k as f32 * len,
+                ly + lh / 2. - h / 2.,
+                len + 1.,
+                h,
+            ),
+            BackgroundColor(PILL),
+            GlobalZIndex(43),
+        ));
+    }
+    for (i, l) in lines.iter().enumerate() {
+        text(
+            &mut commands,
+            l,
+            lx + 10.,
+            ly + PILL_H / 2. + 1. + i as f32 * 22.,
+            19.,
+            44,
+        );
+    }
     let cx = lx + lw / 2.;
     for (label, dx, dy, glyph) in [("USE!", -61., -62., "X"), ("More!", -51., 55., "[]")] {
         let (hx, hy) = (cx + dx, ly + lh / 2. + dy);

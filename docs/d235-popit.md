@@ -62,6 +62,28 @@ pad's West button toggles it, arrows move the focus while it is open. Code:
   stays the gameplay camera. Viewer: `--popit-cursor` (QA), WASD / left stick move the ring, C / Circle leave,
   Z / Square leave and reopen the Popit.
 
+## MEASURED pass 5: Tools = the Sounds list (frame 18:12:52, 5/8)
+- The Tools button opens the sound-object list, not the tool plans: title "Sounds", no Functions row, one column.
+  Rows 46 px apart from y 140, icon 38 px at x 957 (focused row 64 px, teal bar x 960..1213, 40 px tall), label at
+  x 1000 (21 px bold). Order and speaker colours match the game exactly for the 11 visible rows (Alerts,
+  Animals, Contraptions, Destruction, Earth Wind and Fire, Electric, Human Body, Human Vox, Impacts, Launchers,
+  Mechanisms).
+- Source: `sound` plans under `gamedata/lbp2/unthemed/` sorted by title. The LBP1 `palette_music_*` sounds, DLC packs
+  (Cross-Controller, DC, Move, Muppets, Nightmare, ...) are absent from the measured list (INFERRED: not owned /
+  not shown on that profile). Probe: `crates/lbp-preview/examples/popit_pages_probe.rs`.
+- The tool plans (`palette_tools_*`: Capture Object, Corner Editor, Electric, Flame, Horrible Gas, Material Changer,
+  Unlethalize, Freezatron) are the "Functions" tiles of the other pages; the Community page shows Capture Object.
+- Counter "n/N" is not item or page index: Body 4/5, Stickers 1/5, Sounds 5/8, Community 4/4 (OPEN).
+- Button -> page (frames 18:50-18:51, create mode): Goodies Bag opens "Community Objects" (Functions: Capture
+  Object + a ghosted tile, empty-message bubble, counter 4/4); Personal (star) opens "Tools and Used Objects"
+  (Functions row of 14 tiles: Popit Cursor first, then arrow, splat, paint can, sticker tool, scissors, checker,
+  capture, 4 triangles (bolt, flame, sun, gas), triangle-X, torn paper; then "Gameplay Kits" with the Popit stone);
+  Tools Bag opens Sounds. The function tile icons are not the plan thumbnails (those decode to SDF placeholders):
+  sheets `0001cfb9` (cursor/can/sticker/splat/scissors) and `0001d150` (bolt/flame/gas/sun/X/bracket/camera/bag)
+  hold related glyphs; the triangle tiles and tile order are OPEN. Viewer shows only the first tile (Popit Cursor).
+- Circle in cursor mode returns to the open Popit (focus Popit Cursor); returning from any page resets the focus
+  to the Popit Cursor (the 2026-10-11 f handoff said "not reset": wrong).
+
 ## OPEN
 - Exact gradient colours/alpha (not in script, Gooey defaults), card anchor rule, bubble tail/cord geometry
   (yellow S-curve drawn as dots here), camera constants (no named data found), whether Sackboy turns/tints
