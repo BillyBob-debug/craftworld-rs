@@ -143,14 +143,15 @@ const PAGES: [(u32, &str, Option<&str>, Option<&str>); 6] = [
     ),
     (5, "Tools", None, None),
     (4, "Tools and Used Objects", None, None),
-    (10, "Pod", None, None),
+    (10, "My Pods", None, None),
 ];
 const PERSONAL_BUTTON: u32 = 4;
 /// Function tile icons (MEASURED 2026-10-11 frames; tile order and names from the tooltips):
 /// (label, texture GUID of the 64x64 field icon). Popit Cursor comes from the button sheet;
 /// the glue and cutter glyphs are the HUD sheet's, UV Tool and Slice 'N Dice are drawn
 /// (their game textures are not located).
-const FUNCTION_TILES: [(&str, u32); 9] = [
+const FUNCTION_TILES: [(&str, u32); 10] = [
+    ("Take A Photo", 42928),
     ("Corner Editor", 42407),
     ("Material Changer", 42406),
     ("Sticker & Decoration Edit Tool", 42408),
@@ -295,6 +296,100 @@ fn drawn(cover: impl Fn(f32, f32) -> f32) -> Image {
         }
     }
     image_from(64, 64, out)
+}
+
+/// Sackboy figure coverage (128x128) from the Body button's last icon frame.
+fn figure_cover(rgba: &[u8], sheet_w: u32, frames: u32) -> Vec<f32> {
+    let cols = sheet_w / 128;
+    let f = frames - 1;
+    let (x0, y0) = ((f % cols) * 128, (f / cols) * 128);
+    let mut out = Vec::with_capacity(128 * 128);
+    for y in 0..128 {
+        for x in 0..128 {
+            let i = (((y0 + y) * sheet_w + x0 + x) * 4) as usize;
+            let v = f32::from(rgba[i]) / 255.;
+            let t = ((v - (SDF_EDGE - SDF_SOFT)) / (2. * SDF_SOFT)).clamp(0., 1.);
+            out.push(t * t * (3. - 2. * t));
+        }
+    }
+    out
+}
+
+/// A costume-tool tile (Reset / Random / Save / Wash Costume): the figure scaled to a
+/// `size` px box centred at (cx, cy) plus a drawn mark. INFERRED art: the game's four
+/// textures (guids 42924-42926, 46763) are not in the disc data.
+fn costume_tile(
+    figure: &[f32],
+    (cx, cy, size): (f32, f32, f32),
+    mark: impl Fn(f32, f32) -> f32,
+) -> Image {
+    drawn(|x, y| {
+        let sample = |px: f32, py: f32| {
+            let (u, v) = ((px - cx) / size + 0.5, (py - cy) / size + 0.5);
+            if !(0. ..1.).contains(&u) || !(0. ..1.).contains(&v) {
+                return 0.;
+            }
+            figure[(v * 128.) as usize * 128 + (u * 128.) as usize]
+        };
+        let fig = if size > 0. {
+            (sample(x - 0.25, y - 0.25)
+                + sample(x + 0.25, y - 0.25)
+                + sample(x - 0.25, y + 0.25)
+                + sample(x + 0.25, y + 0.25))
+                / 4.
+        } else {
+            0.
+        };
+        fig.max(mark(x, y))
+    })
+}
+
+/// Distance from (x, y) to the segment a-b.
+fn seg(x: f32, y: f32, a: (f32, f32), b: (f32, f32)) -> f32 {
+    let (dx, dy) = (b.0 - a.0, b.1 - a.1);
+    let t = (((x - a.0) * dx + (y - a.1) * dy) / (dx * dx + dy * dy).max(1e-6)).clamp(0., 1.);
+    ((x - a.0 - t * dx).powi(2) + (y - a.1 - t * dy).powi(2)).sqrt()
+}
+
+/// Random Costume mark: "!?" above the figure.
+fn mark_random(x: f32, y: f32) -> f32 {
+    let line = |d: f32| (1.6 - d).clamp(0., 1.);
+    let bang =
+        line(seg(x, y, (14., 6.), (14., 15.))).max(line(((x - 14.).hypot(y - 20.) - 0.6).max(0.)));
+    let (qx, qy) = (30., 12.);
+    let ring = ((x - qx).hypot(y - qy) - 6.).abs();
+    let open = x < qx && y > qy + 2.;
+    let hook = if open { 0. } else { line(ring) };
+    let stem = line(seg(x, y, (qx, qy + 6.), (qx, qy + 10.)));
+    let dot = line(((x - qx).hypot(y - 20.) - 0.6).max(0.));
+    bang.max(hook).max(stem).max(dot)
+}
+
+/// Save Costume mark: four corner brackets round the figure.
+fn mark_brackets(x: f32, y: f32) -> f32 {
+    let line = |d: f32| (1.8 - d).clamp(0., 1.);
+    let mut v = 0f32;
+    for (sx, sy) in [(6., 6.), (58., 6.), (6., 58.), (58., 58.)] {
+        let (ex, ey) = (
+            if sx < 32. { 1. } else { -1. },
+            if sy < 32. { 1. } else { -1. },
+        );
+        v = v
+            .max(line(seg(x, y, (sx, sy), (sx + 13. * ex, sy))))
+            .max(line(seg(x, y, (sx, sy), (sx, sy + 13. * ey))));
+    }
+    v
+}
+
+/// Wash Costume: a rounded square with an X cut out (INFERRED from the frame).
+fn mark_wash(x: f32, y: f32) -> f32 {
+    let (u, v) = ((x - 32.).abs(), (y - 32.).abs());
+    let inside = (22. - u.max(v)).clamp(0., 1.);
+    let corner = ((u - 14.).max(0.)).hypot((v - 14.).max(0.));
+    let rounded = (8. - corner).clamp(0., 1.).min(inside);
+    let cut = (2.2 - seg(x, y, (22., 22.), (42., 42.)).min(seg(x, y, (42., 22.), (22., 42.))))
+        .clamp(0., 1.);
+    (rounded - cut).clamp(0., 1.)
 }
 
 /// UV Tool: a 2x2 checker with the top-right and bottom-left squares filled, outlined
@@ -483,6 +578,48 @@ pub(crate) fn load_assets(
         }
         let mut functions = Vec::new();
         let mut kits = Vec::new();
+        // MEASURED 2026-10-12 (play frames, tooltips): Body = Reset / Random / Save / Wash
+        // Costume, Stickers = Sticker & Decoration Edit Tool, Take A Photo.
+        if id == 6 {
+            if let Ok(sheet) = decode_icon(source, catalog, ResourceKey::Guid(0x19149), control) {
+                let fig = figure_cover(&sheet.rgba, sheet.width, 32);
+                for (label, geo, mark) in [
+                    ("Reset Costume", (32., 32., 46.), None),
+                    (
+                        "Random Costume",
+                        (32., 40., 38.),
+                        Some(mark_random as fn(f32, f32) -> f32),
+                    ),
+                    (
+                        "Save Costume",
+                        (32., 32., 30.),
+                        Some(mark_brackets as fn(f32, f32) -> f32),
+                    ),
+                    (
+                        "Wash Costume",
+                        (32., 32., 0.),
+                        Some(mark_wash as fn(f32, f32) -> f32),
+                    ),
+                ] {
+                    let img = costume_tile(&fig, geo, |x, y| mark.map_or(0., |m| m(x, y)));
+                    functions.push((label.to_owned(), img));
+                }
+            }
+        }
+        // MEASURED 2026-10-12 (own Pod frames): the rocket opens "My Pods", two tiles, no grid.
+        let tiles: &[(&str, u32)] = match id {
+            0 => &[
+                ("Sticker & Decoration Edit Tool", 42408),
+                ("Take A Photo", 42928),
+            ],
+            10 => &[("Reset Pod Decoration", 82777), ("Save Pod", 82775)],
+            _ => &[],
+        };
+        for &(label, guid) in tiles {
+            if let Ok(i) = decode_icon(source, catalog, ResourceKey::Guid(guid), control) {
+                functions.push((label.to_owned(), field_icon(&i.rgba, i.width, i.height)));
+            }
+        }
         if id == PERSONAL_BUTTON {
             let field = |guid: u32| -> Option<Image> {
                 let i = decode_icon(source, catalog, ResourceKey::Guid(guid), control).ok()?;
@@ -1251,6 +1388,9 @@ fn popit_page_ui(
         ));
     };
     let [px, py, pw, ph] = PANEL;
+    // MEASURED 2026-10-12 (play frame): in play mode the star opens "Heart Items", a bare
+    // panel with the empty-list message and no functions row, counter or focus.
+    let heart = p.mode == Mode::Play && id == PERSONAL_BUTTON;
     let panel = images.add(card_image_at([pw, ph], [0., 0.57 * ph], 18.));
     commands.spawn((
         PageNode,
@@ -1259,8 +1399,20 @@ fn popit_page_ui(
         GlobalZIndex(40),
     ));
     // The game's handwritten title is narrower than our sans: shrink long titles to the panel.
-    let title_px = (30. * 14. / page.title.chars().count().max(1) as f32).clamp(19., 30.);
-    text(&mut commands, page.title, px + 18., 84., title_px, 42);
+    let page_title = if heart { "Heart Items" } else { page.title };
+    let title_px = (30. * 14. / page_title.chars().count().max(1) as f32).clamp(19., 30.);
+    text(&mut commands, page_title, px + 18., 84., title_px, 42);
+    if heart {
+        let mut y = 134.;
+        for l in wrap(
+            "You haven't hearted any objects yet - maybe you hate them all?",
+            22,
+        ) {
+            text(&mut commands, &l, px + 56., y, 21., 42);
+            y += 28.;
+        }
+        return;
+    }
     let line = |commands: &mut Commands, y: f32| {
         commands.spawn((
             PageNode,

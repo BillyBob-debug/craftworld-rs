@@ -105,3 +105,23 @@ pad's West button toggles it, arrows move the focus while it is open. Code:
   (yellow S-curve drawn as dots here), camera constants (no named data found), whether Sackboy turns/tints
   (the 2026-10-11 frames show him from behind, untinted), animation order of the icon frames when focused.
 - Create mode needs the real D-pad Down binding; the viewer uses Z for both modes.
+
+## MEASURED pass 7: play-mode pages and the Pod page (RPCS3 frames 2026-10-12, Moon in play mode, own Pod)
+- Play mode is reachable from the Moon (pause menu -> "Change to Play Mode" -> Discard Changes), so no level is
+  needed. Square opens/closes the Popit in play mode; D-pad Down is the sad emote.
+- Play card: costume top, then star + stickers, then text chat + retry (no Goodies, Cursor, Tools).
+  Body: "Body", Functions = Reset Costume, Random Costume, Save Costume, Wash Costume (tooltip per tile), then the
+  "Common" section, counter 4/5. Stickers: Functions = Sticker & Decoration Edit Tool, Take A Photo; section headers
+  fold (Animals collapsed, Architecture open), counter 1/5.
+- Star in play mode is **Heart Items**: bare panel, no Functions row, no counter, message "You haven't hearted any
+  objects yet - maybe you hate them all?".
+- Text Chat opens the PS3 on-screen keyboard dialog ("Enter Your Message"; Circle back, Triangle space, Square
+  backspace), not a Popit page. Retry shows the tooltip "Hold To Retry!" below-right of the card (hold, not tap).
+- Pod (Moon -> Return to Pod -> Circle x4 to stand in the Pod, walk away from "Use Pod Computer", Square): the card has
+  costume, **rocket** (Pod Decoration), star, stickers, text chat. The rocket opens **"My Pods"**: Functions =
+  Reset Pod Decoration, Save Pod, nothing else, no counter. The rocket is only present in the own Pod (owner note
+  2026-10-12).
+- Icons: Take A Photo 42928, Sticker tool 42408, Reset Pod Decoration 82777, Save Pod 82775 are field icons; the four
+  costume tools (guids 42924-42926, 46763) are not in the disc data, drawn from the Body button figure plus marks
+  (INFERRED art). Viewer: Body/Stickers/My Pods tiles, Heart Items (play), tiles shared by both modes (create-mode
+  Body/Stickers tiles INFERRED the same).
