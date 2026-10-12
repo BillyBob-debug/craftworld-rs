@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-12 — D241 landing dip matched to the game's vertices
+
+Owner note: Sackboy "extra bouncy, stretching vertically". Game vs ours, same jump: the vertical arc matches
+within 3 units (centroid +234 apex both), but on landing our drawn figure sank 35 + 5.5 below rest for
+about 15 ticks, the game's lowest vertex reaches 29 and is back at rest 3 ticks later. `LANDING_DIP` is
+now 4 ticks (-21.2, -23.5, -10.7, 0). docs/d241-landing-dip.md. +0 / +0.
+
 ## 2026-10-11 â€” D239 Popit Personal page tiles
 
 "Tools and Used Objects" now draws its 14 function tiles (names from the game's tooltips, icons from the

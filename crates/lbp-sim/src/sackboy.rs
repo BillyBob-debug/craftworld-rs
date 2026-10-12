@@ -8,7 +8,7 @@
 //! camera (PC run d211, 2026-10-09; repeats agree within about 1 unit), which is the
 //! reference: CONFIRMED_FROM_LOCAL_DATA (emulated) for every constant below unless a
 //! comment says otherwise. Units are LBP world units and game ticks. Not modelled
-//! yet: the crouch/landing dips (about 35 units for 1-2 and 8 ticks; visual only), slopes,
+//! yet: the crouch dips before take-off, slopes,
 //! grabbing, swimming, terminal velocity, the 10 u/tick plateau seen once after landing.
 
 /// Gravity per tick². A 65-tick fall from the Moon's top (d230 fly-1, 173.7 per tick at the
@@ -21,14 +21,14 @@ pub const GRAVITY_TICK: f32 = 2.698;
 /// terminal fall speed about 9,000 per tick, so the world MaxVel of 100 seen in the code
 /// never applied (173.7 was reached).
 pub const AIR_DRAG: f32 = 0.9997;
-/// Y offset from his resting position, per tick after touch-down: the legs compress to a
-/// hard stop 35 below rest (reached by every landing seen: jumps, a 18.9/tick spawn drop,
-/// a 29/tick fall) and spring back. Moon d230 (airrel-1/airrev-1), tick 0 = first tick
-/// with floor contact. Position only; the walking physics above are unaffected.
-pub const LANDING_DIP: [f32; 15] = [
-    -26.19, -35.0, -35.0, -31.75, -25.28, -15.57, -8.57, -4.27, -2.53, -1.48, -0.86, -0.49, -0.26,
-    -0.13, -0.05,
-];
+/// Y offset of the drawn figure from its resting position, per tick after touch-down (tick 0
+/// = first tick with floor contact). D241: the game's skinned vertices put the lowest point
+/// 26.7 then 29.0 below rest and back at rest after 3 more ticks (jump capture, d234
+/// `jump.bin`); the jump clip tail already pushes the feet about 5.5 below the root, so the
+/// root offset is that series plus 5.5. The body position the physics reads dips further (35,
+/// d230); that table drew him about 12 units too low for 15 ticks (owner: "extra bouncy").
+/// Position only; the walking physics above are unaffected.
+pub const LANDING_DIP: [f32; 4] = [-21.2, -23.5, -10.7, 0.];
 /// Ground acceleration and deceleration per tick² (linear: 3, 6, ... 30).
 pub const WALK_ACCEL: f32 = 3.0;
 /// Ground top speed per tick (900 u/s), reached in 10 ticks.

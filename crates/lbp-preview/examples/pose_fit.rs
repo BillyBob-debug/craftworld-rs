@@ -75,6 +75,11 @@ fn fit(grid: &Grid, g: &[[f32; 3]], p: &[[f32; 3]]) -> (f32, Vec<f32>) {
     best.unwrap()
 }
 
+thread_local! {
+    /// Translation of the last `fit1` call (QA print: the visual root offset per sample).
+    static LAST_T: std::cell::Cell<[f32; 3]> = const { std::cell::Cell::new([0.; 3]) };
+}
+
 fn fit1(grid: &Grid, g: &[[f32; 3]], p: &[[f32; 3]], yaw0: f32) -> (f32, Vec<f32>) {
     let cg = centroid(g);
     let cp = centroid(p);
@@ -127,6 +132,7 @@ fn fit1(grid: &Grid, g: &[[f32; 3]], p: &[[f32; 3]], yaw0: f32) -> (f32, Vec<f32
             mn[2] - (sn * mp[0] + cs * mp[2]),
         ];
     }
+    LAST_T.with(|c| c.set(t));
     for (i, q) in p.iter().enumerate() {
         dists[i] = grid
             .nearest(place(q, &t, yaw))
@@ -459,7 +465,12 @@ fn run() -> Result<(), String> {
             .take(3)
             .map(|(r, i)| format!("{}@{} {:.1}", table[*i].0, table[*i].1, r))
             .collect();
-        println!("sample {s}: {} | worst {}", t.join(" ; "), w.join(" "));
+        let ty = LAST_T.with(|c| c.get())[1];
+        println!(
+            "sample {s}: {} | worst {} | ty {ty:.1}",
+            t.join(" ; "),
+            w.join(" ")
+        );
     }
     Ok(())
 }
