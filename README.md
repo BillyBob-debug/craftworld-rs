@@ -11,6 +11,17 @@ must not be copied, adapted or translated into product code. Runtime assets come
 from user-owned ISO/game data; direct ISO support remains a later input feature.
 Current rules: [AGENTS.md](AGENTS.md).
 
+## What is not in this repository
+
+No game assets are included: no textures, meshes, audio, levels, archives,
+executables, keys, saves or emulator captures, and none have ever been committed.
+`.gitignore` is default-deny, so only authored source, docs and synthetic test
+recipes can be tracked. To use the tools you supply your own disc dump of
+LittleBigPlanet 2. Asset names, GUIDs and hashes in the docs are identifiers
+only. The authored code is licensed under either of [MIT](LICENSE-MIT) or
+[Apache-2.0](LICENSE-APACHE) at your option; that license does not cover any
+game data. LittleBigPlanet is a trademark of Sony Interactive Entertainment.
+
 Current milestone: **D40 first material-linked textured mesh preview complete**;
 B2 metadata explorer supports validated source attachment and hex inspection.
 Rust readers inventory SFO, MAP/FARC, resource magic, binary headers and dependencies
@@ -124,7 +135,7 @@ so multi-extent logical files require consolidation before file-size totals.
 [Community projects](docs/community-projects.md): ranked references and reuse limits.
 [Local inventory](docs/local-data.md): exact input and container facts.
 
-License for this project's own authored source is not selected yet. No third-party
+This project's own authored source is licensed MIT OR Apache-2.0. No third-party
 source is vendored into the implementation. See [notices](THIRD-PARTY-NOTICES.md).
 ## Texture research (C1 complete)
 
