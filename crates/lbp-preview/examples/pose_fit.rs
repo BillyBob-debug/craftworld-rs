@@ -78,6 +78,7 @@ fn fit(grid: &Grid, g: &[[f32; 3]], p: &[[f32; 3]]) -> (f32, Vec<f32>) {
 thread_local! {
     /// Translation of the last `fit1` call (QA print: the visual root offset per sample).
     static LAST_T: std::cell::Cell<[f32; 3]> = const { std::cell::Cell::new([0.; 3]) };
+    static LAST_YAW: std::cell::Cell<f32> = const { std::cell::Cell::new(0.) };
 }
 
 fn fit1(grid: &Grid, g: &[[f32; 3]], p: &[[f32; 3]], yaw0: f32) -> (f32, Vec<f32>) {
@@ -133,6 +134,7 @@ fn fit1(grid: &Grid, g: &[[f32; 3]], p: &[[f32; 3]], yaw0: f32) -> (f32, Vec<f32
         ];
     }
     LAST_T.with(|c| c.set(t));
+    LAST_YAW.with(|c| c.set(yaw));
     for (i, q) in p.iter().enumerate() {
         dists[i] = grid
             .nearest(place(q, &t, yaw))
@@ -231,6 +233,10 @@ fn run() -> Result<(), String> {
             );
         }
     }
+    if let Ok(path) = std::env::var("DUMP_JOINTS") {
+        let j: Vec<u8> = clips[0].1.skin.joints.iter().map(|j| j[0]).collect();
+        std::fs::write(path, j).map_err(|e| e.to_string())?;
+    }
     let n = clips[0].1.bind_positions.len();
     println!("mesh vertices {n}, clips {}", clips.len());
     let gn: usize = std::env::var("GAME_VERTS")
@@ -296,6 +302,31 @@ fn run() -> Result<(), String> {
                     })
                     .collect();
                 table.push((name.clone(), f, p));
+            }
+        }
+    }
+    if std::env::var("BIND_BLEND").is_ok() {
+        // lerp(bind pose, clip frame, w): the clip played at partial weight over the bind pose
+        let ax: u32 = std::env::var("AXIS")
+            .ok()
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+        for (name, c) in &clips {
+            for f in 0..i64::from(c.report.frames.max(1)) {
+                let Some(pose) = c.frame_pose(f) else {
+                    continue;
+                };
+                for k in 1..=10 {
+                    let w = k as f32 / 10.0;
+                    let mut bp = skinned::BlendPose::bind(&c.rig);
+                    bp.lerp(&c.rig, &pose, w);
+                    let p = c
+                        .blended_positions(&bp)
+                        .iter()
+                        .map(|q| if ax == 1 { [q[0], q[2], -q[1]] } else { *q })
+                        .collect();
+                    table.push((format!("{name}*w{w}"), f, p));
+                }
             }
         }
     }
@@ -454,6 +485,32 @@ fn run() -> Result<(), String> {
                 .map(|(n, (t, c))| format!("{n} {:.1}", (t / c.max(1) as f32).sqrt()))
                 .collect();
             println!("  groups {}", g.join(" "));
+        }
+        if std::env::var("SIGNED").is_ok() {
+            // mean signed vertical offset game - ours per joint (ours placed by the fit)
+            let t = LAST_T.with(|c| c.get());
+            let (sn, cs) = LAST_YAW.with(|c| c.get()).sin_cos();
+            let mut acc = std::collections::BTreeMap::<u8, (f32, u32)>::new();
+            for (q, j) in table[b.1].2.iter().zip(&clips[0].1.skin.joints) {
+                let w = [
+                    cs * q[0] - sn * q[2] + t[0],
+                    q[1] + t[1],
+                    sn * q[0] + cs * q[2] + t[2],
+                ];
+                if let Some((n, d)) = grid.nearest(w) {
+                    if d < 12.0 {
+                        let e = acc.entry(j[0]).or_default();
+                        e.0 += n[1];
+                        e.1 += 1;
+                    }
+                }
+            }
+            let v: Vec<String> = acc
+                .into_iter()
+                .filter(|(_, (_, c))| *c > 20)
+                .map(|(j, (t, c))| format!("{j}:{:.2}", t / c as f32))
+                .collect();
+            println!("  dy {}", v.join(" "));
         }
         let w: Vec<String> = worst
             .iter()

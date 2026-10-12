@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D241 landing dip (2026-10-12)
+## Latest: D242 idle stretch (2026-10-12)
+- Owner: stretch is in the idle animation. Game idle moves head/chest 2-3 units, ours 7-11; stand clip now at 0.5 over
+  bind (`docs/d242-idle-stretch.md`, weight inferred). Needs a tick-aligned idle capture to confirm.
+
+## Before: D241 landing dip (2026-10-12)
 - Jump arc matches the game (centroid within 3). Landing dip was 12 units too deep and 10+ ticks too long;
   `LANDING_DIP` now follows the game's lowest vertex (`docs/d241-landing-dip.md`). D240 (#140) Pod/play-mode Popit merged.
   Open: take-off crouch vs game's straight stretch, landing/stop/turn pose fit 3.5+, Popit Pod card placement.

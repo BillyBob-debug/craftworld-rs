@@ -489,6 +489,12 @@ pub enum Blend {
     Additive { reference: f32 },
 }
 
+/// Weight of the stand clip over the bind pose (D242). The game's idle vertices (d234 `idle.bin`)
+/// fit the stand clip at 0.3-0.8 over the bind pose, 0.5 on average: its head and chest joints
+/// move 2-3 units over the breathing cycle (ours 7-11) and sit 3-6 higher. INFERRED weight,
+/// MEASURED amplitude (docs/d242-idle-stretch.md); other base clips stay at 1.
+pub const STAND_BASE_WEIGHT: f32 = 0.5;
+
 /// One clip sampled at one frame with a weight.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Layer {
@@ -933,7 +939,11 @@ impl SackboyAnim {
         layers.push(Layer {
             clip: self.idle,
             frame: self.idle_frame as f32,
-            weight: 1.,
+            weight: if self.idle == ClipId::Stand {
+                STAND_BASE_WEIGHT
+            } else {
+                1.
+            },
             mirror: false,
             blend: Blend::Lerp,
         });
@@ -1586,7 +1596,12 @@ mod tests {
         let mut blinks = Vec::new();
         for t in 0..20_000u32 {
             let f = a.tick(&s, true);
-            assert_eq!(f.layers[0].weight, 1.);
+            let expect = if f.layers[0].clip == ClipId::Stand {
+                STAND_BASE_WEIGHT
+            } else {
+                1.
+            };
+            assert_eq!(f.layers[0].weight, expect);
             if bases.last() != Some(&f.layers[0].clip) {
                 bases.push(f.layers[0].clip);
             }
