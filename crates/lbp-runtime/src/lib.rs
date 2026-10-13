@@ -17,12 +17,13 @@
 use lbp_level::parts::{ScriptObject, ScriptPart, ScriptValue, ShapeColor, SwitchSignal};
 use lbp_level::thing::ThingRecord;
 use lbp_script_vm::natives::{
-    Bindings, CameraFromToUp, ResourceKind, SwitchInput, World, SCORE_BOARD_SCRIPT,
+    Bindings, CameraFromToUp, PlayerRecord, ResourceKind, SwitchInput, World, SCORE_BOARD_SCRIPT,
 };
 use lbp_script_vm::{ClassId, Host, MemberKind, ObjectId, Step, Task, Value, Vm};
 use std::collections::{BTreeMap, BTreeSet};
 
 mod switches;
+pub mod transform;
 pub use switches::*;
 
 /// One Thing as the runtime sees it.
@@ -34,6 +35,9 @@ pub struct ThingState {
     pub next_sibling: Option<u32>,
     /// POS world matrix in stored order (translation at 12..14).
     pub world_matrix: Option<[f32; 16]>,
+    /// POS local matrix, against the parent's world matrix. LBP2 level files do not store
+    /// it; [`LevelWorld::derive_local_matrices`] works it out when the level loads.
+    pub local_matrix: Option<[f32; 16]>,
     pub parts: Vec<&'static str>,
     /// GUID of the PScript resource, when the Thing has one.
     pub script_guid: Option<u32>,
@@ -62,6 +66,15 @@ pub struct ThingState {
     /// PMicrochip: the chip's circuit-board Thing. The components on the board are the
     /// board's children.
     pub circuit_board: Option<u32>,
+    /// GUID of the mesh the Thing's PRenderMesh shows, when it has one with a GUID.
+    pub mesh_guid: Option<u32>,
+    /// A script hid the render mesh (`Thing.HideRenderMesh`); nothing draws by it yet.
+    pub render_mesh_hidden: bool,
+    /// Render-mesh editor colour a script set (`SetRenderMeshEditorColour`).
+    pub render_mesh_colour: Option<[f32; 4]>,
+    /// Render-mesh editor texture a script set (`SetRenderMeshEditorTexture`), as passed
+    /// (a resource handle, or null).
+    pub render_mesh_texture: Option<Value>,
 }
 
 /// A PSwitch at run time: the stored settings and its outputs. The switch pass
@@ -112,6 +125,9 @@ pub struct InputWire {
     pub output: usize,
 }
 
+/// How many chips inside chips [`LevelWorld::microchip_of`] follows outwards.
+pub const MAX_CHIP_NESTING: usize = 64;
+
 /// Input ports past this are not wired (a guard against a damaged file; the count of
 /// targets it drops is [`LevelWorld::input_ports_dropped`]).
 pub const MAX_INPUT_PORTS: usize = 1024;
@@ -134,6 +150,8 @@ pub struct TriggerState {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct PlayerState {
     pub thing: u32,
+    /// His `PYellowHead.PlayerNumber`, the number of his [`PlayerRecord`].
+    pub number: i32,
     /// Nearest and farthest z his body covers (the layers he stands in).
     pub layers: (f32, f32),
 }
@@ -252,8 +270,16 @@ pub struct LevelWorld {
     pub planets: Option<ObjectId>,
     /// Planet objects by `GetCrafteroid__i` index - 1, with their Thing.
     pub crafteroids: Vec<(ObjectId, Option<u32>)>,
-    /// `Game.SetPlayerScoreMultiplierTimer` by player number.
-    pub score_multiplier_timers: BTreeMap<i32, i32>,
+    /// The game state's player records, in join order (`Game.GetNumPlayers__` is their
+    /// count). A level read with [`LevelWorld::from_things`] starts with the record of
+    /// one local player, number 0, who has no Sackboy yet; [`LevelWorld::add_player`]
+    /// gives the next record a Sackboy and makes the record when it is missing.
+    ///
+    /// INFERRED: one local player whose `Game.EPlayerNumber` is 0, there from the start
+    /// (in the game a level is not played without a player, and his record is there
+    /// before his Sackboy is spawned); his team starts at 0 (the start value was not
+    /// read; the world script sets every player's team each tick).
+    pub player_records: Vec<PlayerRecord>,
     /// Players' Sackboys ([`LevelWorld::add_player`]); none until a caller adds one.
     pub players: Vec<PlayerState>,
     /// Switch targets whose port already had an output wired (the first one is kept).
@@ -272,6 +298,52 @@ pub struct LevelWorld {
     /// Set once the deactivated flags have their start values
     /// ([`LevelWorld::prepare_switches`]).
     pub switches_prepared: bool,
+    /// The level's PWorld values scripts read ([`WorldState`]).
+    pub pworld: WorldState,
+    /// The owner of each circuit board: board Thing -> the Thing whose PMicrochip names it
+    /// (the first in Thing order). See [`LevelWorld::microchip_of`].
+    pub board_owners: BTreeMap<u32, u32>,
+    /// `Audio.PlaySound__Q5ThingQ7StringA` requests by sound name; nothing plays.
+    pub sounds_played: BTreeMap<String, u64>,
+    /// Calls the world only records ([`World::engine_call`]), by name.
+    pub engine_calls: BTreeMap<&'static str, u64>,
+    /// `Game.GotoScoreboard__b` requests, with the flag passed. The game ends the level
+    /// on it; nothing here does.
+    pub scoreboard_requests: Vec<bool>,
+    /// The script SlotID objects `Game.GetLevelSlotID__` and `GetPrimaryLevelSlotID__`
+    /// hand out (see [`add_engine_objects`]).
+    pub level_slot: Option<ObjectId>,
+    pub primary_level_slot: Option<ObjectId>,
+    /// `Game.IsTutorialLevel__`. False unless the caller sets it (INFERRED: which levels
+    /// the game sets it for is not established).
+    pub tutorial_level: bool,
+}
+
+/// Slots of the PWorld global-settings arrays (FOUND: the natives index two arrays of
+/// 8 x s32, PWorld+0x5d8 and +0x5f8).
+pub const GLOBAL_SETTINGS: usize = 8;
+
+/// PWorld state scripts read through `World.World` members, with the level file's values
+/// at the start.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct WorldState {
+    /// `PWorld.GameMode` (declared `Game.EGameMode`, an s32): 0 normal, 1 competitive,
+    /// 2 cut scene, 3 single player, 4 social, 5 teams (Toolkit `GameMode`).
+    pub game_mode: i32,
+    /// `PWorld.Frame`: the world's frame counter ([`LevelWorld::advance_frame`]).
+    pub frame: i32,
+    /// PWorld `simFrame`, advanced with `frame`.
+    pub sim_frame: i32,
+    /// PWorld `isPaused` as stored. Nothing reads it: see `Game.IsVcrPaused__` in
+    /// [`LevelWorld::state_query`].
+    pub is_paused: bool,
+    /// `PWorld.WaterLevel`.
+    pub water_level: f32,
+    /// PWorld `GlobalSettingsThingUIDs` and `GlobalSettingsThingPriority`, one entry per
+    /// global-settings type: the stored values at the start (padded with zeros to
+    /// [`GLOBAL_SETTINGS`] entries), then what `Game.SetGlobalSettingUID` makes of them.
+    pub global_settings_thing_uids: Vec<i32>,
+    pub global_settings_thing_priority: Vec<i32>,
 }
 
 /// VM value for a stored script field; `None` for a field the instance does not store.
@@ -327,21 +399,27 @@ fn signal(s: &SwitchSignal) -> SwitchInput {
     }
 }
 
-/// `"PSpriteLight"` -> `"SPRITE_LIGHT"`, the reader's part name.
-fn part_name(native: &str) -> String {
-    let base = native.strip_prefix('P').unwrap_or(native);
-    let mut out = String::new();
-    for (i, c) in base.chars().enumerate() {
-        if c.is_ascii_uppercase() && i > 0 {
-            out.push('_');
-        }
-        out.push(c.to_ascii_uppercase());
-    }
-    // The one part whose reader name does not split at the capital.
-    if out == "YELLOW_HEAD" {
-        out = "YELLOWHEAD".into();
-    }
-    out
+/// The reader's part name for a script-side one: `"PSpriteLight"` (the `HasP...` natives)
+/// or `"SpriteLight"` (a native member, `thing.SpriteLight`) -> `"SPRITE_LIGHT"`. `None`
+/// when the name is no part.
+///
+/// The names are compared without case and underscores, so the reader names that do not
+/// split at a capital match too (`MetaData`, `MicroChip`, `WormHole`, `YellowHead`). The
+/// script side spells `TagSynchroniser` with an s. The whole name is tried first and the
+/// leading `P` dropped only when that fails: `Pos`, `PhysicsTweak`, `PoppetPowerup`,
+/// `PocketItem`, `PowerUp` and `Paint` keep their own `P`.
+fn part_name(native: &str) -> Option<&'static str> {
+    let find = |name: &str| {
+        let want = name
+            .to_ascii_uppercase()
+            .replace('_', "")
+            .replace("SYNCHRONISER", "SYNCHRONIZER");
+        lbp_level::thing::PARTS
+            .iter()
+            .map(|p| p.0)
+            .find(|p| p.replace('_', "") == want)
+    };
+    find(native).or_else(|| find(native.strip_prefix('P')?))
 }
 
 impl LevelWorld {
@@ -408,9 +486,15 @@ impl LevelWorld {
                         .microchip
                         .and_then(|m| m.circuit_board)
                         .and_then(handle),
+                    mesh_guid: t
+                        .data
+                        .render_mesh
+                        .as_ref()
+                        .and_then(|m| m.mesh.as_ref()?.guid),
                     ..Default::default()
                 })
                 .collect(),
+            player_records: vec![PlayerRecord::default()],
             ..Default::default()
         };
         // Children in Thing-list order.
@@ -432,6 +516,31 @@ impl LevelWorld {
             .iter()
             .position(|t| t.data.world.is_some())
             .and_then(handle);
+        if let Some(p) = list.iter().find_map(|t| t.data.world.as_ref()) {
+            w.pworld = WorldState {
+                game_mode: p.game_mode,
+                frame: p.frame,
+                sim_frame: p.sim_frame,
+                is_paused: p.is_paused,
+                water_level: p.water_level,
+                global_settings_thing_uids: p.global_settings_thing_uids.clone(),
+                global_settings_thing_priority: p.global_settings_thing_priority.clone(),
+            };
+            for slots in [
+                &mut w.pworld.global_settings_thing_uids,
+                &mut w.pworld.global_settings_thing_priority,
+            ] {
+                if slots.len() < GLOBAL_SETTINGS {
+                    slots.resize(GLOBAL_SETTINGS, 0);
+                }
+            }
+        }
+        for (i, t) in w.things.iter().enumerate() {
+            if let Some(board) = t.circuit_board {
+                w.board_owners.entry(board).or_insert(i as u32);
+            }
+        }
+        w.derive_local_matrices();
         for t in list {
             if let Some(part) = &t.data.script {
                 for f in &part.fields {
@@ -657,7 +766,9 @@ impl LevelWorld {
     }
 
     /// Adds a player's Sackboy as a new Thing (YELLOWHEAD, CREATURE, BODY, POS; no parent)
-    /// at `position`, covering the z span `layers`. Triggers test players only.
+    /// at `position`, covering the z span `layers`. Triggers test players only. The n-th
+    /// Sackboy belongs to player number n - 1; that player's record
+    /// ([`LevelWorld::player_records`]) is made here when it is not there yet.
     pub fn add_player(&mut self, position: [f32; 3], layers: (f32, f32)) -> u32 {
         let thing = self.things.len() as u32;
         self.things.push(ThingState {
@@ -666,12 +777,22 @@ impl LevelWorld {
         });
         // `PYellowHead.PlayerNumber`, read by scripts a player walks into: the player's
         // index (INFERRED: an s32 `Game.EPlayerNumber`, as `Game.GetPlayerNumber__i`).
-        let number = Value::Int(self.players.len() as i32);
+        let number = self.players.len() as i32;
         let part = self.part_handle(thing, "YELLOWHEAD") as usize - 1;
         self.part_handles[part]
             .members
-            .insert("PlayerNumber".into(), number);
-        self.players.push(PlayerState { thing, layers });
+            .insert("PlayerNumber".into(), Value::Int(number));
+        if !self.player_records.iter().any(|r| r.number == number) {
+            self.player_records.push(PlayerRecord {
+                number,
+                ..Default::default()
+            });
+        }
+        self.players.push(PlayerState {
+            thing,
+            number,
+            layers,
+        });
         self.move_player(thing, position, layers);
         thing
     }
@@ -682,7 +803,9 @@ impl LevelWorld {
         (m[0], m[5], m[10], m[15]) = (1., 1., 1., 1.);
         m[12..15].copy_from_slice(&position);
         if let Some(t) = self.things.get_mut(thing as usize) {
+            // A Sackboy has no parent: his local matrix is his world matrix.
             t.world_matrix = Some(m);
+            t.local_matrix = Some(m);
         }
         if let Some(p) = self.players.iter_mut().find(|p| p.thing == thing) {
             p.layers = layers;
@@ -766,6 +889,162 @@ impl LevelWorld {
         events
     }
 
+    /// Gives every Thing with a PPos its local matrix: inverse(parent's world) x world when
+    /// its parent has a PPos, else its world matrix.
+    ///
+    /// FOUND (01.33, 0xf26bc and 0xf1d58): this is how the game keeps the local matrix
+    /// when a world matrix is written. LBP2 level files store the world matrix only.
+    /// INFERRED: a parent whose matrix cannot be inverted counts as no parent.
+    pub fn derive_local_matrices(&mut self) {
+        for i in 0..self.things.len() {
+            let Some(world) = self.things[i].world_matrix else {
+                continue;
+            };
+            let local = self
+                .parent_world(i as u32)
+                .and_then(|p| transform::inverse(&p))
+                .map_or(world, |inv| transform::mul(&inv, &world));
+            self.things[i].local_matrix = Some(local);
+        }
+    }
+
+    /// World matrix of the Thing's parent, when it has a parent with a PPos.
+    fn parent_world(&self, thing: u32) -> Option<[f32; 16]> {
+        let parent = self.things.get(thing as usize)?.parent?;
+        self.things.get(parent as usize)?.world_matrix
+    }
+
+    /// After a Thing moved: every descendant with a PPos gets world = its parent's world x
+    /// its own local, parents before children (FOUND, 0xf250c / 0xf20f0). A descendant
+    /// whose parent has no PPos keeps its matrix (INFERRED), and its children are still
+    /// visited.
+    fn move_descendants(&mut self, thing: u32) {
+        let first = |w: &Self, t: u32| w.things.get(t as usize).and_then(|t| t.first_child);
+        let mut stack: Vec<u32> = first(self, thing).into_iter().collect();
+        // A damaged tree cannot make this run for ever.
+        let mut left = self.things.len();
+        while let Some(t) = stack.pop().filter(|_| left > 0) {
+            left -= 1;
+            let Some(state) = self.things.get(t as usize) else {
+                continue;
+            };
+            let (sibling, local) = (state.next_sibling, state.local_matrix);
+            if let (Some(parent), Some(local)) = (self.parent_world(t), local) {
+                self.things[t as usize].world_matrix = Some(transform::mul(&parent, &local));
+            }
+            stack.extend(sibling);
+            stack.extend(first(self, t));
+        }
+    }
+
+    /// The Thing's microchip Thing (the game's Thing+0x5c), if it has one.
+    ///
+    /// INFERRED: the Thing whose PMicrochip names the circuit board this Thing is a child
+    /// of, and for a chip that itself sits on a board, the outermost chip. The level
+    /// scripts read the PPos of this Thing without a null test, so it must have one; in
+    /// the levels a chip on another chip's board has no PPos and the outermost chip has
+    /// (PC census, 378 levels: 1,107 scripted Things sit on such an inner chip).
+    pub fn microchip_of(&self, thing: u32) -> Option<u32> {
+        let owner = |t: u32| {
+            let parent = self.things.get(t as usize)?.parent?;
+            self.board_owners.get(&parent).copied()
+        };
+        let mut chip = owner(thing)?;
+        // Bounded, so a damaged tree cannot loop.
+        for _ in 0..MAX_CHIP_NESTING {
+            match owner(chip) {
+                Some(outer) if outer != chip => chip = outer,
+                _ => break,
+            }
+        }
+        Some(chip)
+    }
+
+    /// One world frame has passed: `PWorld.Frame` (and `simFrame`) go up by one.
+    ///
+    /// INFERRED: the game's increment was not located. Here it happens at the end of
+    /// [`LevelScripts::tick_level`], so the scripts of the first tick read the stored
+    /// frame and those of tick n the stored frame + n - 1.
+    pub fn advance_frame(&mut self) {
+        self.pworld.frame = self.pworld.frame.wrapping_add(1);
+        self.pworld.sim_frame = self.pworld.sim_frame.wrapping_add(1);
+    }
+
+    /// A member of an engine part that the runtime keeps as real state, or `None` for one
+    /// it does not know (those live in the part handle's own map).
+    ///
+    /// FOUND (01.33): the PWorld serializer (0xb3f3c0..0xb3fd20) names `Frame` (s32),
+    /// `GameMode` (i32) and `WaterLevel` (f32) and the level file stores them; the PPos
+    /// readers (0x755874, 0x755a98) give the world matrix its place in the part.
+    /// INFERRED: that the members scripts name are these fields, and that the PTrigger
+    /// members are the stored `radiusMultiplier`, `allZLayers` and `hysteresisMultiplier`
+    /// the trigger test uses ([`LevelWorld::update_triggers`]).
+    fn engine_member(&self, thing: u32, part: &str, field: &str) -> Result<Option<Value>, String> {
+        let t = self.state(thing)?;
+        let trigger = || {
+            t.trigger
+                .as_ref()
+                .ok_or_else(|| format!("thing {thing} has no trigger state"))
+        };
+        Ok(Some(match (part, field) {
+            ("WORLD", "GameMode") => Value::Int(self.pworld.game_mode),
+            ("WORLD", "Frame") => Value::Int(self.pworld.frame),
+            ("WORLD", "WaterLevel") => Value::Float(self.pworld.water_level),
+            ("POS", "WorldPosition") => Value::Mat44(
+                t.world_matrix
+                    .ok_or_else(|| format!("thing {thing} has no position"))?,
+            ),
+            ("TRIGGER", "RadiusMultiplier") => Value::Float(trigger()?.radius),
+            ("TRIGGER", "HysteresisMultiplier") => Value::Float(trigger()?.hysteresis),
+            ("TRIGGER", "AllZLayers") => Value::Bool(trigger()?.all_z_layers),
+            _ => return Ok(None),
+        }))
+    }
+
+    /// Writes a member [`Self::engine_member`] reads; `Ok(false)` for any other member.
+    ///
+    /// `PPos.WorldPosition`: INFERRED a plain field write: the world matrix changes, the
+    /// local matrix and the Thing's descendants do not (the member accessor was not
+    /// located; the natives `SetWorldPosition__m` / `SetLocalPosition__m` do move them).
+    /// No script of the levels writes the PWorld members; a write is kept.
+    fn set_engine_member(
+        &mut self,
+        thing: u32,
+        part: &str,
+        field: &str,
+        value: &Value,
+    ) -> Result<bool, String> {
+        let bad = || format!("{part} member {field} set to {value:?}");
+        let pworld = &mut self.pworld;
+        let t = self
+            .things
+            .get_mut(thing as usize)
+            .ok_or_else(|| format!("no thing {thing}"))?;
+        match (part, field, value) {
+            ("WORLD", "GameMode", Value::Int(i)) => pworld.game_mode = *i,
+            ("WORLD", "Frame", Value::Int(i)) => pworld.frame = *i,
+            ("WORLD", "WaterLevel", Value::Float(f)) => pworld.water_level = *f,
+            ("POS", "WorldPosition", Value::Mat44(m)) => t.world_matrix = Some(*m),
+            ("TRIGGER", "RadiusMultiplier" | "HysteresisMultiplier" | "AllZLayers", v) => {
+                let g = t
+                    .trigger
+                    .as_mut()
+                    .ok_or_else(|| format!("thing {thing} has no trigger state"))?;
+                match (field, v) {
+                    ("RadiusMultiplier", Value::Float(f)) => g.radius = *f,
+                    ("HysteresisMultiplier", Value::Float(f)) => g.hysteresis = *f,
+                    ("AllZLayers", Value::Bool(b)) => g.all_z_layers = *b,
+                    _ => return Err(bad()),
+                }
+            }
+            ("WORLD", "GameMode" | "Frame" | "WaterLevel", _) | ("POS", "WorldPosition", _) => {
+                return Err(bad())
+            }
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
     /// Handle for a part a Thing carries (index + 1), created on first use.
     fn part_handle(&mut self, thing: u32, part: &'static str) -> u32 {
         if let Some(i) = self
@@ -797,8 +1076,7 @@ impl LevelWorld {
     /// `thing.SpriteLight` and the like: the part as a raw pointer, null when the Thing
     /// lacks it. Only names of the reader's part list are parts.
     fn native_member(&mut self, base: &Value, class: &str, field: &str) -> Result<Value, String> {
-        let want = part_name(field);
-        let Some(&(part, ..)) = lbp_level::thing::PARTS.iter().find(|p| p.0 == want) else {
+        let Some(part) = part_name(field) else {
             return Err(format!(
                 "world does not provide native member {class}.{field}"
             ));
@@ -850,17 +1128,42 @@ impl World for LevelWorld {
     fn world_thing(&mut self) -> Result<Option<u32>, String> {
         Ok(self.world)
     }
-    /// Translation column of the POS world matrix (INFERRED: w as stored, normally 1).
-    fn world_position(&mut self, thing: u32) -> Result<[f32; 4], String> {
-        let m = self
-            .state(thing)?
-            .world_matrix
-            .ok_or_else(|| format!("thing {thing} has no position"))?;
-        Ok([m[12], m[13], m[14], m[15]])
+    fn world_transform(&mut self, thing: u32) -> Result<Option<[f32; 16]>, String> {
+        Ok(self.state(thing)?.world_matrix)
+    }
+    fn local_transform(&mut self, thing: u32) -> Result<Option<[f32; 16]>, String> {
+        Ok(self.state(thing)?.local_matrix)
+    }
+    /// FOUND (01.33, 0xf2e80): see `Thing.SetLocalPosition__m` in the native table.
+    fn set_local_transform(&mut self, thing: u32, m: [f32; 16]) -> Result<(), String> {
+        if self.state(thing)?.world_matrix.is_none() {
+            return Ok(());
+        }
+        let world = self
+            .parent_world(thing)
+            .map_or(m, |p| transform::mul(&p, &m));
+        let t = self.thing_mut(thing)?;
+        (t.local_matrix, t.world_matrix) = (Some(m), Some(world));
+        self.move_descendants(thing);
+        Ok(())
+    }
+    /// The "deactivated" flag the switch pass keeps (FOUND: the byte the native reads,
+    /// Thing+0x7f). The flags get their start values first if no switch pass ran yet.
+    fn is_inactive(&mut self, thing: u32) -> Result<bool, String> {
+        self.prepare_switches();
+        Ok(self.state(thing)?.deactivated)
+    }
+    fn microchip_proxy(&mut self, thing: u32) -> Result<u32, String> {
+        self.state(thing)?;
+        Ok(self.microchip_of(thing).unwrap_or(thing))
+    }
+    fn is_on_sequencer(&mut self, thing: u32) -> Result<bool, String> {
+        self.state(thing)?;
+        Ok(self.on_sequencer(thing))
     }
     fn has_part(&mut self, thing: u32, part: &str) -> Result<bool, String> {
         let want = part_name(part);
-        Ok(self.state(thing)?.parts.iter().any(|p| *p == want))
+        Ok(self.state(thing)?.parts.iter().any(|p| Some(*p) == want))
     }
     fn trigger_count(&mut self, thing: u32) -> Result<i32, String> {
         let t = self.state(thing)?;
@@ -913,6 +1216,13 @@ impl World for LevelWorld {
             // Through `Thing` or a script class of a Thing (`World.World`).
             MemberKind::Native => return self.native_member(base, class, field),
             MemberKind::RefPtr => {
+                let (thing, part) = {
+                    let p = self.part_of(base)?;
+                    (p.thing, p.part)
+                };
+                if let Some(v) = self.engine_member(thing, part, field)? {
+                    return Ok(v);
+                }
                 let p = self.part_of(base)?;
                 return p
                     .members
@@ -939,7 +1249,13 @@ impl World for LevelWorld {
         value: Value,
     ) -> Result<(), String> {
         if kind == MemberKind::RefPtr {
-            self.part_of(base)?.members.insert(field.to_owned(), value);
+            let (thing, part) = {
+                let p = self.part_of(base)?;
+                (p.thing, p.part)
+            };
+            if !self.set_engine_member(thing, part, field, &value)? {
+                self.part_of(base)?.members.insert(field.to_owned(), value);
+            }
             return Ok(());
         }
         if kind != MemberKind::Thing {
@@ -958,9 +1274,16 @@ impl World for LevelWorld {
             .insert(field.to_owned(), value);
         Ok(())
     }
-    /// One local player (the PC run has no controllers yet).
+    /// Counted by name in [`LevelWorld::sounds_played`]; nothing plays (audio natives are
+    /// recorded no-ops until there is an audio system, docs/rscript-plan.md).
+    fn play_sound(&mut self, _thing: Option<u32>, name: &str) -> Result<(), String> {
+        *self.sounds_played.entry(name.to_owned()).or_default() += 1;
+        Ok(())
+    }
+    /// FOUND (01.33, 0x5fadd4 -> 0x5e885c): the count of player records
+    /// ([`LevelWorld::player_records`]).
     fn num_players(&mut self) -> Result<i32, String> {
-        Ok(1)
+        Ok(self.player_records.len() as i32)
     }
     /// Play mode (0); levels run as played, not edited.
     fn play_or_edit_mode(&mut self) -> Result<i32, String> {
@@ -997,23 +1320,138 @@ impl World for LevelWorld {
         self.thing_mut(thing)?.anim_speed = Some(speed);
         Ok(())
     }
-    /// Player `index` is `Game.EPlayerNumber` `index` (INFERRED: no enum values are in the
-    /// script tables); outside `0..num_players()` is an error.
+    /// FOUND (01.33, 0x5e917c): the number of record `index`, -1 outside the records.
     fn player_number(&mut self, index: i32) -> Result<i32, String> {
-        let n = self.num_players()?;
-        if (0..n).contains(&index) {
-            Ok(index)
-        } else {
-            Err(format!("player index {index} outside 0..{n}"))
+        let record = usize::try_from(index)
+            .ok()
+            .and_then(|i| self.player_records.get(i));
+        Ok(record.map_or(-1, |r| r.number))
+    }
+    fn player(&mut self, number: i32) -> Result<Option<&mut PlayerRecord>, String> {
+        Ok(self.player_records.iter_mut().find(|r| r.number == number))
+    }
+    /// FOUND (01.33, 0x18ec14): the game walks the PWorld's list of PYellowHead parts for
+    /// the one with this player number. Here those are the Sackboys
+    /// [`LevelWorld::add_player`] made; a level file's own PYellowHead Things are not
+    /// looked at (INFERRED: a stored level has no player in it).
+    fn yellowhead(&mut self, number: i32) -> Result<Option<u32>, String> {
+        let player = self.players.iter().find(|p| p.number == number);
+        Ok(player.map(|p| p.thing))
+    }
+    /// INFERRED: one machine, so every player with a record is local.
+    fn player_is_local(&mut self, number: i32) -> Result<bool, String> {
+        Ok(self.player_records.iter().any(|r| r.number == number))
+    }
+    /// FOUND (01.33, 0x5eb810): 0 for a level without a PWorld. A `kind` outside the
+    /// slots is an error (the game reads past the array).
+    fn global_setting_uid(&mut self, kind: i32) -> Result<i32, String> {
+        if self.world.is_none() {
+            return Ok(0);
         }
+        let slots = &self.pworld.global_settings_thing_uids;
+        usize::try_from(kind)
+            .ok()
+            .and_then(|k| slots.get(k).copied())
+            .ok_or_else(|| format!("global setting {kind} outside 0..{}", slots.len()))
+    }
+    /// FOUND (01.33, 0xce554): see `Game.SetGlobalSettingUID` in the native table.
+    /// Nothing for a level without a PWorld (0x5eb718 tests for one first).
+    fn set_global_setting_uid(&mut self, kind: i32, uid: i32, priority: i32) -> Result<(), String> {
+        if self.world.is_none() {
+            return Ok(());
+        }
+        let p = &mut self.pworld;
+        let n = p
+            .global_settings_thing_uids
+            .len()
+            .min(p.global_settings_thing_priority.len());
+        let k = usize::try_from(kind)
+            .ok()
+            .filter(|&k| k < n)
+            .ok_or_else(|| format!("global setting {kind} outside 0..{n}"))?;
+        let current = p.global_settings_thing_priority[k];
+        if priority < current || current == 1 {
+            return Ok(());
+        }
+        p.global_settings_thing_uids[k] = uid;
+        p.global_settings_thing_priority[k] = if uid != 0 { priority } else { 0 };
+        Ok(())
+    }
+    /// The SlotID object made ahead ([`add_engine_objects`]).
+    fn level_slot_id(&mut self, primary: bool) -> Result<Value, String> {
+        let slot = if primary {
+            self.primary_level_slot
+        } else {
+            self.level_slot
+        };
+        slot.map(|o| Value::Object(Some(o)))
+            .ok_or_else(|| "no SlotID object (class not loaded)".into())
+    }
+    /// Depth first, a Thing before its children, children in Thing-list order.
+    fn find_mesh_descendant(&mut self, thing: u32, mesh: u32) -> Result<Option<u32>, String> {
+        let mut at = self.state(thing)?.first_child;
+        // Bounded, so a damaged tree cannot loop.
+        for _ in 0..self.things.len() {
+            let Some(t) = at else { break };
+            let state = self.state(t)?;
+            if state.mesh_guid == Some(mesh) {
+                return Ok(Some(t));
+            }
+            at = state.first_child;
+            let mut up = t;
+            while at.is_none() && up != thing {
+                let s = self.state(up)?;
+                at = s.next_sibling;
+                match s.parent {
+                    Some(p) if at.is_none() => up = p,
+                    _ => break,
+                }
+            }
+        }
+        Ok(None)
+    }
+    /// Counted by name in [`LevelWorld::engine_calls`]. The render-mesh calls are also
+    /// kept on their Thing (nothing draws by them yet) and a scoreboard request in
+    /// [`LevelWorld::scoreboard_requests`]. A null Thing is counted and nothing more, as
+    /// the game does nothing for it.
+    fn engine_call(
+        &mut self,
+        name: &'static str,
+        thing: Option<u32>,
+        args: &[Value],
+    ) -> Result<(), String> {
+        *self.engine_calls.entry(name).or_default() += 1;
+        if let ("GotoScoreboard", Some(Value::Bool(b))) = (name, args.first()) {
+            self.scoreboard_requests.push(*b);
+        }
+        let Some(thing) = thing else { return Ok(()) };
+        let t = self.thing_mut(thing)?;
+        match (name, args.first()) {
+            ("HideRenderMesh", _) => t.render_mesh_hidden = true,
+            ("SetRenderMeshEditorColour", Some(Value::Vec4(c))) => t.render_mesh_colour = Some(*c),
+            ("SetRenderMeshEditorTexture", Some(v)) => t.render_mesh_texture = Some(v.clone()),
+            _ => {}
+        }
+        Ok(())
     }
     /// The handle is the GUID itself (INFERRED stand-in: nothing is loaded; scripts only
     /// keep the handle and pass it back to natives).
     fn load_resource(&mut self, _kind: ResourceKind, guid: u32) -> Result<u32, String> {
         Ok(guid)
     }
+    /// FOUND (01.33, 0xf26bc, 0xf1d58): see `Thing.SetWorldPosition__m` in the native
+    /// table. INFERRED: a parent whose matrix cannot be inverted counts as no parent.
     fn set_world_transform(&mut self, thing: u32, m: [f32; 16]) -> Result<(), String> {
-        self.thing_mut(thing)?.world_matrix = Some(m);
+        if self.state(thing)?.world_matrix.is_none() {
+            return Ok(());
+        }
+        let local = self
+            .parent_world(thing)
+            .and_then(|p| transform::inverse(&p))
+            .map_or(m, |inv| transform::mul(&inv, &m));
+        let t = self.thing_mut(thing)?;
+        (t.local_matrix, t.world_matrix) = (Some(local), Some(m));
+        self.move_descendants(thing);
         Ok(())
     }
     fn set_anim_pos(&mut self, thing: u32, pos: f32) -> Result<(), String> {
@@ -1053,8 +1491,24 @@ impl World for LevelWorld {
     /// (there is no Sackboy yet), no video, a 16:9 screen, player 0 leads, no music track
     /// (GUID 0), no user music (stopped, not paused), interactive music audible, no
     /// attraction (demo) loop.
+    ///
+    /// Stage 4, all INFERRED:
+    /// - `Game.IsVcrPaused__` is false. The game returns the PWorld's IsPaused byte, but
+    ///   the level files store it as true in 220 of the 236 levels that have a PWorld
+    ///   (PC census), story levels included, and those levels play: the stored value is
+    ///   an editor state the game must clear when play starts. Where it clears it was not
+    ///   located.
+    /// - `Game.IsTutorialLevel__` is [`LevelWorld::tutorial_level`].
+    /// - `Game.IsPSNDemoBuild__` is false: the full game, not the demo.
+    /// - `Game.GetPartyLeadersPlayerNumber__` is the first player record's number, -1
+    ///   with no record.
     fn state_query(&mut self, native: &str) -> Result<Value, String> {
         Ok(match native {
+            "Game.IsVcrPaused__" | "Game.IsPSNDemoBuild__" => Value::Bool(false),
+            "Game.IsTutorialLevel__" => Value::Bool(self.tutorial_level),
+            "Game.GetPartyLeadersPlayerNumber__" => {
+                Value::Int(self.player_records.first().map_or(-1, |r| r.number))
+            }
             "Game.IsNonInteractive__"
             | "Video.IsVideoPlaying__"
             | "System.Is4to3__"
@@ -1110,14 +1564,6 @@ impl World for LevelWorld {
     /// No cinema mode in the PC run (INFERRED default).
     fn cinema_mode_count(&mut self) -> Result<i32, String> {
         Ok(0)
-    }
-    fn set_score_multiplier_timer(&mut self, player: i32, timer: i32) -> Result<(), String> {
-        let n = self.num_players()?;
-        if !(0..n).contains(&player) {
-            return Err(format!("player {player} outside 0..{n}"));
-        }
-        self.score_multiplier_timers.insert(player, timer);
-        Ok(())
     }
     fn write(&mut self, text: &str) {
         if self.written.len() < 1000 {
@@ -1218,6 +1664,30 @@ pub fn add_engine_objects(
     if let Some(class) = vm.class_by_name("PodComputer") {
         if let Err(e) = make(vm, host, class, true) {
             faults.push(format!("PodComputer {e}"));
+        }
+    }
+    // The SlotID objects of `Game.GetLevelSlotID__` and `GetPrimaryLevelSlotID__`. FOUND:
+    // the game builds a new SlotID (fields Type and SlotNumber) on every call, from the
+    // slot the game state holds. Here one object each is made ahead and handed out every
+    // time (the scripts of the levels only read it). INFERRED: Type 0 and SlotNumber 0,
+    // an empty slot: the level's own slot is in the game's slot list, not in the level
+    // file, and is not known here.
+    if let Some(class) = vm.class_by_name("SlotID") {
+        for primary in [false, true] {
+            match vm.instantiate(class) {
+                Ok(o) => {
+                    if let Some(fields) = vm.fields_mut(o) {
+                        fields.insert("Type".into(), Value::Int(0));
+                        fields.insert("SlotNumber".into(), Value::Int(0));
+                    }
+                    if primary {
+                        host.world.primary_level_slot = Some(o);
+                    } else {
+                        host.world.level_slot = Some(o);
+                    }
+                }
+                Err(f) => faults.push(format!("SlotID {f:?}")),
+            }
         }
     }
     faults.dedup();
@@ -1781,6 +2251,7 @@ impl LevelScripts {
         let mut report = self.tick(vm, host, budget);
         report.absorb(self.trigger_events(vm, host, budget));
         report.absorb(self.switch_reactions(vm, host, budget));
+        host.world.advance_frame();
         report
     }
 
@@ -1862,10 +2333,43 @@ impl LevelScripts {
 mod tests {
     #[test]
     fn part_names() {
-        assert_eq!(super::part_name("PSpriteLight"), "SPRITE_LIGHT");
-        assert_eq!(super::part_name("PJoint"), "JOINT");
-        assert_eq!(super::part_name("PSwitch"), "SWITCH");
-        assert_eq!(super::part_name("PYellowHead"), "YELLOWHEAD");
-        assert_eq!(super::part_name("YellowHead"), "YELLOWHEAD");
+        use super::part_name;
+        assert_eq!(part_name("PSpriteLight"), Some("SPRITE_LIGHT"));
+        assert_eq!(part_name("PJoint"), Some("JOINT"));
+        assert_eq!(part_name("PSwitch"), Some("SWITCH"));
+        assert_eq!(part_name("PYellowHead"), Some("YELLOWHEAD"));
+        assert_eq!(part_name("YellowHead"), Some("YELLOWHEAD"));
+        // A name that starts with its own `P` keeps it.
+        assert_eq!(part_name("Pos"), Some("POS"));
+        assert_eq!(part_name("PPos"), Some("POS"));
+        assert_eq!(part_name("World"), Some("WORLD"));
+        assert_eq!(part_name("MetaData"), Some("METADATA"));
+        assert_eq!(part_name("MicroChip"), Some("MICROCHIP"));
+        assert_eq!(part_name("WormHole"), Some("WORMHOLE"));
+        assert_eq!(part_name("TagSynchroniser"), Some("TAG_SYNCHRONIZER"));
+        assert_eq!(part_name("PTagSynchroniser"), Some("TAG_SYNCHRONIZER"));
+        assert_eq!(part_name("Os"), None);
+        assert_eq!(part_name("P"), None);
+        assert_eq!(part_name(""), None);
+        assert_eq!(part_name("Thing"), None);
+    }
+
+    /// Every part the reader knows is found by its script-side spelling (`SPRITE_LIGHT`
+    /// as `SpriteLight`), bare as a native member and with the `P` of the part class.
+    #[test]
+    fn every_part_name_maps_back() {
+        for &(part, ..) in lbp_level::thing::PARTS {
+            let camel: String = part
+                .split('_')
+                .map(|w| w[..1].to_owned() + &w[1..].to_ascii_lowercase())
+                .collect();
+            assert_eq!(super::part_name(&camel), Some(part), "{camel}");
+            assert_eq!(
+                super::part_name(&format!("P{camel}")),
+                Some(part),
+                "P{camel}"
+            );
+            assert_eq!(super::part_name(part), Some(part));
+        }
     }
 }
