@@ -4,7 +4,7 @@
 //! level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH NEW-JSON --play=TICKS [--flags=N,..]
 //!     [--puter-in-use=TICK]
 //! level_scripts SNAPSHOT GAME-DIRS --all NEW-JSON [--play=TICKS] [--strict]
-//!     [--visit-triggers]
+//!     [--visit-triggers] [--pulse-switches]
 //!
 //! Loads every magic-confirmed script with its MAP GUID (the U12 loader), reads the level(s)
 //! and reports, per level: scripted Things (PScript with a resource GUID), how many resolve
@@ -22,13 +22,19 @@
 //! natives (they return their type's default and are counted); `--strict` makes them fault
 //! instead. `--visit-triggers` then adds a player who stands on every PTrigger's Thing in
 //! turn (two ticks on it, one far away), so the level's `Enter`, `Inside` and `Leave`
-//! scripts run; the report counts the events raised and run. `triggers` is the PTrigger
+//! scripts run; the report counts the events raised and run. `--pulse-switches` then runs
+//! two more ticks in which every switch output is forced on, then off, through the per-tick
+//! switch pass, so the `SwitchPerformReaction` scripts run with true, then false (a test
+//! drive: the pass itself computes the logic types and keeps the sensors' stored signals). `switch_reactions` counts the
+//! output targets the pass visited and the reaction calls by script GUID. `triggers` is the PTrigger
 //! census over the levels read, `switches` the PSwitch census with the input tables built
 //! from the outputs' targets. Names and counts only; no bytecode. Output: a NEW JSON file under
 //! ignored `local-analysis/`. Counting unit: Thing with a PScript part (instances) or
 //! distinct script class (function names).
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
-use lbp_runtime::{instances, LevelScripts, LevelWorld, Outcome, Runner, StepReport};
+use lbp_runtime::{
+    instances, LevelScripts, LevelWorld, Outcome, ReactionReport, Runner, StepReport,
+};
 use lbp_script_vm::natives::Bindings;
 use lbp_script_vm::Vm;
 use std::collections::{BTreeMap, BTreeSet};
@@ -190,6 +196,15 @@ struct Switches {
     scripted_classes: BTreeMap<String, usize>,
     /// Scripted Things `BaseWorld.IsScoreBoard__Q5Thing` holds for.
     score_boards: usize,
+    /// AND (14), OR (21) and NOT (23) gates by "t<type> mode=<word> inverted=<flag>".
+    gates: BTreeMap<String, usize>,
+    /// Counts of the stored logic settings, by name.
+    logic: BTreeMap<&'static str, usize>,
+    /// Timers by behaviour.
+    timer_behaviours: BTreeMap<i32, usize>,
+    /// Battery (28) and toggle (17) outputs by stored output signal against the stored
+    /// ManualActivation ("t<type> out=<ternary>/<player> manual=<ternary>/<player>").
+    manual_outputs: BTreeMap<String, usize>,
 }
 
 impl Switches {
@@ -202,6 +217,82 @@ impl Switches {
                 *self.by_type.entry(s.switch_type).or_default() += 1;
                 self.inverted += usize::from(s.inverted);
                 self.outputs += s.outputs.len();
+                if matches!(s.switch_type, 14 | 21 | 23) {
+                    let key = format!(
+                        "t{} mode={} inverted={}",
+                        s.switch_type, s.gate_mode, s.inverted
+                    );
+                    *self.gates.entry(key).or_default() += 1;
+                }
+                if matches!(s.switch_type, 17 | 28) {
+                    let m = s.manual_activation;
+                    for o in s.outputs.iter().flatten() {
+                        let key = format!(
+                            "t{} inverted={} out={}/{} manual={}/{}",
+                            s.switch_type,
+                            s.inverted,
+                            o.stored.ternary,
+                            o.stored.player,
+                            m.ternary,
+                            m.player
+                        );
+                        *self.manual_outputs.entry(key).or_default() += 1;
+                    }
+                }
+                if s.switch_type == 16 {
+                    *self.timer_behaviours.entry(s.behavior).or_default() += 1;
+                }
+                let get = |i: Option<u32>| world.things.get(i? as usize);
+                let board = get(t.circuit_board);
+                let is = |t: Option<&lbp_runtime::ThingState>, ty| {
+                    t.and_then(|t| t.switch.as_ref())
+                        .is_some_and(|s| s.switch_type == ty)
+                };
+                let chip = s.switch_type == 36;
+                let owner = get(t.parent);
+                for (name, holds) in [
+                    ("old_lbp1_switch_flag", s.old_lbp1_switch),
+                    ("old_joint_flag", s.old_joint),
+                    (
+                        "counters_with_team_filter",
+                        s.switch_type == 15 && s.team_filter != 0,
+                    ),
+                    ("chips", chip),
+                    (
+                        "chips_cursor_include_touching",
+                        chip && s.include_touching > 0,
+                    ),
+                    (
+                        "chips_with_microchip_part",
+                        chip && t.parts.contains(&"MICROCHIP"),
+                    ),
+                    ("chips_with_board", chip && board.is_some()),
+                    ("chips_board_is_type_37", chip && is(board, 37)),
+                    (
+                        "chips_board_parent_is_chip",
+                        chip && board
+                            .is_some_and(|b| get(b.parent).is_some_and(|p| std::ptr::eq(p, t))),
+                    ),
+                    (
+                        "chips_port0_wired",
+                        chip && t.inputs.first().is_some_and(Option::is_some),
+                    ),
+                    ("boards", s.switch_type == 37),
+                    ("boards_owner_chip", s.switch_type == 37 && is(owner, 36)),
+                    (
+                        "boards_owner_sequencer",
+                        s.switch_type == 37
+                            && owner.is_some_and(|o| o.parts.contains(&"SEQUENCER")),
+                    ),
+                    (
+                        "boards_owner_controlinator",
+                        s.switch_type == 37
+                            && owner.is_some_and(|o| o.parts.contains(&"CONTROLINATOR")),
+                    ),
+                    ("on_board", is(owner, 37)),
+                ] {
+                    *self.logic.entry(name).or_default() += usize::from(holds);
+                }
                 for o in &s.outputs {
                     let Some(o) = o else {
                         self.outputs_null += 1;
@@ -264,6 +355,10 @@ impl Switches {
             "scripted_things_with_wired_port": self.scripted_with_input,
             "scripted_classes_with_wired_port": classes,
             "score_board_things": self.score_boards,
+            "gates_by_type_mode_inverted": self.gates,
+            "logic_settings": self.logic,
+            "timers_by_behaviour": self.timer_behaviours,
+            "battery_and_toggle_outputs_stored_against_manual": self.manual_outputs,
         })
     }
 }
@@ -320,6 +415,51 @@ struct PlayOptions {
     in_use_from: Option<u64>,
     strict: bool,
     visit: bool,
+    pulse: bool,
+}
+
+/// The switch pass counts. Unit: visited output target; `g<N>` = script resource GUID.
+fn reactions_json(r: &ReactionReport) -> serde_json::Value {
+    let by_guid = |m: &BTreeMap<u32, usize>| {
+        m.iter()
+            .map(|(g, n)| (format!("g{g}"), *n))
+            .collect::<BTreeMap<_, _>>()
+    };
+    let total = |m: &BTreeMap<u32, usize>| m.values().sum::<usize>();
+    serde_json::json!({
+        "targets_visited": r.targets_visited,
+        "targets_visited_on": r.targets_on,
+        "calls_b": total(&r.calls_b),
+        "calls_bf": total(&r.calls_bf),
+        "calls_b_by_guid": by_guid(&r.calls_b),
+        "calls_bf_by_guid": by_guid(&r.calls_bf),
+        "targets_without_script": r.without_script,
+        "targets_not_whitelisted": total(&r.not_whitelisted),
+        "not_whitelisted_by_guid": by_guid(&r.not_whitelisted),
+        "listed_but_switch_thing": total(&r.shadowed_by_switch),
+        "listed_but_switch_thing_by_guid": by_guid(&r.shadowed_by_switch),
+        "listed_without_function": total(&r.no_function),
+        "listed_without_function_by_guid": by_guid(&r.no_function),
+        "listed_but_stopped": total(&r.to_stopped),
+        "listed_but_stopped_by_guid": by_guid(&r.to_stopped),
+    })
+}
+
+/// Switch outputs whose signal differs from the stored one, by switch type; with `active`
+/// only those of Things that are not deactivated.
+fn outputs_changed(world: &LevelWorld, active: bool) -> BTreeMap<i32, usize> {
+    let mut changed = BTreeMap::<i32, usize>::new();
+    for t in world.things.iter().filter(|t| !(active && t.deactivated)) {
+        let Some(s) = &t.switch else {
+            continue;
+        };
+        let n = s.outputs.iter().flatten().filter(|o| o.signal != o.stored);
+        match n.count() {
+            0 => {}
+            n => *changed.entry(s.switch_type).or_default() += n,
+        }
+    }
+    changed
 }
 
 /// One level played: the report and what `--all` adds up.
@@ -332,11 +472,26 @@ struct Played {
     events_run: [usize; 3],
     events_without_script: usize,
     events_to_stopped: usize,
+    reactions: ReactionReport,
     fault_kinds: BTreeMap<String, usize>,
     thread_faults: Vec<String>,
     engine_faults: usize,
     calls: BTreeMap<String, u64>,
     unbound: BTreeMap<String, u64>,
+    /// Switch outputs whose signal at the end differs from the stored one, by switch type.
+    outputs_changed: BTreeMap<i32, usize>,
+    /// Things deactivated at the end.
+    deactivated: usize,
+    /// After the first tick: the switch pass counts, the outputs changed (all, and of
+    /// Things that are not deactivated) and the Things deactivated.
+    first_tick: Option<FirstTick>,
+}
+
+struct FirstTick {
+    reactions: ReactionReport,
+    changed: BTreeMap<i32, usize>,
+    changed_active: BTreeMap<i32, usize>,
+    deactivated: usize,
 }
 
 /// How far from a trigger's Thing the `--visit-triggers` player goes to leave it.
@@ -375,6 +530,7 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
         })
     };
     let mut camera_before_in_use = None;
+    let mut first_tick = None;
     for tick in 0..opts.ticks {
         if opts.in_use_from.is_some_and(|t| t > 0 && t == tick) {
             camera_before_in_use = Some(camera_json(&host.world.camera));
@@ -383,6 +539,14 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
         let t = level.tick_level(vm, &mut host, BUDGET_PER_CALL);
         ticks_with_faults += usize::from(!t.faults.is_empty());
         note_faults(&t);
+        if tick == 0 {
+            first_tick = Some(FirstTick {
+                reactions: t.reactions.clone(),
+                changed: outputs_changed(&host.world, false),
+                changed_active: outputs_changed(&host.world, true),
+                deactivated: host.world.things.iter().filter(|t| t.deactivated).count(),
+            });
+        }
         sum.absorb(t);
     }
     // `--visit-triggers`: a player stands on each trigger's Thing for two ticks (Enter,
@@ -412,6 +576,19 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
             visited += 1;
         }
     }
+    // `--pulse-switches`: one tick with every switch output forced on, one with it forced
+    // off, so each wired target sees a rising and a falling edge.
+    let mut pulse = StepReport::default();
+    if opts.pulse {
+        for on in [true, false] {
+            host.world.switch_pulse = Some(on);
+            let t = level.tick_level(vm, &mut host, BUDGET_PER_CALL);
+            ticks_with_faults += usize::from(!t.faults.is_empty());
+            note_faults(&t);
+            pulse.absorb(t);
+        }
+        host.world.switch_pulse = None;
+    }
     let report = |r: &StepReport| {
         serde_json::json!({
             "done": r.done, "yielded": r.yielded, "resumed": r.resumed,
@@ -422,11 +599,14 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
             "trigger_events_run": r.events_run,
             "trigger_events_without_script": r.events_without_script,
             "trigger_events_to_stopped": r.events_to_stopped,
+            "switch_reactions": reactions_json(&r.reactions),
         })
     };
     let mut unbound: Vec<_> = host.unbound.iter().collect();
     unbound.sort_by(|a, b| b.1.cmp(a.1));
     unbound.truncate(40);
+    let outputs_changed = outputs_changed(&host.world, false);
+    let deactivated = host.world.things.iter().filter(|t| t.deactivated).count();
     let json = serde_json::json!({
         "instances": level.instances.len(),
         "ticks": level.ticks,
@@ -435,7 +615,11 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
         "ticks_total": report(&sum),
         "triggers_visited": visited,
         "visit_total": report(&visit),
+        "switches_pulsed": opts.pulse,
+        "pulse_total": report(&pulse),
         "ticks_with_faults": ticks_with_faults,
+        "switch_outputs_changed_by_type": outputs_changed,
+        "things_deactivated_at_end": deactivated,
         "stopped_by_fault": level.stopped.len(),
         "threads_running_at_end": level.threads(),
         "pending_at_end": level.pending(),
@@ -464,6 +648,7 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
         }).collect::<Vec<_>>(),
     });
     sum.absorb(visit);
+    sum.absorb(pulse);
     Played {
         json,
         instances: level.instances.len(),
@@ -473,6 +658,7 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
         events_run: sum.events_run,
         events_without_script: sum.events_without_script,
         events_to_stopped: sum.events_to_stopped,
+        reactions: sum.reactions,
         fault_kinds,
         thread_faults: sum
             .thread_faults
@@ -483,6 +669,9 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
         engine_faults: engine_faults.len(),
         calls: host.calls,
         unbound: host.unbound,
+        outputs_changed,
+        deactivated,
+        first_tick,
     }
 }
 
@@ -499,10 +688,18 @@ struct PlayTotals {
     events_run: [usize; 3],
     events_without_script: usize,
     events_to_stopped: usize,
+    reactions: ReactionReport,
     calls: BTreeMap<String, (u64, usize)>,
     unbound: BTreeMap<String, (u64, usize)>,
     faults: BTreeMap<String, (u64, usize)>,
     thread_faults: BTreeMap<String, (u64, usize)>,
+    outputs_changed: BTreeMap<i32, usize>,
+    levels_with_outputs_changed: usize,
+    deactivated: usize,
+    first_reactions: ReactionReport,
+    first_changed: BTreeMap<i32, usize>,
+    first_changed_active: BTreeMap<i32, usize>,
+    first_deactivated: usize,
 }
 
 impl PlayTotals {
@@ -518,6 +715,22 @@ impl PlayTotals {
         }
         self.events_without_script += p.events_without_script;
         self.events_to_stopped += p.events_to_stopped;
+        self.reactions.absorb(p.reactions.clone());
+        for (ty, n) in &p.outputs_changed {
+            *self.outputs_changed.entry(*ty).or_default() += n;
+        }
+        self.levels_with_outputs_changed += usize::from(!p.outputs_changed.is_empty());
+        self.deactivated += p.deactivated;
+        if let Some(f) = &p.first_tick {
+            self.first_reactions.absorb(f.reactions.clone());
+            for (ty, n) in &f.changed {
+                *self.first_changed.entry(*ty).or_default() += n;
+            }
+            for (ty, n) in &f.changed_active {
+                *self.first_changed_active.entry(*ty).or_default() += n;
+            }
+            self.first_deactivated += f.deactivated;
+        }
         self.levels_with_faults +=
             usize::from(!p.fault_kinds.is_empty() || !p.thread_faults.is_empty());
         let bump = |m: &mut BTreeMap<String, (u64, usize)>, k: &str, n: u64| {
@@ -568,6 +781,18 @@ impl PlayTotals {
             "trigger_events_run": self.events_run,
             "trigger_events_without_script": self.events_without_script,
             "trigger_events_to_stopped": self.events_to_stopped,
+            "switches_pulsed": opts.pulse,
+            "switch_reactions": reactions_json(&self.reactions),
+            "switch_outputs_changed": self.outputs_changed.values().sum::<usize>(),
+            "switch_outputs_changed_by_type": self.outputs_changed,
+            "levels_with_switch_outputs_changed": self.levels_with_outputs_changed,
+            "things_deactivated_at_end": self.deactivated,
+            "first_tick": {
+                "switch_reactions": reactions_json(&self.first_reactions),
+                "switch_outputs_changed_by_type": self.first_changed,
+                "switch_outputs_changed_not_deactivated_by_type": self.first_changed_active,
+                "things_deactivated": self.first_deactivated,
+            },
             "native_calls": calls,
             "native_calls_bound": calls - unbound,
             "native_calls_unbound": unbound,
@@ -625,13 +850,15 @@ fn run() -> Result<(), String> {
                 && !a.starts_with("--puter-in-use=")
                 && *a != "--strict"
                 && *a != "--visit-triggers"
+                && *a != "--pulse-switches"
         })
         .collect();
     if args.len() != 5 {
         return Err(
             "usage: level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH|--all NEW-JSON \
                     [--entry=NAME]... [--ticks=N] [--play=TICKS] [--flags=N,..] \
-                    [--puter-in-use=TICK] [--strict] [--visit-triggers]"
+                    [--puter-in-use=TICK] [--strict] [--visit-triggers] \
+                    [--pulse-switches]"
                 .into(),
         );
     }
@@ -649,6 +876,7 @@ fn run() -> Result<(), String> {
         in_use_from,
         strict: all.iter().any(|a| a == "--strict"),
         visit: all.iter().any(|a| a == "--visit-triggers"),
+        pulse: all.iter().any(|a| a == "--pulse-switches"),
     });
     if play.is_some() && !entries.is_empty() {
         return Err("use --play or --entry, not both".into());
