@@ -11,7 +11,26 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D316 the planets zoom against the game's captures (2026-10-15)
+## Latest: D318 the Pod planets' turn against the game's captures (2026-10-15)
+- Research (`docs/level-scripts.md` part 69), no code change. MEASURED (lane B's six RenderDoc
+  captures, `local-analysis/d321-planet-turn/`; drawn vertices paired with pod_planets' model by
+  order, clip y un-flipped): in the planets level's frame the Earth and the Moon are at their
+  class places, unturned (spin and pitch within 0.0004 rad, 0.025 deg) at ticks 600 to 619, closed
+  and in use: the point is along +z, which is the runtime's placeholder (0, 0, 1). No easing
+  toward "Story" by 619. The game's Earth face matches the viewer's (land centroid within 0.01 r).
+- MEASURED: the runtime's World Thing matrix is the game's at all six captures; part 67's extra
+  turn about the eye came from RPCS3's clip y flip. Open: the point once an entry is selected.
+
+## Before: D317 the Pod Earth drawn per bone under the scripts (2026-10-15)
+- Viewer (`docs/level-scripts.md` part 68): in the scripted Pod the Earth (pod_planets Thing 1,
+  boneThings [1, 2, 3]) is drawn per bone and the per-bone copy is on the Thing map, so it follows
+  the scripts; per-bone placement is on by default there (`--no-per-bone-placement` turns it off).
+- MEASURED (limb fits on captured frames 6082 / 8348 / 8980 / 9601 against stills): the gap was
+  the Earth's shape, not its size (part 67's 5 % came from a model curve): widths equal, the
+  viewer's height over width 1.06-1.12 against the game's 0.91-0.96, now 0.93-0.96; centres
+  within 2 to 5 px.
+
+## Before: D316 the planets zoom against the game's captures (2026-10-15)
 - Research (`docs/level-scripts.md` part 67), no code change; withdraws part 66's lead. MEASURED
   (RenderDoc, six captures, `local-analysis/d316-zoom/`): the Earth draw's fog plane `vc[16]`
   gives the game's blend s = 0.2160 / 0.4253 / 0.5748 / 0.8960 / 0.99275 at dissolve ticks 606 /
