@@ -1516,6 +1516,21 @@ impl LevelWorld {
 }
 
 impl World for LevelWorld {
+    /// D326 FOUND (the 01.33 listings): `SearchDetails.CreateStoryLevels__` is a static
+    /// native whose declared return type is the script class `SearchDetailsStoryLevels`,
+    /// and the pod's search state calls that object's script virtuals (`GetScale`,
+    /// `GetDefaultBrowseMode`, `DoTitle`), so the engine hands back a script object.
+    fn native_object_class(&mut self, class: &str, mangled: &str) -> Option<&'static str> {
+        match (class, mangled) {
+            ("SearchDetails", "CreateStoryLevels__") => Some("SearchDetailsStoryLevels"),
+            // INFERRED: no result is under the cursor yet, so the planet's current result
+            // is an empty handle (`SearchResultHandle..ctor__` sets `_Type` 0), which the
+            // search state reads with `GetType__` every frame.
+            ("Planet", "GetCurResult__") => Some("SearchResultHandle"),
+            _ => None,
+        }
+    }
+
     fn thing_uid(&mut self, thing: u32) -> Result<i32, String> {
         self.state(thing)?
             .uid
@@ -2029,6 +2044,10 @@ impl World for LevelWorld {
         args: &[Value],
     ) -> Result<(), String> {
         *self.engine_calls.entry(name).or_default() += 1;
+        // D326: the Gooey's `FontScale` property sets this (see `gooey_call`).
+        if let ("SetStylesheetScalingFactor", Some(Value::Float(f))) = (name, args.last()) {
+            self.gooey.set_font_scale(*f);
+        }
         if let ("GotoScoreboard", Some(Value::Bool(b))) = (name, args.first()) {
             self.scoreboard_requests.push(*b);
         }

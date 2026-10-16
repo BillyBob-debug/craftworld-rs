@@ -655,6 +655,10 @@ pub trait World {
     ) -> Result<Option<Value>, String> {
         Ok(None)
     }
+    /// D326 ([`Host::native_object_class`]): the script class a native makes an object of.
+    fn native_object_class(&mut self, _class: &str, _mangled: &str) -> Option<&'static str> {
+        None
+    }
     /// Outcome of a `Test.Check*` / `Test.Fail` native in the game's own test scripts.
     fn test_check(&mut self, _passed: bool, _message: &str, _line: i32) {}
     /// Uniform in [0, 1); only `NonDeterministic*` natives use it.
@@ -839,6 +843,13 @@ impl<W: World> Host for Bindings<W> {
     }
     fn thing_script(&mut self, thing: u32) -> Option<u32> {
         self.world.thing_script(thing)
+    }
+    fn native_object_class(&mut self, class: &str, function: &str) -> Option<&'static str> {
+        let made = self.world.native_object_class(class, function);
+        if made.is_some() {
+            *self.calls.entry(format!("{class}.{function}")).or_default() += 1;
+        }
+        made
     }
     fn write(&mut self, text: &str) {
         self.world.write(text)
@@ -3258,7 +3269,7 @@ pub const UI_CLASSES: [&str; 2] = ["Gooey", "Callout"];
 /// D319: natives of other classes the pod computer's per-frame step and its main menu ask
 /// (part 46 found 28 kinds of them unbound in the planets level), also answered by
 /// [`World::ui_call`].
-pub const UI_NATIVES: [(&str, &str); 24] = [
+pub const UI_NATIVES: [(&str, &str); 25] = [
     ("Planets", "CheckOverlayNeedsUpdate__"),
     ("PodComputer", "GetPodComputerUserPlayerNumber__"),
     (
@@ -3286,6 +3297,7 @@ pub const UI_NATIVES: [(&str, &str); 24] = [
     ("HUD", "SDF_INFO__iii"),
     ("Audio", "RequestVoiceOverMovePack__Q7StringAbbb"),
     ("Start_Menu", "GetFriendStatus__Q13PodFriendData"),
+    ("System", "GetLanguageID__"),
 ];
 
 #[cfg(test)]
