@@ -91,6 +91,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 85: the Story globe's AO overlays blended (2026-10-16, D338)](level-scripts/part-85.md)
 - [Part 86: the Story view's info bubble (2026-10-16, D339)](level-scripts/part-86.md)
 - [Part 87: the info bubble's goodies row (2026-10-16, D340)](level-scripts/part-87.md)
+- [Part 88: the profile's per-slot records (2026-10-17, D341)](level-scripts/part-88.md)
 
 ## Next
 

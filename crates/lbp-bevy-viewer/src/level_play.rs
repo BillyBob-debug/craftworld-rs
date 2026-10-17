@@ -409,6 +409,17 @@ pub fn install(app: &mut App) -> Result<(), String> {
         .unwrap_or_default();
     // D321 (part 72): the scripted Pod's menu assets (fonts, card picture, pins).
     let card_pins = crate::pod_menu::card_pins_option(&all)?;
+    // D341 (part 88): the local profile's goodies counts by SlotID, from a file
+    // `scripts/rpcs3_profile_records.py` wrote. Without it the profile has no records, as
+    // a fresh one.
+    let profile_goodies = value(&all, "--profile-records")
+        .map(|path| {
+            let text = std::fs::read_to_string(&path)
+                .map_err(|e| format!("--profile-records {path}: {e}"))?;
+            lbp_runtime::parse_profile_records(&text).map_err(|e| format!("--profile-records: {e}"))
+        })
+        .transpose()?
+        .unwrap_or_default();
     // The level reader recurses deeply: same worker stack as the level scene.
     type Loaded = (
         Vm,
@@ -455,6 +466,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             // that cannot be read is left out: the scripts then give their own text for
             // a missing key and a bubble shows no close prompt.
             let (strings, _) = lbp_preview::story::load_strings(&source, &catalog, &control);
+            world.profile_goodies = profile_goodies;
             world.translations = [strings.patch, strings.base]
                 .into_iter()
                 .flatten()
