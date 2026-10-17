@@ -99,6 +99,10 @@ pub(crate) struct PodSackboy {
     /// D320: the frame counts of [`POD_CLIPS`]: the loaded clips' once his figure is
     /// there, before that [`POD_CLIP_FRAMES`].
     pub frames: [u32; 3],
+    /// D403: he stands where Square is the pod computer's button (its pad zone, the tick
+    /// before) or the pod computer is in use (written by `level_play::tick`); elsewhere
+    /// Square is the Popit's (`popit_play`).
+    pub at_computer: bool,
 }
 
 /// D320: the frame counts of [`POD_CLIPS`] (MEASURED, the clip files of 01.33); the loaded
@@ -957,11 +961,9 @@ pub fn install(app: &mut App) -> Result<(), String> {
                 r.rejected.values().sum::<usize>(),
                 r.joints
             );
-            // D281: no Popit in the Pod (its Square is the pod computer's engage button).
-            let popit = match pod {
-                Some(_) => None,
-                None => Some(crate::popit_play::load_assets(&source, &catalog, &control)?),
-            };
+            // D403: the Popit in the Pod too; Square is the pod computer's engage button
+            // only where the pod's script asks for it (`PodSackboy::at_computer`).
+            let popit = Some(crate::popit_play::load_assets(&source, &catalog, &control)?);
             // D282: the pod computer's engage target takes its x from this Thing.
             let controller = report.things.iter().enumerate().find_map(|(i, t)| {
                 let named = t.data.script_name.as_ref()?.name.as_slice() == b"pod_controller";
@@ -1035,7 +1037,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     }
     if pod.is_some() {
         println!(
-            "Pod Sackboy: plays in the shell level (pod.bin), every body held where the file has it (placeholder); keys: arrows walk and change lanes, Space jumps, Z or gamepad Square is the engage button; no Popit"
+            "Pod Sackboy: plays in the shell level (pod.bin), every body held where the file has it (placeholder); keys: arrows walk and change lanes, Space jumps, Z or gamepad Square is the engage button in the pod computer's pad zone and the Popit's elsewhere (D403)"
         );
         let target = engage_target(controller.and_then(|c| c.1));
         println!(
