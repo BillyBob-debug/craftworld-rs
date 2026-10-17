@@ -107,6 +107,10 @@ struct Play {
     /// D329 `--level-scripts-choose-at N` (QA): the focused entry of the scripts' menu is
     /// chosen on tick N (as `level_scripts --menu=N:choose`); none once that is done.
     choose_at: Option<u64>,
+    /// Level1 part 3: the player's close button (C or Circle) on the open speech bubble,
+    /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N.
+    close: bool,
+    close_at: Option<u64>,
 }
 
 /// The script world of the Pod's shell layer (part 28): the second level of the
@@ -393,6 +397,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let in_use_at = tick_option(&all, "--level-scripts-in-use-at")?;
     let press_at = tick_option(&all, "--level-scripts-press-at")?;
     let choose_at = tick_option(&all, "--level-scripts-choose-at")?;
+    let close_at = tick_option(&all, "--level-scripts-close-at")?;
     if press_at.is_some() && shell_guid.is_none() {
         println!(
             "--level-scripts-press-at is not used without the Pod's shell layer (--pod-camera N --pod-shell HEX): the engage press is read by the shell level's script"
@@ -588,6 +593,8 @@ pub fn install(app: &mut App) -> Result<(), String> {
         dissolve_edge_printed: false,
         dof_printed: None,
         choose_at,
+        close: false,
+        close_at,
     })
     .insert_resource(crate::CaptureHold(hold_at.is_some()))
     .insert_resource(menu_assets.unwrap_or_default())
@@ -636,7 +643,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             .after(crate::camera)
             .before(crate::capture),
     )
-    .add_systems(Update, menu_keys)
+    .add_systems(Update, (menu_keys, close_key))
     .add_systems(EguiPrimaryContextPass, (speech, window));
     Ok(())
 }
@@ -829,6 +836,23 @@ fn menu_keys(
     }
 }
 
+/// Level1 part 3: C or Circle closes the open speech bubble on the next tick, as the
+/// game's Circle does ([`LevelScripts::player_close_message`]); not while the pod
+/// computer is in use (its menu has the key).
+fn close_key(mut play: NonSendMut<Play>, keys: Res<ButtonInput<KeyCode>>, pads: Query<&Gamepad>) {
+    let p = &mut *play;
+    let in_use = p
+        .shell
+        .as_ref()
+        .is_some_and(|s| s.host.world.pod_computer_in_use);
+    if !in_use
+        && (keys.just_pressed(KeyCode::KeyC)
+            || pads.iter().any(|g| g.just_pressed(GamepadButton::East)))
+    {
+        p.close = true;
+    }
+}
+
 /// One fixed step of the scripts: the create step first, then a tick each, unless held.
 fn step(
     p: &mut Play,
@@ -887,6 +911,22 @@ fn step(
         println!(
             "Menu choose on tick {}, from --level-scripts-choose-at",
             p.scripts.ticks + 1
+        );
+    }
+    // Level1 part 3: the close button, before the tick (the game's net message is
+    // handled before the switch pass that carries the bubble's output).
+    let close_now = press_now(&mut p.close_at, p.scripts.ticks + 1);
+    if std::mem::take(&mut p.close) || close_now {
+        let o = p
+            .scripts
+            .player_close_message(&mut p.vm, &mut p.host, BUDGET_PER_CALL);
+        println!(
+            "Close button before tick {}: {}",
+            p.scripts.ticks + 1,
+            match o {
+                Some(o) => format!("OnMagicMouthRemoteStop__b(true) on the open bubble: {o:?}"),
+                None => "no open bubble to close".into(),
+            }
         );
     }
     // Part 30: the session's Sackboy and pad. He is put on the pod computer's trigger

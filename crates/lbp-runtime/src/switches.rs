@@ -564,6 +564,22 @@ pub enum Reaction {
 pub const REACTION_B: &str = "SwitchPerformReaction__b";
 /// `SwitchPerformReaction__bf` (FOUND: function record 0xe46960, called at 0x11e928).
 pub const REACTION_BF: &str = "SwitchPerformReaction__bf";
+/// A scripted switch's signal ([`crate::LevelScripts`]'s script activations).
+pub const SWITCH_ACTIVATION: &str = "SwitchGetNewActivation__i";
+/// The bubble's close from the player's button (FOUND: method-name cache 0xe46948).
+pub const REMOTE_STOP: &str = "OnMagicMouthRemoteStop__b";
+
+/// The ternary of a scripted switch's activation: 1 at or above 1.0, -1 at or below -1.0,
+/// else 0 (INFERRED; the bubble's pulse is 1.0 or 0.0).
+pub fn scripted_ternary(activation: f32) -> i32 {
+    if activation >= 1. {
+        1
+    } else if activation <= -1. {
+        -1
+    } else {
+        0
+    }
+}
 
 /// The switch types the game's per-type tables cover (0x11be00, 0x3eed4) end below this.
 pub const SWITCH_KIND_TYPES: i32 = 0x42;
@@ -1864,6 +1880,14 @@ mod tests {
         w.things[2].parts.push("SEQUENCER");
         w.update_switches();
         assert_eq!(out(&w, 3, 1), SIGNAL_OFF);
+    }
+
+    #[test]
+    fn a_scripted_pulse_is_on_only_when_full() {
+        assert_eq!(scripted_ternary(1.0), 1);
+        assert_eq!(scripted_ternary(0.0), 0);
+        assert_eq!(scripted_ternary(0.5), 0);
+        assert_eq!(scripted_ternary(-1.0), -1);
     }
 
     #[test]
