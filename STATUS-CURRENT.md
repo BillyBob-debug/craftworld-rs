@@ -11,7 +11,12 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D401 Popit pages picked by the game's script (2026-10-17)
+## Latest: D348 the goodies disc's pie (2026-10-17)
+- Part 95 (`docs/level-scripts/part-95.md`): a part-filled goodies disc is two segments in one
+  draw (FOUND 0x4f5abc / 0x4a3824): the collected share in the profile's colour, a 0.1 radian
+  gap, the rest in the shade (0, 0, 0, 0.3). The viewer's `MenuShape::Pie`; the shader's
+  zero axis and turn (straight up, clockwise) are INFERRED.
+## D401 Popit pages picked by the game's script (2026-10-17)
 - Popit part 2 (`docs/d401-popit-pages-from-script.md`): the viewer runs
   `Poppet.DoMainMenuButtonResponse` per button in create and play mode and opens the inventory
   page of the collection the script pushes (create 0:1, 1:2, 4:4, 5:3, 6:0, 10:8; play the
