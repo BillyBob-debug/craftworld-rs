@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D347 the info bubble's size and goodies row (2026-10-17)
+## Latest: D400 the Popit card from the game's script (2026-10-17)
+- Popit part 1 (`docs/d400-popit-script-card.md`): the viewer runs `Poppet.DoMainMenu` on the
+  Gooey host with a single-player create session pinned and takes the card's rows, icons
+  (new `ATXb` animated-texture reader), tooltip keys, focus and pitch from it; same card as
+  the game's frame. Tables stay as the fallback.
+
+## D347 the info bubble's size and goodies row (2026-10-17)
 - Part 94 (`docs/level-scripts/part-94.md`): the goodies row is the game's play stat widget
   (FOUND 0x496700 / 0x4f5400: a disc in the profile's second colour, the percent at S x 1.9,
   the label at S x 0.9 below); the bubble's texts at the Gooey scale 1.42 (MEASURED), its
@@ -109,7 +115,7 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 
 ## Next
 1. Emote clip frames vs game.
-2. Popit: compare more frames, cursor mode, inventory grid pages (submode 11).
+2. Popit: inventory grid pages (submode 11) from the script, cursor mode, more frames.
 3. Camera lead, slopes (paused by the owner).
 
 ## Environment

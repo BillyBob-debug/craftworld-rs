@@ -18,7 +18,7 @@ const PAGE: usize = 4096;
 /// Scripts with their GUID (if known), and the count not read.
 pub type Loaded = (Vec<(Option<u32>, Script)>, usize);
 
-fn read_all(
+pub fn read_all(
     source: &AttachedSource,
     key: &LocationKey,
     control: &LoadControl,

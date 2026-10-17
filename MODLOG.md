@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-17 - D400 the Popit card from the game's script
+
+Viewer and UI host. The `--play-sackboy` Popit's create and play cards now come from running the game's
+`Poppet.DoMainMenu` on the Gooey host (rows, icons, tooltip keys, default focus, pitch) instead of copied
+tables, which stay as the fallback. New `ATXb` animated-texture reader for the icon sheets. See
+docs/d400-popit-script-card.md.
+
 ## 2026-10-14 - D300 the scene's alpha at the final pass
 
 Viewer only. FOUND (RenderDoc frames 5247 and 14790): after the depth of field and the glow's source the Pod's
