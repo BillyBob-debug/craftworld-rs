@@ -5621,6 +5621,7 @@ fn story_results_list_every_slot_and_link_levels_to_their_group() {
         id,
         group,
         location: [1., 2., 3., 4.],
+        ..SearchSlot::default()
     };
     let result = |i: u32, parent| StoryResult {
         result: ObjectId(10 + i),
@@ -5701,11 +5702,13 @@ fn d331_story_turns_earth_to_the_default_group() {
                 id: (1, 5),
                 group: Some((4, 27)),
                 location: [1., 0., 0., 0.],
+                ..SearchSlot::default()
             },
             SearchSlot {
                 id: (4, 27),
                 group: None,
                 location: [0., 0.6, 0.8, 0.],
+                ..SearchSlot::default()
             },
         ],
         ..LevelWorld::default()

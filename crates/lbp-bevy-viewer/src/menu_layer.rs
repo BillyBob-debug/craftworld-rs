@@ -24,10 +24,14 @@ pub enum MenuShape {
     /// half the sides), open at the right edge's middle for a tail `tail` pixels long whose
     /// arms are the ring's width. INFERRED from the game frame: the tail's tip points right
     /// and its base is [`BUBBLE_TAIL_BASE`] of its length on each side of the middle.
+    /// D339: `filled`, a filled bubble (`GCS_SPEECH_BUBBLE`, part 86) with its tail on the
+    /// left edge's middle (INFERRED from the game frame: the info bubble's tail points left
+    /// at its badge); `width` is then unused.
     Bubble {
         radius: f32,
         width: f32,
         tail: f32,
+        filled: bool,
     },
 }
 
@@ -261,10 +265,24 @@ impl MenuCanvas {
                 radius,
                 width,
                 tail,
+                filled,
             } => {
                 let r = radius.min(half.x).min(half.y).max(0.);
                 let q = l.abs() - (half - Vec2::splat(r));
                 let d = q.max(Vec2::ZERO).length() + q.x.max(q.y).min(0.) - r;
+                if filled {
+                    let body = (0.5 - d).clamp(0., 1.);
+                    if tail <= 0. {
+                        return body;
+                    }
+                    // The tail: a triangle from the left edge, `base` above and below the
+                    // middle, to the tip `tail` past it.
+                    let base = tail * BUBBLE_TAIL_BASE;
+                    let x = half.x + tail + l.x;
+                    let side = (l.y.abs() * tail - base * x) / tail.hypot(base);
+                    let cut = if l.x < 0. { 1. } else { 0. };
+                    return body.max((0.5 - side.max(-x)).clamp(0., 1.) * cut);
+                }
                 let w = width.max(1.);
                 let ring = (0.5 - ((d + w / 2.).abs() - w / 2.)).clamp(0., 1.);
                 if tail <= 0. {
@@ -509,6 +527,7 @@ mod tests {
             radius: 10.,
             width: 2.,
             tail: 8.,
+            filled: false,
         };
         let half = Vec2::new(30., 15.);
         let cov = |x: f32, y: f32| MenuCanvas::coverage(shape, Vec2::new(x, y), half);
@@ -521,6 +540,26 @@ mod tests {
         // The tip, and nothing beyond it.
         assert!(cov(37.5, 0.) > 0.5);
         assert_eq!(cov(41., 0.), 0.);
+    }
+
+    /// D339: the filled bubble covers its inside, with its tail's tip past the left edge.
+    #[test]
+    fn d339_filled_bubble_has_its_tail_on_the_left() {
+        let shape = MenuShape::Bubble {
+            radius: 10.,
+            width: 0.,
+            tail: 10.,
+            filled: true,
+        };
+        let half = Vec2::new(30., 15.);
+        let cov = |x: f32, y: f32| MenuCanvas::coverage(shape, Vec2::new(x, y), half);
+        assert_eq!(cov(0., 0.), 1.);
+        assert_eq!(cov(29., 0.), 1.);
+        assert_eq!(cov(-35., 0.), 1.);
+        assert!(cov(-39.5, 0.) > 0.);
+        assert_eq!(cov(-41., 0.), 0.);
+        assert_eq!(cov(-35., 3.), 0.);
+        assert_eq!(cov(35., 0.), 0.);
     }
 
     /// D322: a pill at 82/255 then white text at 102/255 over it (the game's two draws over

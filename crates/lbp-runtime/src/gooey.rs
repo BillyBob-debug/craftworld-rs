@@ -1006,16 +1006,35 @@ pub struct SpeechBubble {
     /// (FOUND default 20). INFERRED: the tail's offset and its size.
     pub tail_offset: [f32; 2],
     pub tail_size: f32,
+    /// D339: style 13 (`GCS_SPEECH_BUBBLE`): the bubble is filled (no outline).
+    pub filled: bool,
 }
 
 /// `GCS_SPEECH_BUBBLE_OUTLINE`.
 pub const SPEECH_BUBBLE_OUTLINE: i32 = 15;
+/// D339 FOUND (0x7006c0, the info bubble): `GCS_SPEECH_BUBBLE`, a filled bubble whose
+/// fill is the frame's colour (part 86).
+pub const SPEECH_BUBBLE: i32 = 13;
+/// D339 MEASURED (the game frame of the Story view, 1280 x 720): the info bubble's tail is
+/// 45 pixels long, 96 root-frame units at part 81's 0.47 pixels a unit. INFERRED: its
+/// `SetFrameTailScale(15, 10, 0.6)` and the placement 0x701780 give it (not decoded).
+pub const SPEECH_BUBBLE_TAIL: f32 = 96.;
 
 impl SpeechBubble {
-    /// The bubble of a frame of style 15, else `None`.
+    /// The bubble of a frame of style 15 or 13, else `None`.
     pub fn of(f: &GooeyFrame) -> Option<Self> {
         let first = |name: &str| f.other.get(name).and_then(|v| v.first().copied());
-        if first("SetFrameStyle")? as i32 != SPEECH_BUBBLE_OUTLINE {
+        let style = first("SetFrameStyle")? as i32;
+        if style == SPEECH_BUBBLE {
+            return Some(Self {
+                outline_width: 0.,
+                corner_radius: first("SetFrameCornerRadius").unwrap_or(0.),
+                tail_offset: [0., 0.],
+                tail_size: SPEECH_BUBBLE_TAIL,
+                filled: true,
+            });
+        }
+        if style != SPEECH_BUBBLE_OUTLINE {
             return None;
         }
         let tail = f.other.get("SetFrameSpeechBubbleOutlineTailSettings");
@@ -1027,6 +1046,7 @@ impl SpeechBubble {
                 tail.and_then(|t| t.get(1).copied()).unwrap_or(0.),
             ],
             tail_size: tail.and_then(|t| t.get(4).copied()).unwrap_or(20.),
+            filled: false,
         })
     }
 }
@@ -1661,12 +1681,57 @@ mod tests {
                 corner_radius: 80.,
                 tail_offset: [50., 0.],
                 tail_size: 30.,
+                filled: false,
             }
         );
         assert!(matches!(placed[1].kind, PlacedKind::Text { .. }));
         // The bubble is the text and its borders.
         assert_eq!(placed[0].size[0], placed[1].size[0] + 90.);
         assert_eq!(placed[0].centre, placed[1].centre);
+    }
+
+    /// D339: while Story is up the default result's info bubble is a filled bubble around
+    /// the slot's translated name and its author, borders 48 on every side.
+    #[test]
+    fn d339_story_info_bubble_holds_the_default_slot_name_and_author() {
+        let mut w = LevelWorld {
+            story_slots: vec![crate::SearchSlot {
+                id: (4, 27),
+                tag: Some("COSMOS_THEME".into()),
+                author: Some("Dr Herbert Higginbotham".into()),
+                ..Default::default()
+            }],
+            ..LevelWorld::default()
+        };
+        w.pod.search.default_result = Some(0);
+        assert_eq!(w.story_info_bubble(), None);
+        w.pod.search.selected_planet = Some(1);
+        w.pod.search.want_search_details_calls = 1;
+        let frame = w.story_info_bubble().unwrap();
+        let root = GooeyFrame {
+            children: vec![GooeyItem::Frame(frame)],
+            ..Default::default()
+        };
+        let placed = layout(&root, None);
+        let PlacedKind::Bubble(b) = &placed[0].kind else {
+            panic!("{placed:?}");
+        };
+        assert!(b.filled);
+        assert_eq!(b.corner_radius, 64.);
+        let texts: Vec<_> = placed[1..]
+            .iter()
+            .filter_map(|p| match &p.kind {
+                PlacedKind::Text { text, style, .. } => Some((text.as_str(), *style)),
+                _ => None,
+            })
+            .collect();
+        // No table loaded: the tag stands for the name.
+        assert_eq!(
+            texts,
+            [("COSMOS_THEME", 1), ("By Dr Herbert Higginbotham", 5)]
+        );
+        let widest = placed[1..].iter().map(|p| p.size[0]).fold(0., f32::max);
+        assert_eq!(placed[0].size[0], widest + 96.);
     }
 
     #[test]

@@ -2653,6 +2653,71 @@ impl LevelWorld {
         let [x, y, z, _] = slot.location;
         Some([x * EARTH_RADIUS, y * EARTH_RADIUS, z * EARTH_RADIUS, 0.])
     }
+
+    /// The first loaded table's text for a LAMS key (patch table first).
+    fn lams(&self, key: u32) -> Option<&str> {
+        self.translations.iter().find_map(|t| t.get(key))
+    }
+
+    /// D339 (part 86): the info bubble the planets draw by the selected Story result, as a
+    /// Gooey frame in the root frame's units. FOUND (01.33, 0x7006c0): a frame of style 13
+    /// (`GCS_SPEECH_BUBBLE`, filled), borders 48, child spacing 32, corner radius 64,
+    /// curvature 5, corner jauntiness 5, tail scale (15, 10, 0.6), no transition; FOUND
+    /// (0x70430c, 0x703768): the slot's name (text style 1), a break, its author (style
+    /// 5, "By %1", key 0x43dd1282). INFERRED: the selected result is the default one
+    /// ([`Self::story_planet_point`]). Left out: the goodies row (the profile's collected
+    /// items are not read; the engine hides the row when the total is 0) and the outer
+    /// frame's maximum width 1150 (the text is not wrapped).
+    pub fn story_info_bubble(&self) -> Option<GooeyFrame> {
+        if !self.story_open() {
+            return None;
+        }
+        let slot = self.story_slots.get(self.pod.search.default_result?)?;
+        // `Slot.toString`: the tag's `_NAME` translation, else the tag, else the stored
+        // name, else "Unnamed Level" (key 0xeca1a592).
+        let name = match &slot.tag {
+            Some(tag) => {
+                let key = format!("{tag}_NAME");
+                (self.translations.iter())
+                    .find_map(|t| t.translate(&key))
+                    .unwrap_or(tag)
+                    .to_owned()
+            }
+            None if slot.name.is_empty() => {
+                self.lams(0xeca1_a592).unwrap_or("Unnamed Level").to_owned()
+            }
+            None => slot.name.clone(),
+        };
+        let text = |text: String, style| GooeyItem::Text {
+            text,
+            style,
+            font_scale: 1.,
+        };
+        let mut children = vec![text(name, 1)];
+        if let Some(author) = &slot.author {
+            let by = self
+                .lams(0x43dd_1282)
+                .unwrap_or("By %1")
+                .replace("%1", author);
+            children.extend([GooeyItem::Break, text(by, 5)]);
+        }
+        let other = [
+            ("SetFrameStyle", vec![SPEECH_BUBBLE as f32]),
+            ("SetFrameCornerRadius", vec![64.]),
+            ("SetFrameCurvature", vec![5.]),
+            ("SetFrameCornerJauntiness", vec![5.]),
+            ("SetFrameTailScale", vec![15., 10., 0.6]),
+        ];
+        Some(GooeyFrame {
+            sizing: Some([0., 0.]),
+            borders: Some([48.; 4]),
+            spacing: Some([32., 32.]),
+            transition: Some([0., 0.]),
+            other: other.into_iter().map(|(k, v)| (k.to_owned(), v)).collect(),
+            children,
+            ..GooeyFrame::default()
+        })
+    }
 }
 
 /// D328: the Story search's results, one per [`LevelWorld::story_slots`] entry.

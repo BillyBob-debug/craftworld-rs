@@ -783,8 +783,10 @@ impl ScriptMenuFrame {
             .focus_since
             .map_or(age, |s| (world.pworld.frame - s) as f32)
             .clamp(0., age);
+        let mut placed = lbp_runtime::layout_with(menu.frame, menu.focus, fonts);
+        placed.extend(info_bubble(world, &placed, fonts));
         Some(Self {
-            placed: lbp_runtime::layout_with(menu.frame, menu.focus, fonts),
+            placed,
             matrix: Mat4::from_cols_array(&menu.matrix),
             fade,
             colour: lbp_script_vm::natives::colour_vector(colour),
@@ -793,6 +795,49 @@ impl ScriptMenuFrame {
             built_at: menu.first_built,
         })
     }
+}
+
+/// D339 MEASURED (the game frame of the Story view, 1280 x 720): the info bubble's tail tip
+/// (686, 348) from the Story title bubble's centre (285.5, 350, part 81), in root-frame units
+/// at part 81's 0.47 pixels a unit. INFERRED: the tip is at the selected badge, which stays
+/// put on the screen while Story is up (Earth turns it toward the camera, part 82); the
+/// engine's own placement (0x701780) is not decoded.
+const INFO_BUBBLE_TIP: [f32; 2] = [(686. - 285.5) / 0.47, (348. - 350.) / 0.47];
+
+/// D339 (part 86): the Story info bubble's items ([`lbp_runtime::LevelWorld::story_info_bubble`]),
+/// placed with the menu's so its tail's tip is [`INFO_BUBBLE_TIP`] from the title's bubble;
+/// none without the Story title's bubble.
+fn info_bubble(
+    world: &lbp_runtime::LevelWorld,
+    placed: &[lbp_runtime::PlacedItem],
+    fonts: Option<&lbp_runtime::GooeyFonts>,
+) -> Vec<lbp_runtime::PlacedItem> {
+    let title = placed.iter().find_map(|p| match &p.kind {
+        lbp_runtime::PlacedKind::Bubble(b) if !b.filled => Some(p.centre),
+        _ => None,
+    });
+    let (Some(frame), Some(title)) = (world.story_info_bubble(), title) else {
+        return Vec::new();
+    };
+    let mut items = lbp_runtime::layout_with(&frame, None, fonts);
+    let Some(lbp_runtime::PlacedItem {
+        kind: lbp_runtime::PlacedKind::Bubble(b),
+        centre,
+        size,
+        ..
+    }) = items.first().cloned()
+    else {
+        return Vec::new();
+    };
+    let at = [
+        title[0] + INFO_BUBBLE_TIP[0] + b.tail_size + size[0] / 2.,
+        title[1] + INFO_BUBBLE_TIP[1],
+    ];
+    for item in &mut items {
+        item.centre[0] += at[0] - centre[0];
+        item.centre[1] += at[1] - centre[1];
+    }
+    items
 }
 
 /// D323 (part 74): the planets' coronas: FOUND (RenderDoc 6082 to 9601, ticks 600 to 619,
@@ -1902,38 +1947,46 @@ pub(crate) fn paint_script_menu(
         // (the ring is not opened under it).
         if let (lbp_runtime::PlacedKind::Bubble(b), Some(mut border)) = (&item.kind, border) {
             let unit = dx.length();
-            let [r, g, bl, a] = BUBBLE_COLOUR;
+            let [r, g, bl, a] = bubble_colour(b, frame.colour);
             let colour = if layer_route {
                 Color::NONE
             } else {
                 Color::srgba(r, g, bl, a * fade)
             };
-            let width = (b.outline_width * BUBBLE_WIDTH_SCALE * unit).max(1.);
-            node.border = UiRect::all(Val::Px(width));
             node.border_radius =
                 BorderRadius::all(Val::Px((b.corner_radius * unit).min(w / 2.).min(h / 2.)));
-            *border = BorderColor::all(colour);
-            let tail = b.tail_size * unit;
-            // A square turned 45 degrees with two borders: arms `tail` long across, meeting
-            // the outline.
-            let side = tail * std::f32::consts::SQRT_2;
-            for (ScriptMenuBubbleTail(j), mut t, mut t_border) in &mut tails {
-                if j != i {
-                    continue;
+            // D339: on the overlay the filled bubble is the node's background, no tail.
+            if b.filled {
+                node.border = UiRect::ZERO;
+                *background = BackgroundColor(colour);
+                *border = BorderColor::all(Color::NONE);
+            } else {
+                let width = (b.outline_width * BUBBLE_WIDTH_SCALE * unit).max(1.);
+                node.border = UiRect::all(Val::Px(width));
+                *border = BorderColor::all(colour);
+                let tail = b.tail_size * unit;
+                // A square turned 45 degrees with two borders: arms `tail` long across, meeting
+                // the outline.
+                let side = tail * std::f32::consts::SQRT_2;
+                for (ScriptMenuBubbleTail(j), mut t, mut t_border) in &mut tails {
+                    if j != i {
+                        continue;
+                    }
+                    t.width = Val::Px(side);
+                    t.height = Val::Px(side);
+                    // The chevron's tip `tail` past the outer edge (the child is placed from the
+                    // inside of the border).
+                    t.left = Val::Px(
+                        w - width + tail - side * std::f32::consts::FRAC_1_SQRT_2 - side / 2.,
+                    );
+                    t.top = Val::Px(h / 2. - width - side / 2.);
+                    t.border = UiRect {
+                        top: Val::Px(width),
+                        right: Val::Px(width),
+                        ..default()
+                    };
+                    *t_border = BorderColor::all(colour);
                 }
-                t.width = Val::Px(side);
-                t.height = Val::Px(side);
-                // The chevron's tip `tail` past the outer edge (the child is placed from the
-                // inside of the border).
-                t.left =
-                    Val::Px(w - width + tail - side * std::f32::consts::FRAC_1_SQRT_2 - side / 2.);
-                t.top = Val::Px(h / 2. - width - side / 2.);
-                t.border = UiRect {
-                    top: Val::Px(width),
-                    right: Val::Px(width),
-                    ..default()
-                };
-                *t_border = BorderColor::all(colour);
             }
         }
         if layer_route {
@@ -1961,8 +2014,9 @@ pub(crate) fn paint_script_menu(
                         radius: b.corner_radius * unit,
                         width: b.outline_width * BUBBLE_WIDTH_SCALE * unit,
                         tail: b.tail_size * unit,
+                        filled: b.filled,
                     },
-                    colour: BUBBLE_COLOUR,
+                    colour: bubble_colour(b, frame.colour),
                     image: None,
                 });
             }
@@ -2149,11 +2203,7 @@ pub(crate) fn paint_script_menu(
                 placed_at.get(label.item).copied().flatten(),
             ) {
                 let a = if focused { 1. } else { GAME_LABEL_ALPHA };
-                let colour = if bubbled[label.item] {
-                    BUBBLE_COLOUR
-                } else {
-                    [1., 1., 1., a * fade]
-                };
+                let colour = bubbled[label.item].unwrap_or([1., 1., 1., a * fade]);
                 prims[label.item].push(MenuPrim {
                     centre: centre * scale,
                     size: Vec2::new(img.width as f32, img.height as f32),
@@ -2166,8 +2216,7 @@ pub(crate) fn paint_script_menu(
             continue;
         }
         let a = if focused { 1. } else { LABEL_ALPHA };
-        image.color = if bubbled[label.item] {
-            let [r, g, b, a] = BUBBLE_COLOUR;
+        image.color = if let Some([r, g, b, a]) = bubbled[label.item] {
             Color::srgba(r, g, b, a * fade)
         } else {
             Color::srgba(1., 1., 1., a * fade)
@@ -2194,20 +2243,42 @@ pub(crate) fn paint_script_menu(
     }
 }
 
-/// D330: per placed item, whether it is text inside a speech bubble placed before it (the
-/// bubble's frame is placed before its children, part 81).
-fn in_bubble(placed: &[lbp_runtime::PlacedItem]) -> Vec<bool> {
+/// D330: per placed item, the colour of text inside a speech bubble placed before it (the
+/// bubble's frame is placed before its children, part 81): the outline's colour, or (D339)
+/// opaque white in a filled bubble (INFERRED by eye from the game frame's info bubble).
+fn in_bubble(placed: &[lbp_runtime::PlacedItem]) -> Vec<Option<[f32; 4]>> {
     placed
         .iter()
         .enumerate()
         .map(|(i, item)| {
-            matches!(item.kind, lbp_runtime::PlacedKind::Text { .. })
-                && placed[..i].iter().any(|b| {
-                    matches!(b.kind, lbp_runtime::PlacedKind::Bubble(_))
-                        && (0..2).all(|k| (item.centre[k] - b.centre[k]).abs() <= b.size[k] / 2.)
-                })
+            if !matches!(item.kind, lbp_runtime::PlacedKind::Text { .. }) {
+                return None;
+            }
+            placed[..i].iter().rev().find_map(|b| match &b.kind {
+                lbp_runtime::PlacedKind::Bubble(bubble)
+                    if (0..2).all(|k| (item.centre[k] - b.centre[k]).abs() <= b.size[k] / 2.) =>
+                {
+                    Some(if bubble.filled {
+                        [1.; 4]
+                    } else {
+                        BUBBLE_COLOUR
+                    })
+                }
+                _ => None,
+            })
         })
         .collect()
+}
+
+/// D339: a bubble's colour: the outline's, or a filled bubble's fill, the player's colour
+/// (FOUND, 0x7006c0: frame colour slot 1, the Gooey's player colour 0; MEASURED: the game
+/// frame's fill is 150, 221, 60, the default player colour).
+fn bubble_colour(b: &lbp_runtime::SpeechBubble, player: [f32; 4]) -> [f32; 4] {
+    if b.filled {
+        [player[0], player[1], player[2], 1.]
+    } else {
+        BUBBLE_COLOUR
+    }
 }
 
 /// An encoded colour and an alpha as a layer colour.
