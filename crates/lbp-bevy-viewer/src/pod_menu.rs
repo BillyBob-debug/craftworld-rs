@@ -840,6 +840,89 @@ fn info_bubble(
     items
 }
 
+/// D346 MEASURED (the game frame of the Story view with the owner's profile, 1280 x 720):
+/// the info bubble's tail tip sits on the badge card's right rim, about 15 pixels in from
+/// its edge at half its height. In the card's own space (x right, z up, the picture facing
+/// -Y) that is this point. INFERRED: the game ties the tip to the badge (0x701780's
+/// placement is not decoded); part 86's fixed offset from the title missed it by about
+/// 100 pixels at the viewer's scale.
+pub const INFO_BUBBLE_ON_CARD: Vec3 = Vec3::new(150., -55., 0.);
+
+/// D346: the first of the Story info bubble's items: the filled bubble [`info_bubble`]
+/// appends; its texts follow it.
+fn info_bubble_items(placed: &[lbp_runtime::PlacedItem]) -> Option<usize> {
+    placed
+        .iter()
+        .position(|p| matches!(&p.kind, lbp_runtime::PlacedKind::Bubble(b) if b.filled))
+}
+
+/// D346: moves the Story info bubble so its tail's tip is on the badge card
+/// ([`INFO_BUBBLE_ON_CARD`]) where the card is drawn, before the menu is painted. The
+/// pixels the tip must move are turned into menu units along the menu's own axes at the
+/// tip (twice, for the perspective).
+pub(crate) fn anchor_info_bubble(
+    mut menu: Option<ResMut<ScriptMenu>>,
+    display: Option<Res<crate::sackboy_play::LevelDisplay>>,
+    cameras: Query<(&Transform, &Projection), With<Camera3d>>,
+    windows: Query<&Window>,
+    things: Query<(&crate::thing_view::LevelThing, &GlobalTransform)>,
+) {
+    let Some(frame) = menu.as_mut().and_then(|m| m.0.as_mut()) else {
+        return;
+    };
+    let (Some(display), Ok((transform, projection)), Ok(window)) =
+        (display, cameras.single(), windows.single())
+    else {
+        return;
+    };
+    let Some(first) = info_bubble_items(&frame.placed) else {
+        return;
+    };
+    let card = things
+        .iter()
+        .find(|(t, _)| t.item.alternate && t.item.mesh == Some(crate::story_world::POLAROID_MESH));
+    let Some((_, card)) = card else {
+        return;
+    };
+    let size = Vec2::new(window.width(), window.height());
+    let clip_from_view = projection.get_clip_from_view() * transform.to_matrix().inverse();
+    let clip = clip_from_view
+        * card
+            .affine()
+            .transform_point3(INFO_BUBBLE_ON_CARD)
+            .extend(1.);
+    if clip.w <= 0. {
+        return;
+    }
+    let ndc = clip.truncate() / clip.w;
+    let target = Vec2::new((ndc.x + 1.) / 2. * size.x, (1. - ndc.y) / 2. * size.y);
+    let clip_from_world = clip_from_view * display.0;
+    for _ in 0..2 {
+        let item = &frame.placed[first];
+        let lbp_runtime::PlacedKind::Bubble(b) = &item.kind else {
+            return;
+        };
+        let tip = Vec2::new(
+            item.centre[0] - item.size[0] / 2. - b.tail_size,
+            item.centre[1],
+        );
+        let to = |p: Vec2| menu_to_screen(clip_from_world, frame.matrix, p, size).truncate();
+        let at = to(tip);
+        let jacobian = Mat2::from_cols(to(tip + Vec2::X) - at, to(tip + Vec2::Y) - at);
+        if jacobian.determinant().abs() < 1e-9 {
+            return;
+        }
+        let shift = jacobian.inverse() * (target - at);
+        if !shift.is_finite() {
+            return;
+        }
+        for p in &mut frame.placed[first..] {
+            p.centre[0] += shift.x;
+            p.centre[1] += shift.y;
+        }
+    }
+}
+
 /// D323 (part 74): the planets' coronas: FOUND (RenderDoc 6082 to 9601, ticks 600 to 619,
 /// closed and open Pod, with and without the menu) two additive draws after the copy back,
 /// one square each for the Earth and the Moon, facing the eye (its normal points at the

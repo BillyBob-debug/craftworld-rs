@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D345
+# Current state (overwrite each milestone) — after D346
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D345 the Story badge's frame colour (2026-10-17)
+## Latest: D346 the Story badge's medals and bubble (2026-10-17)
+- Part 93 (`docs/level-scripts/part-93.md`): the badge's overlay slots 1..12 (FOUND: GUIDs,
+  offsets on the card, SearchResultSlot flags); `--profile-records` `overlays` lines (written
+  by `scripts/rpcs3_profile_records.py`) pick them, so The Cosmos's card shows the gold ace,
+  finish and collect medals. The info bubble's tail is pinned to the card's right rim.
+
+## D345 the Story badge's frame colour (2026-10-17)
 - Part 92 (`docs/level-scripts/part-92.md`): the badge's frame group (a solid grey; neither
   of the card's gmats has a ThingColor box) is multiplied by the profile's first colour from
   `--profile-records`, so the frame is gold as in the game. Left out: the light mat inside

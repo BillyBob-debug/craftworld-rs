@@ -151,6 +151,9 @@ pub fn parse_progression_flags(text: &str) -> Result<u32, String> {
 ///
 /// D342 (part 89): a line `colours C0 C1 C2 C3` (hex 0xAARRGGBB words) gives the
 /// profile's four colours ([`ProfileRecords::colours`]).
+///
+/// D346 (part 93): a line `overlays TYPE ID MASK` (MASK hex) gives the overlay slots a
+/// slot's badge shows ([`ProfileRecords::overlays`]).
 pub fn parse_profile_records(text: &str) -> Result<ProfileRecords, String> {
     let mut profile = ProfileRecords::default();
     for (n, line) in text.lines().enumerate() {
@@ -170,6 +173,13 @@ pub fn parse_profile_records(text: &str) -> Result<ProfileRecords, String> {
                 .try_into()
                 .map_err(|_| bad(&"expected colours C0 C1 C2 C3"))?;
             profile.colours = Some(colours);
+            continue;
+        }
+        if let ["overlays", ty, id, mask] = words[..] {
+            let int = |w: &str| w.parse::<i32>().map_err(|e| bad(&e));
+            let digits = mask.strip_prefix("0x").unwrap_or(mask);
+            let mask = u16::from_str_radix(digits, 16).map_err(|e| bad(&e))?;
+            profile.overlays.insert((int(ty)?, int(id)?), mask);
             continue;
         }
         let [ty, id, collected, total] = words[..] else {
@@ -198,6 +208,10 @@ pub struct ProfileRecords {
     /// profile in RPCS3): that record is the same object the player record points at
     /// (+0x16c), so its first colour is the player's.
     pub colours: Option<[u32; 4]>,
+    /// D346: by `SlotID`, bit `n` set for each badge overlay slot `n` (1..12: padlock,
+    /// finish, played, collect, ace, heart, playlist, rosette, versus, cutscene, lbp1,
+    /// move) the game shows, read from its badge results in a running game.
+    pub overlays: BTreeMap<(i32, i32), u16>,
 }
 
 #[cfg(test)]
@@ -213,6 +227,7 @@ mod tests {
         assert_eq!(records.goodies.len(), 2);
         assert_eq!(records.colours, None);
         assert!(parse_profile_records("0 1 2").is_err());
+        assert!(records.overlays.is_empty());
         assert!(parse_profile_records("0 1 5 4").is_err());
         assert!(parse_profile_records("0 x 1 1").is_err());
     }
@@ -231,6 +246,19 @@ mod tests {
         assert_eq!(records.goodies.len(), 1);
         assert!(parse_profile_records("colours 0xff 0xff 0xff").is_err());
         assert!(parse_profile_records("colours 0xff 0xff 0xff zz").is_err());
+    }
+
+    #[test]
+    fn d346_profile_overlays_line() {
+        let records = parse_profile_records(
+            "overlays 4 7 0x34
+0 1 0 0
+",
+        )
+        .unwrap();
+        assert_eq!(records.overlays.get(&(4, 7)), Some(&0x34));
+        assert_eq!(records.goodies.len(), 1);
+        assert!(parse_profile_records("overlays 4 7 zz").is_err());
     }
 
     #[test]

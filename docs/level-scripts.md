@@ -96,6 +96,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 90: the Story view's badge card (2026-10-17, D343)](level-scripts/part-90.md)
 - [Part 91: the Story badge's size (2026-10-17, D344)](level-scripts/part-91.md)
 - [Part 92: the Story badge's frame colour (2026-10-17, D345)](level-scripts/part-92.md)
+- [Part 93: the Story badge's medals and the info bubble's place (2026-10-17, D346)](level-scripts/part-93.md)
 
 ## Next
 

@@ -467,7 +467,9 @@ pub fn install(app: &mut App) -> Result<(), String> {
             // a missing key and a bubble shows no close prompt.
             let (strings, _) = lbp_preview::story::load_strings(&source, &catalog, &control);
             // D342: the profile's colours, when the file gives them, colour the players.
-            let lbp_runtime::ProfileRecords { goodies, colours } = profile;
+            let lbp_runtime::ProfileRecords {
+                goodies, colours, ..
+            } = profile;
             world.profile_goodies = goodies;
             world.set_profile_colour(colours);
             world.translations = [strings.patch, strings.base]
@@ -626,6 +628,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             follow_dissolve,
             layer_depths,
             crate::pod_menu::paint_coronas,
+            crate::pod_menu::anchor_info_bubble,
             crate::pod_menu::paint_script_menu,
         )
             .chain()
