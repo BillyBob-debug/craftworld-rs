@@ -14,6 +14,11 @@ An item without a GUID is checked elsewhere (*(profile+0x518), not followed): co
 not owned here.
 D342: the profile's colours, *(profile+0x514) words +0x4c..+0x58 (0x18ae48, 0x15894c), go
 on a line `colours C0 C1 C2 C3`.
+D346: with the Story view (or any planet) up, each planet result's shown badge overlays go
+on a line `overlays TYPE ID MASK`. A planet object holds its radius (1750.0) at +0x1c and
+its results at +0xf8 (count +0xfc, 0x2c0 bytes each); a result's overlay k (0..12) is
+shown while its scale target (+0x68 + 12k, 0x6fba24) is above 0; its SearchResultSlot
+*(result+0x30) holds the SlotID at +0x7c / +0x80 (MEASURED: Earth's six groups, 4 22..27).
 """
 import ctypes, ctypes.wintypes as wt, os, struct, subprocess, sys
 
@@ -32,6 +37,33 @@ def rpcs3_pid():
     if 'rpcs3.exe' not in out:
         sys.exit('RPCS3 is not running')
     return int(out.split(',')[1].strip('"'))
+
+
+def planet_overlays(blk, u32):
+    """D346: `overlays` lines from the planet results in guest 0x30000000..0x40000000."""
+    lines, step, radius = {}, 1 << 20, struct.pack('>f', 1750.0)
+    for base in range(0x30000000, 0x40000000, step):
+        try:
+            d = blk(base, step)
+        except OSError:
+            continue
+        j = d.find(radius)
+        while j >= 0:
+            try:
+                res, cnt = struct.unpack('>II', blk(base + j - 0x1c + 0xf8, 8))
+                ok = j % 4 == 0 and 0 < cnt < 100 and 0x10000 < res < 0x40000000
+                for i in range(cnt if ok else 0):
+                    r = res + i * 0x2c0
+                    scales = [struct.unpack('>f', blk(r + 0x68 + 12 * k, 4))[0] for k in range(13)]
+                    slot = u32(r + 0x30)
+                    if 0x10000 < slot < 0x40000000:
+                        ty, sid = struct.unpack('>ii', blk(slot + 0x7c, 8))
+                        mask = sum(1 << k for k in range(1, 13) if scales[k] > 0)
+                        lines[(ty, sid)] = f'overlays {ty} {sid} 0x{mask:x}'
+            except OSError:
+                pass
+            j = d.find(radius, j + 1)
+    return [lines[k] for k in sorted(lines)]
 
 
 def main(out):
@@ -77,6 +109,7 @@ def main(out):
                 total += 1
                 collected += (ity & 0x7fffffff, guid, it[4:24]) in owned
         lines.append(f'{ty} {sid} {collected} {total}')
+    lines += planet_overlays(blk, u32)
     with open(out, 'w', newline='\n') as f:
         f.write('\n'.join(lines) + '\n')
     print(f'{n} records -> {out}')

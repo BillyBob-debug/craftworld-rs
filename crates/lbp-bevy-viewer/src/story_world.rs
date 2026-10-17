@@ -181,6 +181,34 @@ pub const BADGE_FRAME_GROUP: usize = 1;
 /// 0.18 (0x16afb0, which only seeds a settings block).
 pub const GROUP_BADGE_ANGLE: f32 = 0.27;
 
+/// D346 FOUND (01.33): a badge's overlay slots 1..12, the medals and marks drawn on it.
+/// Each slot's mesh is a TOC GUID (r2+0x6c98 down to r2+0x6c6c, the wrappers at
+/// 0x6fcd30..0x6fcf98 into 0x6fca08), and its place on the polaroid is the second column
+/// of the 13 x 2 table 0x6fe398 builds (0xe535b0, read by 0x6fe974): an offset in the
+/// card's own space (the picture faces -Y). Slots 1 and 8..10 sit at the card's origin.
+pub const BADGE_OVERLAYS: [(u32, [f32; 3]); 12] = [
+    (0x0000_0eb1, [0., 0., 0.]),         // 1 padlock
+    (0x0000_d12f, [0., -20., -200.]),    // 2 medal_finish
+    (0x0001_3890, [0., -20., -200.]),    // 3 medal_played
+    (0x0000_d12d, [150., -40., -150.]),  // 4 medal_collect
+    (0x0000_d12e, [-150., -10., -150.]), // 5 medal_ace
+    (0x0000_d16d, [-150., -10., -50.]),  // 6 medal_heart
+    (0x0001_52b0, [150., -10., -50.]),   // 7 medal_playlist
+    (0x0001_3ee0, [0., 0., 0.]),         // 8 badge_rosette
+    (0x0002_2f20, [0., 0., 0.]),         // 9 badge_versus
+    (0x0002_2f1f, [0., 0., 0.]),         // 10 badge_cutscene
+    (0x0002_3a8c, [-150., -40., 150.]),  // 11 medal_lbp1
+    (0x0002_edc4, [150., -20., 150.]),   // 12 medal_move
+];
+
+/// D346 FOUND (0x6fe974, constants r2+0x6c68, r2+0x6dd4): each overlay turns about the
+/// card's Y (its depth axis, so an in-plane tilt) by a random spin in [-1, 1] times pi/8.
+/// The viewer's spin is a fixed hash of the slot, not the game's random draw.
+pub fn overlay_spin(slot: usize) -> f32 {
+    let h = (slot as u32 + 1).wrapping_mul(0x9e37_79b9) >> 16;
+    ((h % 2001) as f32 / 1000. - 1.) * std::f32::consts::FRAC_PI_8
+}
+
 /// D343: the default result's badge: the polaroid with its slot's icon, and where it sits.
 pub struct Badge {
     pub mesh: lbp_preview::GroupedMesh,
@@ -191,6 +219,8 @@ pub struct Badge {
     pub icon: Result<String, String>,
     /// D345: whether the frame took the profile's colour (`None`: no colour given).
     pub frame: Option<Result<(), String>>,
+    /// D346: the overlays shown (slot 1..12 and mesh), or why one was left out.
+    pub overlays: Vec<(usize, Result<lbp_preview::GroupedMesh, String>)>,
 }
 
 /// D343: loads the polaroid badge of story slot `slot` (a group: [`GROUP_BADGE_ANGLE`]),
@@ -199,7 +229,8 @@ pub struct Badge {
 /// colour, which the game's badge instance holds at +0x10 and +0x14, part 91 MEASURED)
 /// multiplies the frame's solid colour ([`BADGE_FRAME_GROUP`]). INFERRED: neither of the
 /// card's gmats has a ThingColor box, so the game applies it outside the material graph;
-/// the picture group is left untinted.
+/// the picture group is left untinted. D346: `overlays` has bit `n` set for each overlay
+/// slot `n` (1..12, [`BADGE_OVERLAYS`]) the game shows on this badge.
 pub fn load_badge(
     source: &lbp_catalog::attachment::AttachedSource,
     catalog: &lbp_catalog::Catalog,
@@ -207,6 +238,7 @@ pub fn load_badge(
     options: lbp_preview::PreviewOptions,
     slot: &lbp_level::slots::Slot,
     colour: Option<u32>,
+    overlays: u16,
 ) -> Result<Badge, String> {
     let key = lbp_preview::resolve(catalog, Some(POLAROID_MESH), None)?;
     let mut mesh =
@@ -229,12 +261,30 @@ pub fn load_badge(
             lbp_preview::level_scene::editor_color_tint(c),
         )
     });
+    let overlays = (1..=BADGE_OVERLAYS.len())
+        .filter(|n| overlays & (1 << n) != 0)
+        .map(|n| {
+            let guid = BADGE_OVERLAYS[n - 1].0;
+            let mesh = lbp_preview::resolve(catalog, Some(guid), None).and_then(|key| {
+                lbp_preview::load_mesh_groups_with_overrides(
+                    source,
+                    catalog,
+                    &key,
+                    control,
+                    options,
+                    &[],
+                )
+            });
+            (n, mesh)
+        })
+        .collect();
     Ok(Badge {
         mesh,
         location: slot.location,
         angle: GROUP_BADGE_ANGLE,
         icon,
         frame,
+        overlays,
     })
 }
 
@@ -286,39 +336,74 @@ pub fn add_badge(
         .ok_or("the Pod's Earth Thing has no POS")?;
     let (scale, rotation, _) = Mat4::from_cols_array(&thing).to_scale_rotation_translation();
     let world = Mat4::from_scale_rotation_translation(scale, rotation, translation) * local;
-    let payload = ScenePayload::Model(Box::new(badge.mesh));
-    scene.meshes.push(level_scene::SceneMesh {
-        source: MeshSource::Guid(POLAROID_MESH),
-        bounds: level_scene::payload_bounds(&payload),
-        payload,
-        neutral_groups: false,
-    });
-    scene.items.push(level_scene::SceneItem {
-        mesh: scene.meshes.len() - 1,
-        world: world.to_cols_array(),
-        thing: globe,
-        uid: None,
-        shapes: 0,
-        decoration: false,
-        alternate: true,
-    });
-    let card = scene.meshes.last().and_then(|m| m.bounds);
+    let mut push = |source: u32, mesh: lbp_preview::GroupedMesh, world: Mat4| {
+        let payload = ScenePayload::Model(Box::new(mesh));
+        scene.meshes.push(level_scene::SceneMesh {
+            source: MeshSource::Guid(source),
+            bounds: level_scene::payload_bounds(&payload),
+            payload,
+            neutral_groups: false,
+        });
+        scene.items.push(level_scene::SceneItem {
+            mesh: scene.meshes.len() - 1,
+            world: world.to_cols_array(),
+            thing: globe,
+            uid: None,
+            shapes: 0,
+            decoration: false,
+            alternate: true,
+        });
+        scene.meshes.last().and_then(|m| m.bounds)
+    };
+    let card = push(POLAROID_MESH, badge.mesh, world);
+    // D346: each overlay at its offset in the card's space, turned about the card's Y.
+    let mut overlays = Vec::new();
+    for (n, mesh) in badge.overlays {
+        let (guid, at) = BADGE_OVERLAYS[n - 1];
+        overlays.push((
+            n,
+            mesh.map(|m| {
+                push(guid, m, world * overlay_matrix(n, at));
+            }),
+        ));
+    }
     Ok(BadgeBounds {
         earth,
         card,
         centre: translation,
         at: world.w_axis.truncate(),
+        overlays,
     })
 }
 
+/// D346: the overlays for the `Story badge` line: each slot drawn, or why not.
+pub fn overlays_line(overlays: &[(usize, Result<(), String>)]) -> String {
+    if overlays.is_empty() {
+        return "none".into();
+    }
+    let each = overlays.iter().map(|(n, r)| match r {
+        Ok(()) => format!("{n} {:08x}", BADGE_OVERLAYS[n - 1].0),
+        Err(e) => format!("{n} not drawn ({e})"),
+    });
+    each.collect::<Vec<_>>().join(", ")
+}
+
+/// D346: overlay slot `n`'s matrix in the card's space: its offset, then its spin about
+/// Y ([`overlay_spin`]). The game's scale spring settles at 1 (r2+0x6c48) for a shown slot.
+pub fn overlay_matrix(n: usize, at: [f32; 3]) -> Mat4 {
+    Mat4::from_translation(Vec3::from(at)) * Mat4::from_rotation_y(overlay_spin(n))
+}
+
 /// D343: the Earth model and the badge, for the load's line.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub struct BadgeBounds {
     pub earth: Option<[[f32; 3]; 2]>,
     pub card: Option<[[f32; 3]; 2]>,
     /// The Earth model's and the badge's places in the level.
     pub centre: Vec3,
     pub at: Vec3,
+    /// D346: the overlay slots drawn, or why one was not.
+    pub overlays: Vec<(usize, Result<(), String>)>,
 }
 
 /// D336: a draw entity of the backdrop Thing: the Pod world's own backdrop, or the
@@ -367,6 +452,21 @@ pub fn wanted(item: &crate::thing_view::Item, globe: u32, open: bool) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn d346_overlays_sit_on_the_card() {
+        // Finish below the picture, ace and collect at its bottom corners.
+        let at = |n: usize| overlay_matrix(n, BADGE_OVERLAYS[n - 1].1).w_axis.truncate();
+        assert_eq!(at(2), Vec3::new(0., -20., -200.));
+        assert_eq!(at(5).x, -150.);
+        assert_eq!(at(4).x, 150.);
+        for n in 1..=12 {
+            assert!(overlay_spin(n).abs() <= std::f32::consts::FRAC_PI_8);
+            // The spin is about Y: the card's depth axis stays put.
+            let y = overlay_matrix(n, [0.; 3]).transform_vector3(Vec3::Y);
+            assert!((y - Vec3::Y).length() < 1e-6);
+        }
+    }
 
     #[test]
     fn d343_badge_matrix_is_the_games_basis() {
