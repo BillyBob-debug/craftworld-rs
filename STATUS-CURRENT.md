@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D336
+# Current state (overwrite each milestone) — after D337
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,15 +11,19 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D336 the Story backdrop and its lighting (2026-10-16)
+## Latest: D337 the Story globe's jelly on the glass route (2026-10-16)
+- Part 84 (`docs/level-scripts/part-84.md`): `proc_victoria_jelly_glassy` (0x1a6f5) takes
+  the glass route (opacity 1, rim in full); a static gloss colour above 1 no longer drops a
+  material's whole surface in lbp-preview.
+- FOUND: the globe's black continents are the AO overlays `cloth_earth_land_ao` /
+  `cloth_earth_sea_ao` (black on port 0, texture x 0.8 alpha on port 1), drawn opaque.
+- Next: D338 the AO overlays blended by their port-1 alpha; the badge card and bubble.
+
+## D336 the Story backdrop and its lighting (2026-10-16)
 - Part 83 (`docs/level-scripts/part-83.md`): while Story is up the viewer swaps the Pod's
   backdrop for The Cosmos's own (0xdb2c4, FOUND) and lights the Pod world with that
   backdrop plan's preset under The Cosmos's PWorld factors (0xda074, FOUND). With
   `--lbp-lighting` the room fades to dark with coloured dots as in the game.
-- FOUND: gmat 108277 (copper continents) is `proc_victoria_jelly_glassy`, the glass program
-  family (x6 specular/rim/reflection after the sqrt); the viewer's glass route is
-  `window_glassy` only.
-- Next: the copper continents on the glass route; the group's badge card and bubble.
 - D331 (part 82): Story turns Earth to The Cosmos; Story never zooms (view 6).
 - D330 (part 81): the Story title's speech bubble.
 

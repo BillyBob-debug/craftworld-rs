@@ -174,7 +174,8 @@ pub struct SecondTexture {
     dissolve_island: Option<Handle<Image>>,
     /// D286: clear glass. x = the output alpha (0 = not glass: alpha 1, colour as is), y =
     /// the green the dissolve's edge takes in place of the surface colour's. D287: z = the
-    /// scale of the specular added after the alpha (the game's fc45).
+    /// scale of the specular added after the alpha (the game's fc45). D337: w = the weight
+    /// of the specular's rim term.
     #[uniform(145)]
     glass: Vec4,
     /// D314: the sun as a point (xyz, display world position; w = 1 when on): the light
@@ -515,8 +516,15 @@ pub fn tinted(material: &ViewerMaterial) -> bool {
 /// place of the surface colour's green. D287: the colour is that alpha times the encoded
 /// lit colour plus `specular` times the gloss (added after the alpha, as the game does),
 /// written for `AlphaMode::Premultiplied` through [`glass_blend`].
-pub fn enable_glass(material: &mut ViewerMaterial, opacity: f32, green: f32, specular: f32) {
-    material.extension.glass = Vec4::new(opacity, green, specular, 0.);
+/// D337: `rim` weighs the specular's rim term (0.5 for `window_glassy`, 1 for the jelly).
+pub fn enable_glass(
+    material: &mut ViewerMaterial,
+    opacity: f32,
+    green: f32,
+    specular: f32,
+    rim: f32,
+) {
+    material.extension.glass = Vec4::new(opacity, green, specular, rim);
 }
 /// D287: the two encoded destination values the glass's blend is exact at
 /// ([`glass_blend`]); chosen on the captured frame's and the viewer's room pixels. The
@@ -616,6 +624,11 @@ pub fn glass(material: &ViewerMaterial) -> Option<f32> {
 #[cfg(test)]
 pub fn glass_specular_scale(material: &ViewerMaterial) -> f32 {
     material.extension.glass.z
+}
+/// D337: the weight of the glass's rim term (0 when the material is not glass).
+#[cfg(test)]
+pub fn glass_rim(material: &ViewerMaterial) -> f32 {
+    material.extension.glass.w
 }
 /// D278: what [`set_dissolve`] writes. See the fields of the same names above.
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -893,7 +906,8 @@ fn gloss_term(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>, tint: vec3<f3
     return 2.0 * w * factor * spec;
 }
 // D287 (part 38): the glass's specular (the captured program, LBP mode only): light^2 x
-// (pow(saturate(R.L), CosinePower) + saturate(rim / 2)) x gloss colour x glass.z, added
+// (pow(saturate(R.L), CosinePower) + saturate(rim x glass.w)) x gloss colour x glass.z
+// (D337: glass.w is 1/2 for window_glassy, 1 for the jelly), added
 // to the encoded output after the alpha; no shadow (none bound in the game's draw).
 fn glass_specular(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>) -> vec3<f32> {
     if light_dir.w < 1.5 || gloss.w <= 0.0 || dot(n, n) <= 0.0 {
@@ -901,7 +915,7 @@ fn glass_specular(n: vec3<f32>, to_view: vec3<f32>, factor: vec3<f32>) -> vec3<f
     }
     let rim = pow(clamp(dot(n, -to_view) + 0.9, 0.0, 1.0), 2.0);
     let r = reflect(-to_view, n);
-    let spec = pow(clamp(dot(r, frag_toward), 0.0, 1.0), gloss.w) + clamp(rim * 0.5, 0.0, 1.0);
+    let spec = pow(clamp(dot(r, frag_toward), 0.0, 1.0), gloss.w) + clamp(rim * glass.w, 0.0, 1.0);
     return glass.z * gloss.rgb * factor * spec;
 }
 // D287: sRGB transfer of the viewer's target, clamped to 0..1.
@@ -1538,9 +1552,9 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
             ..Default::default()
         };
         super::set_dissolve(&mut m, Some(&d));
-        super::enable_glass(&mut m, 0.2, 0.117_65, 6.);
+        super::enable_glass(&mut m, 0.2, 0.117_65, 6., 0.5);
         assert_eq!(super::glass(&m), Some(0.2));
-        assert_eq!(m.extension.glass, Vec4::new(0.2, 0.117_65, 6., 0.));
+        assert_eq!(m.extension.glass, Vec4::new(0.2, 0.117_65, 6., 0.5));
         assert_eq!(super::dissolve(&m).as_ref(), Some(&d));
         assert_eq!(m.extension.dissolve_params.x, 1.);
     }
@@ -1757,7 +1771,7 @@ fn main_pass_post_lighting_processing(p: PbrInputStub, c: vec4<f32>) -> vec4<f32
         use bevy::render::render_resource::{BlendFactor, BlendOperation};
         let mut m = super::material(StandardMaterial::default());
         assert!(!super::SecondTextureKey::from(&m.extension).glass);
-        super::enable_glass(&mut m, 0.2, 0.117_65, 6.);
+        super::enable_glass(&mut m, 0.2, 0.117_65, 6., 0.5);
         assert!(super::SecondTextureKey::from(&m.extension).glass);
         let blend = super::glass_dual_color_blend();
         assert_eq!(blend.src_factor, BlendFactor::One);
