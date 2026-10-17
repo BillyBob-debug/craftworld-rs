@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D400 the Popit card from the game's script (2026-10-17)
+## Latest: D401 Popit pages picked by the game's script (2026-10-17)
+- Popit part 2 (`docs/d401-popit-pages-from-script.md`): the viewer runs
+  `Poppet.DoMainMenuButtonResponse` per button in create and play mode and opens the inventory
+  page of the collection the script pushes (create 0:1, 1:2, 4:4, 5:3, 6:0, 10:8; play the
+  same without the Goodies Bag). Page contents stay MEASURED (`DoInventoryGrid` is native).
+
+## D400 the Popit card from the game's script (2026-10-17)
 - Popit part 1 (`docs/d400-popit-script-card.md`): the viewer runs `Poppet.DoMainMenu` on the
   Gooey host with a single-player create session pinned and takes the card's rows, icons
   (new `ATXb` animated-texture reader), tooltip keys, focus and pitch from it; same card as
@@ -115,7 +121,7 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 
 ## Next
 1. Emote clip frames vs game.
-2. Popit: inventory grid pages (submode 11) from the script, cursor mode, more frames.
+2. Popit: page titles per collection, pod button condition, focus tile from highlight sizing.
 3. Camera lead, slopes (paused by the owner).
 
 ## Environment

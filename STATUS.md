@@ -6216,3 +6216,13 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
   Compared with RPCS3 frame 12:56:43 (create): same buttons, icons, focus and pill.
 - Checks: fmt; Clippy -D warnings lbp-resource, lbp-ui-script, lbp-bevy-viewer; tests
   lbp-resource, lbp-ui-script, lbp-script-vm.
+
+## D401 - Popit part 2: pages picked by the Poppet script, PR (2026-10-17)
+
+- `lbp_ui_script::popit::run_responses` runs `DoMainMenuButtonResponse(gooey, index)` per
+  button and reads `SendSimpleMessage(37, collection)` from the trace: create
+  {0: 1, 1: 2, 4: 4, 5: 3, 6: 0, 10: 8}, play the same without 1 (`poppet/error`).
+- Viewer: pages keyed by collection, opened only where the mode's run opens them; the
+  table is the fallback. `ui_trace ... Poppet popit-pages` prints the map.
+- `UpdateUI` frame 1 chrome and the `DoTitleBox` / `DoSectionBreak` constants recorded
+  in the doc (not used yet).

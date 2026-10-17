@@ -19,6 +19,7 @@
 use bevy::prelude::*;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::story::{decode_icon, load_strings, ResourceKey};
+use std::collections::BTreeMap;
 
 /// Seconds for the open/close blend: 10 ticks at 30 Hz.
 const BLEND_SECONDS: f32 = 10. / 30.;
@@ -123,6 +124,8 @@ pub(crate) struct PopitAssets {
     square: Image,
     close: String,
     pages: Vec<PageData>,
+    /// D401: create and play mode, button -> the inventory collection it opens.
+    opens: [BTreeMap<u32, i32>; 2],
 }
 
 /// One inventory page behind a main-menu button: title and the first icons by category.
@@ -139,22 +142,27 @@ struct PageData {
     kits: Vec<(String, Image)>,
 }
 
-/// Buttons that open an inventory page: (button, panel title, plan page, empty message).
-const PAGES: [(u32, &str, Option<&str>, Option<&str>); 6] = [
-    (6, "Body", Some("costume"), None),
-    (0, "Stickers", Some("sticker"), None),
+/// Inventory pages by collection (`InventoryCollection.EInventoryCollection`, the argument
+/// of `Poppet.PushSubModeInventory`): (collection, panel title, plan page, empty message).
+/// The titles and contents are drawn by the native `DoInventoryGrid` (MEASURED).
+const PAGES: [(i32, &str, Option<&str>, Option<&str>); 6] = [
+    (0, "Body", Some("costume"), None),
+    (1, "Stickers", Some("sticker"), None),
     // MEASURED 2026-10-11 18:50: Goodies Bag opens "Community Objects", Personal opens
     // "Tools and Used Objects", Tools Bag opens the Sounds list.
     (
-        1,
+        2,
         "Community Objects",
         None,
         Some("Get your friends to send you objects, and they'll appear here."),
     ),
-    (5, "Tools", None, None),
+    (3, "Tools", None, None),
     (4, "Tools and Used Objects", None, None),
-    (10, "My Pods", None, None),
+    (8, "My Pods", None, None),
 ];
+/// Fallback button -> collection (create mode; play mode lacks the Goodies Bag, 1), equal
+/// to the D401 run of `Poppet.DoMainMenuButtonResponse`.
+const FALLBACK_OPENS: [(u32, i32); 6] = [(0, 1), (1, 2), (4, 4), (5, 3), (6, 0), (10, 8)];
 const PERSONAL_BUTTON: u32 = 4;
 /// Function tile icons (MEASURED 2026-10-11 frames; tile order and names from the tooltips):
 /// (label, texture GUID of the 64x64 field icon). Popit Cursor comes from the button sheet;
@@ -504,13 +512,19 @@ pub(crate) fn load_assets(
     control: &LoadControl,
 ) -> Result<PopitAssets, String> {
     let (strings, _) = load_strings(source, catalog, control);
-    let (cards, mut card_source, icons) = match script_cards(source, catalog, control) {
-        Ok((c, note, icons)) => (c, note, icons),
-        Err(e) => (
-            fallback_cards(),
-            format!("fallback constants ({e})"),
-            Default::default(),
-        ),
+    let (cards, mut card_source, icons, opens) = match script_cards(source, catalog, control) {
+        Ok((c, note, icons, opens)) => (c, note, icons, opens),
+        Err(e) => {
+            let edit: BTreeMap<u32, i32> = FALLBACK_OPENS.into_iter().collect();
+            let mut play = edit.clone();
+            play.remove(&1);
+            (
+                fallback_cards(),
+                format!("fallback constants ({e})"),
+                Default::default(),
+                [edit, play],
+            )
+        }
     };
     let mut items = Vec::new();
     let mut from_script = 0;
@@ -547,7 +561,11 @@ pub(crate) fn load_assets(
     }
     let popit = lbp_preview::popit::load_popit(source, catalog, control)?;
     let mut pages = Vec::new();
-    for (id, title, plan_page, message) in PAGES {
+    for (&id, collection) in &opens[0] {
+        let Some(&(_, title, plan_page, message)) = PAGES.iter().find(|pg| pg.0 == *collection)
+        else {
+            continue;
+        };
         let mut sections: Vec<(String, Vec<(String, Image)>)> = Vec::new();
         let mut taken = 0;
         if let Some(name) = plan_page {
@@ -743,6 +761,7 @@ pub(crate) fn load_assets(
         square: image_from(64, 64, square),
         close,
         pages,
+        opens,
     })
 }
 
@@ -814,7 +833,7 @@ fn script_cards(
     let (vm, class, script) = poppet_vm(source, catalog, control)?;
     let mut vm = vm;
     let mut out = Vec::new();
-    let mut icons = std::collections::BTreeMap::new();
+    let mut icons = BTreeMap::new();
     for edit in [true, false] {
         let (card, keys) = lbp_ui_script::popit::run_card(&mut vm, class, &script, edit)?;
         for b in card.rows.iter().flatten() {
@@ -841,18 +860,30 @@ fn script_cards(
     }
     let play = out.pop().expect("two cards");
     let edit = out.pop().expect("two cards");
+    // D401: what each button opens, from `Poppet.DoMainMenuButtonResponse`.
+    let mut opens = [true, false]
+        .map(|edit| lbp_ui_script::popit::run_responses(&mut vm, class, &script, edit, 0..=10));
+    if opens[0].is_empty() {
+        return Err("DoMainMenuButtonResponse opened no inventory page".into());
+    }
+    // A page the viewer has no title for stays closed.
+    for o in &mut opens {
+        o.retain(|_, c| PAGES.iter().any(|pg| pg.0 == *c));
+    }
     let note = format!(
-        "script Poppet.DoMainMenu: create {:?} focus {}, play {:?} focus {}, pitch {:.1} px",
-        edit.0, edit.1, play.0, play.1, edit.2
+        "script Poppet.DoMainMenu: create {:?} focus {}, play {:?} focus {}, pitch {:.1} px; \
+         pages (button: collection) create {:?}, play {:?}",
+        edit.0, edit.1, play.0, play.1, edit.2, opens[0], opens[1]
     );
-    Ok(([edit, play], note, icons))
+    Ok(([edit, play], note, icons, opens))
 }
 
 /// Both cards, a note for the log, and per button (sheet GUID, cell px, frames, LAMS key).
 type ScriptCards = (
     [(Vec<Vec<u32>>, u32, f32); 2],
     String,
-    std::collections::BTreeMap<u32, (u32, u32, u32, u32)>,
+    BTreeMap<u32, (u32, u32, u32, u32)>,
+    [BTreeMap<u32, i32>; 2],
 );
 
 /// A VM with every catalog script loaded, and the `Poppet` class.
@@ -1006,7 +1037,8 @@ fn popit_input(
         p.cursor = Some(CURSOR_START);
         return;
     }
-    if confirm && PAGES.iter().any(|(id, ..)| *id == p.focus) {
+    let mode = usize::from(p.mode == Mode::Play);
+    if confirm && assets.opens[mode].contains_key(&p.focus) {
         p.page = Some(p.focus);
         p.cell = (0, 0);
         return;
