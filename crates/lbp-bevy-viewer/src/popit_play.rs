@@ -958,6 +958,7 @@ fn popit_input(
     mut p: ResMut<Popit>,
     mut sackboy: Query<&mut lbp_sim::character::SackboyBody>,
     assets: Res<PopitAssets>,
+    pod: Option<Res<crate::sackboy_play::PodSackboy>>,
 ) {
     let pad = pads.iter().next();
     if let Some(at) = p.cursor {
@@ -991,7 +992,11 @@ fn popit_input(
         }
         return;
     }
-    if keys.just_pressed(KeyCode::KeyZ) || pad.is_some_and(|g| g.just_pressed(GamepadButton::West))
+    // D403: in the Pod's pad zone (or at the pod computer) Square is the pod computer's.
+    let at_computer = !p.open && pod.is_some_and(|s| s.at_computer);
+    if !at_computer
+        && (keys.just_pressed(KeyCode::KeyZ)
+            || pad.is_some_and(|g| g.just_pressed(GamepadButton::West)))
     {
         p.open = !p.open;
     }

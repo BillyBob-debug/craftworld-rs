@@ -901,6 +901,20 @@ fn step(
             // spawned there is no Sackboy in the session.
             if let Some((at, grounded)) = pod.at {
                 let (thing, new) = stand_sackboy(&mut shell.host.world, &mut shell.sackboy, at);
+                // D403: the pad zone as the tick before left the triggers' lists.
+                let world = &shell.host.world;
+                let at_computer = world.pod_computer_in_use || world.in_pad_zone(thing);
+                if pod.at_computer != at_computer {
+                    pod.at_computer = at_computer;
+                    println!(
+                        "Pod Sackboy before tick {next}: Square is {}",
+                        if at_computer {
+                            "the pod computer's engage button"
+                        } else {
+                            "the Popit's (D403)"
+                        }
+                    );
+                }
                 if new {
                     println!(
                         "Pod Sackboy before tick {next}: Thing {thing} of the shell level, the viewer's own Sackboy at {at:.1?} ({}); his place is handed to the shell level before every tick, z span {:.0} to {:.0} (absolute world z, FOUND constants of the 01.33 creature update) for the triggers' layer rule; the pad zone wants him in the pod computer trigger's list and z at least {PAD_ZONE_MIN_Z}",
