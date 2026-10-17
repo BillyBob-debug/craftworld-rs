@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D341
+# Current state (overwrite each milestone) — after D342
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,12 +11,19 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D341 the profile's per-slot records (2026-10-17)
+## Latest: D342 the profile's colour (2026-10-17)
+- Part 89 (`docs/level-scripts/part-89.md`): the Story view's Gooey takes the local profile's
+  colours each frame (FOUND 0x4381d8, `*(profile+0x514)` +0x4c..); `--profile-records` now
+  carries them (`colours` line) and the viewer's bubble is the owner's yellow. The green was a
+  new profile's default.
+- FOUND for next: the planet badge is a mesh (`cosmos_polaroid.mol` 0x6a1a etc., result+0x220)
+  with the slot icon in mesh 0's texture slot (0x6fe974).
+
+## D341 the profile's per-slot records (2026-10-17)
 - Part 88 (`docs/level-scripts/part-88.md`): the save is encrypted, so
   `scripts/rpcs3_profile_records.py` reads the local profile's per-slot records from LBP2 in
   RPCS3 (FOUND chain 0xE4F800 / 0xE50A04, records profile+0x280, owned list +0x78) and the
   viewer's `--profile-records PATH` shows the goodies row from them.
-- Open: the Gooey's green player colour is not the player's first colour (a yellow).
 
 ## D340 the info bubble's goodies row (2026-10-16)
 - Part 87 (`docs/level-scripts/part-87.md`): a story level or group's bubble adds "N%" and

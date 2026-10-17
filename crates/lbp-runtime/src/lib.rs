@@ -357,6 +357,10 @@ pub struct LevelWorld {
     /// collected count (0x43982c). D341: the viewer fills it from `--profile-records`
     /// ([`parse_profile_records`]); without that it is empty (no record, so no row).
     pub profile_goodies: BTreeMap<(i32, i32), [u32; 2]>,
+    /// D342 (part 89): the local profile's first colour, when `--profile-records` gives
+    /// the profile's colours ([`ProfileRecords::colours`]): every player record takes it
+    /// ([`Self::set_profile_colour`]) instead of [`lbp_script_vm::natives::DEFAULT_PLAYER_COLOUR`].
+    pub profile_colour: Option<u32>,
     /// D328: the result objects of [`Self::story_slots`], one per slot, same order.
     pub story_results: Vec<StoryResult>,
     /// D328: an empty SearchResultHandle (`_Type` 0): `SearchResult.GetParent__` of a
@@ -1100,10 +1104,14 @@ impl LevelWorld {
             .members
             .insert("PlayerNumber".into(), Value::Int(number));
         if !self.player_records.iter().any(|r| r.number == number) {
-            self.player_records.push(PlayerRecord {
+            let mut record = PlayerRecord {
                 number,
                 ..Default::default()
-            });
+            };
+            if let Some(colour) = self.profile_colour {
+                record.colour = colour;
+            }
+            self.player_records.push(record);
         }
         self.players.push(PlayerState {
             thing,
@@ -2664,6 +2672,18 @@ pub fn goodies_percent(collected: u32, total: u32) -> String {
 }
 
 impl LevelWorld {
+    /// D342 (part 89): the local profile's colours ([`ProfileRecords::colours`]): its first
+    /// becomes [`Self::profile_colour`] and every player record's colour, as the game's
+    /// player records point at the profile's colour record.
+    pub fn set_profile_colour(&mut self, colours: Option<[u32; 4]>) {
+        self.profile_colour = colours.map(|c| c[0]);
+        if let Some(colour) = self.profile_colour {
+            for record in &mut self.player_records {
+                record.colour = colour;
+            }
+        }
+    }
+
     /// D331 (part 82): the Story search is up: the search state has selected Earth
     /// (`Planets.SelectPlanet__i` with crafteroid 1) and asked for its search details.
     /// MEASURED (viewer run, part 82): both on the tick Story is chosen (640);
@@ -2716,6 +2736,15 @@ impl LevelWorld {
         self.translations.iter().find_map(|t| t.get(key))
     }
 
+    /// D342: the slot the Story view's info bubble and badge card are about: the
+    /// search's default result while Story is up.
+    pub fn story_info_slot(&self) -> Option<&SearchSlot> {
+        if !self.story_open() {
+            return None;
+        }
+        self.story_slots.get(self.pod.search.default_result?)
+    }
+
     /// D339 (part 86): the info bubble the planets draw by the selected Story result, as a
     /// Gooey frame in the root frame's units. FOUND (01.33, 0x7006c0): a frame of style 13
     /// (`GCS_SPEECH_BUBBLE`, filled), borders 48, child spacing 32, corner radius 64,
@@ -2728,10 +2757,7 @@ impl LevelWorld {
     /// [`Self::story_goodies`] has a total. Left out: the outer frame's maximum width 1150
     /// (the text is not wrapped) and the row's icon.
     pub fn story_info_bubble(&self) -> Option<GooeyFrame> {
-        if !self.story_open() {
-            return None;
-        }
-        let slot = self.story_slots.get(self.pod.search.default_result?)?;
+        let slot = self.story_info_slot()?;
         // `Slot.toString`: the tag's `_NAME` translation, else the tag, else the stored
         // name, else "Unnamed Level" (key 0xeca1a592).
         let name = match &slot.tag {

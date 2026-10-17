@@ -5721,3 +5721,25 @@ fn d331_story_turns_earth_to_the_default_group() {
     assert!((point[1] - 0.6 * EARTH_RADIUS).abs() < 1e-3);
     assert!((point[2] - 0.8 * EARTH_RADIUS).abs() < 1e-3);
 }
+
+/// D342 (part 89): the profile's first colour colours the player records there and those
+/// made later, and goes with the session to the other level.
+#[test]
+fn d342_profile_colour_colours_the_players() {
+    let mut world = LevelWorld::from_things(&[]);
+    world.set_profile_colour(Some([0xffce_b424, 0xffc3_31a0, 0xff3b_cfc1, 0xffe6_0f64]));
+    assert_eq!(world.player_records[0].colour, 0xffce_b424);
+    world.add_player([0.; 3], (0., 0.));
+    world.add_player([0.; 3], (0., 0.));
+    assert!(world.player_records.iter().all(|r| r.colour == 0xffce_b424));
+    let mut shell = LevelWorld::from_things(&[]);
+    world.hand_session_to(&mut shell);
+    assert_eq!(shell.player_records[0].colour, 0xffce_b424);
+    assert_eq!(shell.profile_colour, Some(0xffce_b424));
+    let mut fresh = LevelWorld::from_things(&[]);
+    fresh.set_profile_colour(None);
+    assert_eq!(
+        fresh.player_records[0].colour,
+        lbp_script_vm::natives::DEFAULT_PLAYER_COLOUR
+    );
+}

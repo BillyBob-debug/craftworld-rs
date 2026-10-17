@@ -71,7 +71,7 @@ pub struct PlayerRecord {
 /// 0x1589a8, given index 0 by both its callers 0x17ff90 and 0x18b388): a new profile
 /// takes entry 0 of the palette of the script class `PlayerColour` (12 entries), and
 /// this is that entry's primary colour. The viewer reads no profile, so every player
-/// has it unless `--player-colour` gives another.
+/// has it unless `--profile-records` gives the profile's colours (D342).
 pub const DEFAULT_PLAYER_COLOUR: u32 = 0xff96_dd3c;
 
 impl Default for PlayerRecord {

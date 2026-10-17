@@ -409,10 +409,10 @@ pub fn install(app: &mut App) -> Result<(), String> {
         .unwrap_or_default();
     // D321 (part 72): the scripted Pod's menu assets (fonts, card picture, pins).
     let card_pins = crate::pod_menu::card_pins_option(&all)?;
-    // D341 (part 88): the local profile's goodies counts by SlotID, from a file
-    // `scripts/rpcs3_profile_records.py` wrote. Without it the profile has no records, as
-    // a fresh one.
-    let profile_goodies = value(&all, "--profile-records")
+    // D341 (part 88): the local profile's goodies counts by SlotID (D342: and its
+    // colours), from a file `scripts/rpcs3_profile_records.py` wrote. Without it the
+    // profile has no records, as a fresh one.
+    let profile = value(&all, "--profile-records")
         .map(|path| {
             let text = std::fs::read_to_string(&path)
                 .map_err(|e| format!("--profile-records {path}: {e}"))?;
@@ -466,7 +466,10 @@ pub fn install(app: &mut App) -> Result<(), String> {
             // that cannot be read is left out: the scripts then give their own text for
             // a missing key and a bubble shows no close prompt.
             let (strings, _) = lbp_preview::story::load_strings(&source, &catalog, &control);
-            world.profile_goodies = profile_goodies;
+            // D342: the profile's colours, when the file gives them, colour the players.
+            let lbp_runtime::ProfileRecords { goodies, colours } = profile;
+            world.profile_goodies = goodies;
+            world.set_profile_colour(colours);
             world.translations = [strings.patch, strings.base]
                 .into_iter()
                 .flatten()
