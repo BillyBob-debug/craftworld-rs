@@ -244,11 +244,27 @@ pub struct OverlayGrow {
 impl OverlayGrow {
     /// One update towards scale 1 and spin `spin`.
     pub fn step(&mut self, spin: f32) {
+        self.step_to(1., spin);
+    }
+
+    fn step_to(&mut self, scale: f32, spin: f32) {
         let next = |(cur, prev): (f32, f32), target: f32| {
             (cur + 0.7 * (cur - prev) + 0.25 * (target - cur), cur)
         };
-        self.scale = next(self.scale, 1.);
+        self.scale = next(self.scale, scale);
         self.spin = next(self.spin, spin);
+    }
+
+    /// D351 FOUND (0x6fcc68, 0x6fec94-0x6fecb0): a slot no longer wanted (card+0x1a0+n
+    /// cleared, its scale target set to 0) keeps its mesh and is drawn while it shrinks:
+    /// one update towards scale 0, then it is freed (0x6fba24 at 0x6ff324) once its
+    /// current scale is 0 or below (r2+0x6c50). Returns whether it is still drawn. Slot 0
+    /// (not an overlay) is freed at once instead (0x6fcfd0). No viewer path drops a
+    /// single overlay yet (the set is the profile's, fixed at load).
+    #[allow(dead_code)] // the game's slot model, exercised by tests
+    pub fn leave(&mut self, spin: f32) -> bool {
+        self.step_to(0., spin);
+        self.scale.0 > 0.
     }
 
     /// D350 FOUND (0x6fcc78, 0x42b288): a slot made while the card's grow flag is clear
@@ -557,6 +573,17 @@ mod tests {
             g.step(0.3);
             assert_eq!((g.scale.0, g.spin.0), (1., 0.3));
         }
+    }
+
+    #[test]
+    fn d351_left_overlay_shrinks_out() {
+        let mut g = OverlayGrow::settled(0.3);
+        let drawn: Vec<bool> = (0..4).map(|_| g.leave(0.3)).collect();
+        // 1 -> 0.75 -> 0.3875 -> 0.036875, then past 0 (the spring overshoots): freed on
+        // the fourth update.
+        assert_eq!(drawn, [true, true, true, false]);
+        assert!(g.scale.0 < 0.);
+        assert_eq!(g.spin.0, 0.3);
     }
 
     #[test]

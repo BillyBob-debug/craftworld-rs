@@ -11,7 +11,14 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D350 the overlays' turn axis and the badge's first fill (2026-10-17)
+## Latest: D351 a left overlay shrinks out; the cards go when Story closes (2026-10-17)
+- Part 98 (`docs/level-scripts/part-98.md`): a slot no longer wanted springs to scale 0 and
+  is freed once its scale is 0 or below (FOUND 0x6fcc68, 0x6fec94), drawn until then
+  (`OverlayGrow::leave`). A card is erased with all its slots once its scale is 0 (FOUND
+  0x42b3e0); the rebuild runs on `SetDecorations` or a new planet resource, not on each
+  opening, so a reopened search is a first fill by new cards (INFERRED).
+
+## D350 the overlays' turn axis and the badge's first fill (2026-10-17)
 - Part 97 (`docs/level-scripts/part-97.md`): the overlay turn is about the mesh's Y, the
   card's depth axis (FOUND 0x6ff06c, as the viewer had it). The card's grow flag is set
   after its first fill (FOUND 0x42b288), so a badge's overlays show settled when the Story
