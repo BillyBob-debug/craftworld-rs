@@ -2623,6 +2623,38 @@ pub fn add_engine_objects(
     faults
 }
 
+/// D331: the Story search's default result, a story group (`SlotID` type 4 and number).
+pub const STORY_DEFAULT_GROUP: (i32, i32) = (4, 27);
+
+/// Earth's radius in level units (FOUND, 01.33 0x420814, part 81): a result's badge sits
+/// at its slot's `location` times this.
+pub const EARTH_RADIUS: f32 = 1750.;
+
+impl LevelWorld {
+    /// D331 (part 82): the Story search is up: the search state has selected Earth
+    /// (`Planets.SelectPlanet__i` with crafteroid 1) and asked for its search details.
+    /// MEASURED (viewer run, part 82): both on the tick Story is chosen (640);
+    /// `Planet.SetSearchResults` is not called.
+    pub fn story_open(&self) -> bool {
+        let search = &self.pod.search;
+        search.selected_planet == Some(1) && search.want_search_details_calls > 0
+    }
+
+    /// D331 (part 82): the point Earth turns toward the camera while the Story search is
+    /// up: the place of the selected entry (FOUND, 0x421708), here the default result's
+    /// badge, its slot's `location` times [`EARTH_RADIUS`] in Earth's own space. INFERRED:
+    /// the default result is the selected entry (the game's Story view settles facing
+    /// it, MEASURED).
+    pub fn story_planet_point(&self) -> Option<[f32; 4]> {
+        if !self.story_open() {
+            return None;
+        }
+        let slot = self.story_slots.get(self.pod.search.default_result?)?;
+        let [x, y, z, _] = slot.location;
+        Some([x * EARTH_RADIUS, y * EARTH_RADIUS, z * EARTH_RADIUS, 0.])
+    }
+}
+
 /// D328: the Story search's results, one per [`LevelWorld::story_slots`] entry.
 ///
 /// FOUND (01.33, 0x40f120, from the Story setup 0x449ce8): the engine clears the results,
@@ -2632,8 +2664,9 @@ pub fn add_engine_objects(
 /// groups 22..27). FOUND (the 01.33 listings): SearchResultSlot is a script class (base
 /// SearchResult, `.init__`); SearchResultHandle's `.ctor__Q6SlotID` sets `_Type` 1 and
 /// `_SlotID`. FOUND (0x449ce8): the default result is group (4, n), n the highest of 27
-/// down to 22 whose lock state is above 0; one mode bit forces 22. INFERRED: 22 (Da
-/// Vinci's Hideout), the lock states of the profile were not read.
+/// down to 22 whose lock state is above 0; one mode bit forces 22. D331: 27 (The Cosmos),
+/// MEASURED on the owner's profile (the game's Story view settles on its world); the
+/// lock states themselves are not read ([`STORY_DEFAULT_GROUP`]).
 fn add_story_results(
     vm: &mut Vm,
     host: &mut Bindings<LevelWorld>,
@@ -2684,7 +2717,7 @@ fn add_story_results(
     for (i, s) in slots.iter().enumerate() {
         results[i].parent = s.group.and_then(|g| slots.iter().position(|o| o.id == g));
     }
-    host.world.pod.search.default_result = slots.iter().position(|s| s.id == (4, 22));
+    host.world.pod.search.default_result = slots.iter().position(|s| s.id == STORY_DEFAULT_GROUP);
     host.world.story_results = results;
 }
 
@@ -3703,6 +3736,17 @@ impl LevelScripts {
         report.absorb(self.trigger_events(vm, host, budget));
         report.absorb(self.switch_reactions(vm, host, budget));
         report.absorb(self.apply_global_settings(vm, host, budget));
+        // D331: while Story is up Earth turns its default group toward the camera.
+        if let Some(point) = host.world.story_planet_point() {
+            let earth = self
+                .instances
+                .iter()
+                .find(|i| i.class.is_some_and(|c| vm.class_name(c) == "Earth"))
+                .map(|i| i.thing);
+            if let Some(earth) = earth {
+                self.set_planet_point(earth, point);
+            }
+        }
         let mut planets = self.run_all(vm, host, None, budget, &busy, Entries::Planets, frame_tick);
         self.start_threads(vm, host, budget, &mut planets);
         report.absorb(planets);

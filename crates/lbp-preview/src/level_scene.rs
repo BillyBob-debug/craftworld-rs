@@ -32,7 +32,10 @@
 //!
 //! No GUI or GPU types. The level reader recurses natively: call `load_level_scene` on
 //! a thread with at least `LEVEL_STACK_BYTES` of stack.
-use crate::{load_mesh_groups_with_options, resolve, GroupedMesh, MaterialAsset, PreviewOptions};
+use crate::{
+    load_mesh_groups_with_options, load_mesh_groups_with_overrides, resolve, GroupedMesh,
+    MaterialAsset, PreviewOptions, RegionMaterial,
+};
 use lbp_catalog::{
     attachment::{AttachedSource, LocationKey},
     Catalog, LoadControl,
@@ -339,6 +342,11 @@ pub struct SceneCounts {
     /// editorColor is not white, and the extra mesh loads (one per mesh and colour).
     pub drawn_editor_colored: usize,
     pub editor_color_variants: usize,
+    /// D331: drawn Things whose PMaterialOverride lists a gmat for at least one region,
+    /// and the regions with a gmat over those Things (a listed region the mesh lacks
+    /// changes nothing).
+    pub drawn_material_override: usize,
+    pub material_override_regions: usize,
     pub meshes_loaded: usize,
     pub meshes_failed: usize,
     /// Shape Things (SHAPE part present) and their extrusion outcomes.
@@ -409,6 +417,10 @@ impl SceneCounts {
         out.push(format!(
             "Drawn with a non-white editorColor instance colour: {} Things/decorations, {} mesh+colour variants (editorColor to THING_COLOR inferred, D191)",
             self.drawn_editor_colored, self.editor_color_variants
+        ));
+        out.push(format!(
+            "Drawn with a material override: {} Things, {} regions swapped (PMaterialOverride gmat per mesh region; uvScale not applied, D331)",
+            self.drawn_material_override, self.material_override_regions
         ));
         out.push(format!(
             "Drawn bone-attached at own POS (approximation): {} Things",
@@ -558,6 +570,8 @@ pub struct LevelScene<T> {
     /// P2c: Things with a CHECKPOINT part and a valid POS (Thing index, world matrix), in
     /// reader order. The player spawns at a checkpoint.
     pub checkpoints: Vec<(usize, [f32; 16])>,
+    /// D331: each Thing's parent Thing (reader order), indexed by Thing.
+    pub parents: Vec<Option<usize>>,
 }
 
 impl<T> Default for LevelScene<T> {
@@ -572,6 +586,7 @@ impl<T> Default for LevelScene<T> {
             world_water: None,
             backdrop_presets: Vec::new(),
             checkpoints: Vec::new(),
+            parents: Vec::new(),
         }
     }
 }
@@ -1179,6 +1194,12 @@ pub fn skin_bone_things<T>(
         let Some(t) = things.get(item.thing) else {
             continue;
         };
+        // D331: the bone Things are the render mesh's; a decoration's mesh has bones of
+        // its own and is placed by its own matrix (The Cosmos's Earth rocks collapsed to
+        // the Earth's centre when skinned by the Earth's bones).
+        if item.decoration {
+            continue;
+        }
         let (Some(_), Some(rm)) = (&t.data.pos, &t.data.render_mesh) else {
             continue;
         };
@@ -1262,7 +1283,7 @@ pub fn build_scene<T>(
 ) -> LevelScene<T> {
     build_scene_with_colors(
         things,
-        |source, _| load(source),
+        |source, _, _| load(source),
         local_bounds,
         neutral_groups,
         bind_poses,
@@ -1275,16 +1296,21 @@ pub fn build_scene<T>(
 /// Thing colour. Each source first loads with `None` (the base inputs); a Thing with a
 /// non-white editorColor gets its own (mesh, colour) load only when `uses_instance` says
 /// the base load actually used the instance colour, so colour-blind meshes stay shared.
+/// D331: a Thing with a PMaterialOverride gets its own load with the region swaps
+/// (third argument, see [`region_materials`]); Things with equal swaps share it.
 pub fn build_scene_with_colors<T>(
     things: &[ThingRecord],
-    mut load: impl FnMut(&MeshSource, Option<u32>) -> Result<T, String>,
+    mut load: impl FnMut(&MeshSource, Option<u32>, &[RegionMaterial]) -> Result<T, String>,
     local_bounds: impl Fn(&T) -> Option<[[f32; 3]; 2]>,
     neutral_groups: impl Fn(&T) -> bool,
     bind_poses: impl Fn(&T) -> Vec<BindPose>,
     uses_instance: impl Fn(&T) -> bool,
     placement: PosPlacement,
 ) -> LevelScene<T> {
-    let mut scene = LevelScene::<T>::default();
+    let mut scene = LevelScene::<T> {
+        parents: things.iter().map(|t| t.parent).collect(),
+        ..Default::default()
+    };
     let mut by_source: MeshCache = HashMap::new();
     let c = &mut scene.counts;
     c.things_total = things.len();
@@ -1335,6 +1361,12 @@ pub fn build_scene_with_colors<T>(
                 continue;
             }
         };
+        let swaps = t
+            .data
+            .material_override
+            .as_ref()
+            .map(region_materials)
+            .unwrap_or_default();
         let index = scene_mesh_index(
             &mut scene,
             &mut by_source,
@@ -1344,6 +1376,7 @@ pub fn build_scene_with_colors<T>(
             &uses_instance,
             &source,
             checkpoint_editor_color(rm.editor_color, lights.get(&t.index).copied()),
+            &swaps,
         );
         let c = &mut scene.counts;
         let (mesh, colored) = match index {
@@ -1418,6 +1451,8 @@ pub fn build_scene_with_colors<T>(
         c.drawn += 1;
         c.drawn_with_neutral_groups += usize::from(scene.meshes[mesh].neutral_groups);
         c.drawn_editor_colored += usize::from(colored);
+        c.drawn_material_override += usize::from(!swaps.is_empty());
+        c.material_override_regions += swaps.len();
         scene.items.push(SceneItem {
             mesh,
             world,
@@ -1515,9 +1550,32 @@ fn descriptor_source(d: &lbp_level::serial::Descriptor) -> Option<MeshSource> {
     }
 }
 
+/// D331: the region swaps of a PMaterialOverride: each region with a non-null gmat, in
+/// stored order (regions with a null gmat keep the mesh's own material). The stored i32
+/// region is compared with the mesh primitive's u32 region bit for bit.
+pub fn region_materials(o: &lbp_level::parts::MaterialOverride) -> Vec<RegionMaterial> {
+    o.regions
+        .iter()
+        .filter_map(|r| {
+            let d = r.material.as_ref()?;
+            let guid = d.guid.filter(|&g| g != 0);
+            let hash = d
+                .sha1
+                .filter(|h| h.iter().any(|&b| b != 0))
+                .map(|h| h.iter().map(|b| format!("{b:02x}")).collect::<String>());
+            (guid.is_some() || hash.is_some()).then_some(RegionMaterial {
+                region: r.region as u32,
+                guid,
+                hash,
+            })
+        })
+        .collect()
+}
+
 /// Loads (once per source) a mesh into the scene; Err carries the unavailable reason.
-/// Loaded scene meshes by (source, editorColor variant); `None` is the base load.
-type MeshCache = HashMap<(MeshSource, Option<u32>), Result<usize, String>>;
+/// Loaded scene meshes by (source, editorColor variant, D331 region swaps); `None` and
+/// no swaps is the base load.
+type MeshCache = HashMap<(MeshSource, Option<u32>, Vec<RegionMaterial>), Result<usize, String>>;
 
 /// D191: the scene mesh for a Thing with `editor_color`, and whether it is a non-white
 /// colour variant (see [`build_scene_with_colors`]).
@@ -1525,12 +1583,13 @@ type MeshCache = HashMap<(MeshSource, Option<u32>), Result<usize, String>>;
 fn scene_mesh_index<T>(
     scene: &mut LevelScene<T>,
     by_source: &mut MeshCache,
-    load: &mut impl FnMut(&MeshSource, Option<u32>) -> Result<T, String>,
+    load: &mut impl FnMut(&MeshSource, Option<u32>, &[RegionMaterial]) -> Result<T, String>,
     local_bounds: &impl Fn(&T) -> Option<[[f32; 3]; 2]>,
     neutral_groups: &impl Fn(&T) -> bool,
     uses_instance: &impl Fn(&T) -> bool,
     source: &MeshSource,
     editor_color: u32,
+    swaps: &[RegionMaterial],
 ) -> Result<(usize, bool), String> {
     let base = cached_mesh(
         scene,
@@ -1540,8 +1599,10 @@ fn scene_mesh_index<T>(
         neutral_groups,
         source,
         None,
+        &[],
     )?;
-    if editor_color == EDITOR_COLOR_WHITE || !uses_instance(&scene.meshes[base].payload) {
+    let colored = editor_color != EDITOR_COLOR_WHITE && uses_instance(&scene.meshes[base].payload);
+    if !colored && swaps.is_empty() {
         return Ok((base, false));
     }
     let loaded_before = scene.counts.meshes_loaded;
@@ -1552,29 +1613,34 @@ fn scene_mesh_index<T>(
         local_bounds,
         neutral_groups,
         source,
-        Some(editor_color),
+        colored.then_some(editor_color),
+        swaps,
     )?;
-    scene.counts.editor_color_variants += scene.counts.meshes_loaded - loaded_before;
-    Ok((variant, true))
+    if colored {
+        scene.counts.editor_color_variants += scene.counts.meshes_loaded - loaded_before;
+    }
+    Ok((variant, colored))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cached_mesh<T>(
     scene: &mut LevelScene<T>,
     by_source: &mut MeshCache,
-    load: &mut impl FnMut(&MeshSource, Option<u32>) -> Result<T, String>,
+    load: &mut impl FnMut(&MeshSource, Option<u32>, &[RegionMaterial]) -> Result<T, String>,
     local_bounds: &impl Fn(&T) -> Option<[[f32; 3]; 2]>,
     neutral_groups: &impl Fn(&T) -> bool,
     source: &MeshSource,
     color: Option<u32>,
+    swaps: &[RegionMaterial],
 ) -> Result<usize, String> {
-    let key = (source.clone(), color);
+    let key = (source.clone(), color, swaps.to_vec());
     if let Some(r) = by_source.get(&key) {
         return r.clone();
     }
     let r = if scene.meshes.len() >= MAX_LEVEL_MESHES {
         Err("Unsupported: level distinct-mesh budget".to_string())
     } else {
-        load(source, color).map(|payload| {
+        load(source, color, swaps).map(|payload| {
             scene.meshes.push(SceneMesh {
                 source: source.clone(),
                 bounds: local_bounds(&payload),
@@ -1601,7 +1667,7 @@ fn cached_mesh<T>(
 fn add_decorations<T>(
     scene: &mut LevelScene<T>,
     by_source: &mut MeshCache,
-    load: &mut impl FnMut(&MeshSource, Option<u32>) -> Result<T, String>,
+    load: &mut impl FnMut(&MeshSource, Option<u32>, &[RegionMaterial]) -> Result<T, String>,
     local_bounds: &impl Fn(&T) -> Option<[[f32; 3]; 2]>,
     neutral_groups: &impl Fn(&T) -> bool,
     bind_poses: &impl Fn(&T) -> Vec<BindPose>,
@@ -1646,6 +1712,7 @@ fn add_decorations<T>(
             uses_instance,
             &source,
             rm.editor_color,
+            &[],
         ) {
             Ok(i) => i,
             Err(e) => {
@@ -2396,39 +2463,42 @@ pub fn load_level_scene_with_options(
         instance_color: explicit_color,
         ..options
     };
-    let mut load_model =
-        |src: &MeshSource, editor_color: Option<u32>| -> Result<ScenePayload, String> {
-            control.check()?;
-            let key = match src {
-                MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
-                MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
-                MeshSource::Shapes { .. }
-                | MeshSource::Backdrop { .. }
-                | MeshSource::Decals { .. }
-                | MeshSource::JointSkin { .. }
-                | MeshSource::BoneSkin { .. } => return Err("Invalid: shape source".into()),
-            };
-            let mut options = options;
-            if let Some(c) = editor_color.filter(|_| thing_colors) {
-                options.instance_color = Some(editor_color_tint(c));
-            }
-            let mut mesh = load_mesh_groups_with_options(source, catalog, &key, control, options)?;
-            if let MeshSource::Guid(g) = src {
-                apply_runtime_textures(
-                    *g,
-                    &mut mesh,
-                    &scene_options.runtime_textures,
-                    &mut runtime_counts,
-                    source,
-                    catalog,
-                    &key,
-                    control,
-                );
-                control.check()?;
-            }
-            charge(retained(&mesh))?;
-            Ok(ScenePayload::Model(Box::new(mesh)))
+    let mut load_model = |src: &MeshSource,
+                          editor_color: Option<u32>,
+                          swaps: &[RegionMaterial]|
+     -> Result<ScenePayload, String> {
+        control.check()?;
+        let key = match src {
+            MeshSource::Guid(g) => resolve(catalog, Some(*g), None)?,
+            MeshSource::Sha1(h) => resolve(catalog, None, Some(h))?,
+            MeshSource::Shapes { .. }
+            | MeshSource::Backdrop { .. }
+            | MeshSource::Decals { .. }
+            | MeshSource::JointSkin { .. }
+            | MeshSource::BoneSkin { .. } => return Err("Invalid: shape source".into()),
         };
+        let mut options = options;
+        if let Some(c) = editor_color.filter(|_| thing_colors) {
+            options.instance_color = Some(editor_color_tint(c));
+        }
+        let mut mesh =
+            load_mesh_groups_with_overrides(source, catalog, &key, control, options, swaps)?;
+        if let MeshSource::Guid(g) = src {
+            apply_runtime_textures(
+                *g,
+                &mut mesh,
+                &scene_options.runtime_textures,
+                &mut runtime_counts,
+                source,
+                catalog,
+                &key,
+                control,
+            );
+            control.check()?;
+        }
+        charge(retained(&mesh))?;
+        Ok(ScenePayload::Model(Box::new(mesh)))
+    };
     let neutral = |p: &ScenePayload| matches!(p, ScenePayload::Model(m) if grouped_neutral(m));
     let mut scene = build_scene_with_colors(
         &report.things,
@@ -2445,7 +2515,7 @@ pub fn load_level_scene_with_options(
             &mut scene,
             &report.things,
             &scene_options.mesh_alternates,
-            |source| load_model(source, None),
+            |source| load_model(source, None, &[]),
             payload_bounds,
             neutral,
             model_bind_poses,
@@ -3602,6 +3672,40 @@ mod tests {
             .any(|l| l.starts_with("Per-bone placement")));
     }
 
+    /// D331: a decoration of a Thing with bone Things is not skinned by them.
+    #[test]
+    fn d331_decorations_are_not_skinned_by_their_things_bones() {
+        let mut earth = thing(0, Some(0x10), Some(identity_at(0.)));
+        earth.data.render_mesh.as_mut().unwrap().bone_things = vec![Some(0), Some(1)];
+        let mut squash = identity_at(0.);
+        squash[10] = 0.5;
+        let things = vec![earth, thing(1, None, Some(squash))];
+        let mesh: Vec<[f32; 3]> = vec![[0., 0., 10.]; 2];
+        let id = identity_at(0.);
+        let mut scene = build_scene(
+            &things,
+            |_| Ok(mesh.clone()),
+            |p| points_bounds(p),
+            |_| false,
+            |_| vec![BindPose { skin: id, inv: id }; 2],
+            PosPlacement::InverseBind,
+        );
+        for item in &mut scene.items {
+            item.decoration = true;
+        }
+        skin_bone_things(
+            &mut scene,
+            &things,
+            |_| Ok((vec![[1, 0, 0, 0]; 2], vec![[1., 0., 0., 0.]; 2])),
+            |p| Some(&p[..]),
+            |_| vec![BindPose { skin: id, inv: id }; 2],
+            |_, positions| positions,
+        );
+        let item = scene.items.iter().find(|i| i.thing == 0).unwrap();
+        assert_eq!(scene.meshes[item.mesh].source, MeshSource::Guid(0x10));
+        assert_eq!(scene.counts.per_bone_skinned, 0);
+    }
+
     /// D317: the per-bone copy is baked in the frame of the item's matrix, so when the
     /// scripts move the item's Thing and its bone Things by one matrix (the Pod Earth's
     /// bone Things are its children), drawing the copy at the item matrix moved by that
@@ -4250,6 +4354,141 @@ mod tests {
         );
     }
 
+    fn d331_override(regions: &[(i32, Option<u32>)]) -> lbp_level::parts::MaterialOverride {
+        let gmat = |g: u32| lbp_level::serial::Descriptor {
+            flags: Some(0),
+            kind_byte: 2,
+            guid: Some(g),
+            sha1: None,
+        };
+        lbp_level::parts::MaterialOverride {
+            regions: regions
+                .iter()
+                .map(|&(region, g)| lbp_level::parts::RegionOverride {
+                    region,
+                    material_plan: None,
+                    material: g.map(gmat),
+                    uv_scale: [1., 1., 0.],
+                })
+                .collect(),
+            mesh: None,
+        }
+    }
+
+    #[test]
+    fn d331_region_materials_keep_regions_with_a_gmat() {
+        let o = d331_override(&[(-468_172_612, Some(0x19af0)), (7, None), (8, Some(0))]);
+        assert_eq!(
+            region_materials(&o),
+            [RegionMaterial {
+                region: (-468_172_612i32) as u32,
+                guid: Some(0x19af0),
+                hash: None,
+            }]
+        );
+    }
+
+    #[test]
+    fn d331_material_override_loads_a_variant_and_plain_things_stay_shared() {
+        let things = [
+            thing(0, Some(0x10), Some(identity_at(0.))),
+            {
+                let mut t = thing(1, Some(0x10), Some(identity_at(1.)));
+                t.data.material_override = Some(d331_override(&[(5, Some(0x99)), (6, None)]));
+                t
+            },
+            {
+                let mut t = thing(2, Some(0x10), Some(identity_at(2.)));
+                t.data.material_override = Some(d331_override(&[(5, Some(0x99))]));
+                t
+            },
+            {
+                // An override whose regions all lack a gmat changes nothing.
+                let mut t = thing(3, Some(0x10), Some(identity_at(3.)));
+                t.data.material_override = Some(d331_override(&[(5, None)]));
+                t
+            },
+        ];
+        let mut calls = Vec::new();
+        let scene = build_scene_with_colors(
+            &things,
+            |s, _, swaps| {
+                calls.push((s.clone(), swaps.to_vec()));
+                Ok(swaps.iter().map(|r| (r.region, r.guid)).collect::<Vec<_>>())
+            },
+            |_| None,
+            |_| false,
+            |_| Vec::new(),
+            |_| false,
+            PosPlacement::PosOnly,
+        );
+        let swap = RegionMaterial {
+            region: 5,
+            guid: Some(0x99),
+            hash: None,
+        };
+        assert_eq!(
+            calls,
+            [
+                (MeshSource::Guid(0x10), vec![]),
+                (MeshSource::Guid(0x10), vec![swap]),
+            ]
+        );
+        let payloads: Vec<_> = scene
+            .items
+            .iter()
+            .map(|i| scene.meshes[i.mesh].payload.clone())
+            .collect();
+        assert_eq!(
+            payloads,
+            [vec![], vec![(5, Some(0x99))], vec![(5, Some(0x99))], vec![]]
+        );
+        let c = &scene.counts;
+        assert_eq!(
+            (c.drawn_material_override, c.material_override_regions),
+            (2, 2)
+        );
+        assert_eq!((c.drawn_editor_colored, c.editor_color_variants), (0, 0));
+        assert!(c
+            .lines()
+            .iter()
+            .any(|l| l.starts_with("Drawn with a material override: 2 Things, 2 regions")));
+    }
+
+    #[test]
+    fn d331_apply_region_materials_swaps_only_matching_regions() {
+        let prim = |region, guid| lbp_mesh::Primitive {
+            material_flags: 0,
+            material_kind: 2,
+            material_guid: Some(guid),
+            material_hash: None,
+            alternatives_flags: 0,
+            alternatives_kind: 0,
+            alternatives_guid: None,
+            alternatives_hash: None,
+            min_vertex_raw: 0,
+            max_vertex_raw: 0,
+            first_index: 0,
+            index_count: 0,
+            region,
+        };
+        let mut prims = vec![prim(1, 0x10), prim(2, 0x20), prim(1, 0x30)];
+        let swaps = [RegionMaterial {
+            region: 1,
+            guid: None,
+            hash: Some("ab".repeat(20)),
+        }];
+        assert_eq!(crate::apply_region_materials(&mut prims, &swaps), 2);
+        assert_eq!(prims[1].material_guid, Some(0x20));
+        for p in [&prims[0], &prims[2]] {
+            assert_eq!(
+                (p.material_kind, p.material_guid, p.material_hash.as_deref()),
+                (1, None, Some("ab".repeat(20).as_str()))
+            );
+        }
+        assert_eq!(crate::apply_region_materials(&mut prims, &[]), 0);
+    }
+
     #[test]
     fn d191_editor_color_variants_only_for_instance_meshes() {
         let colored = |i, mesh, color| {
@@ -4267,7 +4506,7 @@ mod tests {
         let mut calls = Vec::new();
         let scene = build_scene_with_colors(
             &things,
-            |s, c| {
+            |s, c, _| {
                 calls.push((s.clone(), c));
                 match s {
                     MeshSource::Guid(g) => Ok((*g, c)),
