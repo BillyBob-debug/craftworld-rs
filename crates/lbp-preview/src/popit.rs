@@ -57,6 +57,8 @@ pub struct PopitItem {
     pub creator: Option<String>,
     pub icon: Option<ResourceKey>,
     pub icon_resolved: bool,
+    /// The details' colour (RGBA, high byte red); player colours tint their icon with it.
+    pub colour: u32,
 }
 
 /// Plans that did not give an item, by reason.
@@ -184,6 +186,7 @@ pub fn build_popit(
             creator: d.creator.value().filter(|c| !c.is_empty()).cloned(),
             icon,
             icon_resolved: icon.is_some_and(resolves),
+            colour: d.colour,
         };
         *c.by_page.entry(item.page.clone()).or_default() += 1;
         *c.by_title
