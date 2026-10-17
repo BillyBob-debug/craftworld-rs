@@ -148,7 +148,12 @@ struct PageData {
     /// (the measured profile's open page; the other pages show their title only).
     tabs: Vec<String>,
     home: usize,
+    /// D405: every other page's sections by page index (empty at `home`, whose contents are
+    /// the fields above), filled from the game's plans by the page's inventory type.
+    others: Vec<Sections>,
 }
+
+type Sections = Vec<(String, Vec<(String, Image)>)>;
 
 impl PageData {
     /// The pages L1/R1 can reach. MEASURED 2026-10-12: play mode's Personal collection shows
@@ -208,57 +213,64 @@ const PAGES: [PageRow; 6] = [
 /// D404: each collection's pages in order, (title LAMS key, English fallback), from the
 /// EBOOT's default profile builder (FOUND, 0x465688; the shared pages' order is creation
 /// order, INFERRED). L1/R1 step through them without wrapping (FOUND, 0x463b98).
-const COLLECTION_PAGES: [(i32, &[(u32, &str)]); 6] = [
+/// D405: each page's inventory type as `type_names` names and the costume sub-type mask
+/// (0 = any), from the builder's (type, subtype) pairs (FOUND, 0x465688).
+const COLLECTION_PAGES: [(i32, &[PageType]); 6] = [
     (
         0,
         &[
-            (0xb238_4143, "Costumes"),
-            (0xb074_e7b4, "Head"),
-            (0x9843_f40a, "Body"),
-            (0xb21e_cdf8, "Materials"),
-            (0x2684_06ab, "Player Colour"),
+            (0xb238_4143, "Costumes", &["costume", "user_costume"], 0),
+            (0xb074_e7b4, "Head", &["costume"], 0x1fd),
+            (0x9843_f40a, "Body", &["costume"], 0x3e02),
+            (0xb21e_cdf8, "Materials", &["primitive_material"], 0),
+            (0x2684_06ab, "Player Colour", &["player_colour"], 0),
         ],
     ),
     (
         1,
         &[
-            (0xdae7_f79a, "Stickers"),
-            (0xde04_7861, "Decorations"),
-            (0xa317_6f13, "PlayStation Eye Camera"),
-            (0xf5fa_8331, "My Pictures"),
-            (0xc303_7f54, "Community Photos"),
+            (0xdae7_f79a, "Stickers", &["sticker"], 0),
+            (0xde04_7861, "Decorations", &["decoration"], 0),
+            (0xa317_6f13, "PlayStation Eye Camera", &["eyetoy"], 0),
+            (0xf5fa_8331, "My Pictures", &["user_sticker"], 0),
+            (0xc303_7f54, "Community Photos", &["user_sticker"], 0),
         ],
     ),
     (
         2,
         &[
-            (0xb21e_cdf8, "Materials"),
-            (0xeb8d_7d70, "Collected Objects"),
-            (0x5959_5c00, "My Objects"),
-            (0xfead_43d3, "Community Objects"),
+            (0xb21e_cdf8, "Materials", &["primitive_material"], 0),
+            (0xeb8d_7d70, "Collected Objects", &["readymade"], 0),
+            (0x5959_5c00, "My Objects", &["user_object"], 0),
+            (0xfead_43d3, "Community Objects", &["user_object"], 0),
         ],
     ),
     (
         3,
         &[
-            (0x3bd3_366a, "Tools"),
-            (0x18ba_f616, "Gadgets"),
-            (0x7f8a_51ba, "Gameplay Kits"),
-            (0xe8f2_0178, "Music"),
-            (0xea9b_0d51, "Sounds"),
-            (0x775a_c2b6, "Gameplay Controls"),
-            (0xd0ce_e297, "Global Controls"),
-            (0x5161_8d4b, "Backgrounds"),
+            (0x3bd3_366a, "Tools", &["tool"], 0),
+            (0x18ba_f616, "Gadgets", &["gadget", "joint"], 0),
+            (0x7f8a_51ba, "Gameplay Kits", &["gameplay_kit"], 0),
+            (
+                0xe8f2_0178,
+                "Music",
+                &["sequencer", "music", "instrument"],
+                0,
+            ),
+            (0xea9b_0d51, "Sounds", &["sound"], 0),
+            (0x775a_c2b6, "Gameplay Controls", &[], 0),
+            (0xd0ce_e297, "Global Controls", &[], 0),
+            (0x5161_8d4b, "Backgrounds", &["background"], 0),
         ],
     ),
     (
         4,
         &[
-            (0x5036_ae03, "Tools and Used Objects"),
-            (0x4d45_f1f1, "Heart Items"),
+            (0x5036_ae03, "Tools and Used Objects", &[], 0),
+            (0x4d45_f1f1, "Heart Items", &[], 0),
         ],
     ),
-    (8, &[(0x15f8_630f, "My Pods")]),
+    (8, &[(0x15f8_630f, "My Pods", &[], 0)]),
 ];
 /// Page title keys (D402): the Tools Bag's "Sounds" page and the Personal collection's
 /// "Heart Items" page.
@@ -288,6 +300,8 @@ const FUNCTION_TILES: [(&str, u32); 10] = [
 const HUD_GLYPH_SHEET: u32 = 0x1cfb9;
 const KITS_PLAN: &str = "palette_gameplay_579.plan";
 const PAGE_ICONS: usize = 36;
+/// (title LAMS key, English fallback, inventory type names, costume sub-type mask).
+type PageType = (u32, &'static str, &'static [&'static str], u32);
 const TOOLS_BUTTON: u32 = 5;
 /// Sounds list (MEASURED, frame 18:12:52): first row centre y, row pitch, label x, visible rows.
 const LIST_Y0: f32 = 140.;
@@ -681,36 +695,10 @@ pub(crate) fn load_assets(
         else {
             continue;
         };
-        let mut sections: Vec<(String, Vec<(String, Image)>)> = Vec::new();
-        let mut taken = 0;
-        if let Some(name) = plan_page {
-            for &ix in popit.pages.get(name).map_or(&[][..], Vec::as_slice) {
-                let item = &popit.items[ix];
-                let Some(key) = item.icon.filter(|_| item.icon_resolved) else {
-                    continue;
-                };
-                let Ok(icon) = decode_icon(source, catalog, key, control) else {
-                    continue;
-                };
-                let cat = humanize(item.category.as_deref().unwrap_or_default());
-                if cat.is_empty() {
-                    continue;
-                }
-                if sections.last().is_none_or(|(c, _)| *c != cat) {
-                    sections.push((cat, Vec::new()));
-                }
-                let img = image_from(icon.width, icon.height, icon.rgba);
-                sections
-                    .last_mut()
-                    .expect("section just pushed")
-                    .1
-                    .push((item.title.clone(), img));
-                taken += 1;
-                if taken >= PAGE_ICONS {
-                    break;
-                }
-            }
-        }
+        let sections = match plan_page {
+            Some(name) => plan_sections(source, catalog, control, &popit, |it| it.page == name),
+            None => Vec::new(),
+        };
         // Tools opens the sound-object list: LBP2's own sound objects by name; the LBP1
         // palette sounds and DLC packs are not in the game's list on the measured profile.
         let mut list = Vec::new();
@@ -848,12 +836,36 @@ pub(crate) fn load_assets(
             .iter()
             .find(|c| c.0 == *collection)
             .map_or(&[][..], |c| c.1);
-        let tabs: Vec<String> = order.iter().map(|&(k, e)| tr(k, e)).collect();
-        info!("popit collection {collection} pages {tabs:?}");
+        let tabs: Vec<String> = order.iter().map(|&(k, e, _, _)| tr(k, e)).collect();
+        let home = order.iter().position(|&(k, ..)| k == home_key).unwrap_or(0);
+        // D405: the other pages hold the game's plans of the page's inventory type (and
+        // costume sub-type), by category like the open page (INFERRED: the profile's own
+        // inventory decides which of them a player has).
+        let others: Vec<Sections> = order
+            .iter()
+            .enumerate()
+            .map(|(t, &(_, _, types, sub))| {
+                if t == home || types.is_empty() {
+                    return Vec::new();
+                }
+                plan_sections(source, catalog, control, &popit, |it| {
+                    it.types.iter().any(|n| types.contains(n))
+                        && (sub == 0 || it.sub_type & sub != 0)
+                })
+            })
+            .collect();
+        info!(
+            "popit collection {collection} pages {tabs:?} items {:?}",
+            others
+                .iter()
+                .map(|s| s.iter().map(|(_, v)| v.len()).sum::<usize>())
+                .collect::<Vec<_>>()
+        );
         pages.push(PageData {
             id,
             title: tr(home_key, home_english),
-            home: order.iter().position(|&(k, _)| k == home_key).unwrap_or(0),
+            home,
+            others,
             tabs,
             heart_title: tr(HEART_TITLE.0, HEART_TITLE.1),
             sections,
@@ -888,6 +900,53 @@ pub(crate) fn load_assets(
         pages,
         opens,
     })
+}
+
+/// The first `PAGE_ICONS` plans passing `keep` that have an icon and a category, grouped
+/// into sections by category (the plans come sorted by category, then title).
+fn plan_sections(
+    source: &AttachedSource,
+    catalog: &lbp_catalog::Catalog,
+    control: &LoadControl,
+    popit: &lbp_preview::popit::Popit,
+    keep: impl Fn(&lbp_preview::popit::PopitItem) -> bool,
+) -> Sections {
+    let mut sections: Sections = Vec::new();
+    let mut ixs: Vec<usize> = (0..popit.items.len())
+        .filter(|&i| keep(&popit.items[i]))
+        .collect();
+    ixs.sort_by(|&a, &b| {
+        let (a, b) = (&popit.items[a], &popit.items[b]);
+        (&a.category, &a.title, &a.sha1).cmp(&(&b.category, &b.title, &b.sha1))
+    });
+    let mut taken = 0;
+    for ix in ixs {
+        let item = &popit.items[ix];
+        let Some(key) = item.icon.filter(|_| item.icon_resolved) else {
+            continue;
+        };
+        let cat = humanize(item.category.as_deref().unwrap_or_default());
+        if cat.is_empty() {
+            continue;
+        }
+        let Ok(icon) = decode_icon(source, catalog, key, control) else {
+            continue;
+        };
+        if sections.last().is_none_or(|(c, _)| *c != cat) {
+            sections.push((cat, Vec::new()));
+        }
+        let img = image_from(icon.width, icon.height, icon.rgba);
+        sections
+            .last_mut()
+            .expect("section just pushed")
+            .1
+            .push((item.title.clone(), img));
+        taken += 1;
+        if taken >= PAGE_ICONS {
+            break;
+        }
+    }
+    sections
 }
 
 pub(crate) fn install(app: &mut App, assets: PopitAssets) {
@@ -1159,11 +1218,10 @@ fn popit_input(
                 p.tabs.insert(pg.id, to);
                 p.cell = (0, 0);
             }
-        } else if open_page.is_some_and(|pg| pg.current(&p) != pg.home) {
-            // A page whose contents are not loaded has no grid to move on.
         } else {
             let (r, c) = p.cell;
-            let page = open_page;
+            // D405: the other pages are plain grids (no list, function tiles or kits).
+            let page = open_page.filter(|pg| pg.current(&p) == pg.home);
             let list_len = page.map_or(0, |pg| pg.list.len());
             let (nf, nk) = page.map_or((0, 0), |pg| (pg.functions.len(), pg.kits.len()));
             if nf > 0 {
@@ -1760,10 +1818,18 @@ fn popit_page_ui(
             );
         }
     }
-    if tab != page.home && !heart {
-        // Only the profile's open page has loaded contents (Open in D404).
-        return;
-    }
+    // D405: the open page draws its own fields; the other pages are a grid of their plans.
+    let home = tab == page.home;
+    let none: Sections = Vec::new();
+    let sections = if home {
+        &page.sections
+    } else {
+        page.others.get(tab).unwrap_or(&none)
+    };
+    let list: &[(String, Image)] = if home { &page.list } else { &[] };
+    let functions: &[(String, Image)] = if home { &page.functions } else { &[] };
+    let kits: &[(String, Image)] = if home { &page.kits } else { &[] };
+    let message = page.message.filter(|_| home);
     if heart {
         let mut y = 134.;
         for l in wrap(
@@ -1783,7 +1849,7 @@ fn popit_page_ui(
             GlobalZIndex(41),
         ));
     };
-    let is_list = !page.list.is_empty();
+    let is_list = !list.is_empty();
     // Functions row: the page's own main-menu icon on the teal tile (focus at the first cell).
     if !is_list {
         text(&mut commands, "Functions", px + 18., 133., 19., 42);
@@ -1794,10 +1860,10 @@ fn popit_page_ui(
         .items
         .iter()
         .find(|i| i.id == if id == PERSONAL_BUTTON { 2 } else { id });
-    let fn_page = !page.functions.is_empty();
+    let fn_page = !functions.is_empty();
     let focus_fn = !is_list && !fn_page && row == 0 && col == 0;
-    let fn_rows = page.functions.len().div_ceil(GRID_COLS);
-    let header_focus = fn_page && !page.kits.is_empty() && row == fn_rows;
+    let fn_rows = functions.len().div_ceil(GRID_COLS);
+    let header_focus = fn_page && !kits.is_empty() && row == fn_rows;
     let tile = |commands: &mut Commands, cx: f32, cy: f32, size: f32| {
         commands.spawn((
             PageNode,
@@ -1816,7 +1882,7 @@ fn popit_page_ui(
         main.map_or_else(String::new, |i| i.label.clone())
     };
     if fn_page {
-        for (k, (title, img)) in page.functions.iter().enumerate() {
+        for (k, (title, img)) in functions.iter().enumerate() {
             let (r, c) = (k / GRID_COLS, k % GRID_COLS);
             let (cx, cy) = (
                 GRID_X0 + c as f32 * GRID_PITCH,
@@ -1836,7 +1902,7 @@ fn popit_page_ui(
                 GlobalZIndex(42),
             ));
         }
-        if !page.kits.is_empty() {
+        if !kits.is_empty() {
             // MEASURED: header 43 px under the last tile row (text y), rule 14 px below, items 45 px
             // under the header; focused header is a teal bar across the panel.
             let hy = 180. + (fn_rows as f32 - 1.) * GRID_PITCH + 43.;
@@ -1855,7 +1921,7 @@ fn popit_page_ui(
             text(&mut commands, "Gameplay Kits", px + 18., hy, 19., 42);
             line(&mut commands, hy + 14.);
             text(&mut commands, "^", px + pw - 30., hy, 16., 42);
-            for (k, (title, img)) in page.kits.iter().enumerate() {
+            for (k, (title, img)) in kits.iter().enumerate() {
                 let (cx, cy) = (GRID_X0 + k as f32 * GRID_PITCH, hy + 45.);
                 let focused = row == fn_rows + 1 && col == k;
                 if focused {
@@ -1896,7 +1962,7 @@ fn popit_page_ui(
             GlobalZIndex(42),
         ));
     }
-    if let Some(msg) = page.message {
+    if let Some(msg) = message {
         let mut y = 392.;
         for l in wrap(msg, 22) {
             text(&mut commands, &l, px + 56., y, 21., 42);
@@ -1906,7 +1972,7 @@ fn popit_page_ui(
     // List page: one row per entry, the focused row on a teal bar with a large icon.
     if is_list {
         let first = row.saturating_sub(LIST_VISIBLE - 1);
-        for (k, (title, img)) in page.list.iter().enumerate().skip(first).take(LIST_VISIBLE) {
+        for (k, (title, img)) in list.iter().enumerate().skip(first).take(LIST_VISIBLE) {
             let cy = LIST_Y0 + (k - first) as f32 * LIST_PITCH;
             let focused = k == row;
             if focused {
@@ -1935,7 +2001,7 @@ fn popit_page_ui(
     // Grid: section headers and 6-column icon rows below the functions row.
     let mut y = 220.;
     let mut idx = 0usize;
-    for (name, items) in &page.sections {
+    for (name, items) in sections {
         if y > 600. {
             break;
         }
