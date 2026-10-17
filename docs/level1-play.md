@@ -36,3 +36,35 @@ Not yet: the game's timing of that line (an RPCS3 capture from the level start);
 never closes here (the bubble's dialogue length and audio clock), so the second line
 (1054, via 1064's output -> counter 1068 -> AND 1052 -> timer 1053, 299 ticks) never
 follows; the wall left of the spawn at x -14348 stops Sackboy before Da Vinci.
+
+## Part 2: why the first line stays open (2026-10-17, findings only)
+
+Bubble 1064 (Text `DV_MAIN01_10`, Behaviour 0, DialogueLengthMs 4363, Sound
+`gibberish/lbp2/davinci_jolly`, TriggerThing 1067) opens as message type 2
+(`Messaging_NewTriggerMessageNoPrompt`, prevent-close false). Its only input is counter 1060
+(target 1), which fills once from timer 1059 (59 ticks) and stays full; nothing else is wired
+to 1060 or 1064.
+
+FOUND (Trigger_Speech_Bubble script): the bubble's output (`SwitchGetNewActivation`) is on only
+while `OutputEndSignalFrames` > 0, set to 2 by `TriggerStopMessage`. `TriggerStopMessage` runs
+when the input activation drops to 0 (`SwitchPerformReaction`), from the scoreboard, or (for a
+divergent bubble only; 1064 is not, it has output wires) after 60 frames off screen. The
+dialogue clock (`UpdateAudio__`, `AudioTime` against DialogueLengthMs * 30 / 1000) only stops
+the mouth (`StopAnimatingMouth__`); it neither closes the message nor fires the output.
+
+FOUND (01.33 EBOOT, messaging manager): type 2 has no timeout (only types 0 and 4 do). Circle
+(pad mask 0x20) maps to action 0x37 at 0x3e7898, which only sends net message 0x49 to party
+peers; offline it does nothing (no `OnMagicMouthClosed`, no removal). Type 2 closes only by
+event 3 for its Thing (`Messaging_NewGameEvent` 0x735434, the component destructor 0x6a03cc,
+or a per-frame part update 0x6a3264 when its active byte at +0x24 goes 1 -> 0), which calls
+`OnMagicMouthClosed` (no output signal either). The engine never calls `TriggerStopMessage__b`.
+
+So with our counter and timer rules the second line (1054: 1064's output -> counter 1068 ->
+AND 1052 with board output 0 -> timer 1053, 299 ticks) can never start. OPEN: what turns
+1060 or 1064's input off in the game (a counter reset rule, chip deactivation, or the part
+update at 0x6a3264); needs a game observation of the level start.
+
+The wall at x -14348 is Thing 1028 (UID 246497): a wooden post (base_wood, collidable, z
+-290..+90, x -14490..-14384, y 5905..8162) hung from dark matter 1027 through piston 1026.
+It is genuinely solid in the front lane; Da Vinci (1029) stands behind it at x -15601. Our
+collision reads it correctly, so it is not changed here (slopes/walls stay paused).
