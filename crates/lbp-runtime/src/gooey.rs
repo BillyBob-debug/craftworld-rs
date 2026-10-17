@@ -156,8 +156,96 @@ pub enum GooeyItem {
     PlayerIcon {
         id: Option<i32>,
     },
+    /// D347: a play stat's disc, percent and label ([`PlayStat`]).
+    PlayStat(PlayStat),
     /// Any other `Do*` native, by name.
     Other(String),
+}
+
+/// D347 FOUND (01.33, the widget 0x496700, laid out by 0x4f5400 and drawn by 0x4f5abc): a
+/// play stat: a disc (shader resource 0x109ee) filled to `collected / total` in the
+/// widget's colour, and right of it the percent (font 1) with the label (the style's font)
+/// below. Every size comes from S, the style's size times the Gooey's scale (here
+/// `font_scale`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct PlayStat {
+    pub percent: String,
+    pub label: Option<String>,
+    /// `collected / total`, 0..1.
+    pub fraction: f32,
+    pub style: i32,
+    pub font_scale: f32,
+    /// The widget's colour (ARGB), the Gooey's colour at +0x1e0.
+    pub colour: u32,
+}
+
+/// D347: the text style whose font is font 1 at size 32: the percent is drawn in font 1
+/// at S x 1.9 (S x 1.2 without a label), as this style at that size over 32.
+const PLAY_STAT_PERCENT_STYLE: i32 = 1;
+
+/// D347 MEASURED (the game frame of the Story view, the disc's radius r about 20 pixels):
+/// the percent's ink centre is 0.62 r above the disc's centre, the label's 0.55 r below.
+/// INFERRED: 0x4f5400 puts the percent S x 1.4 down and the label under it (its own text
+/// offsets not decoded).
+const PLAY_STAT_PERCENT_UP: f32 = 0.62;
+const PLAY_STAT_LABEL_DOWN: f32 = 0.55;
+
+/// D347 MEASURED (the game frame): the disc's ink is 38 pixels across where its quad, 2r,
+/// is 45 at the viewer's scale; the disc is placed this share of 2r across. INFERRED: the
+/// shader 0x109ee draws a disc inside its quad (UV 0.02..0.98, edge not decoded).
+pub const PLAY_STAT_DISC_INK: f32 = 0.85;
+
+impl PlayStat {
+    /// S: the style's size times the Gooey's scale.
+    fn size(&self) -> f32 {
+        text_style(self.style).1 * self.font_scale
+    }
+
+    /// The disc's radius: (S x 1.9 + S) x 1.2 / 2 with a label, S x 1.2 x 1.2 / 2 without.
+    pub fn radius(&self) -> f32 {
+        let s = self.size();
+        if self.label.is_some() {
+            (s * 1.9 + s) * 1.2 * 0.5
+        } else {
+            s * 1.2 * 1.2 * 0.5
+        }
+    }
+
+    /// The percent's font scale for [`PLAY_STAT_PERCENT_STYLE`].
+    fn percent_scale(&self) -> f32 {
+        let k = if self.label.is_some() { 1.9 } else { 1.2 };
+        self.size() * k / text_style(PLAY_STAT_PERCENT_STYLE).1
+    }
+
+    /// The label's font scale: S x 0.9 in the style's font.
+    fn label_scale(&self) -> f32 {
+        self.font_scale * 0.9
+    }
+
+    /// The texts right of the disc, each with its style, font scale and width.
+    fn texts(&self, fonts: Option<&GooeyFonts>) -> Vec<(String, i32, f32, f32)> {
+        let mut out = vec![(
+            self.percent.clone(),
+            PLAY_STAT_PERCENT_STYLE,
+            self.percent_scale(),
+        )];
+        if let Some(label) = &self.label {
+            out.push((label.clone(), self.style, self.label_scale()));
+        }
+        out.into_iter()
+            .map(|(t, style, scale)| {
+                let w = text_width(&t, style, scale, fonts);
+                (t, style, scale, w)
+            })
+            .collect()
+    }
+
+    /// Width 2r + 0.2r + the wider text; height 2r.
+    fn measure(&self, fonts: Option<&GooeyFonts>) -> [f32; 2] {
+        let r = self.radius();
+        let w = self.texts(fonts).iter().map(|t| t.3).fold(0., f32::max);
+        [2.2 * r + w, 2. * r]
+    }
 }
 
 /// What the Gooey natives built and were told (one per level world). The tree is rebuilt
@@ -989,7 +1077,20 @@ pub enum PlacedKind {
     /// D330: a frame drawn as a speech bubble's outline ([`SpeechBubble`]), placed before
     /// its children (behind them); its rectangle is the frame's.
     Bubble(SpeechBubble),
+    /// D347: a play stat's disc ([`PlayStat`]), `fraction` of it in `colour` (ARGB).
+    Disc {
+        colour: u32,
+        fraction: f32,
+    },
+    /// D347: a horizontal break's line across its frame, [`RULE_HEIGHT`] tall.
+    Rule,
 }
+
+/// D347 MEASURED (the game frame's info bubble): the horizontal break's line is about 1.5
+/// pixels (4 root-frame units at its 0.33 pixels a unit) of half-white across the frame's
+/// content. INFERRED by eye; FOUND (0x7049fc) the break's own numbers: type 1, (0.5, 0.5,
+/// 0, 0), 0, 0 and colour (1, 1, 1, 1).
+pub const RULE_HEIGHT: f32 = 4.;
 
 /// D330 FOUND (01.33: the bubble style enum at 0xd62d20, the style-15 path 0x4878d4): a
 /// frame of style 15 (`GCS_SPEECH_BUBBLE_OUTLINE`) is drawn as an outline with a tail, its
@@ -1250,6 +1351,12 @@ fn share(code: i32) -> f32 {
     }
 }
 
+/// A text's width: in the game's font when it is loaded, else the fitted [`text_ems`].
+fn text_width(text: &str, style: i32, font_scale: f32, fonts: Option<&GooeyFonts>) -> f32 {
+    (fonts.and_then(|f| f.text_width(text, style, font_scale)))
+        .unwrap_or_else(|| BUTTON_EM * font_scale * text_ems(text))
+}
+
 /// The size an item asks for; text measured in the game's font when it is loaded.
 fn measure(item: &GooeyItem, fonts: Option<&GooeyFonts>) -> [f32; 2] {
     let font = |text: &str, style: i32, scale: f32| fonts?.text_width(text, style, scale);
@@ -1267,11 +1374,8 @@ fn measure(item: &GooeyItem, fonts: Option<&GooeyFonts>) -> [f32; 2] {
             text,
             style,
             font_scale,
-        } => [
-            font(text, *style, *font_scale)
-                .unwrap_or_else(|| BUTTON_EM * font_scale * text_ems(text)),
-            BUTTON_ROW,
-        ],
+        } => [text_width(text, *style, *font_scale, fonts), BUTTON_ROW],
+        GooeyItem::PlayStat(stat) => stat.measure(fonts),
         _ => [0., 0.],
     }
 }
@@ -1280,20 +1384,71 @@ fn borders(f: &GooeyFrame) -> [f32; 4] {
     f.borders.unwrap_or([0.; 4])
 }
 
-/// Rows of items: a break ends a row.
-fn rows(f: &GooeyFrame) -> Vec<Vec<&GooeyItem>> {
-    let mut out = vec![Vec::new()];
+/// Rows of items: a break ends a row. D347: each row says whether a horizontal break
+/// came before it (its line is drawn at the row's top).
+fn rows(f: &GooeyFrame) -> Vec<(bool, Vec<&GooeyItem>)> {
+    let mut out = vec![(false, Vec::new())];
     for c in &f.children {
         match c {
-            GooeyItem::Break | GooeyItem::HorizontalBreak(_) => out.push(Vec::new()),
-            c => out.last_mut().expect("a row").push(c),
+            GooeyItem::Break | GooeyItem::HorizontalBreak(_) => {
+                let rule = matches!(c, GooeyItem::HorizontalBreak(_));
+                match out.last_mut().expect("a row") {
+                    (r, items) if items.is_empty() => *r |= rule,
+                    _ => out.push((rule, Vec::new())),
+                }
+            }
+            c => out.last_mut().expect("a row").1.push(c),
         }
     }
-    out.retain(|r| !r.is_empty());
+    out.retain(|(_, r)| !r.is_empty());
     out
 }
 
 /// The content size of a frame's children (columns side by side, else rows stacked).
+/// D347 MEASURED (the game frame's info bubble, 0.352 pixels a unit from the viewer's
+/// disc): in a filled speech bubble a text's line is this many times its size (the title's
+/// and the author's cap centres 26 pixels apart, 74 units, for sizes 45.4 and 31.2: 1.93),
+/// INFERRED 32 font pixels, twice the 16 a font is made for. Elsewhere a text keeps the
+/// main menu's [`BUTTON_ROW`] (fitted there).
+pub const BUBBLE_TEXT_LINE: f32 = 2.;
+
+/// D347 MEASURED (the same frame): in a filled bubble a text's ink centre is 0.4 of its
+/// line above the line's centre (the title 36 units, 0.40 of 90.9, the author 24, 0.39
+/// of 62.5, against centred ink). INFERRED: the line's lower part is the font's descent
+/// and leading.
+pub const BUBBLE_TEXT_UP: f32 = 0.4;
+
+/// D347: whether a frame lays its texts out by [`BUBBLE_TEXT_LINE`] and spaces a
+/// horizontal break: a filled speech bubble.
+fn bubble_lines(f: &GooeyFrame) -> bool {
+    SpeechBubble::of(f).is_some_and(|b| b.filled)
+}
+
+/// An item's size in a frame's row: [`measure`], but in a filled bubble a text is one
+/// [`BUBBLE_TEXT_LINE`] tall.
+fn row_size(f: &GooeyFrame, item: &GooeyItem, fonts: Option<&GooeyFonts>) -> [f32; 2] {
+    match item {
+        GooeyItem::Text {
+            style, font_scale, ..
+        } if bubble_lines(f) => [
+            measure(item, fonts)[0],
+            BUBBLE_TEXT_LINE * text_style(*style).1 * font_scale,
+        ],
+        _ => measure(item, fonts),
+    }
+}
+
+/// D347: the space a horizontal break takes before its row: in a filled bubble the
+/// frame's child spacing down (MEASURED: with it the info bubble's height is the game's,
+/// 144 pixels, within 1 pixel; INFERRED the spacing goes there), else none.
+fn rule_gap(f: &GooeyFrame) -> f32 {
+    if bubble_lines(f) {
+        f.spacing.map_or(0., |s| s[1])
+    } else {
+        0.
+    }
+}
+
 fn content(f: &GooeyFrame, fonts: Option<&GooeyFonts>) -> [f32; 2] {
     if !f.columns.is_empty() {
         let sizes: Vec<[f32; 2]> = f.children.iter().map(|c| measure(c, fonts)).collect();
@@ -1305,8 +1460,11 @@ fn content(f: &GooeyFrame, fonts: Option<&GooeyFonts>) -> [f32; 2] {
     let rows = rows(f);
     let mut w: f32 = 0.;
     let mut h = 0.;
-    for r in &rows {
-        let sizes: Vec<[f32; 2]> = r.iter().map(|c| measure(c, fonts)).collect();
+    for (rule, r) in &rows {
+        if *rule {
+            h += rule_gap(f);
+        }
+        let sizes: Vec<[f32; 2]> = r.iter().map(|c| row_size(f, c, fonts)).collect();
         w = w.max(sizes.iter().map(|s| s[0]).sum());
         h += sizes.iter().map(|s| s[1]).fold(0., f32::max);
     }
@@ -1380,6 +1538,34 @@ fn place(
             size: [r.w, r.h],
             angle: 0.,
         }),
+        // D347: the disc at the left, centred down the cell; the percent and the label
+        // left-aligned right of it ([`PLAY_STAT_PERCENT_UP`]).
+        GooeyItem::PlayStat(stat) => {
+            let rad = stat.radius();
+            out.push(PlacedItem {
+                kind: PlacedKind::Disc {
+                    colour: stat.colour,
+                    fraction: stat.fraction,
+                },
+                centre: [r.x + rad, centre[1]],
+                size: [2. * rad * PLAY_STAT_DISC_INK; 2],
+                angle: 0.,
+            });
+            let x = r.x + 2.2 * rad;
+            let downs = [-PLAY_STAT_PERCENT_UP, PLAY_STAT_LABEL_DOWN];
+            for ((text, style, font_scale, w), down) in stat.texts(ctx.1).into_iter().zip(downs) {
+                out.push(PlacedItem {
+                    kind: PlacedKind::Text {
+                        text,
+                        style,
+                        font_scale,
+                    },
+                    centre: [x + w / 2., centre[1] + down * rad],
+                    size: [w, rad],
+                    angle: 0.,
+                });
+            }
+        }
         _ => {}
     }
 }
@@ -1455,21 +1641,37 @@ fn place_frame(
     let rows = rows(f);
     let c = content(f, fonts);
     let mut y = inner.y + (inner.h - c[1]) * ay;
-    for row in rows {
+    for (rule, row) in rows {
+        if rule {
+            // The line at the top of the break's gap (MEASURED: the game's line is 10
+            // pixels above the gap's middle, 17 below the author's ink).
+            let gap = rule_gap(f);
+            out.push(PlacedItem {
+                kind: PlacedKind::Rule,
+                centre: [inner.x + inner.w / 2., y],
+                size: [inner.w, RULE_HEIGHT],
+                angle: 0.,
+            });
+            y += gap;
+        }
         let sizes: Vec<[f32; 2]> = row
             .iter()
             .map(|it| match it {
                 GooeyItem::Frame(fr) => frame_size(fr, Some([inner.w, inner.h]), fonts),
-                it => measure(it, fonts),
+                it => row_size(f, it, fonts),
             })
             .collect();
         let rw: f32 = sizes.iter().map(|s| s[0]).sum();
         let rh = sizes.iter().map(|s| s[1]).fold(0., f32::max);
         let mut x = inner.x + (inner.w - rw) * ax;
         for (it, s) in row.iter().zip(&sizes) {
+            let up = match it {
+                GooeyItem::Text { .. } if bubble_lines(f) => BUBBLE_TEXT_UP * s[1],
+                _ => 0.,
+            };
             let cell = Rect {
                 x,
-                y: y + (rh - s[1]) * 0.5,
+                y: y + (rh - s[1]) * 0.5 - up,
                 w: s[0],
                 h: s[1],
             };
@@ -1775,6 +1977,10 @@ mod tests {
             (frame.children.into_iter())
                 .filter_map(|c| match c {
                     GooeyItem::Text { text, style, .. } => Some((text, style)),
+                    // D347: one widget carries the percent and the label.
+                    GooeyItem::PlayStat(s) => {
+                        Some((format!("{} {}", s.percent, s.label?), s.style))
+                    }
                     _ => None,
                 })
                 .collect::<Vec<_>>()
@@ -1801,12 +2007,71 @@ mod tests {
             texts(&w),
             [
                 ("COSMOS_THEME".to_owned(), 1),
-                ("14%".to_owned(), 4),
-                ("Goodies & prizes won".to_owned(), 4)
+                ("14% Goodies & prizes won".to_owned(), 4)
             ]
         );
         assert_eq!(crate::goodies_percent(7, 7), "100%");
         assert_eq!(crate::goodies_percent(0, 3), "0%");
+    }
+
+    /// D347: the play stat's disc is (S x 1.9 + S) x 1.2 / 2 across with S = 26 x the
+    /// scale; the percent is drawn in font 1 at S x 1.9 and the label at S x 0.9, both
+    /// right of the disc; a horizontal break draws its line at the next row's top.
+    #[test]
+    fn d347_play_stat_lays_out_a_disc_and_two_texts() {
+        let stat = PlayStat {
+            percent: "100%".into(),
+            label: Some("Goodies & prizes won".into()),
+            fraction: 1.,
+            style: 4,
+            font_scale: 1.42,
+            colour: 0xffc3_31a0,
+        };
+        let s = 26. * 1.42;
+        assert!((stat.radius() - 2.9 * s * 0.6).abs() < 1e-3);
+        let frame = GooeyFrame {
+            children: vec![
+                GooeyItem::Text {
+                    text: "The Cosmos".into(),
+                    style: 1,
+                    font_scale: 1.42,
+                },
+                GooeyItem::HorizontalBreak(vec![1.]),
+                GooeyItem::PlayStat(stat.clone()),
+            ],
+            ..GooeyFrame::default()
+        };
+        let placed = layout(&frame, None);
+        let kinds: Vec<_> = placed.iter().map(|p| &p.kind).collect();
+        assert!(matches!(kinds[1], PlacedKind::Rule));
+        let PlacedKind::Disc { colour, fraction } = kinds[2] else {
+            panic!("{kinds:?}");
+        };
+        assert_eq!((*colour, *fraction), (0xffc3_31a0, 1.));
+        let disc = &placed[2];
+        assert!((disc.size[0] - 2. * stat.radius() * PLAY_STAT_DISC_INK).abs() < 1e-3);
+        // Outside a filled bubble the rule sits where the stat's row starts.
+        assert!((placed[1].centre[1] - (disc.centre[1] - stat.radius())).abs() < 1e-3);
+        let text = |i: usize| match &placed[i].kind {
+            PlacedKind::Text {
+                text,
+                style,
+                font_scale,
+            } => (text.as_str(), *style, *font_scale),
+            k => panic!("{k:?}"),
+        };
+        let (percent, style, scale) = text(3);
+        assert_eq!((percent, style), ("100%", 1));
+        assert!((scale * 32. - s * 1.9).abs() < 1e-3);
+        let (label, style, scale) = text(4);
+        assert_eq!((label, style), ("Goodies & prizes won", 4));
+        assert!((scale * 26. - s * 0.9).abs() < 1e-3);
+        let left = disc.centre[0] + 1.2 * stat.radius();
+        for i in [3, 4] {
+            let p = &placed[i];
+            assert!((p.centre[0] - p.size[0] / 2. - left).abs() < 1e-3);
+        }
+        assert!(placed[3].centre[1] < disc.centre[1] && placed[4].centre[1] > disc.centre[1]);
     }
 
     #[test]

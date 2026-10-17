@@ -1625,6 +1625,24 @@ fn spawn_script_menu(
                 }
                 card
             }
+            // D347: a play stat's disc and a horizontal break's line: plain fills (round
+            // for the disc).
+            lbp_runtime::PlacedKind::Disc { .. } | lbp_runtime::PlacedKind::Rule => commands
+                .spawn((
+                    Node {
+                        position_type: PositionType::Absolute,
+                        border_radius: if item.kind == lbp_runtime::PlacedKind::Rule {
+                            BorderRadius::ZERO
+                        } else {
+                            BorderRadius::all(Val::Px(9999.))
+                        },
+                        ..default()
+                    },
+                    UiTransform::IDENTITY,
+                    BackgroundColor(Color::NONE),
+                    ScriptMenuNode(i),
+                ))
+                .id(),
             // D330: the bubble is drawn on the menu layer; its node only places it.
             // On the overlay it is the node's border and a chevron child.
             lbp_runtime::PlacedKind::Bubble(_) => commands
@@ -2020,6 +2038,16 @@ pub(crate) fn paint_script_menu(
                 CARD_FRAME[2],
                 CARD_FRAME[3] * fade,
             ]),
+            lbp_runtime::PlacedKind::Disc { colour, fraction } => {
+                let [r, g, b, a] = disc_colour(*colour, *fraction);
+                Some([r, g, b, a * fade])
+            }
+            lbp_runtime::PlacedKind::Rule => Some([
+                RULE_COLOUR[0],
+                RULE_COLOUR[1],
+                RULE_COLOUR[2],
+                RULE_COLOUR[3] * fade,
+            ]),
             lbp_runtime::PlacedKind::Text { .. } | lbp_runtime::PlacedKind::Bubble(_) => None,
         };
         *background = match fill {
@@ -2077,7 +2105,7 @@ pub(crate) fn paint_script_menu(
             placed_at[*i] = Some((centre, angle));
             let card = item.kind == lbp_runtime::PlacedKind::PlayerIcon;
             let (w, h) = (w * scale, h * scale);
-            let shape = if card {
+            let shape = if card || item.kind == lbp_runtime::PlacedKind::Rule {
                 MenuShape::Rect
             } else {
                 MenuShape::Capsule
@@ -2361,6 +2389,21 @@ fn bubble_colour(b: &lbp_runtime::SpeechBubble, player: [f32; 4]) -> [f32; 4] {
         [player[0], player[1], player[2], 1.]
     } else {
         BUBBLE_COLOUR
+    }
+}
+
+/// D347: a horizontal break's line, half white ([`lbp_runtime::RULE_HEIGHT`]).
+const RULE_COLOUR: [f32; 4] = [1., 1., 1., 0.5];
+
+/// D347 FOUND (0x4f5abc): a play stat's disc is all the widget's colour once collected
+/// reaches the total and all (0, 0, 0, 0.3) at none; between, a pie of the colour over
+/// that shade. Left out: the pie (a part-filled disc is drawn in the colour).
+fn disc_colour(colour: u32, fraction: f32) -> [f32; 4] {
+    if fraction <= 0. {
+        [0., 0., 0., 0.3]
+    } else {
+        let [r, g, b, _] = lbp_script_vm::natives::colour_vector(colour);
+        [r, g, b, 1.]
     }
 }
 

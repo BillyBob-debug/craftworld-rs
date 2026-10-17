@@ -361,6 +361,9 @@ pub struct LevelWorld {
     /// the profile's colours ([`ProfileRecords::colours`]): every player record takes it
     /// ([`Self::set_profile_colour`]) instead of [`lbp_script_vm::natives::DEFAULT_PLAYER_COLOUR`].
     pub profile_colour: Option<u32>,
+    /// D347: the profile's second colour: the info bubble's play stat disc takes it
+    /// ([`INFO_BUBBLE_SCALE`]).
+    pub profile_stat_colour: Option<u32>,
     /// D328: the result objects of [`Self::story_slots`], one per slot, same order.
     pub story_results: Vec<StoryResult>,
     /// D328: an empty SearchResultHandle (`_Type` 0): `SearchResult.GetParent__` of a
@@ -2661,6 +2664,22 @@ pub const GOODIES_ROW_DELAY: i32 = 15;
 /// D340 FOUND (01.33, 0x703200): the goodies row's label, "Goodies & prizes won".
 pub const GOODIES_LABEL_KEY: u32 = 0xd9b1_b864;
 
+/// D347 MEASURED (the game frame of the Story view, the owner's profile): the info
+/// bubble's texts are 1.42 times the size their styles give (the title's and the author's
+/// widths 1.41 and 1.44 times the viewer's at scale 1, the percent's cap height 27 pixels
+/// against 27.8 predicted). FOUND (0x48a584): a text's size is its style's times the
+/// Gooey's scale at +4; INFERRED: this is that scale for the planets' info bubble (not
+/// read from memory).
+pub const INFO_BUBBLE_SCALE: f32 = 1.42;
+
+/// D347 MEASURED (the same frame): the play stat's disc is (195, 49, 160), the profile's
+/// second colour (0xffc331a0, `--profile-records`). FOUND (0x704088): the widget's colour
+/// is the Gooey's colour vector at +0x1e0; INFERRED that the planets set it from that
+/// colour. Without a profile the disc takes the default player colour.
+fn stat_colour(world: &LevelWorld) -> u32 {
+    (world.profile_stat_colour).unwrap_or(lbp_script_vm::natives::DEFAULT_PLAYER_COLOUR)
+}
+
 /// D340 FOUND (01.33, 0x4f57b4): a play stat's percent: collected x 100 / total, truncated,
 /// printed "%d%%" (0xc6b7b0), or "100%" (0xc6b7c0) once collected reaches the total.
 pub fn goodies_percent(collected: u32, total: u32) -> String {
@@ -2677,6 +2696,7 @@ impl LevelWorld {
     /// player records point at the profile's colour record.
     pub fn set_profile_colour(&mut self, colours: Option<[u32; 4]>) {
         self.profile_colour = colours.map(|c| c[0]);
+        self.profile_stat_colour = colours.map(|c| c[1]);
         if let Some(colour) = self.profile_colour {
             for record in &mut self.player_records {
                 record.colour = colour;
@@ -2776,7 +2796,7 @@ impl LevelWorld {
         let text = |text: String, style| GooeyItem::Text {
             text,
             style,
-            font_scale: 1.,
+            font_scale: INFO_BUBBLE_SCALE,
         };
         let mut children = vec![text(name, 1)];
         if let Some(author) = &slot.author {
@@ -2795,11 +2815,19 @@ impl LevelWorld {
                 let label = self
                     .lams(GOODIES_LABEL_KEY)
                     .unwrap_or("Goodies & prizes won");
+                // D347 FOUND (0x7049fc, 0x703ef4): the break, then one play stat widget
+                // (0x496700) with the label, style 4 and the percent shown.
+                let fraction = (collected as f32 / total as f32).min(1.);
                 children.extend([
-                    GooeyItem::HorizontalBreak(vec![1., 0., 0., 0.5]),
-                    text(goodies_percent(collected, total), 4),
-                    GooeyItem::Break,
-                    text(label.to_owned(), 4),
+                    GooeyItem::HorizontalBreak(vec![1., 0.5, 0.5, 0., 0., 0., 0., 1., 1., 1., 1.]),
+                    GooeyItem::PlayStat(PlayStat {
+                        percent: goodies_percent(collected, total),
+                        label: Some(label.to_owned()),
+                        fraction,
+                        style: 4,
+                        font_scale: INFO_BUBBLE_SCALE,
+                        colour: stat_colour(self),
+                    }),
                 ]);
             }
         }
