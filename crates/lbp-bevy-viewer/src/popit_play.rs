@@ -50,6 +50,8 @@ const CLOSE_POPIT_KEY: u32 = 0x9c2a_eec8;
 /// and the measured card size in 1280x720 pixels.
 const EDIT_ROWS: &[&[u32]] = &[&[6, 1, 8], &[4, 2, 0], &[7, 5, 3]];
 const PLAY_ROWS: &[&[u32]] = &[&[6], &[4, 0], &[7, 3]];
+/// Play mode in our Pod (D402, `DoMainMenuPlay`): Pod Decoration joins row 1, Retry goes.
+const PLAY_ROWS_POD: &[&[u32]] = &[&[6, 10], &[4, 0], &[7]];
 const EDIT_CARD: [f32; 2] = [170., 177.];
 const PLAY_CARD: [f32; 2] = [109., 146.];
 /// Cell pitch and sizes (measured, 720p px): icon 128 units shown at 0.323 px/unit.
@@ -131,7 +133,9 @@ pub(crate) struct PopitAssets {
 /// One inventory page behind a main-menu button: title and the first icons by category.
 struct PageData {
     id: u32,
-    title: &'static str,
+    title: String,
+    /// Play-mode title of the Personal page ("Heart Items", the collection's second page).
+    heart_title: String,
     sections: Vec<(String, Vec<(String, Image)>)>,
     message: Option<&'static str>,
     /// One-column list page (Tools = the "Sounds" list): rows of (label, icon).
@@ -143,23 +147,37 @@ struct PageData {
 }
 
 /// Inventory pages by collection (`InventoryCollection.EInventoryCollection`, the argument
-/// of `Poppet.PushSubModeInventory`): (collection, panel title, plan page, empty message).
-/// The titles and contents are drawn by the native `DoInventoryGrid` (MEASURED).
-const PAGES: [(i32, &str, Option<&str>, Option<&str>); 6] = [
-    (0, "Body", Some("costume"), None),
-    (1, "Stickers", Some("sticker"), None),
+/// of `Poppet.PushSubModeInventory`): (collection, title LAMS key, English fallback, plan
+/// page, empty message). The title is the open page's own key (D402: the EBOOT's default
+/// profile pages, `GetTitleKey`); which page is open is the profile's (MEASURED). The
+/// contents are drawn by the native `DoInventoryGrid` (MEASURED).
+type PageRow = (
+    i32,
+    u32,
+    &'static str,
+    Option<&'static str>,
+    Option<&'static str>,
+);
+const PAGES: [PageRow; 6] = [
+    (0, 0x9843_f40a, "Body", Some("costume"), None),
+    (1, 0xdae7_f79a, "Stickers", Some("sticker"), None),
     // MEASURED 2026-10-11 18:50: Goodies Bag opens "Community Objects", Personal opens
     // "Tools and Used Objects", Tools Bag opens the Sounds list.
     (
         2,
+        0xfead_43d3,
         "Community Objects",
         None,
         Some("Get your friends to send you objects, and they'll appear here."),
     ),
-    (3, "Tools", None, None),
-    (4, "Tools and Used Objects", None, None),
-    (8, "My Pods", None, None),
+    (3, 0x3bd3_366a, "Tools", None, None),
+    (4, 0x5036_ae03, "Tools and Used Objects", None, None),
+    (8, 0x15f8_630f, "My Pods", None, None),
 ];
+/// Page title keys (D402): the Tools Bag's "Sounds" page and the Personal collection's
+/// "Heart Items" page.
+const SOUNDS_TITLE: (u32, &str) = (0xea9b_0d51, "Sounds");
+const HEART_TITLE: (u32, &str) = (0x4d45_f1f1, "Heart Items");
 /// Fallback button -> collection (create mode; play mode lacks the Goodies Bag, 1), equal
 /// to the D401 run of `Poppet.DoMainMenuButtonResponse`.
 const FALLBACK_OPENS: [(u32, i32); 6] = [(0, 1), (1, 2), (4, 4), (5, 3), (6, 0), (10, 8)];
@@ -560,9 +578,15 @@ pub(crate) fn load_assets(
         });
     }
     let popit = lbp_preview::popit::load_popit(source, catalog, control)?;
+    let tr = |key: u32, english: &str| {
+        strings
+            .get(key)
+            .map_or_else(|| english.to_owned(), str::to_owned)
+    };
     let mut pages = Vec::new();
     for (&id, collection) in &opens[0] {
-        let Some(&(_, title, plan_page, message)) = PAGES.iter().find(|pg| pg.0 == *collection)
+        let Some(&(_, title_key, english, plan_page, message)) =
+            PAGES.iter().find(|pg| pg.0 == *collection)
         else {
             continue;
         };
@@ -727,10 +751,11 @@ pub(crate) fn load_assets(
         pages.push(PageData {
             id,
             title: if id == TOOLS_BUTTON && !list.is_empty() {
-                "Sounds"
+                tr(SOUNDS_TITLE.0, SOUNDS_TITLE.1)
             } else {
-                title
+                tr(title_key, english)
             },
+            heart_title: tr(HEART_TITLE.0, HEART_TITLE.1),
             sections,
             message,
             list,
@@ -821,7 +846,12 @@ fn rows(p: &Popit) -> Vec<Vec<u32>> {
 
 fn fallback_cards() -> [(Vec<Vec<u32>>, u32, f32); 2] {
     let grid = |r: &[&[u32]]| r.iter().map(|row| row.to_vec()).collect();
-    [(grid(EDIT_ROWS), 2, PITCH), (grid(PLAY_ROWS), 6, PITCH)]
+    let play = if crate::sackboy_play::in_pod() {
+        PLAY_ROWS_POD
+    } else {
+        PLAY_ROWS
+    };
+    [(grid(EDIT_ROWS), 2, PITCH), (grid(play), 6, PITCH)]
 }
 
 /// D400: both cards from the game's `Poppet` script (create mode, then play mode).
@@ -832,10 +862,12 @@ fn script_cards(
 ) -> Result<ScriptCards, String> {
     let (vm, class, script) = poppet_vm(source, catalog, control)?;
     let mut vm = vm;
+    // D402: the play card has the Pod Decoration button only in our Pod, Retry elsewhere.
+    let our_pod = crate::sackboy_play::in_pod();
     let mut out = Vec::new();
     let mut icons = BTreeMap::new();
     for edit in [true, false] {
-        let (card, keys) = lbp_ui_script::popit::run_card(&mut vm, class, &script, edit)?;
+        let (card, keys) = lbp_ui_script::popit::run_card(&mut vm, class, &script, edit, our_pod)?;
         for b in card.rows.iter().flatten() {
             let (Some(atx), Some(&key)) = (b.icon, keys.get(&b.index)) else {
                 continue;
@@ -861,8 +893,9 @@ fn script_cards(
     let play = out.pop().expect("two cards");
     let edit = out.pop().expect("two cards");
     // D401: what each button opens, from `Poppet.DoMainMenuButtonResponse`.
-    let mut opens = [true, false]
-        .map(|edit| lbp_ui_script::popit::run_responses(&mut vm, class, &script, edit, 0..=10));
+    let mut opens = [true, false].map(|edit| {
+        lbp_ui_script::popit::run_responses(&mut vm, class, &script, edit, our_pod, 0..=10)
+    });
     if opens[0].is_empty() {
         return Err("DoMainMenuButtonResponse opened no inventory page".into());
     }
@@ -1553,7 +1586,11 @@ fn popit_page_ui(
         GlobalZIndex(40),
     ));
     // The game's handwritten title is narrower than our sans: shrink long titles to the panel.
-    let page_title = if heart { "Heart Items" } else { page.title };
+    let page_title = if heart {
+        &page.heart_title
+    } else {
+        &page.title
+    };
     let title_px = (30. * 14. / page_title.chars().count().max(1) as f32).clamp(19., 30.);
     text(&mut commands, page_title, px + 18., 84., title_px, 42);
     if heart {

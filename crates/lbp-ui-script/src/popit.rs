@@ -28,9 +28,12 @@ pub const FIRST_BUTTON: i32 = 10001;
 const BUDGET: u64 = 1_000_000;
 
 /// The natives the card reads, answered as in a single-player session in create mode
-/// (`edit`) or play mode.
-pub fn answers(edit: bool) -> BTreeMap<String, Value> {
+/// (`edit`) or play mode, in the player's own Pod (`our_pod`) or another level. D402: the
+/// play card shows the Pod Decoration button (10) only in our Pod as party host, and Retry
+/// (3) only outside it (`DoMainMenuPlay`).
+pub fn answers(edit: bool, our_pod: bool) -> BTreeMap<String, Value> {
     [
+        ("Game.CurrentLevelIsOurPod", Value::Bool(our_pod)),
         ("Thing.IsEditing", Value::Bool(edit)),
         ("Game.GetPlayOrEditMode", Value::Int(i32::from(edit))),
         ("Game.GetNumPS3s", Value::Int(1)),
@@ -145,10 +148,11 @@ pub fn run_card(
     class: ClassId,
     script: &Script,
     edit: bool,
+    our_pod: bool,
 ) -> Result<(Card, BTreeMap<u32, u32>), String> {
     let none = |_| None;
     let mut host = GooeyHost::new(&none);
-    host.answers = answers(edit);
+    host.answers = answers(edit, our_pod);
     let r = crate::run(vm, &mut host, class, script, CARD_FUNCTION, BUDGET);
     r.result.map_err(|f| format!("{CARD_FUNCTION}: {f}"))?;
     let card = card_from_tree(&r.tree).ok_or("Poppet card: no button frame")?;
@@ -235,13 +239,14 @@ pub fn run_responses(
     class: ClassId,
     script: &Script,
     edit: bool,
+    our_pod: bool,
     buttons: impl IntoIterator<Item = u32>,
 ) -> BTreeMap<u32, i32> {
     let none = |_| None;
     let mut out = BTreeMap::new();
     for b in buttons {
         let mut host = GooeyHost::new(&none);
-        host.answers = answers(edit);
+        host.answers = answers(edit, our_pod);
         host.answers
             .insert("Game.GetNumAvatars".into(), Value::Int(1));
         host.answers
