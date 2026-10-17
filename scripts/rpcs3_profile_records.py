@@ -12,6 +12,8 @@ profile owns: profile+0x78 / +0x7c, a sorted array of pointers to {GUID, SHA1 po
 zero hash), type} compared by type & 0x7fffffff, GUID and SHA1 (0x171a00).
 An item without a GUID is checked elsewhere (*(profile+0x518), not followed): counted as
 not owned here.
+D342: the profile's colours, *(profile+0x514) words +0x4c..+0x58 (0x18ae48, 0x15894c), go
+on a line `colours C0 C1 C2 C3`.
 """
 import ctypes, ctypes.wintypes as wt, os, struct, subprocess, sys
 
@@ -56,6 +58,11 @@ def main(out):
         owned.add((ty & 0x7fffffff, guid, blk(sha, 20) if sha else bytes(20)))
     data, n = u32(profile + 0x280), u32(profile + 0x284)
     lines = ['# LBP2 local profile goodies by SlotID: type id collected total']
+    # D342: the profile's colour record *(profile+0x514) (0x18ae48), words +0x4c..+0x58.
+    colours = u32(profile + 0x514)
+    if colours:
+        words = struct.unpack('>4I', blk(colours + 0x4c, 16))
+        lines.append('colours ' + ' '.join(f'0x{w:08x}' for w in words))
     for i in range(n):
         rec = blk(data + i * 0x80, 0x80)
         ty, sid = struct.unpack('>ii', rec[:8])

@@ -153,6 +153,8 @@ pub struct SearchSlot {
     /// sum, [`crate::LevelWorld::story_goodies`]).
     pub is_sub_level: bool,
     pub developer_level_type: Option<u32>,
+    /// D342: the slot's icon (the picture on its badge card).
+    pub icon: Option<lbp_level::serial::Descriptor>,
 }
 
 impl SearchSlot {
@@ -170,6 +172,7 @@ impl SearchSlot {
                 author: s.author_name.clone().filter(|a| !a.is_empty()),
                 is_sub_level: s.is_sub_level.unwrap_or(false),
                 developer_level_type: s.developer_level_type,
+                icon: s.icon,
             })
             .collect()
     }
@@ -392,6 +395,7 @@ impl LevelWorld {
         other.pod_computer_in_use = self.pod_computer_in_use;
         other.pod.host_use_pod_pending = self.pod.host_use_pod_pending;
         other.media.clone_from(&self.media);
+        other.profile_colour = self.profile_colour;
         for mine in &self.player_records {
             let theirs = other.player_records.iter_mut();
             let Some(theirs) = theirs.into_iter().find(|r| r.number == mine.number) else {

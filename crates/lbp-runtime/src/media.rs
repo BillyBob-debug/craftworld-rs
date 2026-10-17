@@ -148,8 +148,11 @@ pub fn parse_progression_flags(text: &str) -> Result<u32, String> {
 /// COLLECTED TOTAL` (decimal, separated by spaces); blank lines and text from `#` on are
 /// skipped. `scripts/rpcs3_profile_records.py` writes it from a running game: the save
 /// itself is encrypted, so the records are read where the game has loaded them.
-pub fn parse_profile_records(text: &str) -> Result<BTreeMap<(i32, i32), [u32; 2]>, String> {
-    let mut records = BTreeMap::new();
+///
+/// D342 (part 89): a line `colours C0 C1 C2 C3` (hex 0xAARRGGBB words) gives the
+/// profile's four colours ([`ProfileRecords::colours`]).
+pub fn parse_profile_records(text: &str) -> Result<ProfileRecords, String> {
+    let mut profile = ProfileRecords::default();
     for (n, line) in text.lines().enumerate() {
         let line = line.split('#').next().unwrap_or("").trim();
         if line.is_empty() {
@@ -157,6 +160,18 @@ pub fn parse_profile_records(text: &str) -> Result<BTreeMap<(i32, i32), [u32; 2]
         }
         let bad = |e: &dyn std::fmt::Display| format!("profile record line {}: {e}", n + 1);
         let words: Vec<&str> = line.split_whitespace().collect();
+        if let ["colours", rest @ ..] = &words[..] {
+            let hex = |w: &&str| {
+                let digits = w.strip_prefix("0x").or_else(|| w.strip_prefix("0X"));
+                u32::from_str_radix(digits.unwrap_or(w), 16).map_err(|e| bad(&e))
+            };
+            let colours: Vec<u32> = rest.iter().map(hex).collect::<Result<_, _>>()?;
+            let colours = colours
+                .try_into()
+                .map_err(|_| bad(&"expected colours C0 C1 C2 C3"))?;
+            profile.colours = Some(colours);
+            continue;
+        }
         let [ty, id, collected, total] = words[..] else {
             return Err(bad(&"expected TYPE ID COLLECTED TOTAL"));
         };
@@ -166,9 +181,23 @@ pub fn parse_profile_records(text: &str) -> Result<BTreeMap<(i32, i32), [u32; 2]
         if counts[0] > counts[1] {
             return Err(bad(&"more collected than the total"));
         }
-        records.insert((int(ty)?, int(id)?), counts);
+        profile.goodies.insert((int(ty)?, int(id)?), counts);
     }
-    Ok(records)
+    Ok(profile)
+}
+
+/// What [`parse_profile_records`] reads: the goodies counts by `SlotID` (`[collected,
+/// total]`) and the profile's colours, when the file gives them.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct ProfileRecords {
+    pub goodies: BTreeMap<(i32, i32), [u32; 2]>,
+    /// D342 FOUND (01.33, the Pod's per-frame update 0x4381d8, block 0x438278..0x438318):
+    /// the Story view's Gooey takes its colours (0x48e9f8: fill, then the three others)
+    /// from the local profile's colour record `*(profile+0x514)` (0x18ae48), words +0x4c to
+    /// +0x58 (0x15894c), each frame before the bubble is built. MEASURED (the owner's
+    /// profile in RPCS3): that record is the same object the player record points at
+    /// (+0x16c), so its first colour is the player's.
+    pub colours: Option<[u32; 4]>,
 }
 
 #[cfg(test)]
@@ -179,12 +208,29 @@ mod tests {
     fn d341_profile_records_are_read_by_slot_id() {
         let text = "# type id collected total\n0 20354 36 40\n\n4 7 0 0  # a group\n";
         let records = parse_profile_records(text).unwrap();
-        assert_eq!(records.get(&(0, 20354)), Some(&[36, 40]));
-        assert_eq!(records.get(&(4, 7)), Some(&[0, 0]));
-        assert_eq!(records.len(), 2);
+        assert_eq!(records.goodies.get(&(0, 20354)), Some(&[36, 40]));
+        assert_eq!(records.goodies.get(&(4, 7)), Some(&[0, 0]));
+        assert_eq!(records.goodies.len(), 2);
+        assert_eq!(records.colours, None);
         assert!(parse_profile_records("0 1 2").is_err());
         assert!(parse_profile_records("0 1 5 4").is_err());
         assert!(parse_profile_records("0 x 1 1").is_err());
+    }
+
+    /// D342: the colours line gives the profile's four colours.
+    #[test]
+    fn d342_profile_colours_line() {
+        let text = "colours 0xffceb424 0xffc331a0 0xff3bcfc1 ffe60f64
+0 1 0 0
+";
+        let records = parse_profile_records(text).unwrap();
+        assert_eq!(
+            records.colours,
+            Some([0xffce_b424, 0xffc3_31a0, 0xff3b_cfc1, 0xffe6_0f64])
+        );
+        assert_eq!(records.goodies.len(), 1);
+        assert!(parse_profile_records("colours 0xff 0xff 0xff").is_err());
+        assert!(parse_profile_records("colours 0xff 0xff 0xff zz").is_err());
     }
 
     #[test]
