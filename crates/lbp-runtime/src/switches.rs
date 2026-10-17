@@ -198,7 +198,13 @@ fn mirrored(
 /// (FOUND, 0x3c784, by the owner's object kind): 1 for a microchip, controlinator or
 /// selector (port 0 is the owner's own activation input), 2 for a data sampler, else 0.
 /// `None` for a sequencer: 1 or 2 by a sequencer setting the reader does not keep.
+/// D500: the kind test (0x3ed2c) checks the NPC part (kind 0x88) and the YellowHead
+/// part (0x89) before the switch, and the offset is 0 for both, so an NPC with a
+/// microchip (Da Vinci in Rookie Test, switch type 36) mirrors from port 0.
 fn board_port_offset(owner: &ThingState) -> Option<usize> {
+    if owner.parts.contains(&"NPC") || owner.parts.contains(&"YELLOWHEAD") {
+        return Some(0);
+    }
     if owner.parts.contains(&"SEQUENCER") {
         return None;
     }
@@ -1858,6 +1864,25 @@ mod tests {
         w.things[2].parts.push("SEQUENCER");
         w.update_switches();
         assert_eq!(out(&w, 3, 1), SIGNAL_OFF);
+    }
+
+    #[test]
+    fn an_npc_chips_board_mirrors_from_port_0() {
+        // D500 (Da Vinci in Rookie Test): an NPC with a microchip is switch type 36, but
+        // its board's output i is the NPC's input port i, not i + 1.
+        let mut chip = logic(36, 2);
+        chip.circuit_board = Some(2);
+        chip.parts.push("NPC");
+        let mut board = logic(37, 2);
+        board.parent = Some(1);
+        let sensor = sig(1., 1, 0);
+        let mut w = world(vec![battery(sensor, &[(1, 0)]), chip, board]);
+        w.update_switches();
+        assert_eq!([out(&w, 2, 0), out(&w, 2, 1)], [sensor, SIGNAL_OFF]);
+        // The same chip without the NPC part: port 0 is its own activation input.
+        w.things[1].parts.clear();
+        w.update_switches();
+        assert_eq!(out(&w, 2, 0), SIGNAL_OFF);
     }
 
     #[test]
