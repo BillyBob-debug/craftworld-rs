@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D339
+# Current state (overwrite each milestone) — after D340
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,11 +11,18 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D339 the Story view's info bubble (2026-10-16)
+## Latest: D340 the info bubble's goodies row (2026-10-16)
+- Part 87 (`docs/level-scripts/part-87.md`): a story level or group's bubble adds "N%" and
+  "Goodies & prizes won" (key 0xd9b1b864) 15 frames after it is up, when its total is not
+  0; FOUND: the counts come from the profile's per-slot records (0x199c9c, 0x43982c).
+- Left out: reading the profile (row hidden, as for a fresh profile), the stat's icon and
+  divider line, linked-level recursion.
+
+## D339 the Story view's info bubble (2026-10-16)
 - Part 86 (`docs/level-scripts/part-86.md`): while Story is up a filled speech bubble in the
   player's colour (style 13, FOUND 0x7006c0) shows the default result's name and author,
   its tail at the badge's measured screen place.
-- Left out: the goodies row (profile collection not read), text wrapping, the badge card.
+- Left out: text wrapping, the badge card.
 
 ## D338 the Story globe's AO overlays blended (2026-10-16)
 - Part 85 (`docs/level-scripts/part-85.md`): a solid material with its alpha port wired
