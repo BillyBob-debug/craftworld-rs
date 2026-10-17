@@ -1,5 +1,11 @@
 # Development log
 
+## 2026-10-17 - D401 Popit pages picked by the game's script
+
+Viewer and UI host. Which Popit button opens which inventory page (and in which mode) now comes from running
+`Poppet.DoMainMenuButtonResponse` on the Gooey host: the collection `PushSubModeInventory` sends. Play mode
+refuses the Goodies Bag page, as in the game. See docs/d401-popit-pages-from-script.md.
+
 ## 2026-10-17 - D400 the Popit card from the game's script
 
 Viewer and UI host. The `--play-sackboy` Popit's create and play cards now come from running the game's

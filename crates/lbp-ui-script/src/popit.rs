@@ -169,22 +169,29 @@ fn tooltip_key(
     script: &Script,
     index: u32,
 ) -> Option<u32> {
+    match call_with_index(vm, host, class, script, TOOLTIP_FUNCTION, index)? {
+        Step::Done(Value::Int(k)) => Some(k as u32),
+        _ => None,
+    }
+}
+
+/// Runs a `Poppet` member whose last argument is a button index (the other arguments get
+/// their defaults, a `Gooey` argument a fresh instance).
+fn call_with_index(
+    vm: &mut Vm,
+    host: &mut GooeyHost,
+    class: ClassId,
+    script: &Script,
+    function: &str,
+    index: u32,
+) -> Option<Step> {
     let mut left = BUDGET;
     let mut supplied = Vec::new();
     let this = Value::Object(Some(
         make_object(vm, host, class, &mut left, &mut supplied).ok()?,
     ));
-    let e = entry_registers(
-        vm,
-        host,
-        script,
-        TOOLTIP_FUNCTION,
-        this,
-        &mut left,
-        &mut supplied,
-    )
-    .ok()?;
-    let at = *e.offsets.iter().find(|&&o| o != 0)?;
+    let e = entry_registers(vm, host, script, function, this, &mut left, &mut supplied).ok()?;
+    let at = *e.offsets.iter().rev().find(|&&o| o != 0)?;
     let regs: Vec<_> = e
         .registers
         .into_iter()
@@ -196,13 +203,57 @@ fn tooltip_key(
             }
         })
         .collect();
-    match vm
-        .start_registers(host, class, TOOLTIP_FUNCTION, &regs, &mut left)
-        .ok()?
-    {
-        Step::Done(Value::Int(k)) => Some(k as u32),
-        _ => None,
+    vm.start_registers(host, class, function, &regs, &mut left)
+        .ok()
+}
+
+/// D401: what pressing a button does, from `Poppet.DoMainMenuButtonResponse(gooey, index)`.
+pub const RESPONSE_FUNCTION: &str = "DoMainMenuButtonResponse__Q5Gooeyi";
+/// `PushSubModeInventory(collection)` sends `SendSimpleMessage(37, collection)` (FOUND).
+pub const INVENTORY_MESSAGE: i32 = 37;
+
+/// The inventory collection (`InventoryCollection.EInventoryCollection`) a button opens:
+/// the second argument of the `SendSimpleMessage(37, collection)` the response sends.
+/// `None` for buttons that do something else (cursor, restart, chat, tutorials) or are
+/// refused in this mode (the response plays `poppet/error`).
+pub fn opened_collection(trace: &[crate::TraceCall]) -> Option<i32> {
+    trace.iter().find_map(|t| {
+        if t.class != CLASS || crate::base_name(&t.function) != "SendSimpleMessage" {
+            return None;
+        }
+        let n: Vec<i32> = t.args.iter().filter_map(|a| a.parse().ok()).collect();
+        match n.as_slice() {
+            [m, c] if *m == INVENTORY_MESSAGE => Some(*c),
+            _ => None,
+        }
+    })
+}
+
+/// Button index -> inventory collection for every button in `buttons`, in edit or play mode.
+pub fn run_responses(
+    vm: &mut Vm,
+    class: ClassId,
+    script: &Script,
+    edit: bool,
+    buttons: impl IntoIterator<Item = u32>,
+) -> BTreeMap<u32, i32> {
+    let none = |_| None;
+    let mut out = BTreeMap::new();
+    for b in buttons {
+        let mut host = GooeyHost::new(&none);
+        host.answers = answers(edit);
+        host.answers
+            .insert("Game.GetNumAvatars".into(), Value::Int(1));
+        host.answers
+            .insert("Poppet.GetAllowChat".into(), Value::Bool(true));
+        if call_with_index(vm, &mut host, class, script, RESPONSE_FUNCTION, b).is_none() {
+            continue;
+        }
+        if let Some(c) = opened_collection(&host.trace) {
+            out.insert(b, c);
+        }
     }
+    out
 }
 
 /// Reads and parses an animated texture by GUID.
@@ -278,5 +329,33 @@ mod tests {
         assert_eq!(card.rows[0][0].icon, Some(7));
         assert!(!card.rows[0][2].enabled);
         assert_eq!(card.pitch(), 144.);
+    }
+
+    #[test]
+    fn d401_collection_is_the_inventory_message_argument() {
+        let call = |class: &str, function: &str, args: &[&str]| crate::TraceCall {
+            class: class.into(),
+            function: function.into(),
+            args: args.iter().map(|a| a.to_string()).collect(),
+        };
+        let trace = [
+            call(
+                "Poppet",
+                "TelemetryPoppetMenu__i",
+                &["Object(Some(ObjectId(0)))", "5"],
+            ),
+            call(
+                "Poppet",
+                "SendSimpleMessage__i",
+                &["Object(Some(ObjectId(0)))", "0"],
+            ),
+            call(
+                "Poppet",
+                "SendSimpleMessage__ii",
+                &["Object(Some(ObjectId(0)))", "37", "3"],
+            ),
+        ];
+        assert_eq!(opened_collection(&trace), Some(3));
+        assert_eq!(opened_collection(&trace[..2]), None);
     }
 }

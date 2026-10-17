@@ -14,6 +14,8 @@
 //! key) for `LAMS.Translate`. An argument `Class.Base=VALUE` in that list instead pins
 //! what a native returns (`true`/`false`, an integer, or a float with a `.`), e.g.
 //! `Thing.IsEditing=true` for the Popit's create card (D400).
+//! `ui_trace SNAPSHOT.json GAME-DIR Poppet popit-pages` prints which inventory collection
+//! each Popit button opens in create and play mode (D401).
 use lbp_level::script::{self, Script};
 use lbp_level::Limits;
 use lbp_resource::translation::{parse_translation_table, TranslationLimits};
@@ -70,7 +72,8 @@ fn run_main() -> Result<(), String> {
     let catalog_mode = all.get(1).is_some_and(|a| a.ends_with(".json"));
     let skip = if catalog_mode { 3 } else { 2 };
     let args = all.get(skip..).unwrap_or_default();
-    if args.len() != 1 && args.len() < 3 {
+    let pages = args.get(1).is_some_and(|a| a == "popit-pages");
+    if args.len() != 1 && args.len() < 3 && !pages {
         return Err(
             "usage: ui_trace (SNAPSHOT.json GAME-DIR | SCRIPT-DIR) CLASS \
              [FUNCTION|all NEW-JSON [TRANS-FILE...]]"
@@ -104,6 +107,16 @@ fn run_main() -> Result<(), String> {
         loaded_guids.len(),
         args[0]
     );
+    if pages {
+        for edit in [true, false] {
+            let opens = lbp_ui_script::popit::run_responses(&mut vm, class, &s, edit, 0..=10);
+            println!(
+                "{}: button -> collection {opens:?}",
+                if edit { "create" } else { "play" }
+            );
+        }
+        return Ok(());
+    }
     let list = functions(&s);
     if args.len() == 1 {
         for f in &list {
