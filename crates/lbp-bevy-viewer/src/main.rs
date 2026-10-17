@@ -2160,6 +2160,10 @@ fn prepare_buckets(
             .as_ref()
             .and_then(|a| a.texture())
             .is_some_and(|a| a.dual.is_some() && a.selection.texture_alpha_mix.is_some());
+        let overlay = asset
+            .as_ref()
+            .and_then(|a| a.texture())
+            .is_some_and(|a| a.overlay_alpha);
         // D189: per-fragment graph on raw UV0 (mesh UV) and raw UV1 (docs/d189-mixed-uv-graphs.md).
         let graph = match asset
             .as_ref()
@@ -2456,7 +2460,8 @@ fn prepare_buckets(
             fourth_image,
             color,
             alpha_mix,
-            decal: false,
+            // D338: an alpha overlay blends as a decal does (its texture's alpha).
+            decal: overlay,
             normals_trusted,
             bump,
             gloss,
@@ -4690,6 +4695,7 @@ fn synthetic_groups(
             wrap: lbp_preview::TextureWrapping::uniform(false),
             selection: lbp_preview::DiffuseSelection::default(),
             runtime_texture: None,
+            overlay_alpha: false,
             fragment: None,
         })
     };

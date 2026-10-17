@@ -280,6 +280,7 @@ pub(crate) fn load(
         wrap: primary.wrap,
         selection,
         runtime_texture: None,
+        overlay_alpha: false,
         fragment: Some(Box::new(FragmentGraph {
             textures: textures.collect(),
             steps,

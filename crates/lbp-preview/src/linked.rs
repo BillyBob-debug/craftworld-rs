@@ -45,6 +45,9 @@ pub struct Asset {
     /// D189 per-fragment graph (docs/d189-mixed-uv-graphs.md): Bevy only; `sampling_uv`
     /// is then raw UV0 and the primary texture is graph texture 0.
     pub fragment: Option<Box<crate::FragmentGraph>>,
+    /// D338: a solid colour blended by the material's alpha port (port 1): the display
+    /// pixels carry the colour and, in alpha, the port's red ([`alpha_overlay`]).
+    pub overlay_alpha: bool,
 }
 pub struct SharedSampleAsset {
     pub texture: lbp_texture::Texture,
@@ -1483,6 +1486,7 @@ pub(crate) fn load_material(
     options: crate::PreviewOptions,
 ) -> Result<MaterialAsset, String> {
     let surface_key = options.surface.then(|| material_key.clone());
+    let overlay_key = material_key.clone();
     let mut asset = load_diffuse_material(
         source,
         catalog,
@@ -1493,6 +1497,28 @@ pub(crate) fn load_material(
         options,
         0,
     )?;
+    // D338: a solid colour with its alpha port wired is an overlay blended by that port.
+    if let MaterialAsset::Solid(solid) = &asset {
+        let color = solid.selection.color;
+        let (graph, _) = read_material_graph(source, &overlay_key, control)?;
+        if matches!(
+            crate::surface::rewire_output(&graph.graph, ALPHA_PORT),
+            Ok(Some(_))
+        ) {
+            if let Ok(MaterialAsset::Texture(alpha)) = load_diffuse_material(
+                source,
+                catalog,
+                overlay_key,
+                vertices,
+                uv_input,
+                control,
+                options,
+                ALPHA_PORT,
+            ) {
+                asset = MaterialAsset::Texture(alpha_overlay(alpha, color.values()));
+            }
+        }
+    }
     if let Some(key) = surface_key {
         let (graph, material_bytes) = read_material_graph(source, &key, control)?;
         let mut surface =
@@ -1554,6 +1580,41 @@ pub(crate) fn load_material(
         }
     }
     Ok(asset)
+}
+/// D338: the material output's alpha port.
+const ALPHA_PORT: u8 = 1;
+/// D338 (part 85): the AO overlays (`cloth_earth_land_ao`, `cloth_earth_sea_ao`) are COLOR
+/// black on port 0 and texture x 0.8 on port 1; their program writes the alpha as the
+/// port's x times the tint's alpha (FOUND, `MUL H0.w, H1.xxxx, tintcol`). `alpha` is port 1
+/// loaded as a diffuse; its pixels become the colour (`linear` rgb, sRGB-encoded as the
+/// display pixels are) with the port's red as their alpha.
+pub(crate) fn alpha_overlay(mut alpha: Box<Asset>, linear: [f32; 4]) -> Box<Asset> {
+    let pixels = overlay_pixels(alpha.display_pixels(), linear);
+    match alpha.product.as_mut() {
+        Some(p) => p.rgba = pixels,
+        None => alpha.tinted_rgba = Some(pixels),
+    }
+    alpha.overlay_alpha = true;
+    alpha
+}
+/// D338: RGBA pixels of the colour (`linear`, sRGB-encoded) with `alpha`'s red as alpha.
+fn overlay_pixels(alpha: &[u8], linear: [f32; 4]) -> Vec<u8> {
+    let encode = |c: f32| {
+        let v = c.clamp(0., 1.);
+        let e = if v <= 0.003_130_8 {
+            v * 12.92
+        } else {
+            1.055 * v.powf(1. / 2.4) - 0.055
+        };
+        (e * 255.).round() as u8
+    };
+    let rgb = [encode(linear[0]), encode(linear[1]), encode(linear[2])];
+    alpha
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| [rgb[0], rgb[1], rgb[2], p[0]])
+        .collect()
 }
 #[allow(clippy::too_many_arguments)] // output_port picks glow (P3h) or diffuse (0)
 fn load_diffuse_material(
@@ -1932,6 +1993,7 @@ fn load_diffuse_material(
         selection,
         runtime_texture: None,
         fragment: None,
+        overlay_alpha: false,
     })))
 }
 
@@ -1957,6 +2019,19 @@ pub(crate) fn selected_uv(
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// D338: the overlay keeps the colour and takes the alpha port's red as its alpha.
+    #[test]
+    fn d338_the_overlay_takes_the_alpha_ports_red() {
+        let alpha = [204, 10, 20, 255, 0, 0, 0, 255];
+        assert_eq!(
+            overlay_pixels(&alpha, [0., 0., 0., 1.]),
+            vec![0, 0, 0, 204, 0, 0, 0, 0]
+        );
+        assert_eq!(
+            overlay_pixels(&alpha[..4], [1., 0.214, 0., 1.]),
+            vec![255, 127, 0, 204]
+        );
+    }
     #[test]
     fn diffuse_projection_requires_bounded_static_routes_and_labels_ignored_branches() {
         use lbp_resource::material::{AnimationMetadata, BoxMetadata, WireMetadata};
