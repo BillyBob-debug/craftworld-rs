@@ -172,9 +172,10 @@ pub fn merge(scene: &mut LevelScene, story: LevelScene, globe: usize) -> Result<
 /// game binds the slot's icon into its group 0 texture slot each frame (0x6fe974).
 pub const POLAROID_MESH: u32 = 0x0000_6a1a;
 
-/// D343 (part 81 FOUND, 0x16afb0): a story group badge's angle on its planet (a level's
-/// is 0.12).
-pub const GROUP_BADGE_ANGLE: f32 = 0.18;
+/// D344 (MEASURED, RPCS3 memory in the Story view): the angle each of Earth's six group
+/// results holds at +0x210 (the value 0x6ffff4 scales by) is 0.27, 1.5 times part 81's
+/// 0.18 (0x16afb0, which only seeds a settings block).
+pub const GROUP_BADGE_ANGLE: f32 = 0.27;
 
 /// D343: the default result's badge: the polaroid with its slot's icon, and where it sits.
 pub struct Badge {
@@ -241,8 +242,10 @@ pub fn badge_matrix(location: [f32; 4], radius: f32, angle: f32) -> Option<Mat4>
 
 /// D343: adds the badge to Thing `globe` (the Pod's Earth) as an alternate item, so it
 /// shows while the Story search is up. Its place is in Earth's own space: the Thing's
-/// rotation about the Earth model's centre, at the Earth model's scale (INFERRED from
-/// 0x6ffa64: the planet's instances are drawn by its node matrices).
+/// rotation and scale about the Earth model's centre (INFERRED from 0x6ffa64: the
+/// planet's instances are drawn by its node matrices). D344: at the Thing's scale (0.961)
+/// the planet's radius of 1750 lands on the Earth model's surface (about 1620); the Earth
+/// model's own 1.35 put the card 1.46 radii out and 1.18 times too tall.
 pub fn add_badge(
     scene: &mut LevelScene,
     badge: Badge,
@@ -254,15 +257,15 @@ pub fn add_badge(
         .ok_or("the badge's location is not a direction")?;
     // The planet's turn (part 82) takes the point into the Thing's frame, whose rotation
     // is not the Earth model's (the model is placed by a bone): the badge takes the
-    // Thing's rotation, and the Earth model's centre and scale.
-    let (scale, _, translation) = Mat4::from_cols_array(&pod.world).to_scale_rotation_translation();
+    // Thing's rotation and scale, and the Earth model's centre.
+    let (_, _, translation) = Mat4::from_cols_array(&pod.world).to_scale_rotation_translation();
     let thing = scene
         .positions
         .get(globe)
         .copied()
         .flatten()
         .ok_or("the Pod's Earth Thing has no POS")?;
-    let (_, rotation, _) = Mat4::from_cols_array(&thing).to_scale_rotation_translation();
+    let (scale, rotation, _) = Mat4::from_cols_array(&thing).to_scale_rotation_translation();
     let world = Mat4::from_scale_rotation_translation(scale, rotation, translation) * local;
     let payload = ScenePayload::Model(Box::new(badge.mesh));
     scene.meshes.push(level_scene::SceneMesh {
@@ -350,7 +353,7 @@ mod tests {
     fn d343_badge_matrix_is_the_games_basis() {
         // A badge facing +Z: X = up x d = +X, Y = -d, Z = d x X = up, at d x radius.
         let m = badge_matrix([0., 0., 1., 0.], 1750., GROUP_BADGE_ANGLE).unwrap();
-        let s = 1750. * 0.18 / 240.;
+        let s = 1750. * 0.27 / 240.;
         assert!(m.x_axis.abs_diff_eq(Vec4::new(s, 0., 0., 0.), 1e-4));
         assert!(m.y_axis.abs_diff_eq(Vec4::new(0., 0., -s, 0.), 1e-4));
         assert!(m.z_axis.abs_diff_eq(Vec4::new(0., s, 0., 0.), 1e-4));
