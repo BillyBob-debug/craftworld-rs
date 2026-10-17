@@ -354,7 +354,8 @@ pub struct LevelWorld {
     /// record (0x89581c -> 0x199c9c: an array of 0x80-byte entries keyed by `SlotID` at
     /// profile+0x280; INFERRED `PlayedLevelData`), whose item list (+0x38, 0x20-byte
     /// entries, those with +0x1c == 0) is the total and the items the profile owns the
-    /// collected count (0x43982c). The profile is not read: empty (no record, so no row).
+    /// collected count (0x43982c). D341: the viewer fills it from `--profile-records`
+    /// ([`parse_profile_records`]); without that it is empty (no record, so no row).
     pub profile_goodies: BTreeMap<(i32, i32), [u32; 2]>,
     /// D328: the result objects of [`Self::story_slots`], one per slot, same order.
     pub story_results: Vec<StoryResult>,

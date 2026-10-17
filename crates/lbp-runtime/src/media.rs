@@ -143,9 +143,49 @@ pub fn parse_progression_flags(text: &str) -> Result<u32, String> {
     Ok(word)
 }
 
+/// D341 (part 88): the viewer's `--profile-records` file, the local profile's goodies
+/// counts by `SlotID` for [`LevelWorld::profile_goodies`]. One record per line, `TYPE ID
+/// COLLECTED TOTAL` (decimal, separated by spaces); blank lines and text from `#` on are
+/// skipped. `scripts/rpcs3_profile_records.py` writes it from a running game: the save
+/// itself is encrypted, so the records are read where the game has loaded them.
+pub fn parse_profile_records(text: &str) -> Result<BTreeMap<(i32, i32), [u32; 2]>, String> {
+    let mut records = BTreeMap::new();
+    for (n, line) in text.lines().enumerate() {
+        let line = line.split('#').next().unwrap_or("").trim();
+        if line.is_empty() {
+            continue;
+        }
+        let bad = |e: &dyn std::fmt::Display| format!("profile record line {}: {e}", n + 1);
+        let words: Vec<&str> = line.split_whitespace().collect();
+        let [ty, id, collected, total] = words[..] else {
+            return Err(bad(&"expected TYPE ID COLLECTED TOTAL"));
+        };
+        let int = |w: &str| w.parse::<i32>().map_err(|e| bad(&e));
+        let count = |w: &str| w.parse::<u32>().map_err(|e| bad(&e));
+        let counts = [count(collected)?, count(total)?];
+        if counts[0] > counts[1] {
+            return Err(bad(&"more collected than the total"));
+        }
+        records.insert((int(ty)?, int(id)?), counts);
+    }
+    Ok(records)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn d341_profile_records_are_read_by_slot_id() {
+        let text = "# type id collected total\n0 20354 36 40\n\n4 7 0 0  # a group\n";
+        let records = parse_profile_records(text).unwrap();
+        assert_eq!(records.get(&(0, 20354)), Some(&[36, 40]));
+        assert_eq!(records.get(&(4, 7)), Some(&[0, 0]));
+        assert_eq!(records.len(), 2);
+        assert!(parse_profile_records("0 1 2").is_err());
+        assert!(parse_profile_records("0 1 5 4").is_err());
+        assert!(parse_profile_records("0 x 1 1").is_err());
+    }
 
     #[test]
     fn progression_flag_masks_are_ored() {
