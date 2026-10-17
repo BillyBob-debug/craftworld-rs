@@ -890,6 +890,12 @@ pub(crate) fn load_assets(
                 if PlanStyle::of(types) == PlanStyle::Swatch {
                     return swatch_sections(source, catalog, control, &popit);
                 }
+                if PlanStyle::of(types) == PlanStyle::Wide {
+                    let keep = owned_backgrounds(&popit);
+                    return plan_sections(source, catalog, control, &popit, |it| {
+                        keep.contains(&it.sha1)
+                    });
+                }
                 plan_sections(source, catalog, control, &popit, |it| {
                     it.types.iter().any(|n| types.contains(n))
                         && (sub == 0 || it.sub_type & sub != 0)
@@ -991,14 +997,49 @@ fn swatch_sections(
     plans.sort_by(|a, b| (a.0, &a.1.title).cmp(&(b.0, &b.1.title)));
     let items = plans
         .into_iter()
-        .map(|(ix, it)| (it.title.clone(), swatch(&fig, PLAYER_COLOURS[ix])))
+        .map(|(ix, it)| {
+            let (primary, _) = PLAYER_COLOURS[ix];
+            let worn = primary == lbp_script_vm::natives::DEFAULT_PLAYER_COLOUR & 0xff_ffff;
+            (it.title.clone(), swatch(&fig, PLAYER_COLOURS[ix], worn))
+        })
         .collect();
     vec![(String::new(), items)]
 }
 
+/// D407: the Backgrounds page lists the profile's backgrounds by title, one tile per title
+/// (MEASURED 2026-10-17: Avalonia, Blank Background, Blank Level Background, Da Vinci's
+/// Hideout, Eve's Asylum, The Canyons). INFERRED stand-in for the profile's inventory: the
+/// story and LBP1 theme backgrounds, without DLC (a `dlc` path, a "Kit" or "Pack" in the
+/// title or location, or a location naming a pack rather than the place), the Pod's
+/// copies and plans titled by file name.
+fn owned_backgrounds(popit: &lbp_preview::popit::Popit) -> std::collections::HashSet<String> {
+    let dlc = |it: &lbp_preview::popit::PopitItem| {
+        let path = it.paths.first().map_or("", String::as_str);
+        let loc = it.location.as_deref().unwrap_or_default();
+        path.contains("dlc")
+            || path.contains("/pod/")
+            || [&it.title[..], loc]
+                .iter()
+                .any(|s| s.contains("Kit") || s.contains("Pack"))
+            || !(loc.is_empty() || loc.eq_ignore_ascii_case(&it.title))
+    };
+    let mut plans: Vec<_> = popit
+        .items
+        .iter()
+        .filter(|it| it.types.contains(&"background") && it.icon_resolved)
+        .filter(|it| !it.title.ends_with(".plan") && !dlc(it))
+        .collect();
+    plans.sort_by(|a, b| (&a.title, &a.paths).cmp(&(&b.title, &b.paths)));
+    plans.dedup_by(|a, b| a.title == b.title);
+    plans.into_iter().map(|it| it.sha1.clone()).collect()
+}
+
 /// A 64x64 swatch: the secondary colour's rounded square behind the figure's top right,
 /// the figure filled with the primary colour (MEASURED placement, game frame 2026-10-17).
-fn swatch(fig: &[f32], (primary, secondary): (u32, u32)) -> Image {
+/// D407: the colour Sackboy wears gets a white check mark over its square (MEASURED: the
+/// tick runs from the square's left middle down to its lower centre and out past its top
+/// right corner). Without a profile that is palette entry 0, the default colour.
+fn swatch(fig: &[f32], (primary, secondary): (u32, u32), worn: bool) -> Image {
     let rgb = |c: u32| [(c >> 16) as u8, (c >> 8) as u8, c as u8];
     let (p, q) = (rgb(primary), rgb(secondary));
     let mut out = Vec::with_capacity(64 * 64 * 4);
@@ -1015,14 +1056,34 @@ fn swatch(fig: &[f32], (primary, secondary): (u32, u32)) -> Image {
             let d = (dx.max(0.).hypot(dy.max(0.)) + dx.max(dy).min(0.)) - 4.;
             let sq = (0.5 - d).clamp(0., 1.);
             let a = f + sq * (1. - f);
+            let tick = if worn {
+                tick_cover(x as f32 + 0.5, y as f32 + 0.5)
+            } else {
+                0.
+            };
+            let a2 = tick + a * (1. - tick);
             let mix = |i: usize| {
                 let c = f32::from(p[i]) * f + f32::from(q[i]) * sq * (1. - f);
-                (c / a.max(1e-4)) as u8
+                ((255. * tick + c * (1. - tick)) / a2.max(1e-4)) as u8
             };
+            let a = a2;
             out.extend_from_slice(&[mix(0), mix(1), mix(2), (a * 255.) as u8]);
         }
     }
     image_from(64, 64, out)
+}
+
+/// Coverage of the swatch's check mark at a pixel centre: two round-capped strokes,
+/// 3.3 px wide, (45, 12) -> (52, 18.6) -> (62.5, 5) (MEASURED from the game frame,
+/// relative to the 22 px square).
+fn tick_cover(x: f32, y: f32) -> f32 {
+    let seg = |(ax, ay): (f32, f32), (bx, by): (f32, f32)| {
+        let (dx, dy) = (bx - ax, by - ay);
+        let t = (((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)).clamp(0., 1.);
+        (x - ax - t * dx).hypot(y - ay - t * dy)
+    };
+    let d = seg((45., 12.), (52., 18.6)).min(seg((52., 18.6), (62.5, 5.)));
+    (1.65 + 0.5 - d).clamp(0., 1.)
 }
 
 /// The first `PAGE_ICONS` plans passing `keep` that have an icon, grouped into sections by
