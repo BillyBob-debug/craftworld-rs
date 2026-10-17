@@ -1012,6 +1012,7 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
             | "--play-sackboy-at"
             | "--popit-mode"
             | "--popit-page"
+            | "--popit-tab"
             | "--play-sackboy-input"
             | "--qa-record" => {}
             _ => return Err(format!("Unknown option {flag}")),

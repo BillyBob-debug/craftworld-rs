@@ -144,6 +144,37 @@ struct PageData {
     functions: Vec<(String, Image)>,
     /// Personal page: the focusable "Gameplay Kits" header's items (label, icon).
     kits: Vec<(String, Image)>,
+    /// D404: the collection's page titles in order, and the index of the page drawn above
+    /// (the measured profile's open page; the other pages show their title only).
+    tabs: Vec<String>,
+    home: usize,
+}
+
+impl PageData {
+    /// The pages L1/R1 can reach. MEASURED 2026-10-12: play mode's Personal collection shows
+    /// "Heart Items" with no page counter, so it is the only visible page there. Elsewhere all
+    /// default pages are kept: the create-mode Tools Bag counts 8 (MEASURED "5/8", 18:12:52),
+    /// though the game hides empty pages of custom type 0 (FOUND, filter 0x471a80).
+    fn visible(&self, mode: Mode) -> Vec<usize> {
+        if mode == Mode::Play && self.id == PERSONAL_BUTTON {
+            vec![self.tabs.len().saturating_sub(1)]
+        } else if self.tabs.is_empty() {
+            vec![self.home]
+        } else {
+            (0..self.tabs.len()).collect()
+        }
+    }
+
+    /// The open page: the collection's kept page, else the profile's saved one (MEASURED).
+    fn current(&self, p: &Popit) -> usize {
+        p.tabs.get(&self.id).copied().unwrap_or(
+            if p.mode == Mode::Play && self.id == PERSONAL_BUTTON {
+                self.tabs.len().saturating_sub(1)
+            } else {
+                self.home
+            },
+        )
+    }
 }
 
 /// Inventory pages by collection (`InventoryCollection.EInventoryCollection`, the argument
@@ -173,6 +204,61 @@ const PAGES: [PageRow; 6] = [
     (3, 0x3bd3_366a, "Tools", None, None),
     (4, 0x5036_ae03, "Tools and Used Objects", None, None),
     (8, 0x15f8_630f, "My Pods", None, None),
+];
+/// D404: each collection's pages in order, (title LAMS key, English fallback), from the
+/// EBOOT's default profile builder (FOUND, 0x465688; the shared pages' order is creation
+/// order, INFERRED). L1/R1 step through them without wrapping (FOUND, 0x463b98).
+const COLLECTION_PAGES: [(i32, &[(u32, &str)]); 6] = [
+    (
+        0,
+        &[
+            (0xb238_4143, "Costumes"),
+            (0xb074_e7b4, "Head"),
+            (0x9843_f40a, "Body"),
+            (0xb21e_cdf8, "Materials"),
+            (0x2684_06ab, "Player Colour"),
+        ],
+    ),
+    (
+        1,
+        &[
+            (0xdae7_f79a, "Stickers"),
+            (0xde04_7861, "Decorations"),
+            (0xa317_6f13, "PlayStation Eye Camera"),
+            (0xf5fa_8331, "My Pictures"),
+            (0xc303_7f54, "Community Photos"),
+        ],
+    ),
+    (
+        2,
+        &[
+            (0xb21e_cdf8, "Materials"),
+            (0xeb8d_7d70, "Collected Objects"),
+            (0x5959_5c00, "My Objects"),
+            (0xfead_43d3, "Community Objects"),
+        ],
+    ),
+    (
+        3,
+        &[
+            (0x3bd3_366a, "Tools"),
+            (0x18ba_f616, "Gadgets"),
+            (0x7f8a_51ba, "Gameplay Kits"),
+            (0xe8f2_0178, "Music"),
+            (0xea9b_0d51, "Sounds"),
+            (0x775a_c2b6, "Gameplay Controls"),
+            (0xd0ce_e297, "Global Controls"),
+            (0x5161_8d4b, "Backgrounds"),
+        ],
+    ),
+    (
+        4,
+        &[
+            (0x5036_ae03, "Tools and Used Objects"),
+            (0x4d45_f1f1, "Heart Items"),
+        ],
+    ),
+    (8, &[(0x15f8_630f, "My Pods")]),
 ];
 /// Page title keys (D402): the Tools Bag's "Sounds" page and the Personal collection's
 /// "Heart Items" page.
@@ -208,6 +294,9 @@ const LIST_Y0: f32 = 140.;
 const LIST_PITCH: f32 = 46.;
 const LIST_LABEL_X: f32 = 1000.;
 const LIST_VISIBLE: usize = 11;
+/// Page arrows (MEASURED, frame 18:12:52): left / right centre x, centre y (720p px).
+const PAGE_ARROW_X: (f32, f32) = (928., 1212.);
+const PAGE_ARROW_Y: f32 = 350.;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Mode {
@@ -229,7 +318,9 @@ struct Popit {
     page: Option<u32>,
     page_blend: f32,
     cell: (usize, usize),
-    built: Option<(u32, usize, usize)>,
+    /// D404: each collection's current page (kept per collection, FOUND 0x463b98 +0x38).
+    tabs: BTreeMap<u32, usize>,
+    built: Option<(u32, usize, usize, usize)>,
     /// Cursor mode (Popit Cursor button): cursor position in 720p screen px.
     cursor: Option<Vec2>,
 }
@@ -748,13 +839,22 @@ pub(crate) fn load_assets(
                 }
             }
         }
+        let (home_key, home_english) = if id == TOOLS_BUTTON && !list.is_empty() {
+            SOUNDS_TITLE
+        } else {
+            (title_key, english)
+        };
+        let order = COLLECTION_PAGES
+            .iter()
+            .find(|c| c.0 == *collection)
+            .map_or(&[][..], |c| c.1);
+        let tabs: Vec<String> = order.iter().map(|&(k, e)| tr(k, e)).collect();
+        info!("popit collection {collection} pages {tabs:?}");
         pages.push(PageData {
             id,
-            title: if id == TOOLS_BUTTON && !list.is_empty() {
-                tr(SOUNDS_TITLE.0, SOUNDS_TITLE.1)
-            } else {
-                tr(title_key, english)
-            },
+            title: tr(home_key, home_english),
+            home: order.iter().position(|&(k, _)| k == home_key).unwrap_or(0),
+            tabs,
             heart_title: tr(HEART_TITLE.0, HEART_TITLE.1),
             sections,
             message,
@@ -820,6 +920,14 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
             page: start_page,
             page_blend: if start_page.is_some() { 1. } else { 0. },
             cell: (0, 0),
+            tabs: start_page
+                .zip(
+                    all.windows(2)
+                        .find(|w| w[0] == "--popit-tab")
+                        .and_then(|w| w[1].parse::<usize>().ok()),
+                )
+                .into_iter()
+                .collect(),
             built: None,
             cursor: all
                 .iter()
@@ -1030,14 +1138,32 @@ fn popit_input(
         || pad.is_some_and(|g| g.just_pressed(GamepadButton::South));
     let back = keys.just_pressed(KeyCode::KeyC)
         || pad.is_some_and(|g| g.just_pressed(GamepadButton::East));
+    // D404: L1 / R1 (Q / E on the keyboard) are the previous / next page keys (FOUND 0x463b98).
+    let shoulder = i32::from(dir(KeyCode::KeyE, GamepadButton::RightTrigger))
+        - i32::from(dir(KeyCode::KeyQ, GamepadButton::LeftTrigger));
+    let open_page = assets.pages.iter().find(|pg| Some(pg.id) == p.page);
     if p.page.is_some() {
         if back {
             // MEASURED 18:51: returning from a page resets the focus to the Popit Cursor.
             p.page = None;
             p.focus = 2;
+        } else if let Some(pg) = open_page.filter(|_| shoulder != 0) {
+            // Step to the previous / next visible page and stop at the ends (FOUND
+            // 0x463b98); the page is kept per collection. The grid focus returns to the
+            // first cell (INFERRED: the game moves focus to the new page's node).
+            let vis = pg.visible(p.mode);
+            let cur = pg.current(&p);
+            let at = vis.iter().position(|&t| t == cur).unwrap_or(0) as i32;
+            let to = vis[(at + shoulder).clamp(0, vis.len() as i32 - 1) as usize];
+            if to != cur {
+                p.tabs.insert(pg.id, to);
+                p.cell = (0, 0);
+            }
+        } else if open_page.is_some_and(|pg| pg.current(&p) != pg.home) {
+            // A page whose contents are not loaded has no grid to move on.
         } else {
             let (r, c) = p.cell;
-            let page = assets.pages.iter().find(|pg| Some(pg.id) == p.page);
+            let page = open_page;
             let list_len = page.map_or(0, |pg| pg.list.len());
             let (nf, nk) = page.map_or((0, 0), |pg| (pg.functions.len(), pg.kits.len()));
             if nf > 0 {
@@ -1534,10 +1660,14 @@ fn popit_page_ui(
     windows: Query<&Window>,
     old: Query<Entity, With<PageNode>>,
 ) {
-    let want = p
-        .page
-        .filter(|_| p.page_blend > 0.5)
-        .map(|id| (id, p.cell.0, p.cell.1));
+    let want = p.page.filter(|_| p.page_blend > 0.5).map(|id| {
+        let tab = assets
+            .pages
+            .iter()
+            .find(|pg| pg.id == id)
+            .map_or(0, |pg| pg.current(&p));
+        (id, tab, p.cell.0, p.cell.1)
+    });
     if want == p.built {
         return;
     }
@@ -1545,7 +1675,7 @@ fn popit_page_ui(
     for e in &old {
         commands.entity(e).despawn();
     }
-    let (Some((id, row, col)), Ok(window)) = (want, windows.single()) else {
+    let (Some((id, tab, row, col)), Ok(window)) = (want, windows.single()) else {
         return;
     };
     let Some(page) = assets.pages.iter().find(|pg| pg.id == id) else {
@@ -1582,7 +1712,7 @@ fn popit_page_ui(
     let [px, py, pw, ph] = PANEL;
     // MEASURED 2026-10-12 (play frame): in play mode the star opens "Heart Items", a bare
     // panel with the empty-list message and no functions row, counter or focus.
-    let heart = p.mode == Mode::Play && id == PERSONAL_BUTTON;
+    let heart = id == PERSONAL_BUTTON && tab + 1 == page.tabs.len() && tab != page.home;
     let panel = images.add(card_image_at([pw, ph], [0., 0.57 * ph], 18.));
     commands.spawn((
         PageNode,
@@ -1591,13 +1721,49 @@ fn popit_page_ui(
         GlobalZIndex(40),
     ));
     // The game's handwritten title is narrower than our sans: shrink long titles to the panel.
-    let page_title = if heart {
+    let page_title = if tab == page.home {
+        &page.title
+    } else if heart {
         &page.heart_title
     } else {
-        &page.title
+        page.tabs.get(tab).unwrap_or(&page.title)
     };
     let title_px = (30. * 14. / page_title.chars().count().max(1) as f32).clamp(19., 30.);
     text(&mut commands, page_title, px + 18., 84., title_px, 42);
+    // D404: page counter "n/m" over the visible pages, drawn only when there is more than
+    // one (FOUND 0x463b98), and the left / right page arrows at the panel's sides (MEASURED
+    // 18:12:52: "5/8" bottom centre, arrows at x 928 / 1212, y 350). An arrow is drawn only
+    // where a page lies on that side (INFERRED from the no-wrap stepping).
+    let vis = page.visible(p.mode);
+    if vis.len() > 1 {
+        let at = vis.iter().position(|&t| t == tab).unwrap_or(0);
+        let counter = format!("{}/{}", at + 1, vis.len());
+        text(&mut commands, &counter, px + pw / 2. - 14., 646., 20., 42);
+        if at > 0 {
+            text(
+                &mut commands,
+                "‹",
+                PAGE_ARROW_X.0 - 5.,
+                PAGE_ARROW_Y,
+                26.,
+                42,
+            );
+        }
+        if at + 1 < vis.len() {
+            text(
+                &mut commands,
+                "›",
+                PAGE_ARROW_X.1 - 5.,
+                PAGE_ARROW_Y,
+                26.,
+                42,
+            );
+        }
+    }
+    if tab != page.home && !heart {
+        // Only the profile's open page has loaded contents (Open in D404).
+        return;
+    }
     if heart {
         let mut y = 134.;
         for l in wrap(
@@ -1802,7 +1968,6 @@ fn popit_page_ui(
         }
         y = top + rows_n as f32 * GRID_PITCH + 6.;
     }
-    text(&mut commands, "1/1", px + pw / 2. - 14., 646., 20., 42);
     // Tooltip pill left of the focus tile, tail pointing right; long titles wrap to two lines.
     let lines = if focus_title.chars().count() > 22 {
         wrap(&focus_title, 22)
