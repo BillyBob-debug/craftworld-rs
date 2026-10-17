@@ -3746,6 +3746,7 @@ impl LevelScripts {
         budget: u64,
     ) -> StepReport {
         let mut report = StepReport::default();
+        self.script_activations(vm, host, budget, &mut report);
         host.world.prepare_switches();
         host.world.refresh_tags();
         for switch in host.world.switch_order().to_vec() {
@@ -3802,6 +3803,110 @@ impl LevelScripts {
         }
         self.start_threads(vm, host, budget, &mut report);
         report
+    }
+
+    /// The signal a scripted switch gives: for each output of a scripted Thing whose class
+    /// has `SwitchGetNewActivation__i`, the function's result (called with the output
+    /// number) becomes the output's stored signal, which [`switches::compute_output`]
+    /// passes on for the types it does not compute.
+    ///
+    /// FOUND (Trigger_Speech_Bubble script listing): the bubble's output is 1.0 while its
+    /// `OutputEndSignalFrames` is above 0 (set to 2 by `TriggerStopMessage__b`, counted
+    /// down in `Update__`), else 0.0; its next line hangs off that pulse.
+    /// INFERRED: the engine asks the script before the switch pass (the call site in the
+    /// executable was not read); ternary 1 for an activation at or above 1.0, -1 at or
+    /// below -1.0, else 0; the player is kept.
+    fn script_activations(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut Bindings<LevelWorld>,
+        budget: u64,
+        report: &mut StepReport,
+    ) {
+        for inst in self.instances.clone() {
+            if self.stopped.contains(&inst.thing)
+                || !inst
+                    .class
+                    .is_some_and(|c| vm.has_code(c, SWITCH_ACTIVATION))
+            {
+                continue;
+            }
+            let i = inst.thing as usize;
+            let outputs = host.world.things[i]
+                .switch
+                .as_ref()
+                .map_or(0, |s| s.outputs.len());
+            for output in 0..outputs {
+                let mut b = budget;
+                let arg = [(4, Value::Int(i32::try_from(output).unwrap_or(i32::MAX)))];
+                let (o, value) =
+                    self.runner
+                        .start_for_value(vm, host, inst, SWITCH_ACTIVATION, &arg, &mut b);
+                if matches!(o, Outcome::Fault(_)) {
+                    self.stopped.insert(inst.thing);
+                    report.add(inst.thing, o);
+                    break;
+                }
+                let activation = match value {
+                    Some(Value::Float(f)) => f,
+                    Some(Value::Int(n)) => n as f32,
+                    _ => continue,
+                };
+                let ternary = switches::scripted_ternary(activation);
+                let out = host.world.things[i]
+                    .switch
+                    .as_mut()
+                    .and_then(|s| s.outputs[output].as_mut());
+                if let Some(out) = out {
+                    out.stored.activation = activation;
+                    out.stored.ternary = ternary;
+                }
+            }
+        }
+    }
+
+    /// The player's close button (Circle) on the open speech bubble.
+    ///
+    /// FOUND (01.33 executable): Circle runs action 0x37 at 0x3e7898, which sends net
+    /// message 0x49; its handler (0xa04d4c -> 0x3e482c, game mode 4 or 5) finds the
+    /// message's Thing and calls `OnMagicMouthRemoteStop__b(true)` on its script, which
+    /// clears `SpeechBubbleOpen` and calls `TriggerStopMessage__b(true)`: that closes the
+    /// message (event 3) and starts the bubble's output pulse.
+    /// OBSERVED (RPCS3, Rookie Test, 2026-10-17): offline, Da Vinci's first line stays
+    /// open until Circle, then his second line opens about 10 s later.
+    /// INFERRED: the message closed is the first open bubble that may be closed (the
+    /// game sends event 2 to the first message of the list only).
+    pub fn player_close_message(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut Bindings<LevelWorld>,
+        budget: u64,
+    ) -> Option<Outcome> {
+        let thing = host
+            .world
+            .messages
+            .open
+            .iter()
+            .find(|m| {
+                matches!(m.kind, MessageKind::Bubble | MessageKind::BubbleNoPrompt)
+                    && !m.prevent_close
+            })?
+            .thing?;
+        let found = self.instances.binary_search_by_key(&thing, |i| i.thing);
+        let inst = self.instances[found.ok()?];
+        let mut b = budget;
+        let o = self.runner.start_with(
+            vm,
+            host,
+            inst,
+            REMOTE_STOP,
+            &[(4, Value::Bool(true))],
+            &mut b,
+        );
+        if matches!(o, Outcome::Fault(_)) {
+            self.stopped.insert(thing);
+        }
+        Some(o)
     }
 
     /// The per-frame call of the global settings: for each of the eight slots in order,

@@ -68,3 +68,33 @@ The wall at x -14348 is Thing 1028 (UID 246497): a wooden post (base_wood, colli
 -290..+90, x -14490..-14384, y 5905..8162) hung from dark matter 1027 through piston 1026.
 It is genuinely solid in the front lane; Da Vinci (1029) stands behind it at x -15601. Our
 collision reads it correctly, so it is not changed here (slopes/walls stay paused).
+
+## Part 3: Circle closes the line, the next one follows (D502, 2026-10-17)
+
+OBSERVED (RPCS3, Rookie Test from the Story menu, all game patches off): the first line
+opens in a letterboxed cutscene with a "Close" prompt (Circle) and stays open (watched for
+over a minute). On Circle the cutscene ends and the second line, "Don't wait around here!",
+opens about 10 s later with its own Close prompt. After it the level goes on to the right
+(an arrow sign), so the post left of the spawn is not on the route.
+
+This corrects Part 2: Circle is not a no-op offline. FOUND (01.33): action 0x37 at
+0x3e7898 sends net message 0x49 (0x3e7dc8 -> 0x3e498c), whose handler (0xa04d4c ->
+0x3e482c, game mode 4 or 5) finds the message's Thing and calls the script's
+`OnMagicMouthRemoteStop__b(true)` (wrapper 0x6551e4). INFERRED: offline the message comes
+back to the local machine (the observation needs it; not read statically).
+`OnMagicMouthRemoteStop__b` clears `SpeechBubbleOpen` and calls `TriggerStopMessage__b(true)`,
+which closes the message (event 3) and, for a non-divergent active bubble, sets
+`OutputEndSignalFrames` to 2; `Update__` counts it down and `SwitchGetNewActivation__i`
+answers 1.0 while it is above 0.
+
+Before: nothing called the bubble's stop, and no code read a scripted Thing's output, so
+the pulse to counter 1068 could not exist. After: C (or the pad's Circle) closes the first
+open bubble that may be closed (`LevelScripts::player_close_message`), and before the
+switch pass every scripted Thing whose class has `SwitchGetNewActivation__i` gives each
+output's signal (the stored signal the pass keeps for types it does not compute). With
+`--level-scripts-close-at 120` the first line closes on tick 120 and the second opens on
+tick 419 (299 ticks of timer 1053 after the pulse), at Da Vinci. Test:
+`switches::tests::a_scripted_pulse_is_on_only_when_full`.
+
+Not yet: the second line's close and what follows it; the cutscene camera while line 1 is
+open; the "Close" prompt on the no-prompt bubble type (the game draws it here).

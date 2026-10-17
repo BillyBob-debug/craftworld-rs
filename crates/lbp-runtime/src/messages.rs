@@ -36,8 +36,10 @@
 //! Not modelled:
 //! - Event 2, the player's button: for a bubble with a prompt whose prevent close is not
 //!   set, action 0x17 calls a function with a part of the Thing and sets the message's
-//!   "triggered once" byte; for a bubble without a prompt, action 0x37 (not read). What
-//!   either does to the script was not read.
+//!   "triggered once" byte (what that does to the script was not read). For a bubble
+//!   without a prompt, action 0x37 reaches the script's `OnMagicMouthRemoteStop__b(true)`
+//!   through net message 0x49 (FOUND; modelled as
+//!   [`crate::LevelScripts::player_close_message`]).
 //! - The state the sort gives each message (one value for a message with the "triggered
 //!   once" byte, one for the first other message when it heads the list, one for the
 //!   rest), and so which of several bubbles is drawn.
