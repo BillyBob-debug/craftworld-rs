@@ -300,9 +300,17 @@ pub fn select_routes(graph: &GraphMetadata) -> Result<SurfaceRoutes, String> {
                 let tint = crate::DiffuseTint {
                     bits: boxes[i].parameters_raw[..4].try_into().unwrap(),
                 };
-                tint.validate()?;
+                // D337 (part 84): a gloss colour may pass 1 (FOUND: the copper continents'
+                // `proc_victoria_jelly_glassy` takes (1.446, 1.054, 1.274), its ta4), so
+                // only a negative or non-finite one is left out, and then the gloss alone.
                 let [r, g, b, _] = tint.values();
-                routes.specular = Some([r, g, b]);
+                if [r, g, b].iter().all(|v| v.is_finite() && *v >= 0.) {
+                    routes.specular = Some([r, g, b]);
+                } else {
+                    routes
+                        .skipped
+                        .push("gloss not drawn (static COLOR not finite or negative)".into());
+                }
             }
             None => match endpoint(w).filter(|&i| boxes[i].type_raw == 1) {
                 Some(i) => match crate::linked::sampler(graph, i) {
@@ -697,6 +705,26 @@ mod tests {
         assert!(rewire_output(&two, GLOW_PORT).is_err());
     }
 
+    /// D337: the jelly's gloss colour passes 1 and is kept; a negative one is left out
+    /// with a note, and the surface is still read.
+    #[test]
+    fn d337_a_gloss_colour_above_one_is_kept() {
+        let routes_for = |rgb: [f32; 3]| {
+            let mut color = [0; 8];
+            color[..4].copy_from_slice(&[rgb[0], rgb[1], rgb[2], 1.].map(f32::to_bits));
+            let g = graph(
+                vec![node(0, [0; 8]), node(3, color)],
+                vec![wire(1, 0, SPECULAR_PORT)],
+            );
+            select_routes(&g).unwrap()
+        };
+        let jelly = routes_for([1.446, 1.054, 1.274]);
+        assert_eq!(jelly.specular, Some([1.446, 1.054, 1.274]));
+        assert!(jelly.skipped.is_empty());
+        let negative = routes_for([-0.1, 0.5, 0.5]);
+        assert_eq!(negative.specular, None);
+        assert_eq!(negative.skipped.len(), 1);
+    }
     #[test]
     fn p2q_routes_take_one_bump_sampler_and_one_static_gloss_color() {
         let gloss = [0.6f32, 0.6, 0.6, 1.].map(f32::to_bits);

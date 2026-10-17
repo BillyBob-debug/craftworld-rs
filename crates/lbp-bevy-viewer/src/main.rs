@@ -1915,15 +1915,42 @@ struct Prepared {
     material: Option<u32>,
     /// D284: the input that holds the mesh's raw UV0 (`pod_dissolve::uv0_source`).
     raw_uv0: u8,
-    /// D286: clear glass (`window_glassy`): its output alpha, drawn premultiplied.
-    glass: Option<f32>,
+    /// D286: clear glass (`window_glassy`): its output alpha, drawn premultiplied. D337:
+    /// and the weight of its rim term (the program family's route, [`glass_route`]).
+    glass: Option<GlassRoute>,
+}
+/// D337: a bucket on the glassy program family's route: its output alpha and the weight
+/// of the rim term in its specular.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct GlassRoute {
+    opacity: f32,
+    rim: f32,
+}
+/// D337 (part 84): the materials drawn on the glass route. `window_glassy` (D286) at
+/// opacity [`GLASS_OPACITY`] with half its rim (D287); `proc_victoria_jelly_glassy`, the
+/// Story's copper continents, with the same program shape (FOUND, its decoded program:
+/// the lit colour times the alpha, then x6 the specular added) but its rim in full and
+/// opacity 1 (INFERRED: its alpha is the diffuse textures' alpha times the tint's, not
+/// read per pixel here).
+fn glass_route(material: Option<u32>) -> Option<GlassRoute> {
+    match material? {
+        WINDOW_GLASSY => Some(GlassRoute {
+            opacity: GLASS_OPACITY,
+            rim: 0.5,
+        }),
+        JELLY_GLASSY => Some(GlassRoute {
+            opacity: 1.,
+            rim: 1.,
+        }),
+        _ => None,
+    }
 }
 /// D286: draws a bucket as the game's glass: opacity [`GLASS_OPACITY`], and its raw UV0
 /// as `in.uv` (MEASURED: the captured draw's TC0 is the mesh's UV0), so the dissolve's
 /// mask lies on the mesh's own UV and not on the position tile. `raw_uv0` is given only
 /// for a bucket without diffuse coordinates (a solid bucket's `in.uv` is all zero).
-fn mark_glass(p: &mut Prepared, raw_uv0: Option<Vec<[f32; 2]>>) {
-    p.glass = Some(GLASS_OPACITY);
+fn mark_glass(p: &mut Prepared, route: GlassRoute, raw_uv0: Option<Vec<[f32; 2]>>) {
+    p.glass = Some(route);
     if let Some(uv) = raw_uv0.filter(|uv| uv.len() == p.mesh.count_vertices()) {
         p.mesh.insert_attribute(Mesh::ATTRIBUTE_UV_0, uv);
         p.raw_uv0 = 1;
@@ -2045,8 +2072,8 @@ fn prepare(
     )?;
     for p in &mut prepared {
         p.material = materials.get(p.bucket).copied().flatten();
-        if p.material == Some(WINDOW_GLASSY) {
-            mark_glass(p, glass_uv.get_mut(p.bucket).and_then(Option::take));
+        if let Some(route) = glass_route(p.material) {
+            mark_glass(p, route, glass_uv.get_mut(p.bucket).and_then(Option::take));
         }
     }
     Ok(prepared)
@@ -2528,12 +2555,13 @@ fn upload(
     if let Some((map, mode)) = p.spec_map {
         dual::enable_spec_map(&mut surface, images.add(map), mode);
     }
-    if let Some(opacity) = p.glass {
+    if let Some(route) = p.glass {
         dual::enable_glass(
             &mut surface,
-            opacity,
+            route.opacity,
             GLASS_DISSOLVE_GREEN,
             GLASS_SPECULAR_SCALE,
+            route.rim,
         );
     }
     surface.extension.normals_trusted = p.normals_trusted;
@@ -3668,6 +3696,8 @@ fn spawn_level(
 /// gone: the game draws it as clear glass over the room. The rule is this GUID only
 /// (the material's alpha mode 4 was measured on this one draw, so it is not used).
 const WINDOW_GLASSY: u32 = 0x0001_d14c;
+/// D337: `proc_victoria_jelly_glassy` (gmat 108277), the Story's copper continents.
+const JELLY_GLASSY: u32 = 0x0001_a6f5;
 /// D286: the glass's output alpha (MEASURED, fc32 of the captured draw): the colour is
 /// premultiplied by it and the room behind is kept by one minus it.
 const GLASS_OPACITY: f32 = 0.2;
@@ -5019,6 +5049,10 @@ mod tests {
         );
     }
     /// D286: a bucket with no diffuse coordinates and its raw UV0 (as the glass is built).
+    const WINDOW_ROUTE: GlassRoute = GlassRoute {
+        opacity: GLASS_OPACITY,
+        rim: 0.5,
+    };
     fn d286_bucket(raw_uv0: u8) -> Prepared {
         let positions = [[0., 0., 0.], [1., 0., 0.], [0., 1., 0.]];
         Prepared {
@@ -5055,8 +5089,8 @@ mod tests {
         plain.decal = true;
         assert_eq!(alpha_mode(&plain), AlphaMode::Blend);
         let mut glass = d286_bucket(0);
-        mark_glass(&mut glass, None);
-        assert_eq!(glass.glass, Some(0.2));
+        mark_glass(&mut glass, WINDOW_ROUTE, None);
+        assert_eq!(glass.glass.map(|g| g.opacity), Some(0.2));
         assert_eq!(alpha_mode(&glass), AlphaMode::Premultiplied);
         let (mut meshes, mut materials, mut images) = (
             Assets::<Mesh>::default(),
@@ -5117,7 +5151,7 @@ mod tests {
         assert_eq!(bias(decal), DECAL_DEPTH_BIAS);
         let mut glass = d286_bucket(0);
         glass.bucket = 2;
-        mark_glass(&mut glass, None);
+        mark_glass(&mut glass, WINDOW_ROUTE, None);
         assert_eq!(bias(glass), 0.);
     }
     /// D287: the uploaded glass carries the specular scale added after its alpha (6); a
@@ -5125,7 +5159,7 @@ mod tests {
     #[test]
     fn d287_the_glass_carries_its_specular_scale() {
         let mut glass = d286_bucket(0);
-        mark_glass(&mut glass, None);
+        mark_glass(&mut glass, WINDOW_ROUTE, None);
         let (mut meshes, mut materials, mut images) = (
             Assets::<Mesh>::default(),
             Assets::<ViewerMaterial>::default(),
@@ -5138,6 +5172,29 @@ mod tests {
         let (_, material, _) = upload(d286_bucket(0), &mut meshes, &mut materials, &mut images);
         let material = materials.get(&material).unwrap();
         assert_eq!(dual::glass_specular_scale(material), 0.);
+    }
+    /// D337: the copper continents' jelly takes the glass route opaque with its rim in
+    /// full; `window_glassy` keeps 0.2 and half its rim; any other material is not glass.
+    #[test]
+    fn d337_the_jelly_takes_the_glass_route() {
+        assert_eq!(glass_route(Some(WINDOW_GLASSY)), Some(WINDOW_ROUTE));
+        let jelly = glass_route(Some(JELLY_GLASSY)).unwrap();
+        assert_eq!((jelly.opacity, jelly.rim), (1., 1.));
+        assert_eq!(glass_route(Some(0x0001_f3ad)), None);
+        assert_eq!(glass_route(None), None);
+        let mut glass = d286_bucket(0);
+        mark_glass(&mut glass, jelly, None);
+        assert_eq!(alpha_mode(&glass), AlphaMode::Premultiplied);
+        let (mut meshes, mut materials, mut images) = (
+            Assets::<Mesh>::default(),
+            Assets::<ViewerMaterial>::default(),
+            Assets::<Image>::default(),
+        );
+        let (_, material, _) = upload(glass, &mut meshes, &mut materials, &mut images);
+        let material = materials.get(&material).unwrap();
+        assert_eq!(dual::glass(material), Some(1.));
+        assert_eq!(dual::glass_rim(material), 1.);
+        assert_eq!(dual::glass_specular_scale(material), GLASS_SPECULAR_SCALE);
     }
     /// D286: the glass gets the mesh's raw UV0 as `in.uv`, recovered from its bump map's
     /// UV0 x 2; a bump on another channel, a matrix transform or a zero scale gives none.
@@ -5160,7 +5217,7 @@ mod tests {
         });
         assert_eq!(raw_uv0_from_bump(0, matrix, &bumped), None);
         let mut glass = d286_bucket(0);
-        mark_glass(&mut glass, Some(back.clone()));
+        mark_glass(&mut glass, WINDOW_ROUTE, Some(back.clone()));
         assert_eq!(glass.raw_uv0, 1);
         match glass.mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
             Some(bevy::mesh::VertexAttributeValues::Float32x2(uv)) => assert_eq!(*uv, back),
@@ -5169,8 +5226,11 @@ mod tests {
         // A wrong length, or none given: still glass, the mask stays on the position.
         for raw in [Some(back[..2].to_vec()), None] {
             let mut other = d286_bucket(0);
-            mark_glass(&mut other, raw);
-            assert_eq!((other.raw_uv0, other.glass), (0, Some(0.2)));
+            mark_glass(&mut other, WINDOW_ROUTE, raw);
+            assert_eq!(
+                (other.raw_uv0, other.glass.map(|g| g.opacity)),
+                (0, Some(0.2))
+            );
             match other.mesh.attribute(Mesh::ATTRIBUTE_UV_0) {
                 Some(bevy::mesh::VertexAttributeValues::Float32x2(uv)) => {
                     assert_eq!(*uv, [[0f32; 2]; 3])
