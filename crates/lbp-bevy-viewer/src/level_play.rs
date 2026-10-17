@@ -1395,11 +1395,13 @@ fn follow_level(
     }
 }
 
-/// D349 (part 96): a Story badge's overlays spring in from nothing each time they show
+/// D349 (part 96): a Story badge's overlays spring in from nothing when they show
 /// (`story_world::OverlayGrow`, one update per game tick): the placed entity (scene spin,
 /// scale 1) is turned back by the part of the spin not reached yet and scaled by the
 /// spring's scale, about its own place. A transform `thing_view::apply` wrote since is
-/// taken as the new placed one.
+/// taken as the new placed one. D350 (part 97): the badge's first fill (no overlay shown
+/// before) shows its overlays settled, as the game's card does before it sets its grow
+/// flag; only overlays shown after that spring in.
 #[allow(clippy::type_complexity)]
 fn grow_badge_overlays(
     v: Res<crate::Viewer>,
@@ -1412,9 +1414,11 @@ fn grow_badge_overlays(
     mut grow: Local<
         std::collections::HashMap<Entity, (crate::story_world::OverlayGrow, Transform, Transform)>,
     >,
+    mut filled: Local<bool>,
 ) {
-    use crate::story_world::{overlay_spins, BADGE_OVERLAYS, OVERLAY_SEED};
+    use crate::story_world::{overlay_spins, OverlayGrow, BADGE_OVERLAYS, OVERLAY_SEED};
     let spins = overlay_spins(v.level.profile_overlays, OVERLAY_SEED);
+    let was_filled = std::mem::take(&mut *filled);
     for (e, tag, mut transform, visibility) in &mut entities {
         if !crate::story_world::is_overlay(&tag.item) {
             continue;
@@ -1438,6 +1442,10 @@ fn grow_badge_overlays(
             *spring = Default::default();
             *placed
         } else {
+            if !was_filled && *spring == OverlayGrow::default() {
+                *spring = OverlayGrow::settled(spins[n]);
+            }
+            *filled = true;
             spring.step(spins[n]);
             placed.mul_transform(Transform {
                 rotation: Quat::from_rotation_y(spring.spin.0 - spins[n]),

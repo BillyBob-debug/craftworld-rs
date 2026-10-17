@@ -232,7 +232,8 @@ pub const OVERLAY_SEED: u32 = 1;
 /// their random spin, each update: next = current, plus 0.7 (current - previous)
 /// (r2+0x6db0), plus 0.25 (target - current) (r2+0x6d14). The drawn spin is the current one times pi/8,
 /// the scale is uniform. All of a badge's new overlays start together (no stagger found).
-/// INFERRED: one update per game tick.
+/// D350 FOUND: the update runs in the planets' combined update-and-draw (0x42f43c calls
+/// 0x42a92c, then 0x4226b0 to 0x6fe974); INFERRED: once per game tick.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct OverlayGrow {
     /// Scale, then spin (radians): (current, previous).
@@ -249,9 +250,19 @@ impl OverlayGrow {
         self.scale = next(self.scale, 1.);
         self.spin = next(self.spin, spin);
     }
+
+    /// D350 FOUND (0x6fcc78, 0x42b288): a slot made while the card's grow flag is clear
+    /// (its first fill after it is made or reset, 0x6fc5c0 / 0x42330c) starts at rest on
+    /// scale 1 and its spin.
+    pub fn settled(spin: f32) -> Self {
+        Self {
+            scale: (1., 1.),
+            spin: (spin, spin),
+        }
+    }
 }
 
-/// D349: whether a scene item is one of a badge's overlays (they spring in as Story opens).
+/// D349: whether a scene item is one of a badge's overlays (they can spring in, D350).
 pub fn is_overlay(item: &crate::thing_view::Item) -> bool {
     item.alternate
         && item
@@ -442,7 +453,8 @@ pub fn overlays_line(overlays: &[(usize, Result<(), String>)]) -> String {
 
 /// D346: an overlay's matrix in the card's space: its offset, then its spin about Y
 /// ([`overlay_spins`]). D349: the spring's scale ([`OverlayGrow`]) is applied on the draw
-/// entity, after this.
+/// entity, after this. D350: the axis is FOUND (0x6ff06c: the mesh's X and Z rows mix, Y
+/// stays), the card's depth axis, so the overlay turns in the card's plane.
 pub fn overlay_matrix(at: [f32; 3], spin: f32) -> Mat4 {
     Mat4::from_translation(Vec3::from(at)) * Mat4::from_rotation_y(spin)
 }
@@ -522,6 +534,28 @@ mod tests {
             // The spin is about Y: the card's depth axis stays put.
             let y = overlay_matrix([0.; 3], spin).transform_vector3(Vec3::Y);
             assert!((y - Vec3::Y).length() < 1e-6);
+        }
+    }
+
+    #[test]
+    fn d350_overlay_turn_is_the_games_row_mix() {
+        // 0x6ff06c-0x6ff0c8: X' = cos X - sin Z and Z' = sin X + cos Z, Y kept (the card's
+        // depth axis), so the overlay turns in the card's plane.
+        for spin in [0.3_f32, -std::f32::consts::FRAC_PI_8] {
+            let m = overlay_matrix([0.; 3], spin);
+            let (s, c) = spin.sin_cos();
+            assert!(m.x_axis.abs_diff_eq(Vec4::new(c, 0., -s, 0.), 1e-6));
+            assert!(m.y_axis.abs_diff_eq(Vec4::Y, 1e-6));
+            assert!(m.z_axis.abs_diff_eq(Vec4::new(s, 0., c, 0.), 1e-6));
+        }
+    }
+
+    #[test]
+    fn d350_first_fill_is_settled() {
+        let mut g = OverlayGrow::settled(0.3);
+        for _ in 0..3 {
+            g.step(0.3);
+            assert_eq!((g.scale.0, g.spin.0), (1., 0.3));
         }
     }
 

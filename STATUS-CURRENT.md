@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D349
+# Current state (overwrite each milestone) — after D350
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D349 the badge overlays' spin and spring-in (2026-10-17)
+## Latest: D350 the overlays' turn axis and the badge's first fill (2026-10-17)
+- Part 97 (`docs/level-scripts/part-97.md`): the overlay turn is about the mesh's Y, the
+  card's depth axis (FOUND 0x6ff06c, as the viewer had it). The card's grow flag is set
+  after its first fill (FOUND 0x42b288), so a badge's overlays show settled when the Story
+  search opens and only later ones spring in (the rebuild on opening is INFERRED).
+
+## D349 the badge overlays' spin and spring-in (2026-10-17)
 - Part 96 (`docs/level-scripts/part-96.md`): each overlay's spin is one draw of the game's
   shared generator (FOUND 0x6fcc0c, x 0x2e90edd + 0xe908fc1, times pi/8), and scale and spin
   spring in from 0 (FOUND 0x6fec44: + 0.7 (cur - prev) + 0.25 (target - cur)). The
