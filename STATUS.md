@@ -6204,3 +6204,15 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
   15.7 -> 4.5 (616), 19.0 -> 2.7 (600, closed); focused pill face 21.3 -> 16.7, slab side 31.6 ->
   20.8; card shadow 10.1 -> 7.8. Open: what draws the coronas, the slab step's and focus scale's
   rule, the card's turn, the menu's fade-in (its draws are at full alpha at 611).
+
+## D400 - Popit part 1: the card from the Poppet script, PR (2026-10-17)
+
+- `lbp_ui_script::popit` runs `Poppet.DoMainMenu` with pinned answers (edit mode, one PS3,
+  party host, not a tutorial level, progression flags set): create 6,1,8 / 4,2,0 / 7,5,3
+  focus 2, play 6 / 4,0 / 7,3 focus 6, pitch 144 units; `GetMainMenuTooltip` keys.
+- `lbp_resource::animated_texture`: `ATXb` = sheet reference, frames, cell w/h, one more
+  integer; the ten Popit icons match the D235 table.
+- Viewer log: "script Poppet.DoMainMenu ... icons and tooltips from the script 9/10".
+  Compared with RPCS3 frame 12:56:43 (create): same buttons, icons, focus and pill.
+- Checks: fmt; Clippy -D warnings lbp-resource, lbp-ui-script, lbp-bevy-viewer; tests
+  lbp-resource, lbp-ui-script, lbp-script-vm.

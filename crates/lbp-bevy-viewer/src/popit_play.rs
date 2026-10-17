@@ -4,8 +4,12 @@
 //! tooltip is the label pill; "Close Popit" is the bottom prompt. Open/close takes 10 ticks
 //! with a smoothstep (EBOOT `SetOpen` 0x515da8, easing 0x4099ac).
 //!
-//! Item order and icon sheets are FOUND in the script (create mode 6,1,8 / 4,2,0 / 7,5,3 with
-//! the cursor focused; play mode 6 / 4,0 / 7,3 with the costume button focused). Screen
+//! D400: the card comes from running the game's own `Poppet.DoMainMenu` on the Gooey host
+//! (`lbp_ui_script::popit`): rows, icons (animated textures: sheet, frames, cell), tooltip
+//! keys, default focus and the cell pitch (icon 128 + child spacing 16 units). The constants
+//! below (FOUND in the script by hand: create mode 6,1,8 / 4,2,0 / 7,5,3 with the cursor
+//! focused; play mode 6 / 4,0 / 7,3 with the costume button focused) are the fallback when
+//! the scripts are not in the catalog, and must agree with the script run. Screen
 //! sizes, colours, label placement and the camera nudge are measured on RPCS3 1280x720 frames
 //! (docs/d235-popit.md): they are screen-space measurements, not game constants.
 //!
@@ -49,6 +53,8 @@ const EDIT_CARD: [f32; 2] = [170., 177.];
 const PLAY_CARD: [f32; 2] = [109., 146.];
 /// Cell pitch and sizes (measured, 720p px): icon 128 units shown at 0.323 px/unit.
 const PITCH: f32 = 46.5;
+/// 720p px per Gooey unit on the card (MEASURED: the 46.5 px pitch over 128 + 16 units).
+const UNIT_PX: f32 = PITCH / 144.;
 const ICON_PX: f32 = 41.;
 const FOCUS_TILE_PX: f32 = 68.;
 const FOCUS_ICON_PX: f32 = 56.;
@@ -110,6 +116,10 @@ pub(crate) struct Item {
 #[derive(Resource)]
 pub(crate) struct PopitAssets {
     items: Vec<Item>,
+    /// Create and play cards: rows of button ids, default focus, pitch (720p px).
+    cards: [(Vec<Vec<u32>>, u32, f32); 2],
+    /// Where the cards came from (the script run, or the fallback constants and why).
+    card_source: String,
     square: Image,
     close: String,
     pages: Vec<PageData>,
@@ -183,6 +193,7 @@ enum Mode {
 #[derive(Resource)]
 struct Popit {
     mode: Mode,
+    cards: [(Vec<Vec<u32>>, u32, f32); 2],
     open: bool,
     blend: f32,
     focus: u32,
@@ -493,8 +504,25 @@ pub(crate) fn load_assets(
     control: &LoadControl,
 ) -> Result<PopitAssets, String> {
     let (strings, _) = load_strings(source, catalog, control);
+    let (cards, mut card_source, icons) = match script_cards(source, catalog, control) {
+        Ok((c, note, icons)) => (c, note, icons),
+        Err(e) => (
+            fallback_cards(),
+            format!("fallback constants ({e})"),
+            Default::default(),
+        ),
+    };
     let mut items = Vec::new();
+    let mut from_script = 0;
     for (id, guid, cell, frames, key, english) in ITEMS {
+        // D400: the script's icon and tooltip key win over the table (which they match).
+        let (guid, cell, frames, key) = match icons.get(&id) {
+            Some(&v) => {
+                from_script += 1;
+                v
+            }
+            None => (guid, cell, frames, key),
+        };
         let icon = decode_icon(source, catalog, ResourceKey::Guid(guid), control)?;
         let cols = icon.width / cell;
         let mut out = Vec::new();
@@ -701,11 +729,17 @@ pub(crate) fn load_assets(
             square.extend_from_slice(&sheet.rgba[i..i + 4]);
         }
     }
+    card_source.push_str(&format!(
+        "; icons and tooltips from the script {from_script}/{}",
+        ITEMS.len()
+    ));
     let close = strings
         .get(CLOSE_POPIT_KEY)
         .map_or_else(|| "Close Popit".to_owned(), str::to_owned);
     Ok(PopitAssets {
         items,
+        cards,
+        card_source,
         square: image_from(64, 64, square),
         close,
         pages,
@@ -718,6 +752,9 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
         .windows(2)
         .any(|w| w[0] == "--popit-mode" && w[1] == "play");
     let mode = if play { Mode::Play } else { Mode::Edit };
+    info!("popit card: {}", assets.card_source);
+    let cards = assets.cards.clone();
+    let focus = cards[usize::from(play)].1;
     // `--popit-page BUTTON` (QA): start with that inventory page open.
     let start_page = all
         .windows(2)
@@ -726,13 +763,14 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
     app.insert_resource(assets)
         .insert_resource(Popit {
             mode,
+            cards,
             open: all.iter().any(|a| a == "--popit-open") || start_page.is_some(),
             blend: if all.iter().any(|a| a == "--popit-open") || start_page.is_some() {
                 1.
             } else {
                 0.
             },
-            focus: if play { 6 } else { 2 },
+            focus,
             clock: 0.,
             spawned: false,
             page: start_page,
@@ -752,12 +790,96 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
         );
 }
 
-fn rows(mode: Mode) -> &'static [&'static [u32]] {
-    if mode == Mode::Edit {
-        EDIT_ROWS
-    } else {
-        PLAY_ROWS
+impl Popit {
+    fn card(&self) -> &(Vec<Vec<u32>>, u32, f32) {
+        &self.cards[usize::from(self.mode == Mode::Play)]
     }
+}
+
+fn rows(p: &Popit) -> Vec<Vec<u32>> {
+    p.card().0.clone()
+}
+
+fn fallback_cards() -> [(Vec<Vec<u32>>, u32, f32); 2] {
+    let grid = |r: &[&[u32]]| r.iter().map(|row| row.to_vec()).collect();
+    [(grid(EDIT_ROWS), 2, PITCH), (grid(PLAY_ROWS), 6, PITCH)]
+}
+
+/// D400: both cards from the game's `Poppet` script (create mode, then play mode).
+fn script_cards(
+    source: &AttachedSource,
+    catalog: &lbp_catalog::Catalog,
+    control: &LoadControl,
+) -> Result<ScriptCards, String> {
+    let (vm, class, script) = poppet_vm(source, catalog, control)?;
+    let mut vm = vm;
+    let mut out = Vec::new();
+    let mut icons = std::collections::BTreeMap::new();
+    for edit in [true, false] {
+        let (card, keys) = lbp_ui_script::popit::run_card(&mut vm, class, &script, edit)?;
+        for b in card.rows.iter().flatten() {
+            let (Some(atx), Some(&key)) = (b.icon, keys.get(&b.index)) else {
+                continue;
+            };
+            let a = lbp_ui_script::popit::animated_texture(source, catalog, atx, control)?;
+            let Some(lbp_resource::animated_texture::TextureRef::Guid(sheet)) = a.texture else {
+                return Err(format!("icon {atx:#x}: no sheet GUID"));
+            };
+            icons.insert(b.index, (sheet, a.cell[0], a.frames, key));
+        }
+        let rows: Vec<Vec<u32>> = card
+            .rows
+            .iter()
+            .map(|r| r.iter().map(|b| b.index).collect())
+            .collect();
+        let focus = card
+            .default_index
+            .filter(|f| rows.iter().flatten().any(|i| i == f))
+            .or_else(|| rows.iter().flatten().next().copied())
+            .ok_or("empty card")?;
+        out.push((rows, focus, card.pitch() * UNIT_PX));
+    }
+    let play = out.pop().expect("two cards");
+    let edit = out.pop().expect("two cards");
+    let note = format!(
+        "script Poppet.DoMainMenu: create {:?} focus {}, play {:?} focus {}, pitch {:.1} px",
+        edit.0, edit.1, play.0, play.1, edit.2
+    );
+    Ok(([edit, play], note, icons))
+}
+
+/// Both cards, a note for the log, and per button (sheet GUID, cell px, frames, LAMS key).
+type ScriptCards = (
+    [(Vec<Vec<u32>>, u32, f32); 2],
+    String,
+    std::collections::BTreeMap<u32, (u32, u32, u32, u32)>,
+);
+
+/// A VM with every catalog script loaded, and the `Poppet` class.
+fn poppet_vm(
+    source: &AttachedSource,
+    catalog: &lbp_catalog::Catalog,
+    control: &LoadControl,
+) -> Result<
+    (
+        lbp_script_vm::Vm,
+        lbp_script_vm::ClassId,
+        lbp_level::script::Script,
+    ),
+    String,
+> {
+    let (scripts, _) = lbp_ui_script::load::load(source, catalog, control)?;
+    let mut vm = lbp_script_vm::Vm::default();
+    let mut target = None;
+    for (guid, s) in scripts {
+        if s.class_name == lbp_ui_script::popit::CLASS && target.is_none() {
+            target = Some((vm.load(s.clone(), guid), s));
+        } else {
+            vm.load(s, guid);
+        }
+    }
+    let (class, script) = target.ok_or("no Poppet script in the catalog")?;
+    Ok((vm, class, script))
 }
 
 fn smooth(t: f32) -> f32 {
@@ -892,7 +1014,7 @@ fn popit_input(
     if dx == 0 && dy == 0 {
         return;
     }
-    let grid = rows(p.mode);
+    let grid = rows(&p);
     let (mut r, mut c) = (0usize, 0usize);
     for (ri, row) in grid.iter().enumerate() {
         if let Some(ci) = row.iter().position(|&i| i == p.focus) {
@@ -1031,7 +1153,7 @@ fn popit_layout(
     let (w, h) = (cw * grow, ch * grow);
     let (left, top) = (cx - w / 2., bottom - h);
     let focus_pos = {
-        let grid = rows(p.mode);
+        let grid = rows(&p);
         let mut found = (0usize, 0usize, 1usize);
         for (ri, row) in grid.iter().enumerate() {
             if let Some(ci) = row.iter().position(|&i| i == p.focus) {
@@ -1041,10 +1163,10 @@ fn popit_layout(
         found
     };
     // Cell centre in card-relative px (top-left origin at 720p).
+    let (rows_n, pitch) = (p.card().0.len() as f32, p.card().2);
     let cell_centre = |ri: usize, ci: usize, n: usize| -> [f32; 2] {
-        let rows_n = rows(p.mode).len() as f32;
-        let y = card[1] / 2. + (ri as f32 - (rows_n - 1.) / 2.) * PITCH + 4.5 - 4.5;
-        let x = card[0] / 2. + (ci as f32 - (n as f32 - 1.) / 2.) * PITCH;
+        let y = card[1] / 2. + (ri as f32 - (rows_n - 1.) / 2.) * pitch + 4.5 - 4.5;
+        let x = card[0] / 2. + (ci as f32 - (n as f32 - 1.) / 2.) * pitch;
         [x, y]
     };
     let px = |v: f32| Val::Px(v * scale);
@@ -1066,7 +1188,7 @@ fn popit_layout(
     };
     let place = if focus_pos.0 == 0 {
         Place::Above
-    } else if focus_pos.0 + 1 == rows(p.mode).len() {
+    } else if focus_pos.0 + 1 == p.card().0.len() {
         Place::Below
     } else {
         Place::Right
@@ -1131,7 +1253,7 @@ fn popit_layout(
                 node.border_radius = BorderRadius::all(Val::Px(sz * 0.3));
             }
             Role::Icon(id) => {
-                let grid = rows(p.mode);
+                let grid = rows(&p);
                 let mut place = None;
                 for (ri, row) in grid.iter().enumerate() {
                     if let Some(ci) = row.iter().position(|&i| i == id) {

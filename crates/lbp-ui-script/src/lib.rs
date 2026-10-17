@@ -20,10 +20,16 @@
 //!   values are UNKNOWN): `Get*XRes` / `Get*YRes` (s32), `Get*Width` / `Get*Height` and
 //!   `GetAspectRatio` (f32); `GetScreenEdgeCrop` returns 0. The Pod scripts' own
 //!   `GetPuterWidth(w)` divides by `GetXRes`, so a default 0 there made widths NaN.
+//! - `Resource.Load*ByFilename__g` returns the GUID as a `Ref` (as the VM's own native
+//!   does), so a script's icon fields keep which resource they name (D400).
+//! - `Gooey.SetDefaultNode__i` records `DefaultNode` = the node id on the innermost frame.
+//! - [`GooeyHost::answers`] overrides any other native by `Class.Base` (the name without
+//!   its argument codes), for game state a caller pins (D400: the Popit's edit/play mode).
 //! - Everything else returns nothing; the VM then substitutes the default of the call's
 //!   return type. Member reads return `Void` and writes are dropped (counted).
 pub mod load;
 pub mod pod;
+pub mod popit;
 pub mod tree;
 
 use lbp_level::script::Script;
@@ -99,6 +105,8 @@ pub struct GooeyHost<'a> {
     pub output: Vec<String>,
     /// Width and height returned by `Get*Width` / `Get*Height` natives.
     pub screen: [f32; 2],
+    /// `Class.Base` -> the value that native returns (checked before the defaults).
+    pub answers: BTreeMap<String, Value>,
     stack: Vec<Frame>,
     nodes: usize,
 }
@@ -135,6 +143,7 @@ impl<'a> GooeyHost<'a> {
             counts: HostCounts::default(),
             output: Vec::new(),
             screen: [1280., 720.],
+            answers: BTreeMap::new(),
             stack: vec![Frame {
                 start: "root".into(),
                 ..Default::default()
@@ -180,6 +189,12 @@ impl<'a> GooeyHost<'a> {
                 .expect("root frame")
                 .props
                 .insert(prop.to_owned(), shown.join(", "));
+        } else if base == "SetDefaultNode" {
+            self.stack
+                .last_mut()
+                .expect("root frame")
+                .props
+                .insert("DefaultNode".to_owned(), shown.join(", "));
         } else if base.starts_with("DoText") {
             self.push(Node::Text {
                 text: first_string(args),
@@ -240,7 +255,20 @@ impl Host for GooeyHost<'_> {
         } else {
             self.counts.trace_dropped += 1;
         }
+        if let Some(v) = self
+            .answers
+            .get(&format!("{class}.{}", base_name(function)))
+        {
+            return Ok(v.clone());
+        }
         match (class, base_name(function)) {
+            ("Resource", base) if base.starts_with("Load") && base.ends_with("ByFilename") => {
+                Ok(match args.first() {
+                    Some(Value::Int(g)) => Value::Ref(*g as u32),
+                    Some(Value::Raw(g) | Value::Ref(g)) => Value::Ref(*g),
+                    _ => Value::Void,
+                })
+            }
             ("Gooey", base) => {
                 self.gooey(function, args, shown);
                 Ok(if base.starts_with("StartFrame") {

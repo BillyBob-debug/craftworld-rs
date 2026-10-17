@@ -11,11 +11,13 @@
 //!   ui_trace SCRIPT-DIR CLASS [FUNCTION|all NEW-JSON [TRANS-FILE...]]
 //! Without FUNCTION it lists the class's functions. `all` runs every non-native function,
 //! each on a fresh instance and host. TRANS-FILEs are `.trans` tables (later files win per
-//! key) for `LAMS.Translate`.
+//! key) for `LAMS.Translate`. An argument `Class.Base=VALUE` in that list instead pins
+//! what a native returns (`true`/`false`, an integer, or a float with a `.`), e.g.
+//! `Thing.IsEditing=true` for the Popit's create card (D400).
 use lbp_level::script::{self, Script};
 use lbp_level::Limits;
 use lbp_resource::translation::{parse_translation_table, TranslationLimits};
-use lbp_script_vm::Vm;
+use lbp_script_vm::{Value, Vm};
 use lbp_ui_script::{functions, outline, run, GooeyHost, RunReport};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -121,7 +123,20 @@ fn run_main() -> Result<(), String> {
         return Err("output must be a new file under local-analysis/".into());
     }
     let mut table = BTreeMap::<u32, String>::new();
+    let mut answers = BTreeMap::new();
     for t in &args[3..] {
+        if let Some((name, v)) = t.split_once('=') {
+            let value = match v {
+                "true" => Value::Bool(true),
+                "false" => Value::Bool(false),
+                _ if v.contains('.') => {
+                    Value::Float(v.parse().map_err(|_| format!("bad answer {t}"))?)
+                }
+                _ => Value::Int(v.parse().map_err(|_| format!("bad answer {t}"))?),
+            };
+            answers.insert(name.to_owned(), value);
+            continue;
+        }
         let bytes = std::fs::read(t).map_err(|e| e.to_string())?;
         let parsed = parse_translation_table(&bytes, TranslationLimits::default())
             .map_err(|e| format!("{t}: {e}"))?;
@@ -143,6 +158,7 @@ fn run_main() -> Result<(), String> {
     let mut reports: Vec<RunReport> = Vec::new();
     for name in &names {
         let mut host = GooeyHost::new(&translate);
+        host.answers.clone_from(&answers);
         let r = run(&mut vm, &mut host, class, &s, name, BUDGET);
         let c = &r.counts;
         println!(

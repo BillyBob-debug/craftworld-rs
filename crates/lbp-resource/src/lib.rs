@@ -3,6 +3,7 @@
 //! CONFIRMED_FROM_COMMUNITY_CODE: Toolkit ResourceType.java at d6a2ef80b5a09999f08f23a803b516096055e5c9.
 //! Extension is a STRONG_INFERENCE about any individual file, never a confirmed type.
 use serde::Serialize;
+pub mod animated_texture;
 pub mod animation;
 pub mod binary;
 pub mod font;
