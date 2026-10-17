@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D346
+# Current state (overwrite each milestone) — after D347
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,7 +11,14 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D346 the Story badge's medals and bubble (2026-10-17)
+## Latest: D347 the info bubble's size and goodies row (2026-10-17)
+- Part 94 (`docs/level-scripts/part-94.md`): the goodies row is the game's play stat widget
+  (FOUND 0x496700 / 0x4f5400: a disc in the profile's second colour, the percent at S x 1.9,
+  the label at S x 0.9 below); the bubble's texts at the Gooey scale 1.42 (MEASURED), its
+  rows by a fitted line height, and the half-white line under the author. 345 x 148 pixels
+  against the game's 348 x 144.
+
+## D346 the Story badge's medals and bubble (2026-10-17)
 - Part 93 (`docs/level-scripts/part-93.md`): the badge's overlay slots 1..12 (FOUND: GUIDs,
   offsets on the card, SearchResultSlot flags); `--profile-records` `overlays` lines (written
   by `scripts/rpcs3_profile_records.py`) pick them, so The Cosmos's card shows the gold ace,

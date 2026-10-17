@@ -396,6 +396,7 @@ impl LevelWorld {
         other.pod.host_use_pod_pending = self.pod.host_use_pod_pending;
         other.media.clone_from(&self.media);
         other.profile_colour = self.profile_colour;
+        other.profile_stat_colour = self.profile_stat_colour;
         for mine in &self.player_records {
             let theirs = other.player_records.iter_mut();
             let Some(theirs) = theirs.into_iter().find(|r| r.number == mine.number) else {
