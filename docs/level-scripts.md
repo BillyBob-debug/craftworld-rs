@@ -95,6 +95,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 89: the profile's colour and the badge card's source (2026-10-17, D342)](level-scripts/part-89.md)
 - [Part 90: the Story view's badge card (2026-10-17, D343)](level-scripts/part-90.md)
 - [Part 91: the Story badge's size (2026-10-17, D344)](level-scripts/part-91.md)
+- [Part 92: the Story badge's frame colour (2026-10-17, D345)](level-scripts/part-92.md)
 
 ## Next
 
