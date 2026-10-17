@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D343
+# Current state (overwrite each milestone) — after D344
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D343 the Story view's badge card (2026-10-17)
+## Latest: D344 the Story badge's size (2026-10-17)
+- Part 91 (`docs/level-scripts/part-91.md`): the game's group badge angle is 0.27 (RPCS3
+  memory, planet results +0x210), not 0.18; at the Earth Thing's scale the card is 157 px
+  tall against the game's ~161 (was 194). FOUND for next: the frame tint is the profile's
+  first colour (0xffceb424 in the badge's instance).
+
+## D343 the Story view's badge card (2026-10-17)
 - Part 90 (`docs/level-scripts/part-90.md`): the default group's badge, `cosmos_polaroid.mol`
   with The Cosmos's icon on its picture, drawn on Earth while Story is up at the game's
   matrix (FOUND 0x6ffff4) in the Earth Thing's frame; its centre matches the owner's frame,
