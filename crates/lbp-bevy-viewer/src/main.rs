@@ -44,6 +44,9 @@ use std::{
     sync::{mpsc, Arc, Mutex},
 };
 
+/// D331: the default group's planet decorations; D343: and its badge card.
+type StoryWorld = (LevelScene, Result<story_world::Badge, String>);
+
 type Context = (Arc<Catalog>, Arc<AttachedSource>);
 type OwnedScene = (
     Entity,
@@ -116,7 +119,7 @@ struct LevelLoaded {
     water_palette: Result<Vec<[f32; 3]>, String>,
     /// D331: the Story default group's planet decorations level, loaded with the
     /// scripted Pod (`story_world`); none elsewhere.
-    story_world: Option<Result<LevelScene, String>>,
+    story_world: Option<Result<StoryWorld, String>>,
 }
 /// D278: the mask of the Pod tent's dissolve (`pod_dissolve::TRANSITION_MASK`) as an
 /// image, with a word on how the load went; there while the shell layer has a script
@@ -499,23 +502,31 @@ impl Viewer {
                                 &source, &catalog, &worker,
                             )?;
                             let (kind, number) = lbp_runtime::STORY_DEFAULT_GROUP;
-                            let guid = list
+                            let slot = list
                                 .slots
                                 .iter()
                                 .find(|s| {
                                     (s.id.slot_type as i32, s.id.number as i32) == (kind, number)
                                 })
-                                .and_then(|s| s.planet_decorations.as_ref()?.guid)
+                                .ok_or("the slot list has no default story group")?;
+                            let guid = slot
+                                .planet_decorations
+                                .as_ref()
+                                .and_then(|d| d.guid)
                                 .ok_or("the default story group has no planet decorations")?;
                             let (key, _) = level_scene::resolve_level(&catalog, Some(guid), None)?;
-                            level_scene::load_level_scene_with_options(
+                            let scene = level_scene::load_level_scene_with_options(
                                 &source,
                                 &catalog,
                                 &key,
                                 &worker,
                                 options,
                                 story_options,
-                            )
+                            )?;
+                            // D343: the default group's badge card.
+                            let badge =
+                                story_world::load_badge(&source, &catalog, &worker, options, slot);
+                            Ok((scene, badge))
                         });
                         Ok(LevelLoaded {
                             scene,
@@ -1431,7 +1442,30 @@ fn load(
             // D331: the Story view's planet world, pasted onto the Pod's Earth.
             let mut story_settings = None;
             if let (Some(story), Some(globe)) = (level.story_world.take(), v.level.pod) {
-                match story.and_then(|s| story_world::merge(&mut level.scene, s, globe)) {
+                let merged = story.and_then(|(s, badge)| {
+                    let m = story_world::merge(&mut level.scene, s, globe)?;
+                    // D343: the default group's badge card on the Earth.
+                    match badge.and_then(|b| {
+                        let icon = b.icon.clone();
+                        story_world::add_badge(&mut level.scene, b, globe).map(|b| (icon, b))
+                    }) {
+                        Ok((icon, bounds)) => println!(
+                            "Story badge: polaroid {:08x} on Thing {globe}, picture {}; local bounds: Earth {:?}, card {:?}; Earth model at {}, badge at {}",
+                            story_world::POLAROID_MESH,
+                            match icon {
+                                Ok(k) => format!("the slot's icon {k}"),
+                                Err(e) => format!("the placeholder ({e})"),
+                            },
+                            bounds.earth,
+                            bounds.card,
+                            bounds.centre,
+                            bounds.at
+                        ),
+                        Err(e) => println!("Story badge: not drawn ({e})"),
+                    }
+                    Ok(m)
+                });
+                match merged {
                     Ok(m) => {
                         println!(
                             "Story world: {} items ({} meshes) of the default group's planet decorations pasted onto Thing {globe} (its Earth is Thing {}), shown while the Story search is up; by (Thing, mesh): {:?}; D336: {} backdrop items in place of the Pod's, its lighting {}, its world factors {:?}",

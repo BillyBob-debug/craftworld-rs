@@ -93,6 +93,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 87: the info bubble's goodies row (2026-10-16, D340)](level-scripts/part-87.md)
 - [Part 88: the profile's per-slot records (2026-10-17, D341)](level-scripts/part-88.md)
 - [Part 89: the profile's colour and the badge card's source (2026-10-17, D342)](level-scripts/part-89.md)
+- [Part 90: the Story view's badge card (2026-10-17, D343)](level-scripts/part-90.md)
 
 ## Next
 

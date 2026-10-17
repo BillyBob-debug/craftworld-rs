@@ -1616,6 +1616,54 @@ fn overlay_pixels(alpha: &[u8], linear: [f32; 4]) -> Vec<u8> {
         .flat_map(|p| [rgb[0], rgb[1], rgb[2], p[0]])
         .collect()
 }
+/// The display pixels of a primary texture through the selection's colour chain (alpha
+/// mix, blend mask, blend, texture add or tint); None when the texture shows as decoded.
+fn display_pixels(
+    selection: &DiffuseSelection,
+    rgba: &[u8],
+    cancelled: impl Fn() -> bool + Copy,
+) -> Result<Option<Vec<u8>>, String> {
+    Ok(if let Some(mix) = selection.alpha_mix {
+        Some(mix.pixels(rgba, cancelled)?)
+    } else if let Some(mask) = selection.blend_mask {
+        Some(mask.pixels(rgba, cancelled)?)
+    } else if let Some(blend) = selection
+        .blend
+        .filter(|_| selection.second_sample.is_none())
+    {
+        blend.pixels(rgba, cancelled)?
+    } else if let Some(add) = selection.texture_add.filter(|a| a.addend.is_some()) {
+        Some(add.pixels(selection.tint, rgba, cancelled)?)
+    } else {
+        selection.tint.pixels(rgba, cancelled)?
+    })
+}
+
+/// D343: draws a single-texture group with `texture` in place of its material's
+/// primary texture (the game binds a slot's icon into the badge card's picture slot,
+/// 0x6fe974), through the same colour chain. Groups with more samples than the primary
+/// are left as they are (Err).
+pub fn retexture(
+    asset: &mut Asset,
+    texture: lbp_texture::Texture,
+    texture_key: LocationKey,
+    cancelled: impl Fn() -> bool + Copy,
+) -> Result<(), String> {
+    if asset.dual.is_some()
+        || asset.product.is_some()
+        || asset.third.is_some()
+        || asset.fourth.is_some()
+        || asset.fragment.is_some()
+        || asset.overlay_alpha
+    {
+        return Err("Unsupported: retexture of a multi-sample group".into());
+    }
+    asset.tinted_rgba = display_pixels(&asset.selection, &texture.rgba, cancelled)?;
+    asset.texture = texture;
+    asset.texture_key = texture_key;
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)] // output_port picks glow (P3h) or diffuse (0)
 fn load_diffuse_material(
     source: &AttachedSource,
@@ -1783,22 +1831,7 @@ fn load_diffuse_material(
         || control.check().is_err(),
     )
     .map_err(|e| e.to_string())?;
-    let tinted_rgba = if let Some(mix) = selection.alpha_mix {
-        Some(mix.pixels(&texture.rgba, || control.check().is_err())?)
-    } else if let Some(mask) = selection.blend_mask {
-        Some(mask.pixels(&texture.rgba, || control.check().is_err())?)
-    } else if let Some(blend) = selection
-        .blend
-        .filter(|_| selection.second_sample.is_none())
-    {
-        blend.pixels(&texture.rgba, || control.check().is_err())?
-    } else if let Some(add) = selection.texture_add.filter(|a| a.addend.is_some()) {
-        Some(add.pixels(selection.tint, &texture.rgba, || control.check().is_err())?)
-    } else {
-        selection
-            .tint
-            .pixels(&texture.rgba, || control.check().is_err())?
-    };
+    let tinted_rgba = display_pixels(&selection, &texture.rgba, || control.check().is_err())?;
     let mut dual = None;
     let product = if let Some(second) = selection.second_sample {
         // D190: a three/four-texture product never bakes a grid (`uses_grid` needs no

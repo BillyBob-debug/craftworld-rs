@@ -168,6 +168,137 @@ pub fn merge(scene: &mut LevelScene, story: LevelScene, globe: usize) -> Result<
     })
 }
 
+/// D343 (part 89 FOUND): a story group's or level's badge is `cosmos_polaroid.mol`; the
+/// game binds the slot's icon into its group 0 texture slot each frame (0x6fe974).
+pub const POLAROID_MESH: u32 = 0x0000_6a1a;
+
+/// D343 (part 81 FOUND, 0x16afb0): a story group badge's angle on its planet (a level's
+/// is 0.12).
+pub const GROUP_BADGE_ANGLE: f32 = 0.18;
+
+/// D343: the default result's badge: the polaroid with its slot's icon, and where it sits.
+pub struct Badge {
+    pub mesh: lbp_preview::GroupedMesh,
+    /// The slot's `location`, a unit vector in the planet's own space.
+    pub location: [f32; 4],
+    pub angle: f32,
+    /// What went on the picture: the icon's key, or why the placeholder stayed.
+    pub icon: Result<String, String>,
+}
+
+/// D343: loads the polaroid badge of story slot `slot` (a group: [`GROUP_BADGE_ANGLE`]),
+/// its picture group drawn with the slot's icon. A missing or undecodable icon leaves
+/// the mesh's placeholder picture.
+pub fn load_badge(
+    source: &lbp_catalog::attachment::AttachedSource,
+    catalog: &lbp_catalog::Catalog,
+    control: &lbp_catalog::LoadControl,
+    options: lbp_preview::PreviewOptions,
+    slot: &lbp_level::slots::Slot,
+) -> Result<Badge, String> {
+    let key = lbp_preview::resolve(catalog, Some(POLAROID_MESH), None)?;
+    let mut mesh =
+        lbp_preview::load_mesh_groups_with_overrides(source, catalog, &key, control, options, &[])?;
+    let icon = (|| {
+        use lbp_preview::story::{decode_icon_texture, ResourceKey};
+        let key = slot
+            .icon
+            .as_ref()
+            .and_then(ResourceKey::of)
+            .ok_or("the slot has no icon")?;
+        let (texture, at) = decode_icon_texture(source, catalog, key, control)?;
+        lbp_preview::retexture_group(&mut mesh, 0, texture, at, || control.check().is_err())?;
+        Ok(key.label())
+    })();
+    Ok(Badge {
+        mesh,
+        location: slot.location,
+        angle: GROUP_BADGE_ANGLE,
+        icon,
+    })
+}
+
+/// D343 (FOUND 0x6ffff4, the path badges take): a badge's matrix in its planet's own
+/// space, scale `s` = radius x angle / 240: X is `s` x normalised (0, 1, 0) x `location`
+/// ((1, 0, 0) when they are parallel), Y is -`s` x `location` (into the planet), Z is
+/// `s` x (`location` x X), at `location` times the radius. The polaroid adds no scale,
+/// lift or spin of its own (0x6fcfd0, 0x6fe450).
+pub fn badge_matrix(location: [f32; 4], radius: f32, angle: f32) -> Option<Mat4> {
+    let d = Vec3::new(location[0], location[1], location[2]);
+    if !d.is_finite() || d == Vec3::ZERO {
+        return None;
+    }
+    let x = Vec3::Y.cross(d).try_normalize().unwrap_or(Vec3::X);
+    let z = d.cross(x).try_normalize().unwrap_or(Vec3::Y);
+    let s = radius * angle / 240.;
+    Some(Mat4::from_cols(
+        (x * s).extend(0.),
+        (-d * s).extend(0.),
+        (z * s).extend(0.),
+        (d * radius).extend(1.),
+    ))
+}
+
+/// D343: adds the badge to Thing `globe` (the Pod's Earth) as an alternate item, so it
+/// shows while the Story search is up. Its place is in Earth's own space: the Thing's
+/// rotation about the Earth model's centre, at the Earth model's scale (INFERRED from
+/// 0x6ffa64: the planet's instances are drawn by its node matrices).
+pub fn add_badge(
+    scene: &mut LevelScene,
+    badge: Badge,
+    globe: usize,
+) -> Result<BadgeBounds, String> {
+    let pod = earth_item(scene, Some(globe)).ok_or("the Pod's Earth has no Earth model")?;
+    let earth = scene.meshes.get(pod.mesh).and_then(|m| m.bounds);
+    let local = badge_matrix(badge.location, lbp_runtime::EARTH_RADIUS, badge.angle)
+        .ok_or("the badge's location is not a direction")?;
+    // The planet's turn (part 82) takes the point into the Thing's frame, whose rotation
+    // is not the Earth model's (the model is placed by a bone): the badge takes the
+    // Thing's rotation, and the Earth model's centre and scale.
+    let (scale, _, translation) = Mat4::from_cols_array(&pod.world).to_scale_rotation_translation();
+    let thing = scene
+        .positions
+        .get(globe)
+        .copied()
+        .flatten()
+        .ok_or("the Pod's Earth Thing has no POS")?;
+    let (_, rotation, _) = Mat4::from_cols_array(&thing).to_scale_rotation_translation();
+    let world = Mat4::from_scale_rotation_translation(scale, rotation, translation) * local;
+    let payload = ScenePayload::Model(Box::new(badge.mesh));
+    scene.meshes.push(level_scene::SceneMesh {
+        source: MeshSource::Guid(POLAROID_MESH),
+        bounds: level_scene::payload_bounds(&payload),
+        payload,
+        neutral_groups: false,
+    });
+    scene.items.push(level_scene::SceneItem {
+        mesh: scene.meshes.len() - 1,
+        world: world.to_cols_array(),
+        thing: globe,
+        uid: None,
+        shapes: 0,
+        decoration: false,
+        alternate: true,
+    });
+    let card = scene.meshes.last().and_then(|m| m.bounds);
+    Ok(BadgeBounds {
+        earth,
+        card,
+        centre: translation,
+        at: world.w_axis.truncate(),
+    })
+}
+
+/// D343: the Earth model and the badge, for the load's line.
+#[derive(Debug, Clone, Copy)]
+pub struct BadgeBounds {
+    pub earth: Option<[[f32; 3]; 2]>,
+    pub card: Option<[[f32; 3]; 2]>,
+    /// The Earth model's and the badge's places in the level.
+    pub centre: Vec3,
+    pub at: Vec3,
+}
+
 /// D336: a draw entity of the backdrop Thing: the Pod world's own backdrop, or the
 /// decorations level's pasted in its place (shown while the Story search is up).
 #[derive(Component, Debug, Clone, Copy)]
@@ -214,6 +345,21 @@ pub fn wanted(item: &crate::thing_view::Item, globe: u32, open: bool) -> Option<
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn d343_badge_matrix_is_the_games_basis() {
+        // A badge facing +Z: X = up x d = +X, Y = -d, Z = d x X = up, at d x radius.
+        let m = badge_matrix([0., 0., 1., 0.], 1750., GROUP_BADGE_ANGLE).unwrap();
+        let s = 1750. * 0.18 / 240.;
+        assert!(m.x_axis.abs_diff_eq(Vec4::new(s, 0., 0., 0.), 1e-4));
+        assert!(m.y_axis.abs_diff_eq(Vec4::new(0., 0., -s, 0.), 1e-4));
+        assert!(m.z_axis.abs_diff_eq(Vec4::new(0., s, 0., 0.), 1e-4));
+        assert!(m.w_axis.abs_diff_eq(Vec4::new(0., 0., 1750., 1.), 1e-3));
+        // At a pole up x d is zero: X falls back to +X (0x6ffff4's TOC constants).
+        let pole = badge_matrix([0., 1., 0., 0.], 1750., GROUP_BADGE_ANGLE).unwrap();
+        assert!(pole.x_axis.abs_diff_eq(Vec4::new(s, 0., 0., 0.), 1e-4));
+        assert!(badge_matrix([0.; 4], 1750., 0.18).is_none());
+    }
 
     fn item(thing: u32, alternate: bool) -> crate::thing_view::Item {
         crate::thing_view::Item {

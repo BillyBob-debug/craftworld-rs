@@ -572,6 +572,8 @@ pub struct LevelScene<T> {
     pub checkpoints: Vec<(usize, [f32; 16])>,
     /// D331: each Thing's parent Thing (reader order), indexed by Thing.
     pub parents: Vec<Option<usize>>,
+    /// D343: each Thing's POS world matrix as the level file stores it, indexed by Thing.
+    pub positions: Vec<Option<[f32; 16]>>,
 }
 
 impl<T> Default for LevelScene<T> {
@@ -587,6 +589,7 @@ impl<T> Default for LevelScene<T> {
             backdrop_presets: Vec::new(),
             checkpoints: Vec::new(),
             parents: Vec::new(),
+            positions: Vec::new(),
         }
     }
 }
@@ -1309,6 +1312,10 @@ pub fn build_scene_with_colors<T>(
 ) -> LevelScene<T> {
     let mut scene = LevelScene::<T> {
         parents: things.iter().map(|t| t.parent).collect(),
+        positions: things
+            .iter()
+            .map(|t| t.data.pos.as_ref().map(|p| p.world))
+            .collect(),
         ..Default::default()
     };
     let mut by_source: MeshCache = HashMap::new();
@@ -2267,7 +2274,8 @@ fn grouped_bounds(g: &GroupedMesh) -> Option<[[f32; 3]; 2]> {
     points_bounds(&g.geometry.positions)
 }
 
-fn payload_bounds(p: &ScenePayload) -> Option<[[f32; 3]; 2]> {
+/// D343: the local bounds of a payload's geometry (None when empty or not finite).
+pub fn payload_bounds(p: &ScenePayload) -> Option<[[f32; 3]; 2]> {
     match p {
         ScenePayload::Model(g) => grouped_bounds(g),
         ScenePayload::Shapes { batch, .. } => points_bounds(&batch.positions),

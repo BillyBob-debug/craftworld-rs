@@ -443,6 +443,21 @@ pub fn decode_icon(
     key: ResourceKey,
     control: &LoadControl,
 ) -> Result<Icon, String> {
+    let (texture, _) = decode_icon_texture(source, catalog, key, control)?;
+    Ok(Icon {
+        width: texture.header.width,
+        height: texture.header.height,
+        rgba: texture.rgba,
+    })
+}
+
+/// D343: [`decode_icon`] keeping the decoded texture and where it was read.
+pub fn decode_icon_texture(
+    source: &AttachedSource,
+    catalog: &Catalog,
+    key: ResourceKey,
+    control: &LoadControl,
+) -> Result<(lbp_texture::Texture, lbp_catalog::attachment::LocationKey), String> {
     let location = resolve_key(catalog, key)?;
     let texture = lbp_texture::decode_reader(
         location.size,
@@ -455,11 +470,7 @@ pub fn decode_icon(
         || control.check().is_err(),
     )
     .map_err(|e| format!("Unsupported: icon texture: {e}"))?;
-    Ok(Icon {
-        width: texture.header.width,
-        height: texture.header.height,
-        rgba: texture.rgba,
-    })
+    Ok((texture, location))
 }
 
 /// The English base table with the patch table over it, and how each loaded.

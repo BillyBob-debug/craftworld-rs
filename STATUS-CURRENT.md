@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D342
+# Current state (overwrite each milestone) — after D343
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D342 the profile's colour (2026-10-17)
+## Latest: D343 the Story view's badge card (2026-10-17)
+- Part 90 (`docs/level-scripts/part-90.md`): the default group's badge, `cosmos_polaroid.mol`
+  with The Cosmos's icon on its picture, drawn on Earth while Story is up at the game's
+  matrix (FOUND 0x6ffff4) in the Earth Thing's frame; its centre matches the owner's frame,
+  its size about 1.18x. Left out: the yellow frame tint, goodies icons, the bubble overlap.
+
+## D342 the profile's colour (2026-10-17)
 - Part 89 (`docs/level-scripts/part-89.md`): the Story view's Gooey takes the local profile's
   colours each frame (FOUND 0x4381d8, `*(profile+0x514)` +0x4c..); `--profile-records` now
   carries them (`colours` line) and the viewer's bubble is the owner's yellow. The green was a

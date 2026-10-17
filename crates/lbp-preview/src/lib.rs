@@ -70,8 +70,8 @@ use lbp_catalog::{
     Catalog, LoadControl,
 };
 pub use linked::{
-    load, resolve, select_diffuse, select_diffuse_with_animation_base, Asset, DiffuseSelection,
-    MaterialAsset, RelativeSampling, SolidAsset,
+    load, resolve, retexture, select_diffuse, select_diffuse_with_animation_base, Asset,
+    DiffuseSelection, MaterialAsset, RelativeSampling, SolidAsset,
 };
 pub use solid::{select_solid_diffuse, SolidSelection};
 pub use tint::DiffuseTint;
@@ -216,6 +216,28 @@ pub fn apply_region_materials(
         }
     }
     changed
+}
+
+/// D343: group `group` of `mesh` drawn with `texture` in place of its material's
+/// primary texture ([`retexture`]); Err when the group did not load as a single-texture
+/// group or its material is shared with another group.
+pub fn retexture_group(
+    mesh: &mut GroupedMesh,
+    group: usize,
+    texture: lbp_texture::Texture,
+    texture_key: LocationKey,
+    cancelled: impl Fn() -> bool + Copy,
+) -> Result<(), String> {
+    let binding = mesh
+        .bindings
+        .get_mut(group)
+        .ok_or("the mesh has no such group")?
+        .as_mut()
+        .map_err(|e| e.clone())?;
+    match std::sync::Arc::get_mut(binding).ok_or("the group's material is shared")? {
+        MaterialAsset::Texture(asset) => retexture(asset, texture, texture_key, cancelled),
+        MaterialAsset::Solid(_) => Err("the group is not textured".into()),
+    }
 }
 
 /// D331: [`load_mesh_groups_with_options`] with the primitives of the listed regions
