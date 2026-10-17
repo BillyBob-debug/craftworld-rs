@@ -319,6 +319,7 @@ mod tests {
                 creator: None,
                 icon: Some(ResourceKey::Guid(100 + i as u32)),
                 icon_resolved: i % 2 == 0,
+                colour: 0,
             });
         }
         for (i, item) in p.items.iter().enumerate() {

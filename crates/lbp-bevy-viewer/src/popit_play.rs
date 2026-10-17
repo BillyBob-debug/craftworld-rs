@@ -17,6 +17,7 @@
 //! keys move the focus instead of walking. `--popit-mode edit|play` picks the menu (default
 //! edit, the Moon's create mode). `--popit-open` starts it open (QA captures).
 use bevy::prelude::*;
+use bevy::ui::widget::NodeImageMode;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::story::{decode_icon, load_strings, ResourceKey};
 use std::collections::BTreeMap;
@@ -151,6 +152,43 @@ struct PageData {
     /// D405: every other page's sections by page index (empty at `home`, whose contents are
     /// the fields above), filled from the game's plans by the page's inventory type.
     others: Vec<Sections>,
+    /// D406: each page's plan layout by page index.
+    styles: Vec<PlanStyle>,
+}
+
+/// D406: how a plan page lays out its items (MEASURED 2026-10-17, game frames of the
+/// Costumes "Player Color" and Tools Bag "Backgrounds" pages): neither page has a Functions
+/// row or section headers.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum PlanStyle {
+    /// Category headers over a 6-column grid of small icons, below the Functions row.
+    Grid,
+    /// Player colours: 3 columns of large swatches, column centres x 970 / 1075 / 1165,
+    /// row pitch 120 px from a first row top at y 140.
+    Swatch,
+    /// Backgrounds: one column of wide tiles, x 943-1186, 75 px tall at an 87 px pitch,
+    /// 6 visible; the focused tile grows to 332 x 108 with a dark border.
+    Wide,
+}
+
+impl PlanStyle {
+    fn of(types: &[&str]) -> Self {
+        if types.contains(&"player_colour") {
+            Self::Swatch
+        } else if types.contains(&"background") {
+            Self::Wide
+        } else {
+            Self::Grid
+        }
+    }
+
+    fn cols(self) -> usize {
+        match self {
+            Self::Grid => GRID_COLS,
+            Self::Swatch => 3,
+            Self::Wide => 1,
+        }
+    }
 }
 
 type Sections = Vec<(String, Vec<(String, Image)>)>;
@@ -258,9 +296,10 @@ const COLLECTION_PAGES: [(i32, &[PageType]); 6] = [
                 0,
             ),
             (0xea9b_0d51, "Sounds", &["sound"], 0),
+            // MEASURED 2026-10-17: "Backgrounds" is page 6/8, before the two control pages.
+            (0x5161_8d4b, "Backgrounds", &["background"], 0),
             (0x775a_c2b6, "Gameplay Controls", &[], 0),
             (0xd0ce_e297, "Global Controls", &[], 0),
-            (0x5161_8d4b, "Backgrounds", &["background"], 0),
         ],
     ),
     (
@@ -848,11 +887,18 @@ pub(crate) fn load_assets(
                 if t == home || types.is_empty() {
                     return Vec::new();
                 }
+                if PlanStyle::of(types) == PlanStyle::Swatch {
+                    return swatch_sections(source, catalog, control, &popit);
+                }
                 plan_sections(source, catalog, control, &popit, |it| {
                     it.types.iter().any(|n| types.contains(n))
                         && (sub == 0 || it.sub_type & sub != 0)
                 })
             })
+            .collect();
+        let styles = order
+            .iter()
+            .map(|&(_, _, types, _)| PlanStyle::of(types))
             .collect();
         info!(
             "popit collection {collection} pages {tabs:?} items {:?}",
@@ -866,6 +912,7 @@ pub(crate) fn load_assets(
             title: tr(home_key, home_english),
             home,
             others,
+            styles,
             tabs,
             heart_title: tr(HEART_TITLE.0, HEART_TITLE.1),
             sections,
@@ -902,8 +949,84 @@ pub(crate) fn load_assets(
     })
 }
 
-/// The first `PAGE_ICONS` plans passing `keep` that have an icon and a category, grouped
-/// into sections by category (the plans come sorted by category, then title).
+/// D406: the player-colour palette by index, (primary, secondary) as 0xRRGGBB, from the
+/// script class `PlayerColour` (g0000a9c2; FOUND: `GetPlayerColourFromIndex__i` loads four
+/// 0-255 constants per entry: primary, secondary, tertiary, emphasis).
+const PLAYER_COLOURS: [(u32, u32); 12] = [
+    (0x96dd3c, 0x3791d7),
+    (0xceb424, 0xc331a0),
+    (0xcc0a1d, 0x2f0514),
+    (0xc800cc, 0x000000),
+    (0xf5d7d7, 0xaab95a),
+    (0x0b60ff, 0xa09687),
+    (0x755f1c, 0x200202),
+    (0xff871d, 0x48b24f),
+    (0x9142b2, 0x10cc75),
+    (0xfa8228, 0x8291d7),
+    (0x13f5ff, 0xccb300),
+    (0xbe3c96, 0x000000),
+];
+
+/// D406: the Player Color page: one unnamed section of the player-colour plans in palette
+/// order, each a Sackboy figure in its primary colour over a square of its secondary
+/// (MEASURED 2026-10-17 game frame; INFERRED: the details' colour byte is the palette
+/// index, the plans' own icons are 2x2 placeholders).
+fn swatch_sections(
+    source: &AttachedSource,
+    catalog: &lbp_catalog::Catalog,
+    control: &LoadControl,
+    popit: &lbp_preview::popit::Popit,
+) -> Sections {
+    let Ok(sheet) = decode_icon(source, catalog, ResourceKey::Guid(0x19149), control) else {
+        return Vec::new();
+    };
+    let fig = figure_cover(&sheet.rgba, sheet.width, 32);
+    let mut plans: Vec<_> = popit
+        .items
+        .iter()
+        .filter(|it| it.types.contains(&"player_colour"))
+        .map(|it| ((it.colour & 0xff) as usize, it))
+        .filter(|&(ix, _)| ix < PLAYER_COLOURS.len())
+        .collect();
+    plans.sort_by(|a, b| (a.0, &a.1.title).cmp(&(b.0, &b.1.title)));
+    let items = plans
+        .into_iter()
+        .map(|(ix, it)| (it.title.clone(), swatch(&fig, PLAYER_COLOURS[ix])))
+        .collect();
+    vec![(String::new(), items)]
+}
+
+/// A 64x64 swatch: the secondary colour's rounded square behind the figure's top right,
+/// the figure filled with the primary colour (MEASURED placement, game frame 2026-10-17).
+fn swatch(fig: &[f32], (primary, secondary): (u32, u32)) -> Image {
+    let rgb = |c: u32| [(c >> 16) as u8, (c >> 8) as u8, c as u8];
+    let (p, q) = (rgb(primary), rgb(secondary));
+    let mut out = Vec::with_capacity(64 * 64 * 4);
+    for y in 0..64 {
+        for x in 0..64 {
+            // Figure: 54 px box centred at (28, 36); square: 22 px at (44..62, 4..26).
+            let (u, v) = ((x as f32 - 1.) / 54., (y as f32 - 9.) / 54.);
+            let f = if (0. ..1.).contains(&u) && (0. ..1.).contains(&v) {
+                fig[(v * 128.) as usize * 128 + (u * 128.) as usize]
+            } else {
+                0.
+            };
+            let (dx, dy) = ((x as f32 - 52.).abs() - 7., (y as f32 - 14.).abs() - 7.);
+            let d = (dx.max(0.).hypot(dy.max(0.)) + dx.max(dy).min(0.)) - 4.;
+            let sq = (0.5 - d).clamp(0., 1.);
+            let a = f + sq * (1. - f);
+            let mix = |i: usize| {
+                let c = f32::from(p[i]) * f + f32::from(q[i]) * sq * (1. - f);
+                (c / a.max(1e-4)) as u8
+            };
+            out.extend_from_slice(&[mix(0), mix(1), mix(2), (a * 255.) as u8]);
+        }
+    }
+    image_from(64, 64, out)
+}
+
+/// The first `PAGE_ICONS` plans passing `keep` that have an icon, grouped into sections by
+/// category (the plans come sorted by category, then title; no category = unnamed section).
 fn plan_sections(
     source: &AttachedSource,
     catalog: &lbp_catalog::Catalog,
@@ -925,10 +1048,9 @@ fn plan_sections(
         let Some(key) = item.icon.filter(|_| item.icon_resolved) else {
             continue;
         };
+        // D406: plans with no category (Player Colour, most Backgrounds) share one unnamed
+        // section, drawn without a header; they sort first.
         let cat = humanize(item.category.as_deref().unwrap_or_default());
-        if cat.is_empty() {
-            continue;
-        }
         let Ok(icon) = decode_icon(source, catalog, key, control) else {
             continue;
         };
@@ -1246,6 +1368,22 @@ fn popit_input(
             } else if list_len > 0 {
                 let r2 = (r as i32 + dy).clamp(0, list_len as i32 - 1) as usize;
                 p.cell = (r2, 0);
+            } else if let Some((style, n)) = open_page
+                .map(|pg| {
+                    let t = pg.current(&p);
+                    let n = pg
+                        .others
+                        .get(t)
+                        .map_or(0, |s| s.iter().map(|x| x.1.len()).sum());
+                    (pg.styles.get(t).copied().unwrap_or(PlanStyle::Grid), n)
+                })
+                .filter(|&(style, n)| style != PlanStyle::Grid && n > 0)
+            {
+                // D406: swatch and wide pages have no Functions row; cells count from 0.
+                let cols = style.cols();
+                let r2 = (r as i32 + dy).clamp(0, ((n - 1) / cols) as i32) as usize;
+                let last = (n - r2 * cols).min(cols);
+                p.cell = (r2, (c as i32 + dx).clamp(0, last as i32 - 1) as usize);
             } else {
                 let c2 = (c as i32 + dx).clamp(0, GRID_COLS as i32 - 1) as usize;
                 let r2 = (r as i32 + dy).clamp(0, 7) as usize;
@@ -1849,7 +1987,12 @@ fn popit_page_ui(
             GlobalZIndex(41),
         ));
     };
-    let is_list = !list.is_empty();
+    let style = if home {
+        PlanStyle::Grid
+    } else {
+        page.styles.get(tab).copied().unwrap_or(PlanStyle::Grid)
+    };
+    let is_list = !list.is_empty() || style != PlanStyle::Grid;
     // Functions row: the page's own main-menu icon on the teal tile (focus at the first cell).
     if !is_list {
         text(&mut commands, "Functions", px + 18., 133., 19., 42);
@@ -1969,8 +2112,53 @@ fn popit_page_ui(
             y += 24.;
         }
     }
+    // D406: swatch and wide pages (MEASURED, see `PlanStyle`).
+    if style != PlanStyle::Grid {
+        let items: Vec<&(String, Image)> = sections.iter().flat_map(|s| s.1.iter()).collect();
+        let cols = style.cols();
+        let at = row * cols + col;
+        let first_row = if style == PlanStyle::Wide {
+            row.saturating_sub(5)
+        } else {
+            0
+        };
+        for (k, (title, img)) in items.iter().enumerate().skip(first_row * cols) {
+            let (r, c) = (k / cols - first_row, k % cols);
+            let focused = k == at;
+            let (cx, cy, w, h) = if style == PlanStyle::Swatch {
+                let cx = [970., 1075., 1165.][c];
+                let sz = if focused { 160. } else { 112. };
+                (cx, 195. + r as f32 * 120., sz, sz)
+            } else if focused {
+                (1064., 162. + r as f32 * 87., 332., 108.)
+            } else {
+                (1064., 162. + r as f32 * 87., 243., 75.)
+            };
+            if cy > 600. {
+                break;
+            }
+            if focused {
+                focus_at = (cx - w / 2. + 32., cy);
+                focus_title = title.clone();
+                if style == PlanStyle::Wide {
+                    commands.spawn((
+                        PageNode,
+                        node(cx - w / 2. - 4., cy - h / 2. - 4., w + 8., h + 8.),
+                        BackgroundColor(Color::srgb(0.05, 0.05, 0.05)),
+                        GlobalZIndex(42),
+                    ));
+                }
+            }
+            commands.spawn((
+                PageNode,
+                node(cx - w / 2., cy - h / 2., w, h),
+                ImageNode::new(images.add(img.clone())).with_mode(NodeImageMode::Stretch),
+                GlobalZIndex(if focused { 43 } else { 42 }),
+            ));
+        }
+    }
     // List page: one row per entry, the focused row on a teal bar with a large icon.
-    if is_list {
+    if is_list && style == PlanStyle::Grid {
         let first = row.saturating_sub(LIST_VISIBLE - 1);
         for (k, (title, img)) in list.iter().enumerate().skip(first).take(LIST_VISIBLE) {
             let cy = LIST_Y0 + (k - first) as f32 * LIST_PITCH;
@@ -2001,12 +2189,16 @@ fn popit_page_ui(
     // Grid: section headers and 6-column icon rows below the functions row.
     let mut y = 220.;
     let mut idx = 0usize;
-    for (name, items) in sections {
+    for (name, items) in sections.iter().filter(|_| style == PlanStyle::Grid) {
         if y > 600. {
             break;
         }
-        text(&mut commands, name, px + 18., y, 19., 42);
-        line(&mut commands, y + 16.);
+        // D406: an unnamed section (uncategorised plans) has no header or rule; its first
+        // row sits where a header's first row would (INFERRED, no game frame yet).
+        if !name.is_empty() {
+            text(&mut commands, name, px + 18., y, 19., 42);
+            line(&mut commands, y + 16.);
+        }
         let rows_n = items.len().div_ceil(GRID_COLS);
         let top = y + 45.;
         for (k, (title, img)) in items.iter().enumerate() {
