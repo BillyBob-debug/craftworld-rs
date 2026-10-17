@@ -2804,6 +2804,7 @@ fn load_decal_texture(
         tinted_rgba: None,
         runtime_texture: None,
         fragment: None,
+        overlay_alpha: false,
         sampling_uv: batch.uv.clone(),
         uv: batch.uv.clone(),
         uv_metadata: lbp_mesh::UvMetadata {

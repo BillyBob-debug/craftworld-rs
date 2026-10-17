@@ -88,6 +88,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 82: Story turns Earth to The Cosmos (2026-10-16, D331)](level-scripts/part-82.md)
 - [Part 83: the Story backdrop and its lighting (2026-10-16, D336)](level-scripts/part-83.md)
 - [Part 84: the Story globe's jelly on the glass route (2026-10-16, D337)](level-scripts/part-84.md)
+- [Part 85: the Story globe's AO overlays blended (2026-10-16, D338)](level-scripts/part-85.md)
 
 ## Next
 

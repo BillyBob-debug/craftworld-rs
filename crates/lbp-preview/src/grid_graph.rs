@@ -889,6 +889,7 @@ pub(crate) fn load(
         selection,
         runtime_texture: None,
         fragment: None,
+        overlay_alpha: false,
     })))
 }
 
