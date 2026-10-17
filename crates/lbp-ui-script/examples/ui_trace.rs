@@ -108,12 +108,20 @@ fn run_main() -> Result<(), String> {
         args[0]
     );
     if pages {
-        for edit in [true, false] {
-            let opens = lbp_ui_script::popit::run_responses(&mut vm, class, &s, edit, 0..=10);
-            println!(
-                "{}: button -> collection {opens:?}",
-                if edit { "create" } else { "play" }
-            );
+        for (edit, pod, name) in [
+            (true, false, "create"),
+            (false, false, "play"),
+            (false, true, "play in our Pod"),
+        ] {
+            let opens = lbp_ui_script::popit::run_responses(&mut vm, class, &s, edit, pod, 0..=10);
+            let rows =
+                lbp_ui_script::popit::run_card(&mut vm, class, &s, edit, pod).map(|(c, _)| {
+                    c.rows
+                        .iter()
+                        .map(|r| r.iter().map(|b| b.index).collect::<Vec<_>>())
+                        .collect::<Vec<_>>()
+                });
+            println!("{name}: card rows {rows:?}; button -> collection {opens:?}");
         }
         return Ok(());
     }
