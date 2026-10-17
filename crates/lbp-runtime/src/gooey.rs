@@ -1734,6 +1734,81 @@ mod tests {
         assert_eq!(placed[0].size[0], widest + 96.);
     }
 
+    /// D340: a story group's bubble adds its goodies row 15 frames after it is up: the
+    /// percent of its levels' summed counts, truncated, and the label; none for a total
+    /// of 0 (no profile record).
+    #[test]
+    fn d340_story_info_bubble_adds_the_goodies_row_after_15_frames() {
+        let level = |n, sub, kind| crate::SearchSlot {
+            id: (0, n),
+            group: Some((4, 27)),
+            is_sub_level: sub,
+            developer_level_type: Some(kind),
+            ..Default::default()
+        };
+        let mut w = LevelWorld {
+            story_slots: vec![
+                crate::SearchSlot {
+                    id: (4, 27),
+                    tag: Some("COSMOS_THEME".into()),
+                    ..Default::default()
+                },
+                level(1, false, 0),
+                level(2, false, 5),
+                level(3, true, 0),
+                level(4, false, 3),
+            ],
+            ..LevelWorld::default()
+        };
+        w.pod.search.default_result = Some(0);
+        w.pod.search.selected_planet = Some(1);
+        w.pod.search.want_search_details_calls = 1;
+        let texts = |w: &LevelWorld| {
+            let frame = w.story_info_bubble().unwrap();
+            assert_eq!(
+                frame
+                    .children
+                    .iter()
+                    .any(|c| matches!(c, GooeyItem::HorizontalBreak(_))),
+                frame.children.len() > 1
+            );
+            (frame.children.into_iter())
+                .filter_map(|c| match c {
+                    GooeyItem::Text { text, style, .. } => Some((text, style)),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        // Fresh profile: no records, total 0, no row.
+        for _ in 0..20 {
+            w.advance_frame();
+        }
+        assert_eq!(texts(&w), [("COSMOS_THEME".to_owned(), 1)]);
+        // Levels 1 and 2 count; the sub-level and the level of type 3 do not.
+        for (n, counts) in [(1, [1, 3]), (2, [0, 4]), (3, [5, 5]), (4, [5, 5])] {
+            w.profile_goodies.insert((0, n), counts);
+        }
+        assert_eq!(w.story_goodies((4, 27)), Some([1, 7]));
+        assert_eq!(w.story_goodies((0, 1)), Some([1, 3]));
+        assert_eq!(w.story_goodies((1, 1)), None);
+        w.pod.search.info_bubble_since = None;
+        w.advance_frame();
+        for _ in 0..15 {
+            assert_eq!(texts(&w).len(), 1);
+            w.advance_frame();
+        }
+        assert_eq!(
+            texts(&w),
+            [
+                ("COSMOS_THEME".to_owned(), 1),
+                ("14%".to_owned(), 4),
+                ("Goodies & prizes won".to_owned(), 4)
+            ]
+        );
+        assert_eq!(crate::goodies_percent(7, 7), "100%");
+        assert_eq!(crate::goodies_percent(0, 3), "0%");
+    }
+
     #[test]
     fn d319_the_layout_puts_the_columns_about_the_card() {
         let mut w = LevelWorld::default();

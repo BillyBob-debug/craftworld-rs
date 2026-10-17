@@ -131,6 +131,9 @@ pub struct PlanetsSearch {
     pub cur_result: Option<usize>,
     /// D328: `Planet.SetSearchResults__Q13SearchResults` calls.
     pub set_search_results_calls: u64,
+    /// D340: `PWorld.Frame` when the Story info bubble was first up (the page's frame
+    /// count starts there; [`crate::LevelWorld::story_info_bubble`]), `None` while it is not.
+    pub info_bubble_since: Option<i32>,
 }
 
 /// D328: one slot of the Story search, as the engine keeps it for a result.
@@ -146,6 +149,10 @@ pub struct SearchSlot {
     pub tag: Option<String>,
     pub name: String,
     pub author: Option<String>,
+    /// D340: the slot's `IsSubLevel` and `DeveloperLevelType` (the goodies row's group
+    /// sum, [`crate::LevelWorld::story_goodies`]).
+    pub is_sub_level: bool,
+    pub developer_level_type: Option<u32>,
 }
 
 impl SearchSlot {
@@ -161,6 +168,8 @@ impl SearchSlot {
                 tag: s.translation_tag.clone().filter(|t| !t.is_empty()),
                 name: s.name.clone(),
                 author: s.author_name.clone().filter(|a| !a.is_empty()),
+                is_sub_level: s.is_sub_level.unwrap_or(false),
+                developer_level_type: s.developer_level_type,
             })
             .collect()
     }

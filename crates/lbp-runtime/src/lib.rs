@@ -349,6 +349,13 @@ pub struct LevelWorld {
     /// D328: the slots the Story search lists, in slot-list order (the caller reads
     /// `lbp2story_slots.slt`; empty: no results). See [`SearchSlot`].
     pub story_slots: Vec<SearchSlot>,
+    /// D340 (part 87): the local profile's goodies counts by `SlotID`, `[collected,
+    /// total]`. FOUND (01.33): the info bubble reads them from the profile's per-slot
+    /// record (0x89581c -> 0x199c9c: an array of 0x80-byte entries keyed by `SlotID` at
+    /// profile+0x280; INFERRED `PlayedLevelData`), whose item list (+0x38, 0x20-byte
+    /// entries, those with +0x1c == 0) is the total and the items the profile owns the
+    /// collected count (0x43982c). The profile is not read: empty (no record, so no row).
+    pub profile_goodies: BTreeMap<(i32, i32), [u32; 2]>,
     /// D328: the result objects of [`Self::story_slots`], one per slot, same order.
     pub story_results: Vec<StoryResult>,
     /// D328: an empty SearchResultHandle (`_Type` 0): `SearchResult.GetParent__` of a
@@ -1379,6 +1386,14 @@ impl LevelWorld {
     pub fn advance_frame(&mut self) {
         self.pworld.frame = self.pworld.frame.wrapping_add(1);
         self.pworld.sim_frame = self.pworld.sim_frame.wrapping_add(1);
+        // D340: the info bubble's page counts its frames from when it is first up.
+        let up = self.story_open() && self.pod.search.default_result.is_some();
+        let since = &mut self.pod.search.info_bubble_since;
+        match (up, *since) {
+            (true, None) => *since = Some(self.pworld.frame),
+            (false, Some(_)) => *since = None,
+            _ => {}
+        }
     }
 
     /// A member of an engine part that the runtime keeps as real state, or `None` for one
@@ -2630,6 +2645,23 @@ pub const STORY_DEFAULT_GROUP: (i32, i32) = (4, 27);
 /// at its slot's `location` times this.
 pub const EARTH_RADIUS: f32 = 1750.;
 
+/// D340 FOUND (01.33, 0xdb8c0c read at 0x70465c and 0x7046e4): the info bubble's goodies
+/// row is drawn once its page has counted this many frames.
+pub const GOODIES_ROW_DELAY: i32 = 15;
+
+/// D340 FOUND (01.33, 0x703200): the goodies row's label, "Goodies & prizes won".
+pub const GOODIES_LABEL_KEY: u32 = 0xd9b1_b864;
+
+/// D340 FOUND (01.33, 0x4f57b4): a play stat's percent: collected x 100 / total, truncated,
+/// printed "%d%%" (0xc6b7b0), or "100%" (0xc6b7c0) once collected reaches the total.
+pub fn goodies_percent(collected: u32, total: u32) -> String {
+    if collected >= total {
+        "100%".to_owned()
+    } else {
+        format!("{}%", u64::from(collected) * 100 / u64::from(total))
+    }
+}
+
 impl LevelWorld {
     /// D331 (part 82): the Story search is up: the search state has selected Earth
     /// (`Planets.SelectPlanet__i` with crafteroid 1) and asked for its search details.
@@ -2654,6 +2686,30 @@ impl LevelWorld {
         Some([x * EARTH_RADIUS, y * EARTH_RADIUS, z * EARTH_RADIUS, 0.])
     }
 
+    /// D340 (part 87): a story slot's goodies counts, `[collected, total]`, as the info
+    /// bubble counts them; `None` for a slot type that has no goodies row. FOUND (01.33,
+    /// the level page's jump table 0x704584): a level (`SlotID` type 0, 0x7045ac) takes
+    /// its own record's counts (0x43982c); a group (type 4, 0x7046b0 -> 0x347ec) sums
+    /// those of the slots whose group is it, of type 0..2 or 8, not a sub-level (slot
+    /// +0xba, `IsSubLevel` by the slot serializer 0xab3ad4) and of `DeveloperLevelType` 0
+    /// or 5 (+0xc0). INFERRED: the story list stands for the slot database 0x347ec walks.
+    /// Left out: 0x43982c's recursion into linked levels.
+    pub fn story_goodies(&self, id: (i32, i32)) -> Option<[u32; 2]> {
+        let own = |id| self.profile_goodies.get(&id).copied().unwrap_or([0, 0]);
+        match id.0 {
+            0 => Some(own(id)),
+            4 => Some(
+                (self.story_slots.iter())
+                    .filter(|s| s.group == Some(id) && matches!(s.id.0, 0..=2 | 8))
+                    .filter(|s| !s.is_sub_level)
+                    .filter(|s| matches!(s.developer_level_type.unwrap_or(0), 0 | 5))
+                    .map(|s| own(s.id))
+                    .fold([0, 0], |a, b| [a[0] + b[0], a[1] + b[1]]),
+            ),
+            _ => None,
+        }
+    }
+
     /// The first loaded table's text for a LAMS key (patch table first).
     fn lams(&self, key: u32) -> Option<&str> {
         self.translations.iter().find_map(|t| t.get(key))
@@ -2665,9 +2721,11 @@ impl LevelWorld {
     /// curvature 5, corner jauntiness 5, tail scale (15, 10, 0.6), no transition; FOUND
     /// (0x70430c, 0x703768): the slot's name (text style 1), a break, its author (style
     /// 5, "By %1", key 0x43dd1282). INFERRED: the selected result is the default one
-    /// ([`Self::story_planet_point`]). Left out: the goodies row (the profile's collected
-    /// items are not read; the engine hides the row when the total is 0) and the outer
-    /// frame's maximum width 1150 (the text is not wrapped).
+    /// ([`Self::story_planet_point`]). D340 (part 87): after [`GOODIES_ROW_DELAY`] frames
+    /// a story level or group adds its goodies row: a horizontal break, the percent
+    /// ([`goodies_percent`]) and the label (key [`GOODIES_LABEL_KEY`]), text style 4, when
+    /// [`Self::story_goodies`] has a total. Left out: the outer frame's maximum width 1150
+    /// (the text is not wrapped) and the row's icon.
     pub fn story_info_bubble(&self) -> Option<GooeyFrame> {
         if !self.story_open() {
             return None;
@@ -2700,6 +2758,23 @@ impl LevelWorld {
                 .unwrap_or("By %1")
                 .replace("%1", author);
             children.extend([GooeyItem::Break, text(by, 5)]);
+        }
+        // D340: the goodies row, once the page has counted 15 frames, for a story level
+        // or group whose total is not 0.
+        let frames = (self.pod.search.info_bubble_since)
+            .map_or(0, |since| self.pworld.frame.wrapping_sub(since));
+        if frames >= GOODIES_ROW_DELAY {
+            if let Some([collected, total]) = self.story_goodies(slot.id).filter(|g| g[1] > 0) {
+                let label = self
+                    .lams(GOODIES_LABEL_KEY)
+                    .unwrap_or("Goodies & prizes won");
+                children.extend([
+                    GooeyItem::HorizontalBreak(vec![1., 0., 0., 0.5]),
+                    text(goodies_percent(collected, total), 4),
+                    GooeyItem::Break,
+                    text(label.to_owned(), 4),
+                ]);
+            }
         }
         let other = [
             ("SetFrameStyle", vec![SPEECH_BUBBLE as f32]),
