@@ -201,12 +201,62 @@ pub const BADGE_OVERLAYS: [(u32, [f32; 3]); 12] = [
     (0x0002_edc4, [150., -20., 150.]),   // 12 medal_move
 ];
 
-/// D346 FOUND (0x6fe974, constants r2+0x6c68, r2+0x6dd4): each overlay turns about the
-/// card's Y (its depth axis, so an in-plane tilt) by a random spin in [-1, 1] times pi/8.
-/// The viewer's spin is a fixed hash of the slot, not the game's random draw.
-pub fn overlay_spin(slot: usize) -> f32 {
-    let h = (slot as u32 + 1).wrapping_mul(0x9e37_79b9) >> 16;
-    ((h % 2001) as f32 / 1000. - 1.) * std::f32::consts::FRAC_PI_8
+/// D346 FOUND (0x6fe974): each overlay turns about the card's Y (its depth axis, so an
+/// in-plane tilt) by a random value in [-1, 1] times pi/8 (r2+0x6dd4). D349 FOUND
+/// (0x6fcc0c, 0x6fcce4): the value is one draw of the game's shared generator (the
+/// word at game+0x400; x = (x 0x2e90edd + 0xe908fc1) & 0x3fffffff, value
+/// 2 ((x >> 16) & 0x3fff) 6.1038882e-5 - 1, the factor r2+0x6c68), taken when a shown
+/// slot's mesh is first made, in slot order. INFERRED: the generator's state then
+/// depends on every earlier draw (about 44 functions use it), so the viewer starts it at
+/// [`OVERLAY_SEED`]. Returns each slot's spin in radians for `shown` (bit `n` for slot
+/// `n`), 0 for the others.
+pub fn overlay_spins(shown: u16, seed: u32) -> [f32; 13] {
+    let mut x = seed;
+    let mut spins = [0.; 13];
+    for (n, spin) in spins.iter_mut().enumerate().skip(1) {
+        if shown & (1 << n) != 0 {
+            x = x.wrapping_mul(0x2e9_0edd).wrapping_add(0xe90_8fc1) & 0x3fff_ffff;
+            let r = 2. * (((x >> 16) & 0x3fff) as f32 * 6.103_888e-5) - 1.;
+            *spin = r * std::f32::consts::FRAC_PI_8;
+        }
+    }
+    spins
+}
+
+/// D349: the generator state the viewer's overlay spins start from (INFERRED, see
+/// [`overlay_spins`]).
+pub const OVERLAY_SEED: u32 = 1;
+
+/// D349 FOUND (0x6fcc78, 0x6fec44): with the card's grow flag set (card+0x22c) a new
+/// overlay's scale and spin each start at 0 (current and previous) and move towards 1 and
+/// their random spin, each update: next = current, plus 0.7 (current - previous)
+/// (r2+0x6db0), plus 0.25 (target - current) (r2+0x6d14). The drawn spin is the current one times pi/8,
+/// the scale is uniform. All of a badge's new overlays start together (no stagger found).
+/// INFERRED: one update per game tick.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct OverlayGrow {
+    /// Scale, then spin (radians): (current, previous).
+    pub scale: (f32, f32),
+    pub spin: (f32, f32),
+}
+
+impl OverlayGrow {
+    /// One update towards scale 1 and spin `spin`.
+    pub fn step(&mut self, spin: f32) {
+        let next = |(cur, prev): (f32, f32), target: f32| {
+            (cur + 0.7 * (cur - prev) + 0.25 * (target - cur), cur)
+        };
+        self.scale = next(self.scale, 1.);
+        self.spin = next(self.spin, spin);
+    }
+}
+
+/// D349: whether a scene item is one of a badge's overlays (they spring in as Story opens).
+pub fn is_overlay(item: &crate::thing_view::Item) -> bool {
+    item.alternate
+        && item
+            .mesh
+            .is_some_and(|m| BADGE_OVERLAYS.iter().any(|(g, _)| *g == m))
 }
 
 /// D343: the default result's badge: the polaroid with its slot's icon, and where it sits.
@@ -357,13 +407,15 @@ pub fn add_badge(
     };
     let card = push(POLAROID_MESH, badge.mesh, world);
     // D346: each overlay at its offset in the card's space, turned about the card's Y.
+    let shown = badge.overlays.iter().fold(0u16, |m, (n, _)| m | 1 << n);
+    let spins = overlay_spins(shown, OVERLAY_SEED);
     let mut overlays = Vec::new();
     for (n, mesh) in badge.overlays {
         let (guid, at) = BADGE_OVERLAYS[n - 1];
         overlays.push((
             n,
             mesh.map(|m| {
-                push(guid, m, world * overlay_matrix(n, at));
+                push(guid, m, world * overlay_matrix(at, spins[n]));
             }),
         ));
     }
@@ -388,10 +440,11 @@ pub fn overlays_line(overlays: &[(usize, Result<(), String>)]) -> String {
     each.collect::<Vec<_>>().join(", ")
 }
 
-/// D346: overlay slot `n`'s matrix in the card's space: its offset, then its spin about
-/// Y ([`overlay_spin`]). The game's scale spring settles at 1 (r2+0x6c48) for a shown slot.
-pub fn overlay_matrix(n: usize, at: [f32; 3]) -> Mat4 {
-    Mat4::from_translation(Vec3::from(at)) * Mat4::from_rotation_y(overlay_spin(n))
+/// D346: an overlay's matrix in the card's space: its offset, then its spin about Y
+/// ([`overlay_spins`]). D349: the spring's scale ([`OverlayGrow`]) is applied on the draw
+/// entity, after this.
+pub fn overlay_matrix(at: [f32; 3], spin: f32) -> Mat4 {
+    Mat4::from_translation(Vec3::from(at)) * Mat4::from_rotation_y(spin)
 }
 
 /// D343: the Earth model and the badge, for the load's line.
@@ -456,16 +509,52 @@ mod tests {
     #[test]
     fn d346_overlays_sit_on_the_card() {
         // Finish below the picture, ace and collect at its bottom corners.
-        let at = |n: usize| overlay_matrix(n, BADGE_OVERLAYS[n - 1].1).w_axis.truncate();
+        let at = |n: usize| {
+            overlay_matrix(BADGE_OVERLAYS[n - 1].1, 0.3)
+                .w_axis
+                .truncate()
+        };
         assert_eq!(at(2), Vec3::new(0., -20., -200.));
         assert_eq!(at(5).x, -150.);
         assert_eq!(at(4).x, 150.);
-        for n in 1..=12 {
-            assert!(overlay_spin(n).abs() <= std::f32::consts::FRAC_PI_8);
+        for spin in overlay_spins(0x1ffe, OVERLAY_SEED) {
+            assert!(spin.abs() <= std::f32::consts::FRAC_PI_8);
             // The spin is about Y: the card's depth axis stays put.
-            let y = overlay_matrix(n, [0.; 3]).transform_vector3(Vec3::Y);
+            let y = overlay_matrix([0.; 3], spin).transform_vector3(Vec3::Y);
             assert!((y - Vec3::Y).length() < 1e-6);
         }
+    }
+
+    #[test]
+    fn d349_overlay_spins_are_the_games_generator() {
+        // Seed 0: the first draw is 0xe908fc1, whose 14 bits from 16 are 0xe90.
+        let spins = overlay_spins(1 << 2 | 1 << 5, 0);
+        let pi8 = std::f32::consts::FRAC_PI_8;
+        let r = 2. * (0xe90 as f32 * 6.103_888e-5) - 1.;
+        assert_eq!(spins[2], r * pi8);
+        // Slots not shown take no draw and no spin; the next shown slot takes the next draw.
+        assert_eq!(spins[3], 0.);
+        assert_eq!(overlay_spins(1 << 5, 0)[5], spins[2]);
+        assert_ne!(spins[5], spins[2]);
+        // The 14-bit value times the factor spans [-1, 1].
+        assert!((2. * (0x3fff as f32 * 6.103_888e-5) - 1. - 1.).abs() < 1e-4);
+    }
+
+    #[test]
+    fn d349_overlays_spring_in_from_nothing() {
+        let mut g = OverlayGrow::default();
+        g.step(0.3);
+        // First update: 0.25 of the way.
+        assert_eq!(g.scale, (0.25, 0.));
+        assert!((g.spin.0 - 0.075).abs() < 1e-6);
+        let mut peak: f32 = 0.;
+        for _ in 0..120 {
+            g.step(0.3);
+            peak = peak.max(g.scale.0);
+        }
+        // Underdamped: it overshoots, then settles on scale 1 and the spin.
+        assert!(peak > 1.2 && peak < 1.6, "peak {peak}");
+        assert!((g.scale.0 - 1.).abs() < 1e-3 && (g.spin.0 - 0.3).abs() < 1e-3);
     }
 
     #[test]

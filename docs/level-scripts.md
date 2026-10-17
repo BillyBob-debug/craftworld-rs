@@ -99,6 +99,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 93: the Story badge's medals and the info bubble's place (2026-10-17, D346)](level-scripts/part-93.md)
 - [Part 94: the info bubble's size and its goodies row (2026-10-17, D347)](level-scripts/part-94.md)
 - [Part 95: the goodies disc's pie (2026-10-17, D348)](level-scripts/part-95.md)
+- [Part 96: the badge overlays' spin and spring-in (2026-10-17, D349)](level-scripts/part-96.md)
 
 ## Next
 
