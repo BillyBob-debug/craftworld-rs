@@ -134,13 +134,18 @@ pub struct PlanetsSearch {
 }
 
 /// D328: one slot of the Story search, as the engine keeps it for a result.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct SearchSlot {
     /// `SlotID` (`Type`, `SlotNumber`).
     pub id: (i32, i32),
     /// The slot's group, when not (0, 0).
     pub group: Option<(i32, i32)>,
     pub location: [f32; 4],
+    /// D339: the slot's translation tag, stored name and author name (the info bubble's
+    /// text, [`crate::LevelWorld::story_info_bubble`]).
+    pub tag: Option<String>,
+    pub name: String,
+    pub author: Option<String>,
 }
 
 impl SearchSlot {
@@ -153,6 +158,9 @@ impl SearchSlot {
                 id: id(s.id),
                 group: s.group.map(id).filter(|g| *g != (0, 0)),
                 location: s.location,
+                tag: s.translation_tag.clone().filter(|t| !t.is_empty()),
+                name: s.name.clone(),
+                author: s.author_name.clone().filter(|a| !a.is_empty()),
             })
             .collect()
     }
