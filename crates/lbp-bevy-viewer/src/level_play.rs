@@ -613,6 +613,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             follow_colour_correction,
             follow_things,
             follow_story_world,
+            grow_badge_overlays,
             follow_world,
             follow_menu,
         )
@@ -1391,6 +1392,63 @@ fn follow_level(
             if first { " (new scene)" } else { "" },
             done.line()
         );
+    }
+}
+
+/// D349 (part 96): a Story badge's overlays spring in from nothing each time they show
+/// (`story_world::OverlayGrow`, one update per game tick): the placed entity (scene spin,
+/// scale 1) is turned back by the part of the spin not reached yet and scaled by the
+/// spring's scale, about its own place. A transform `thing_view::apply` wrote since is
+/// taken as the new placed one.
+#[allow(clippy::type_complexity)]
+fn grow_badge_overlays(
+    v: Res<crate::Viewer>,
+    mut entities: Query<(
+        Entity,
+        &crate::thing_view::LevelThing,
+        &mut Transform,
+        &Visibility,
+    )>,
+    mut grow: Local<
+        std::collections::HashMap<Entity, (crate::story_world::OverlayGrow, Transform, Transform)>,
+    >,
+) {
+    use crate::story_world::{overlay_spins, BADGE_OVERLAYS, OVERLAY_SEED};
+    let spins = overlay_spins(v.level.profile_overlays, OVERLAY_SEED);
+    for (e, tag, mut transform, visibility) in &mut entities {
+        if !crate::story_world::is_overlay(&tag.item) {
+            continue;
+        }
+        let Some(n) = BADGE_OVERLAYS
+            .iter()
+            .position(|(g, _)| Some(*g) == tag.item.mesh)
+            .map(|i| i + 1)
+        else {
+            continue;
+        };
+        let (spring, placed, written) =
+            grow.entry(e)
+                .or_insert((Default::default(), *transform, *transform));
+        if *transform != *written {
+            *placed = *transform;
+        }
+        // Hidden: the spring waits at 0 and the entity keeps its placed transform (no
+        // zero-scale matrix while it is not drawn).
+        let now = if *visibility == Visibility::Hidden {
+            *spring = Default::default();
+            *placed
+        } else {
+            spring.step(spins[n]);
+            placed.mul_transform(Transform {
+                rotation: Quat::from_rotation_y(spring.spin.0 - spins[n]),
+                scale: Vec3::splat(spring.scale.0),
+                ..Default::default()
+            })
+        };
+        if *transform != now {
+            *transform = now;
+        }
+        *written = now;
     }
 }
 

@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D347
+# Current state (overwrite each milestone) — after D349
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D348 the goodies disc's pie (2026-10-17)
+## Latest: D349 the badge overlays' spin and spring-in (2026-10-17)
+- Part 96 (`docs/level-scripts/part-96.md`): each overlay's spin is one draw of the game's
+  shared generator (FOUND 0x6fcc0c, x 0x2e90edd + 0xe908fc1, times pi/8), and scale and spin
+  spring in from 0 (FOUND 0x6fec44: + 0.7 (cur - prev) + 0.25 (target - cur)). The
+  generator's state is INFERRED (seed 1); one update per game tick INFERRED.
+
+## D348 the goodies disc's pie (2026-10-17)
 - Part 95 (`docs/level-scripts/part-95.md`): a part-filled goodies disc is two segments in one
   draw (FOUND 0x4f5abc / 0x4a3824): the collected share in the profile's colour, a 0.1 radian
   gap, the rest in the shade (0, 0, 0, 0.3). The viewer's `MenuShape::Pie`; the shader's
