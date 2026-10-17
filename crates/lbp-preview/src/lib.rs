@@ -240,6 +240,41 @@ pub fn retexture_group(
     }
 }
 
+/// D345: group `group` of `mesh`, a solid colour, with its rgb multiplied by `tint`'s
+/// (alpha kept); Err when the group did not load as a solid colour or its material is
+/// shared with another group.
+pub fn tint_solid_group(
+    mesh: &mut GroupedMesh,
+    group: usize,
+    tint: DiffuseTint,
+) -> Result<(), String> {
+    let binding = mesh
+        .bindings
+        .get_mut(group)
+        .ok_or("the mesh has no such group")?
+        .as_mut()
+        .map_err(|e| e.clone())?;
+    tint_solid(
+        std::sync::Arc::get_mut(binding).ok_or("the group's material is shared")?,
+        tint,
+    )
+}
+
+/// D345: [`tint_solid_group`] on one material.
+pub fn tint_solid(material: &mut MaterialAsset, tint: DiffuseTint) -> Result<(), String> {
+    match material {
+        MaterialAsset::Solid(asset) => {
+            let [r, g, b, a] = asset.selection.color.values();
+            let [tr, tg, tb, _] = tint.values();
+            asset.selection.color = DiffuseTint {
+                bits: [r * tr, g * tg, b * tb, a].map(f32::to_bits),
+            };
+            Ok(())
+        }
+        MaterialAsset::Texture(_) => Err("the group is textured".into()),
+    }
+}
+
 /// D331: [`load_mesh_groups_with_options`] with the primitives of the listed regions
 /// drawn with the override's gmat (see [`RegionMaterial`]).
 pub fn load_mesh_groups_with_overrides(

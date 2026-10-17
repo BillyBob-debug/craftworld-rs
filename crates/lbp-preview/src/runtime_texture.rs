@@ -408,6 +408,22 @@ mod tests {
         assert!(validate(&vec![r(2); MAX_RUNTIME_TEXTURES + 1]).is_err());
     }
 
+    /// D345 (`crate::tint_solid`, here for the solid helper): the rgb is multiplied, the
+    /// alpha kept; a textured material is refused.
+    #[test]
+    fn d345_tint_solid_multiplies_rgb() {
+        let mut m = Arc::try_unwrap(solid(vec![])).ok().unwrap();
+        let tint = crate::level_scene::editor_color_tint(0x80ce_b424);
+        crate::tint_solid(&mut m, tint).unwrap();
+        let MaterialAsset::Solid(s) = &m else {
+            unreachable!()
+        };
+        let [r, g, b, a] = s.selection.color.values();
+        let close = |x: f32, y: f32| (x - y).abs() < 1e-6;
+        assert!(close(r, 0.118 * 206. / 255.) && close(g, 0.118 * 180. / 255.));
+        assert!(close(b, 0.118 * 36. / 255.) && a == 1.);
+    }
+
     fn solid(slots: Vec<usize>) -> Arc<MaterialAsset> {
         Arc::new(MaterialAsset::Solid(Box::new(SolidAsset {
             surface: None,

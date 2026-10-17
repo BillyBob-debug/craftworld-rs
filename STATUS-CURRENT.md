@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D344
+# Current state (overwrite each milestone) — after D345
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D344 the Story badge's size (2026-10-17)
+## Latest: D345 the Story badge's frame colour (2026-10-17)
+- Part 92 (`docs/level-scripts/part-92.md`): the badge's frame group (a solid grey; neither
+  of the card's gmats has a ThingColor box) is multiplied by the profile's first colour from
+  `--profile-records`, so the frame is gold as in the game. Left out: the light mat inside
+  the rim, the goodies icons, the bubble overlap.
+
+## D344 the Story badge's size (2026-10-17)
 - Part 91 (`docs/level-scripts/part-91.md`): the game's group badge angle is 0.27 (RPCS3
   memory, planet results +0x210), not 0.18; at the Earth Thing's scale the card is 157 px
   tall against the game's ~161 (was 194). FOUND for next: the frame tint is the profile's

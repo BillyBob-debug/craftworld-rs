@@ -172,6 +172,10 @@ pub fn merge(scene: &mut LevelScene, story: LevelScene, globe: usize) -> Result<
 /// game binds the slot's icon into its group 0 texture slot each frame (0x6fe974).
 pub const POLAROID_MESH: u32 = 0x0000_6a1a;
 
+/// D345 (MEASURED, the mesh's gmats): group 1 (gmat 0x6a16 is group 0's picture) is the
+/// card's frame, a solid colour (gmat 0x6a17).
+pub const BADGE_FRAME_GROUP: usize = 1;
+
 /// D344 (MEASURED, RPCS3 memory in the Story view): the angle each of Earth's six group
 /// results holds at +0x210 (the value 0x6ffff4 scales by) is 0.27, 1.5 times part 81's
 /// 0.18 (0x16afb0, which only seeds a settings block).
@@ -185,17 +189,24 @@ pub struct Badge {
     pub angle: f32,
     /// What went on the picture: the icon's key, or why the placeholder stayed.
     pub icon: Result<String, String>,
+    /// D345: whether the frame took the profile's colour (`None`: no colour given).
+    pub frame: Option<Result<(), String>>,
 }
 
 /// D343: loads the polaroid badge of story slot `slot` (a group: [`GROUP_BADGE_ANGLE`]),
 /// its picture group drawn with the slot's icon. A missing or undecodable icon leaves
-/// the mesh's placeholder picture.
+/// the mesh's placeholder picture. D345: `colour` (packed ARGB, the profile's first
+/// colour, which the game's badge instance holds at +0x10 and +0x14, part 91 MEASURED)
+/// multiplies the frame's solid colour ([`BADGE_FRAME_GROUP`]). INFERRED: neither of the
+/// card's gmats has a ThingColor box, so the game applies it outside the material graph;
+/// the picture group is left untinted.
 pub fn load_badge(
     source: &lbp_catalog::attachment::AttachedSource,
     catalog: &lbp_catalog::Catalog,
     control: &lbp_catalog::LoadControl,
     options: lbp_preview::PreviewOptions,
     slot: &lbp_level::slots::Slot,
+    colour: Option<u32>,
 ) -> Result<Badge, String> {
     let key = lbp_preview::resolve(catalog, Some(POLAROID_MESH), None)?;
     let mut mesh =
@@ -211,11 +222,19 @@ pub fn load_badge(
         lbp_preview::retexture_group(&mut mesh, 0, texture, at, || control.check().is_err())?;
         Ok(key.label())
     })();
+    let frame = colour.map(|c| {
+        lbp_preview::tint_solid_group(
+            &mut mesh,
+            BADGE_FRAME_GROUP,
+            lbp_preview::level_scene::editor_color_tint(c),
+        )
+    });
     Ok(Badge {
         mesh,
         location: slot.location,
         angle: GROUP_BADGE_ANGLE,
         icon,
+        frame,
     })
 }
 
