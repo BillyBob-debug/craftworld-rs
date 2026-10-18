@@ -25,6 +25,8 @@ pub struct Trace {
     last: HashMap<(u8, u32), lbp_runtime::ThingDisplay>,
     /// The drawn menu frame last written.
     menu: Option<String>,
+    /// D370: the kept top-level menu frames last written.
+    menu_frames: Option<String>,
 }
 
 fn json_string(s: &str) -> String {
@@ -49,6 +51,7 @@ impl Trace {
             out: std::io::BufWriter::new(file),
             last: HashMap::new(),
             menu: None,
+            menu_frames: None,
         })
     }
 
@@ -86,6 +89,13 @@ impl Trace {
                 );
                 self.menu = Some(frame);
             }
+        }
+        // D370: the top-level frames the Gooey keeps, written when they change.
+        let keys: Vec<_> = level.gooey.frames.keys().collect();
+        let keys = format!("{keys:?}");
+        if self.menu_frames.as_deref() != Some(keys.as_str()) {
+            line += &format!(",\"menu_frames\":{}", json_string(&keys));
+            self.menu_frames = Some(keys);
         }
         for (i, (name, world)) in [("level", Some(level)), ("shell", shell)]
             .into_iter()

@@ -1,8 +1,8 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-116.md` (115 for the cursor's flight, 114 for the
-   launch warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the
+1. `docs/level-scripts/part-117.md` (116 for the slide-in, 115 for the cursor's
+   flight, 114 for the launch warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the
    switch, 110 for the hand-off,
    109 for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for
    choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
@@ -10,11 +10,11 @@
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 171 (D368) merged. PR for D369 (branch `pod-menu-slide`,
-  worktree `E:\Projects\wt-d324`): the menus slide in (`sliding_frame_matrix`);
+- PRs 153 (D353) through 172 (D369) merged. PR for D370 (branch `pod-frame-prune`,
+  worktree `E:\Projects\wt-d324`): closed menus go (`prune_transitioned_out`);
   handed to the coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D370.
+  Decision numbers: D348-D399, next free D371.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -29,6 +29,8 @@
   --level-scripts-trace PATH --qa-capture PNG` (each capture needs a new name).
   Disc + update only: `--snapshot local-analysis/d79-inventory-0133.json --game-dir
   "game-data/a1-disc;game-data/a1-update-0133"`. A run takes several minutes.
+- D370 runs: `local-analysis/d370/*-b2*` (`run370b.ps1`, group at 680, Back at 700
+  and 740): scripted frames go 15 ticks after native's; the drawn menu is unchanged.
 - D369 runs: `local-analysis/d369/*-a1*` (`run369.ps1`): native menus follow the
   scripted path (group exact, main menu and Story a tick later).
 - D368 runs: `local-analysis/d368/*-a1*`, `*-a2*` (`run368.ps1`): moves at 700, 720,
@@ -71,7 +73,8 @@
 - Back in the scripts: `PopState` calls `OnLoseFocus`/`OnDeactivate(false)` on the popped
   state and keeps it drawing in `OldStates` until `HasTransitionedOut`; the state below
   gets `OnGainFocus` only. `GooeyState::drawn_menu` breaks same-frame ties toward the
-  frame built last; old frames are not pruned.
+  frame built last. A menu frame left out of a tick's builds goes 15 ticks later (D370,
+  INFERRED); `HasTransitionedOut` is `!IsValidNode(1)` once inactive (FOUND).
 - Research only (never commit): listings in `local-analysis/d353/listings/`, pseudocode
   `local-analysis/d353/planetsworld-pseudocode.md`,
   `local-analysis/d357/podmenu-pseudocode.md`.
@@ -82,11 +85,10 @@
   data file is on the disc or update.
 
 ## Next
-1. Pruning `OldStates` frames. (The default result 23 before tick 640 is scripted mode's
-   own seeding at load, `add_story_results`; INFERRED the game sets none before the
-   search opens (no script call), so native mode's none is kept. D369 check.)
-2. Story's slide back from a group (721-730, the view moves) and the native world
-   Thing's tick of lag. Open: the cursor's height and drawing, the player-count texts
+1. Story's slide back from a group (721-730, the view moves) and the native world
+   Thing's tick of lag. (The default result 23 before tick 640 is scripted mode's own
+   seeding at load; native's none is kept, D369.)
+2. Open: the cursor's height and drawing, the player-count texts
    (0x16e3b0, 0x16de78), the warning popup's drawing, the game's entrance animation
    and state 6/7 load.
 3. The other entries' states as they unlock (the other searches need the network).

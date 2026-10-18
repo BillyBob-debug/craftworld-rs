@@ -1423,6 +1423,8 @@ impl LevelWorld {
     /// [`LevelScripts::tick_level`], so the scripts of the first tick read the stored
     /// frame and those of tick n the stored frame + n - 1.
     pub fn advance_frame(&mut self) {
+        // D370: the menu frames that have transitioned out go before the next frame.
+        self.gooey.prune_transitioned_out(self.pworld.frame);
         self.pworld.frame = self.pworld.frame.wrapping_add(1);
         self.pworld.sim_frame = self.pworld.sim_frame.wrapping_add(1);
         // D340: the info bubble's page counts its frames from when it is first up.
