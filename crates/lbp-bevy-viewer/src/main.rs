@@ -1234,6 +1234,7 @@ fn activate_on_show_for(mut args: impl Iterator<Item = String>) -> bool {
 pub(crate) fn place_on_second_monitor(
     monitors: Query<(Entity, Option<&bevy::window::PrimaryMonitor>), With<bevy::window::Monitor>>,
     mut windows: Query<&mut Window>,
+    mut alone_frames: Local<u32>,
 ) {
     let second = monitors.iter().find(|(_, primary)| primary.is_none());
     if let Some((monitor, _)) = second {
@@ -1249,9 +1250,13 @@ pub(crate) fn place_on_second_monitor(
             }
         }
     } else if !monitors.is_empty() {
-        // D600: a one-monitor PC (a friend's) shows the window where it is.
-        for mut window in &mut windows {
-            window.visible = true;
+        // D600: a one-monitor PC (a friend's) shows the window where it is, once a second
+        // monitor has had a few frames to be listed.
+        *alone_frames += 1;
+        if *alone_frames >= 30 {
+            for mut window in &mut windows {
+                window.visible = true;
+            }
         }
     }
 }
