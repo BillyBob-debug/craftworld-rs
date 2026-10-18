@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D376 the checkpoint's spawn hold (2026-10-18)
+## Latest: D377 the start checkpoint (2026-10-18)
+- Part 124 (`docs/level-scripts/part-124.md`): Sackboy starts at the checkpoint the
+  game scores highest (entrance gate, active, infinite or double), not the first.
+
+## D376 the checkpoint's spawn hold (2026-10-18)
 - Part 123 (`docs/level-scripts/part-123.md`): Sackboy is held still for the game's 11
   frames when the launched level spawns him at its checkpoint.
 
@@ -22,10 +26,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D374 the cursor arrives (2026-10-18)
 - Part 121 (`docs/level-scripts/part-121.md`): the native planets answer
   `HasCursorArrived` and land a flight at once on `SetWantSearchDetails`' first flag.
-
-## D373 Back's main menu (2026-10-18)
-- Part 120 (`docs/level-scripts/part-120.md`): native Back from Story builds the main
-  menu on the next tick, so the Pod's native and scripted menus now match every tick.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

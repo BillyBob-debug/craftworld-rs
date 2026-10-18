@@ -1,21 +1,21 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-123.md` (122 for the player texts, 121 for the cursor, 120 for
-   Back, 119 for the pushes, 118 for Story back, 117 for closed menus, 116 for the
-   slide-in, 115 for the cursor's flight, 114 for the launch warnings, 113 for Sackboy,
-   112 for the entrance camera, 111 for the switch, 110 for the hand-off, 109 for Cross on
-   a level, 108 for the cursor, 107 for the group zoom, 106 for choosing a group, 105 for
-   Back, 104 for the pod computer's stack and main menu)
+1. `docs/level-scripts/part-124.md` (123 for the spawn hold, 122 for the player texts, 121
+   for the cursor, 120 for Back, 119 for the pushes, 118 for Story back, 117 for closed
+   menus, 116 for the slide-in, 115 for the cursor's flight, 114 for the launch warnings,
+   113 for Sackboy, 112 for the entrance camera, 111 for the switch, 110 for the hand-off,
+   109 for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for choosing
+   a group, 105 for Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 179 (D375) merged. PR for D376 (branch `pod-next`,
-  worktree `E:\Projects\wt-d324`): the checkpoint's spawn hold;
+- PRs 153 (D353) through 180 (D376) merged. PR for D377 (branch `pod-next`,
+  worktree `E:\Projects\wt-d324`): the start checkpoint;
   handed to the coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D377.
+  Decision numbers: D348-D399, next free D378.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -92,8 +92,8 @@
   data file is on the disc or update.
 
 ## Next
-1. Open: the warning popup's drawing (0x3e995c, type 0x4b), the start-checkpoint
-   scoring (0x5b46c, part 123) and state 6/7 load. (Spawn hold done, D376.)
+1. Open: the warning popup's drawing (0x3e995c, type 0x4b) and state 6/7 load.
+   (Spawn hold D376, start checkpoint D377 done.)
    (The native and scripted menus match through Back, D373; the default result 23
    before tick 640 is scripted mode's own seeding at load, native's none is kept, D369.
    The cursor's height and blend have no reader and its drawing is script-side, D374.)
