@@ -360,6 +360,10 @@ pub struct LevelWorld {
     pub level_unlocking: Option<LevelUnlocking>,
     pub unlock_events: Vec<String>,
     pub story_search_requested: bool,
+    /// D384: the SlotLink objects of the pending links (made with the Story results),
+    /// and the SlotID objects made for a link's end that is not a Story slot.
+    pub pending_link_objects: Vec<(PendingLink, ObjectId)>,
+    pub link_slot_ids: Vec<(ObjectId, (i32, i32))>,
     /// The video and voice-over requests of the scripts ([`MediaState`]). Nothing plays.
     pub media: MediaState,
     /// `PodComputer.GetPodComputerInUse__`: a player is at the pod computer ("PuterInUse").
@@ -1765,6 +1769,10 @@ impl World for LevelWorld {
     /// made ahead for that answer. Any other slot needs the game's slot database, which
     /// the world does not have: an error.
     fn slot_group(&mut self, slot: &Value) -> Result<Value, String> {
+        // D384: a Story slot's group is in the search's list.
+        if let Some(group) = self.story_slot_group(slot) {
+            return Ok(Value::Object(group));
+        }
         match self.slot_id(slot)? {
             (0, 0) => self
                 .no_group_slot
@@ -1785,7 +1793,10 @@ impl World for LevelWorld {
             Value::Object(Some(o)) if Some(*o) == self.primary_level_slot => {
                 Ok(self.primary_level_slot_id)
             }
-            other => Err(format!("SlotID {other:?} is not one the world made")),
+            // D384: the Story results' SlotIDs and the pending links' ends.
+            other => self
+                .slot_of(other)
+                .ok_or_else(|| format!("SlotID {other:?} is not one the world made")),
         }
     }
     /// FOUND (01.33): see the `SetGlobalSettings<X>To` entries in the native table.
@@ -2360,8 +2371,19 @@ impl World for LevelWorld {
             "Audio.UserMusicIsStopped__" | "Audio.IsInteractiveMusicAudible__" => Value::Bool(true),
             // D381: the profile's pending links (FOUND, 0x5fab40 -> 0x5e8a30: the
             // count at profile+0x2b4).
+            // D384: none while the return's Story search is not up yet, so the scripted
+            // planets world enters state 2 (`LevelUnlockingThread`) only once the
+            // thread can play (it returns at once without a search; INFERRED, the
+            // game is back at its search when the Pod loads after a finish).
             "Game.GetNumPendingLinks__" => {
-                Value::Int(self.story_progress.pending_links.len() as i32)
+                let waiting =
+                    self.story_search_requested && self.pod.search.selected_planet.is_none();
+                let n = if waiting {
+                    0
+                } else {
+                    self.story_progress.pending_links.len()
+                };
+                Value::Int(n as i32)
             }
             "Game.GetNumAvatars__"
             | "Game.GetLocalLeadersPlayerNumber__"
@@ -3234,6 +3256,45 @@ fn add_story_results(
     }
     host.world.pod.search.default_result = slots.iter().position(|s| s.id == STORY_DEFAULT_GROUP);
     host.world.story_results = results;
+    add_pending_link_objects(vm, host);
+}
+
+/// D384: a SlotLink (script, `From` and `To`) for each pending link, its ends the Story
+/// results' SlotIDs (a new SlotID for an end outside them), for `Game.GetPendingLink__i`.
+/// A caller that hands the profile's progress over after the objects are made (the
+/// return to the Pod) calls this again.
+pub fn add_pending_link_objects(vm: &mut Vm, host: &mut Bindings<LevelWorld>) {
+    let (Some(link_class), Some(slot_class)) =
+        (vm.class_by_name("SlotLink"), vm.class_by_name("SlotID"))
+    else {
+        return;
+    };
+    host.world.pending_link_objects.clear();
+    host.world.link_slot_ids.clear();
+    for l in host.world.story_progress.pending_links.clone() {
+        let mut ends = [None; 2];
+        for (end, id) in ends.iter_mut().zip([l.from, l.to]) {
+            let story = host.world.story_slots.iter().position(|s| s.id == id);
+            if let Some(r) = story.and_then(|i| host.world.story_results.get(i)) {
+                *end = Some(r.slot_id);
+            } else if let Ok(o) = vm.instantiate(slot_class) {
+                if let Some(fields) = vm.fields_mut(o) {
+                    fields.insert("Type".into(), Value::Int(id.0));
+                    fields.insert("SlotNumber".into(), Value::Int(id.1));
+                }
+                host.world.link_slot_ids.push((o, id));
+                *end = Some(o);
+            }
+        }
+        let Ok(o) = vm.instantiate(link_class) else {
+            continue;
+        };
+        if let Some(fields) = vm.fields_mut(o) {
+            fields.insert("From".into(), Value::Object(ends[0]));
+            fields.insert("To".into(), Value::Object(ends[1]));
+        }
+        host.world.pending_link_objects.push((l, o));
+    }
 }
 
 /// A scripted Thing and its class, when the class is loaded.

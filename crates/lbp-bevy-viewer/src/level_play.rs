@@ -1745,10 +1745,12 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
     };
     let identity = read.identity.clone();
     let loaded = read.loaded;
-    let (vm, mut host, scripts, mut faults, header) = p.from.start(read);
+    let (mut vm, mut host, scripts, mut faults, header) = p.from.start(read);
     // D381: the profile's state goes with the session (the game keeps one profile).
     host.world.progression_flags = p.host.world.progression_flags;
     host.world.story_progress = std::mem::take(&mut p.host.world.story_progress);
+    // D384: the pending links as SlotLink objects, for `LevelUnlockingThread`.
+    lbp_runtime::add_pending_link_objects(&mut vm, &mut host);
     // D382: back in the Pod, its shell level plays again with it.
     let shell = shell.map(|read| start_shell(&p.from, read, &mut host, &mut faults));
     let shell_present = shell.is_some();

@@ -2,12 +2,16 @@
 //! `PendingLinkCluster`s (FOUND, script aff692cc), run natively as the planets world's
 //! state 2 (`PlanetsWorld.UpdateState__`), one tick per yield. Read in part 127 (D380).
 //!
+//! D384 (part 131): with scripts loaded, the game's own thread runs in the VM instead;
+//! [`LevelWorld::unlock_query`] answers its natives.
+//!
 //! Not ported: the voice-overs (`PlayVO__`), `CanStartEndOfLevelSequence__` (always
 //! true here), the swap from a group search back to Story (the return opens Story), the
 //! cached-info updates, the push of the focus planet's group at the end, the link
 //! drawing and the state-2 camera. No audio plays; the sounds are counted.
 
 use crate::{LevelWorld, PendingLink};
+use lbp_script_vm::{ObjectId, Value};
 
 /// `PendingLinkCluster`'s angle test: a link without a group joins when its target's
 /// direction is within 30 degrees of the cluster's `AverageDir` (FOUND, 0.5235988).
@@ -143,7 +147,7 @@ impl LevelWorld {
         *self.sounds_played.entry(name.to_owned()).or_default() += 1;
     }
 
-    fn cursor_to_badge(&mut self, id: (i32, i32)) {
+    fn cursor_to_badge(&mut self, id: (i32, i32), snap: bool) {
         let Some(i) = self.badge_result(id) else {
             return;
         };
@@ -151,7 +155,7 @@ impl LevelWorld {
         let from = (self.pod.search.cur_result)
             .and_then(|c| self.story_slots.get(c))
             .map(|s| s.location);
-        self.pod.search.move_cursor_to(i, Some(to), from, false);
+        self.pod.search.move_cursor_to(i, Some(to), from, snap);
     }
 
     /// The cursor flies to a direction, keeping its result (state 1's move to
@@ -183,7 +187,7 @@ impl LevelWorld {
                 }
                 let from = c.from;
                 c.state = 1;
-                self.cursor_to_badge(from);
+                self.cursor_to_badge(from, false);
                 self.unlock_events
                     .push(format!("cluster {k}: cursor to the source {from:?}"));
             }
@@ -240,7 +244,7 @@ impl LevelWorld {
                     c.state = 4;
                     let to = c.links.last().map(|l| l.to);
                     if let Some(to) = to {
-                        self.cursor_to_badge(to);
+                        self.cursor_to_badge(to, false);
                     }
                     self.unlock_events
                         .push(format!("cluster {k}: cursor to the last target"));
@@ -293,6 +297,144 @@ impl LevelWorld {
         }
         self.pod.search.cursor_mode = Some(4);
         false
+    }
+}
+
+impl LevelWorld {
+    /// D384: the slot a SlotID object the world made stands for: a Story result's, or
+    /// one made for a pending link's end outside the search (`link_slot_ids`).
+    pub(crate) fn slot_of(&self, v: &Value) -> Option<(i32, i32)> {
+        let Value::Object(Some(o)) = v else {
+            return None;
+        };
+        let result = self.story_results.iter().position(|r| r.slot_id == *o);
+        result
+            .and_then(|i| self.story_slots.get(i))
+            .map(|s| s.id)
+            .or_else(|| {
+                self.link_slot_ids
+                    .iter()
+                    .find(|(x, _)| x == o)
+                    .map(|(_, id)| *id)
+            })
+    }
+
+    /// D384: `Slot.GetSlotGroup__Q6SlotID` for a Story slot: its group's SlotID, or the
+    /// (0, 0) SlotID for a slot without one. `None` for a slot not in the search.
+    pub(crate) fn story_slot_group(&self, v: &Value) -> Option<Option<ObjectId>> {
+        let id = self.slot_of(v)?;
+        self.slot_index(id)?;
+        let group = self.slot_group(id).and_then(|g| self.slot_index(g));
+        Some(
+            group
+                .map(|i| self.story_results[i].slot_id)
+                .or(self.no_group_slot),
+        )
+    }
+
+    fn link_of(&self, v: Option<&Value>) -> Option<PendingLink> {
+        let Some(Value::Object(Some(o))) = v else {
+            return None;
+        };
+        let found = self.pending_link_objects.iter().find(|(_, x)| x == o);
+        found.map(|(l, _)| *l)
+    }
+
+    /// D384 (part 131): the natives the scripted `LevelUnlockingThread` and its
+    /// `PendingLinkCluster`s call, so the game's own thread plays state 2 (the native
+    /// thread, D383, is the port without scripts). The names and types are FOUND (the
+    /// 01.33 listings); the answers reuse the D383 thread's rules and are INFERRED.
+    /// `None` for any other native.
+    pub(crate) fn unlock_query(
+        &mut self,
+        class: &str,
+        mangled: &str,
+        args: &[Value],
+    ) -> Option<Value> {
+        let arg = args.first();
+        let slot = arg.and_then(|v| self.slot_of(v));
+        let snap = matches!(args.get(1), Some(Value::Bool(true)));
+        Some(match (class, mangled) {
+            // The SlotLink objects made with the Story results, in the profile's order.
+            ("Game", "GetPendingLink__i") => {
+                let i = match arg {
+                    Some(Value::Int(i)) => usize::try_from(*i).ok(),
+                    _ => None,
+                };
+                let link = i.and_then(|i| self.story_progress.pending_links.get(i));
+                let o = link.and_then(|l| self.pending_link_objects.iter().find(|(x, _)| x == l));
+                Value::Object(o.map(|(_, o)| *o))
+            }
+            ("Game", "ClearPendingLink__Q8SlotLink") => {
+                if let Some(l) = self.link_of(arg) {
+                    self.story_progress.pending_links.retain(|x| *x != l);
+                    self.unlock_events
+                        .push(format!("link to {:?} cleared", l.to));
+                }
+                Value::Void
+            }
+            // D383: no end-of-level sequence waits.
+            ("PlanetsWorld", "CanStartEndOfLevelSequence__") => Value::Bool(true),
+            // D383's rule: the target is a Story slot and the search is up.
+            ("PodComputer", "IsLinkInCurrentSearch__Q8SlotLink") => {
+                let up = self.pod.search.selected_planet.is_some();
+                if up {
+                    self.story_search_requested = false;
+                }
+                let link = self.link_of(arg);
+                Value::Bool(up && link.is_some_and(|l| self.slot_index(l.to).is_some()))
+            }
+            ("PodComputer", "GetBadgeDir__Q6SlotID") => {
+                let d = slot.and_then(|id| self.slot_dir(id)).unwrap_or([0.; 3]);
+                Value::Vec4([d[0], d[1], d[2], 0.])
+            }
+            ("PodComputer", "SetBadgeUnlocking__Q6SlotID") => {
+                let new = slot.filter(|id| !self.story_progress.unlocking.contains(id));
+                if let Some(id) = new {
+                    self.story_progress.unlocking.push(id);
+                    self.unlock_events.push(format!("{id:?} unlocking"));
+                }
+                Value::Void
+            }
+            ("PodComputer", "UnlockBadge__Q6SlotID") => {
+                if let Some(id) = slot {
+                    let p = &mut self.story_progress;
+                    p.unlocking.retain(|x| *x != id);
+                    if !p.unlocked.contains(&id) {
+                        p.unlocked.push(id);
+                    }
+                    self.unlock_events.push(format!("{id:?} unlocked"));
+                }
+                Value::Void
+            }
+            // The bool is the snap, as on the planet's `MoveCursorToResult` (D368).
+            ("PodComputer", "MoveCursorToPos__rb") => {
+                let dir = match arg {
+                    Some(Value::Vec4(v)) => unit(*v),
+                    _ => None,
+                };
+                if let Some(d) = dir {
+                    if snap {
+                        self.pod.search.cursor_flight = None;
+                        self.pod.search.cursor_dir = Some(d);
+                    } else {
+                        self.cursor_to_dir(d);
+                    }
+                    self.unlock_events.push("cursor to a direction".into());
+                }
+                Value::Void
+            }
+            ("PodComputer", "MoveCursorToResult__Q6SlotIDb") => {
+                if let Some(id) = slot {
+                    self.cursor_to_badge(id, snap);
+                    self.unlock_events.push(format!("cursor to {id:?}"));
+                }
+                Value::Void
+            }
+            // No cached search details are kept.
+            ("SearchDetails", "UpdateAllSearchDetailsCachedInfo__") => Value::Void,
+            _ => return None,
+        })
     }
 }
 
@@ -358,5 +500,68 @@ mod tests {
         assert_eq!(w.pod.search.cursor_mode, Some(4));
         assert_eq!(w.sounds_played.get(UNLOCK_THEME), Some(&4));
         assert!(w.sounds_played.get(UNLOCK_BEEPS).is_some_and(|&n| n >= 3));
+    }
+
+    #[test]
+    fn d384_scripted_thread_natives() {
+        let mut w = world();
+        w.story_results = (0..4)
+            .map(|i| crate::StoryResult {
+                result: ObjectId(i),
+                handle: ObjectId(20 + i),
+                slot_id: ObjectId(10 + i),
+                parent: None,
+            })
+            .collect();
+        let links = w.story_progress.pending_links.clone();
+        w.pending_link_objects = (0..4)
+            .map(|i| (links[i], ObjectId(30 + i as u32)))
+            .collect();
+        w.link_slot_ids = vec![(ObjectId(40), (0, 9))];
+        let obj = |i| Value::Object(Some(ObjectId(i)));
+        assert_eq!(w.slot_of(&obj(11)), Some((0, 2)));
+        assert_eq!(w.slot_of(&obj(40)), Some((0, 9)));
+        assert_eq!(w.slot_of(&obj(99)), None);
+        assert_eq!(w.story_slot_group(&obj(40)), None, "not a Story slot");
+        let q = |w: &mut LevelWorld, c, m, a: &[Value]| w.unlock_query(c, m, a);
+        let link = q(&mut w, "Game", "GetPendingLink__i", &[Value::Int(1)]);
+        assert_eq!(link, Some(obj(31)));
+        let is_in = "IsLinkInCurrentSearch__Q8SlotLink";
+        w.story_search_requested = true;
+        assert_eq!(
+            q(&mut w, "PodComputer", is_in, &[obj(31)]),
+            Some(Value::Bool(false))
+        );
+        assert!(w.story_search_requested, "still waiting for the search");
+        w.pod.search.selected_planet = Some(1);
+        assert_eq!(
+            q(&mut w, "PodComputer", is_in, &[obj(31)]),
+            Some(Value::Bool(true))
+        );
+        assert!(!w.story_search_requested);
+        q(
+            &mut w,
+            "PodComputer",
+            "SetBadgeUnlocking__Q6SlotID",
+            &[obj(12)],
+        );
+        assert_eq!(w.story_progress.unlocking, [(0, 3)]);
+        q(&mut w, "PodComputer", "UnlockBadge__Q6SlotID", &[obj(12)]);
+        assert!(w.story_progress.unlocking.is_empty());
+        assert_eq!(w.story_progress.unlocked, [(0, 3)]);
+        q(&mut w, "Game", "ClearPendingLink__Q8SlotLink", &[obj(31)]);
+        assert_eq!(w.story_progress.pending_links.len(), 3);
+        let to = q(
+            &mut w,
+            "PodComputer",
+            "MoveCursorToResult__Q6SlotIDb",
+            &[obj(13), Value::Bool(true)],
+        );
+        assert_eq!(to, Some(Value::Void));
+        assert_eq!(w.pod.search.cur_result, Some(3));
+        assert_eq!(w.pod.search.cursor_flight, None, "a snap does not fly");
+        let dir = q(&mut w, "PodComputer", "GetBadgeDir__Q6SlotID", &[obj(10)]);
+        assert_eq!(dir, Some(Value::Vec4([1., 0., 0., 0.])));
+        assert_eq!(q(&mut w, "PodComputer", "GetState__", &[]), None);
     }
 }
