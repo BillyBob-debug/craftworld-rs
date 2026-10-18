@@ -130,6 +130,11 @@ pub struct NativePodComputer {
     /// The last state was popped and the host asked to stop using the pod computer: no
     /// new main menu until the answer has come (the pod computer seen not in use).
     released: bool,
+    /// D372: a state was pushed before this tick's world update.
+    pushed_now: bool,
+    /// D372: the main menu's frame under a state pushed before the tick: drawn on that
+    /// tick, dropped on the next.
+    covered: bool,
 }
 
 impl NativePodComputer {
@@ -150,21 +155,52 @@ impl NativePodComputer {
         self.push(host, PuterState::StorySearch);
     }
 
-    /// After a tick of the planets level (`PodComputer.PerFrameUpdate`): a main menu when
-    /// the pod computer is in use with nothing on the stack, then the top state's update
-    /// with the menu input it is given.
-    pub fn after_tick(&mut self, host: &mut Bindings<LevelWorld>) -> Option<PodComputerEvent> {
-        let input = std::mem::take(&mut host.world.gooey.input);
+    /// D372 (part 119): before the tick's world update (`PodComputer.PerFrameUpdate`, the
+    /// first script call of the frame, so the planets world blends to a pushed state's
+    /// view on the same frame; FOUND, D301): a main menu when the pod computer is in use
+    /// with nothing on the stack, and the main menu's Story button. MEASURED (D371 runs):
+    /// the scripted world Thing starts each of those moves a tick before the native one
+    /// did. INFERRED: the button's press comes in the main menu's `UpdateUI`, so the menu
+    /// is built on that tick and Story's frame on the next (MEASURED, 641).
+    pub fn before_tick(&mut self, host: &mut Bindings<LevelWorld>) -> Option<PodComputerEvent> {
         let in_use = host.world.pod_computer_in_use;
         self.released &= in_use;
-        let Some(top) = self.top() else {
-            if in_use && !self.released {
+        match self.top() {
+            None if in_use && !self.released => {
                 self.push(host, PuterState::MainMenu);
-                self.main_menu_ui(&mut host.world);
-                return Some(PodComputerEvent::Pushed(PuterState::MainMenu));
+                Some(PodComputerEvent::Pushed(PuterState::MainMenu))
             }
-            return None;
-        };
+            Some(PuterState::MainMenu) => {
+                let g = &host.world.gooey;
+                let story = g.focus == Some((1, MAIN_MENU_STORY_BUTTON));
+                if !g.input.choose || g.input.back || !story {
+                    return None;
+                }
+                host.world.gooey.input.choose = false;
+                self.main_menu_ui(&mut host.world);
+                self.pushed_now = true;
+                self.push(host, PuterState::StorySearch);
+                Some(PodComputerEvent::Pushed(PuterState::StorySearch))
+            }
+            _ => None,
+        }
+    }
+
+    /// After a tick of the planets level: Back, then the top state's update with the menu
+    /// input it is given (the frames' matrices set after the world's move, as `Draw`).
+    pub fn after_tick(&mut self, host: &mut Bindings<LevelWorld>) -> Option<PodComputerEvent> {
+        let input = std::mem::take(&mut host.world.gooey.input);
+        self.released &= host.world.pod_computer_in_use;
+        let pushed_now = std::mem::take(&mut self.pushed_now);
+        if std::mem::take(&mut self.covered) {
+            if pushed_now {
+                self.covered = true;
+                self.main_menu_matrix(&mut host.world);
+            } else {
+                drop_frame(&mut host.world, MAIN_MENU_FRAME_KEY);
+            }
+        }
+        let top = self.top()?;
         // D362: `PodComputer.OnPlanetCancel` returns without popping while a level launch
         // is pending (`IsLaunchingLevel`, pc 0019-0021, listing 16e6e8c9; MEASURED: the
         // scripted run keeps the group search on top after Back at tick 775).
@@ -175,14 +211,9 @@ impl NativePodComputer {
             return Some(self.pop(host));
         }
         match top {
-            PuterState::MainMenu => {
-                let focus = host.world.gooey.focus;
-                if input.choose && focus == Some((1, MAIN_MENU_STORY_BUTTON)) {
-                    self.push(host, PuterState::StorySearch);
-                    return Some(PodComputerEvent::Pushed(PuterState::StorySearch));
-                }
-                self.main_menu_ui(&mut host.world);
-            }
+            PuterState::MainMenu => self.main_menu_ui(&mut host.world),
+            // Story's frame is first built on the tick after its push.
+            PuterState::StorySearch if pushed_now => {}
             PuterState::StorySearch => self.search.update(&mut host.world),
             PuterState::GroupSearch => self.group.update(&mut host.world),
         }
@@ -261,6 +292,18 @@ impl NativePodComputer {
     /// build of 219906).
     fn deactivate(&mut self, world: &mut LevelWorld, state: PuterState, pushed: bool) {
         let key = match state {
+            // D372: the main menu pushed over before the tick is still drawn on it.
+            PuterState::MainMenu if pushed && self.pushed_now => {
+                self.covered = true;
+                if world
+                    .gooey
+                    .focus
+                    .is_some_and(|f| f.0 == MAIN_MENU_FRAME_KEY.0)
+                {
+                    world.gooey.focus = None;
+                }
+                return;
+            }
             PuterState::MainMenu => MAIN_MENU_FRAME_KEY,
             PuterState::StorySearch if pushed => {
                 self.search.suspend(world);
@@ -298,13 +341,34 @@ impl NativePodComputer {
         }
         g.high_bits = MAIN_MENU_FRAME_KEY.0;
         g.first_built.entry(MAIN_MENU_FRAME_KEY).or_insert(frame);
+        world
+            .gooey
+            .frames
+            .insert(MAIN_MENU_FRAME_KEY, main_menu_frame());
+        self.main_menu_matrix(world);
+        world.gooey.focus_moved = false;
+    }
+
+    /// `PodStateMainMenu.Draw`: the frame's matrix set.
+    fn main_menu_matrix(&self, world: &mut LevelWorld) {
+        let frame = world.pworld.frame;
         let matrix =
             crate::sliding_frame_matrix(world, MAIN_MENU_FRAME_MATRIX, MAIN_MENU_WORLD_REST);
         let g = &mut world.gooey;
-        g.frames.insert(MAIN_MENU_FRAME_KEY, main_menu_frame());
         g.item_matrices.insert(MAIN_MENU_FRAME_KEY, matrix);
         g.item_matrix_frames.insert(MAIN_MENU_FRAME_KEY, frame);
-        g.focus_moved = false;
+    }
+}
+
+/// D372: a menu frame and its builds dropped.
+fn drop_frame(world: &mut LevelWorld, key: (i32, i32)) {
+    let g = &mut world.gooey;
+    g.frames.remove(&key);
+    g.first_built.remove(&key);
+    g.item_matrices.remove(&key);
+    g.item_matrix_frames.remove(&key);
+    if g.focus.is_some_and(|f| f.0 == key.0) {
+        g.focus = None;
     }
 }
 
@@ -409,9 +473,10 @@ mod tests {
         host: &mut Bindings<LevelWorld>,
         input: GooeyInput,
     ) -> Option<PodComputerEvent> {
-        host.world.pworld.frame += 1;
         host.world.gooey.input = input;
-        puter.after_tick(host)
+        let before = puter.before_tick(host);
+        host.world.pworld.frame += 1;
+        puter.after_tick(host).or(before)
     }
 
     const NONE: GooeyInput = GooeyInput {
@@ -469,8 +534,10 @@ mod tests {
         );
         assert!(h.world.story_open());
         assert_eq!(h.world.pod.search.selected_planet, Some(1));
-        assert!(!h.world.gooey.frames.contains_key(&MAIN_MENU_FRAME_KEY));
+        // D372: the covered main menu is still drawn on the push's tick, then dropped.
+        assert!(h.world.gooey.frames.contains_key(&MAIN_MENU_FRAME_KEY));
         tick(&mut puter, &mut h, NONE);
+        assert!(!h.world.gooey.frames.contains_key(&MAIN_MENU_FRAME_KEY));
         assert_eq!(
             h.world.gooey.drawn_menu().unwrap().matrix,
             crate::STORY_FRAME_MATRIX

@@ -1212,6 +1212,8 @@ fn step(
             p.scripts.ticks + 1
         );
     }
+    // D372: the native pod computer's pushes, before the tick's world update.
+    let before = p.story.as_mut().and_then(|s| s.before_tick(&mut p.host));
     // Level1 part 3: the close button, before the tick (the game's net message is
     // handled before the switch pass that carries the bubble's output).
     let close_now = press_next(&mut p.close_at, p.scripts.ticks + 1);
@@ -1409,7 +1411,9 @@ fn step(
         use crate::story_fallback::FallbackEvent;
         use lbp_runtime::{PodComputerEvent, PuterState};
         let ticks = p.scripts.ticks;
-        match story.after_tick(&mut p.host) {
+        let after = story.after_tick(&mut p.host);
+        for event in [before, after] {
+            match event {
             Some(FallbackEvent::StoryAtStart) => {
                 let shell = p.shell.as_mut().map(|s| &mut s.host.world);
                 set_in_use(&mut p.host.world, shell, true);
@@ -1438,6 +1442,7 @@ fn step(
                 );
             }
             None => {}
+        }
         }
     }
     // D359: with no scripts the native pod computer takes the group choice after its

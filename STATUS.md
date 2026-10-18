@@ -6414,3 +6414,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 114 (`docs/level-scripts/part-114.md`): a Pod launch raises the game's Move and
   player-count warnings (0x402b24) and waits for them; Trash Valley raises none. The
   select sound is only a badge lookup.
+
+## D368 the cursor's flight (2026-10-18)
+- Part 115 (`docs/level-scripts/part-115.md`): the Pod cursor flies to the next
+  result over a few frames (0x4298e8), plays `pod/pod_cursor_move` and takes no new
+  move until it lands.
