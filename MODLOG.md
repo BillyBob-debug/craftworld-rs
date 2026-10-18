@@ -1,5 +1,13 @@
 # Development log
 
+## 2026-10-18 - D600 one exe for friends
+
+Viewer. Double-clicking the viewer with no arguments opens a launcher: pick your own LBP2 ISO (USA) and
+the 01.33 update RPCS3 installed, press Set up (files copied out of the ISO, index built in-process), then
+start the Pod, Popit, Rookie Test, the Moon or the explorer. Nothing decrypted is needed; Story waits for a
+script-free fallback. The attach check now accepts RPCS3's unsorted cumulative archive. See
+docs/d600-launcher.md.
+
 ## 2026-10-17 - D401 Popit pages picked by the game's script
 
 Viewer and UI host. Which Popit button opens which inventory page (and in which mode) now comes from running
