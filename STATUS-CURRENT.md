@@ -11,7 +11,12 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D365 the launched level starts at its entrance (2026-10-18)
+## Latest: D366 Sackboy plays in the launched level (2026-10-18)
+- Part 113 (`docs/level-scripts/part-113.md`): after the Pod's switch the viewer reads
+  the launched level's physics and spawns Sackboy at its entrance to play (Trash
+  Valley: checkpoint Thing 33, in both modes).
+
+## D365 the launched level starts at its entrance (2026-10-18)
 - Part 112 (`docs/level-scripts/part-112.md`): a level the Pod launches (or one loaded
   with `--level-entrance-camera`) starts at the game's default camera over Sackboy's
   spawn at its first checkpoint (Trash Valley: its entrance pipe).
@@ -25,11 +30,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Part 110 (`docs/level-scripts/part-110.md`): once a launch's request is done the pod
   hands the slot's root level to the game's level load (FUN_004022fc), in both modes;
   the viewer prints it and the trace records it, but does not switch levels yet.
-
-## D362 choosing a story level (2026-10-18)
-- Part 109 (`docs/level-scripts/part-109.md`): Cross on a story level
-  (`--level-scripts-cross-at`) asks for its launch as the engine does (0x4033b4), in both
-  modes; Back waits while a launch is pending, and a group's title follows the script.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

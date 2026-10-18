@@ -55,13 +55,30 @@ use std::path::Path;
 pub(crate) struct LevelDisplay(pub Mat4);
 
 #[derive(Resource)]
-struct Play {
+pub(crate) struct Play {
     scene: Option<PhysicsScene>,
     spawn: [f32; 3],
     script: Option<Vec<(Input, usize)>>,
     /// D281: the 0-based ticks on which a script step with `e` starts ([`engage_ticks`]).
     engage: Vec<usize>,
     tick: usize,
+    /// The follow camera has taken the game's default framing for this Sackboy
+    /// ([`show_sackboy`]).
+    framed: bool,
+}
+
+/// A level's checkpoints in reader order: (Thing index, world matrix).
+type Checkpoints = Vec<(usize, [f32; 16])>;
+
+/// What [`start_respawn`]'s worker thread reads: the scene, checkpoints and identity.
+type RespawnRead = Result<(PhysicsScene, Checkpoints, String), String>;
+
+/// D366: the launched level's physics, read on a worker thread after the Pod's switch
+/// ([`start_respawn`]); [`respawn`] swaps it in.
+#[derive(Resource)]
+struct Respawn {
+    guid: u32,
+    receiver: std::sync::Mutex<std::sync::mpsc::Receiver<RespawnRead>>,
 }
 
 /// D281: the Sackboy in the Pod, between this module and `level_play`. There only with
@@ -987,45 +1004,19 @@ pub fn install(app: &mut App) -> Result<(), String> {
             let control = LoadControl::default();
             let catalog = lbp_catalog::load(Path::new(&snapshot), &control)?;
             let source = AttachedSource::attach(Path::new(&game), &catalog, &control)?;
-            let rules = material_rules(&catalog);
-            let (key, identity) = level_scene::resolve_level(&catalog, guid, path.as_deref())?;
-            let bytes = level_scene::read_level_bytes(&source, &key, &control)?;
-            let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
-                .map_err(|e| e.to_string())?;
-            let rule = |d: &lbp_level::serial::Descriptor| {
-                d.guid
-                    .and_then(|g| rules.get(&g).copied())
-                    .unwrap_or_default()
-            };
-            let scene = match pod {
-                Some(_) => pod_scene(&report.things, &rule),
-                None => build_scene_with(&report.things, &rule),
-            };
-            let r = &scene.report;
-            let header = format!(
-                "Play Sackboy: {identity}; shapes {}: dynamic {}, static {}, not collidable {}, rejected {}; joints {}",
-                r.shapes,
-                r.dynamic,
-                r.static_,
-                r.not_collidable,
-                r.rejected.values().sum::<usize>(),
-                r.joints
-            );
+            let (scene, checkpoints, controller, identity) = read_physics(
+                (&catalog, &source, &control),
+                guid,
+                path.as_deref(),
+                pod.is_some(),
+            )?;
+            let header = scene_header(&identity, &scene);
             // D403: the Popit in the Pod too; Square is the pod computer's engage button
             // only where the pod's script asks for it (`PodSackboy::at_computer`).
-            let popit = Some(crate::popit_play::load_assets(&source, &catalog, &control, worn)?);
-            // D282: the pod computer's engage target takes its x from this Thing.
-            let controller = report.things.iter().enumerate().find_map(|(i, t)| {
-                let named = t.data.script_name.as_ref()?.name.as_slice() == b"pod_controller";
-                named.then(|| (i, t.data.pos.as_ref().map(|p| p.world[12])))
-            });
-            Ok((
-                scene,
-                level_scene::checkpoints(&report.things),
-                header,
-                popit,
-                controller,
-            ))
+            let popit = Some(crate::popit_play::load_assets(
+                &source, &catalog, &control, worn,
+            )?);
+            Ok((scene, checkpoints, header, popit, controller))
         })
         .map_err(|e| format!("play sackboy thread: {e}"))?
         .join()
@@ -1054,34 +1045,10 @@ pub fn install(app: &mut App) -> Result<(), String> {
             ));
             p
         }
-        (None, Some((_, m))) => {
-            let mut p = [
-                m[12] + SPAWN_OFFSET[0],
-                m[13] + SPAWN_OFFSET[1],
-                m[14] + SPAWN_OFFSET[2],
-            ];
-            // The Rookie Test offset drops him 208 below the checkpoint; where the floor
-            // under the checkpoint is higher than that (blank level: top 1655, his feet at
-            // 1520), he would start inside it (no lane changes, drawn sunk into the floor):
-            // stand him on it instead.
-            if let Some(top) = scene.floor_below([p[0], m[13]], p[2]) {
-                p[1] = p[1].max(top + FLOOR_REST);
-            }
-            p
-        }
+        (None, Some((_, m))) => checkpoint_spawn(&scene, m),
         (None, None) => return Err("--play-sackboy: no CHECKPOINT; give --play-sackboy-at".into()),
     };
-    let points: Vec<String> = checkpoints
-        .iter()
-        .map(|(t, m)| format!("Thing {t} ({:.0}, {:.0}, {:.0})", m[12], m[13], m[14]))
-        .collect();
-    println!(
-        "{header}; checkpoints [{}]; spawn ({:.0}, {:.0}, {:.0})",
-        points.join(", "),
-        spawn[0],
-        spawn[1],
-        spawn[2]
-    );
+    println!("{}", spawn_line(&header, &checkpoints, spawn));
     if let Some(line) = pod_line {
         println!("{line}");
     }
@@ -1119,8 +1086,12 @@ pub fn install(app: &mut App) -> Result<(), String> {
             script,
             engage,
             tick: 0,
+            framed: false,
         })
-        .add_systems(Update, (spawn_world, read_pad, show_sackboy).chain())
+        .add_systems(
+            Update,
+            (respawn, spawn_world, read_pad, show_sackboy).chain(),
+        )
         .add_systems(FixedFirst, script_input)
         .add_systems(FixedLast, (tick_anim, log_scripted).chain());
     if let Some(spec) = value(&all, "--qa-record") {
@@ -1184,6 +1155,176 @@ fn record(
             .spawn(Screenshot::primary_window())
             .observe(save_to_disk(path));
     }
+}
+
+/// Reads a level's physics scene (the Pod shell's with `pod`), its checkpoints, the pod
+/// computer's `pod_controller` Thing (index and x) and the level's identity.
+#[allow(clippy::type_complexity)]
+fn read_physics(
+    (catalog, source, control): (&lbp_catalog::Catalog, &AttachedSource, &LoadControl),
+    guid: Option<u32>,
+    path: Option<&str>,
+    pod: bool,
+) -> Result<
+    (
+        PhysicsScene,
+        Checkpoints,
+        Option<(usize, Option<f32>)>,
+        String,
+    ),
+    String,
+> {
+    let rules = material_rules(catalog);
+    let (key, identity) = level_scene::resolve_level(catalog, guid, path)?;
+    let bytes = level_scene::read_level_bytes(source, &key, control)?;
+    let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
+        .map_err(|e| e.to_string())?;
+    let rule = |d: &lbp_level::serial::Descriptor| {
+        d.guid
+            .and_then(|g| rules.get(&g).copied())
+            .unwrap_or_default()
+    };
+    let scene = if pod {
+        pod_scene(&report.things, &rule)
+    } else {
+        build_scene_with(&report.things, &rule)
+    };
+    // D282: the pod computer's engage target takes its x from this Thing.
+    let controller = report.things.iter().enumerate().find_map(|(i, t)| {
+        let named = t.data.script_name.as_ref()?.name.as_slice() == b"pod_controller";
+        named.then(|| (i, t.data.pos.as_ref().map(|p| p.world[12])))
+    });
+    Ok((
+        scene,
+        level_scene::checkpoints(&report.things),
+        controller,
+        identity,
+    ))
+}
+
+fn scene_header(identity: &str, scene: &PhysicsScene) -> String {
+    let r = &scene.report;
+    format!(
+        "Play Sackboy: {identity}; shapes {}: dynamic {}, static {}, not collidable {}, rejected {}; joints {}",
+        r.shapes,
+        r.dynamic,
+        r.static_,
+        r.not_collidable,
+        r.rejected.values().sum::<usize>(),
+        r.joints
+    )
+}
+
+fn spawn_line(header: &str, checkpoints: &Checkpoints, spawn: [f32; 3]) -> String {
+    let points: Vec<String> = checkpoints
+        .iter()
+        .map(|(t, m)| format!("Thing {t} ({:.0}, {:.0}, {:.0})", m[12], m[13], m[14]))
+        .collect();
+    format!(
+        "{header}; checkpoints [{}]; spawn ({:.0}, {:.0}, {:.0})",
+        points.join(", "),
+        spawn[0],
+        spawn[1],
+        spawn[2]
+    )
+}
+
+/// Sackboy's start at a checkpoint outside the Pod: the Rookie Test offset
+/// ([`SPAWN_OFFSET`]), on the floor where that would put him inside it.
+fn checkpoint_spawn(scene: &PhysicsScene, m: &[f32; 16]) -> [f32; 3] {
+    let mut p = [
+        m[12] + SPAWN_OFFSET[0],
+        m[13] + SPAWN_OFFSET[1],
+        m[14] + SPAWN_OFFSET[2],
+    ];
+    // The Rookie Test offset drops him 208 below the checkpoint; where the floor under the
+    // checkpoint is higher than that (blank level: top 1655, his feet at 1520), he would
+    // start inside it (no lane changes, drawn sunk into the floor): stand him on it
+    // instead.
+    if let Some(top) = scene.floor_below([p[0], m[13]], p[2]) {
+        p[1] = p[1].max(top + FLOOR_REST);
+    }
+    p
+}
+
+/// D366: after the Pod's level switch (`level_play::switch_level`), reads the launched
+/// level's physics on a worker thread; [`respawn`] then replaces the shell level's world
+/// and puts Sackboy at the level's entrance, as `--play-sackboy` does at startup.
+pub(crate) fn start_respawn(commands: &mut Commands, guid: u32) {
+    let all: Vec<String> = std::env::args().collect();
+    let (Some(snapshot), Some(game)) = (value(&all, "--snapshot"), value(&all, "--game-dir"))
+    else {
+        return;
+    };
+    let (send, receiver) = std::sync::mpsc::channel();
+    let started = std::thread::Builder::new()
+        .stack_size(level_scene::LEVEL_STACK_BYTES)
+        .spawn(move || {
+            let control = LoadControl::default();
+            let read = (|| -> RespawnRead {
+                let catalog = lbp_catalog::load(Path::new(&snapshot), &control)?;
+                let source = AttachedSource::attach(Path::new(&game), &catalog, &control)?;
+                let (scene, checkpoints, _, identity) =
+                    read_physics((&catalog, &source, &control), Some(guid), None, false)?;
+                Ok((scene, checkpoints, identity))
+            })();
+            // The receiver is gone only when the viewer is.
+            let _ = send.send(read);
+        });
+    match started {
+        Ok(_) => commands.insert_resource(Respawn {
+            guid,
+            receiver: std::sync::Mutex::new(receiver),
+        }),
+        Err(e) => println!("Play Sackboy: level {guid:08x} not read: {e} (D366)"),
+    }
+}
+
+/// D366: swaps the launched level's physics in once read: the old world (every body,
+/// collider and joint, and Sackboy) and the Pod's Sackboy state go, and [`spawn_world`]
+/// spawns the new world and Sackboy at the level's first checkpoint; the follow camera
+/// frames him again.
+#[allow(clippy::type_complexity)]
+fn respawn(
+    mut commands: Commands,
+    pending: Option<Res<Respawn>>,
+    mut play: ResMut<Play>,
+    old: Query<Entity, Or<(With<lbp_sim::ThingIndex>, With<SackboyBody>)>>,
+) {
+    use std::sync::mpsc::TryRecvError;
+    let Some(pending) = pending else {
+        return;
+    };
+    let read = match pending.receiver.lock().map(|r| r.try_recv()) {
+        Ok(Err(TryRecvError::Empty)) => return,
+        Ok(Ok(read)) => read,
+        _ => Err("the reading thread ended".into()),
+    };
+    let guid = pending.guid;
+    commands.remove_resource::<Respawn>();
+    let (scene, checkpoints, identity) = match read {
+        Ok(read) => read,
+        Err(e) => {
+            println!("Play Sackboy: level {guid:08x} not read: {e}; he stays in the Pod (D366)");
+            return;
+        }
+    };
+    let Some((_, m)) = checkpoints.first() else {
+        println!("Play Sackboy: {identity} has no CHECKPOINT; he stays in the Pod (D366)");
+        return;
+    };
+    let spawn = checkpoint_spawn(&scene, m);
+    for e in &old {
+        commands.entity(e).try_despawn();
+    }
+    commands.remove_resource::<PodSackboy>();
+    println!(
+        "{} (D366: after the level switch)",
+        spawn_line(&scene_header(&identity, &scene), &checkpoints, spawn)
+    );
+    play.scene = Some(scene);
+    play.spawn = spawn;
+    play.framed = false;
 }
 
 fn spawn_world(mut commands: Commands, mut play: ResMut<Play>) {
@@ -1289,9 +1430,13 @@ fn script_input(
 /// D281: where the last physics tick left the Sackboy, for the script tick about to run
 /// (`level_play::tick`).
 fn pod_report(
-    mut pod: ResMut<PodSackboy>,
+    pod: Option<ResMut<PodSackboy>>,
     sackboy: Query<(&SackboyBody, &Position, &lbp_sim::ZSlab)>,
 ) {
+    // D366: gone after the Pod's level switch.
+    let Some(mut pod) = pod else {
+        return;
+    };
     if let Ok((body, pos, slab)) = sackboy.single() {
         let [x, y] = to_level(pos.0);
         pod.at = Some(([x, y, slab.z], body.grounded));
@@ -1487,7 +1632,7 @@ pub(crate) fn show_sackboy(
     mut figure: Query<(&mut Transform, &mut Figure)>,
     mut orbit: ResMut<crate::Orbit>,
     mut cameras: Query<&mut Projection, With<Camera3d>>,
-    mut framed: Local<bool>,
+    mut play: ResMut<Play>,
     pod: Option<Res<PodSackboy>>,
 ) {
     let (Some(display), Ok((body, pos, slab))) = (display, sackboy.single()) else {
@@ -1575,8 +1720,8 @@ pub(crate) fn show_sackboy(
         return;
     }
     let [ex, ey, ez] = FOLLOW_EYE;
-    if !*framed {
-        *framed = true;
+    if !play.framed {
+        play.framed = true;
         FRAMINGS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // The game's default camera: straight on, at its distance and FOV (orbit and zoom
         // stay free afterwards).

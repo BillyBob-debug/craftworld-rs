@@ -1587,6 +1587,10 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
     v.level.switch_to(Some(guid), None);
     // D365: the view starts over the level's entrance, as the game's camera does.
     v.level.entrance = true;
+    // D366: and Sackboy plays in it, from its entrance.
+    if crate::sackboy_play::enabled() {
+        crate::sackboy_play::start_respawn(&mut commands, guid);
+    }
     v.requested = true;
     v.ready_frames = 0;
     commands.remove_resource::<crate::PodRigRes>();
