@@ -1987,6 +1987,8 @@ struct Prepared {
     gloss: Option<([f32; 3], f32)>,
     /// P3d: gloss colour map (linear) and its UV mode (1 = primary UV, 2 = UV1).
     spec_map: Option<(Image, u32)>,
+    /// D701: the gloss colour is the diffuse colour (port 2 evaluates port 0's graph).
+    gloss_diffuse: bool,
     /// P3a: AlphaTestLevel cut-out (0 = none), LBP-lighting materials only.
     alpha_test: f32,
     /// P3h: unlit glow colour and its optional map (sRGB image, UV mode 2 = primary, 3 = UV1).
@@ -2412,6 +2414,11 @@ fn prepare_buckets(
             }
             None => None,
         };
+        // D701: a gloss port evaluating the diffuse graph tints the gloss by the diffuse colour.
+        let gloss_diffuse = spec_map.is_none() && surface.is_some_and(|s| s.specular_diffuse);
+        if gloss_diffuse {
+            gloss.get_or_insert(([1.; 3], surface.map_or(1., |s| s.cosine_power)));
+        }
         // P3h: glow (output port 4) is a solid colour, or one baked map on the diffuse UVs or
         // on UV1 when that is free or holds the same coordinates (graph slot 4, so no graph).
         let glow_alpha = surface.map_or(Default::default(), |s| s.glow_alpha);
@@ -2555,6 +2562,7 @@ fn prepare_buckets(
             bump,
             gloss,
             spec_map,
+            gloss_diffuse,
             alpha_test,
             glow,
             glow_alpha,
@@ -2648,6 +2656,9 @@ fn upload(
     }
     if let Some((map, mode)) = p.spec_map {
         dual::enable_spec_map(&mut surface, images.add(map), mode);
+    }
+    if p.gloss_diffuse {
+        dual::enable_diffuse_gloss(&mut surface);
     }
     if let Some(route) = p.glass {
         dual::enable_glass(
@@ -5163,6 +5174,7 @@ mod tests {
             bump: None,
             gloss: None,
             spec_map: None,
+            gloss_diffuse: false,
             alpha_test: 0.,
             glow: None,
             glow_alpha: Default::default(),

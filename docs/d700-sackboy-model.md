@@ -19,12 +19,45 @@ FOUND = read from the 01.33 data or its compiled programs; INFERRED = our readin
   drawn as an overlay (`overlay_alpha`, so alpha blended with the D338 depth bias).
   `alpha_from_colour_sampler` in `linked.rs`; test `d700_alpha_from_the_colour_sampler`.
 
+## D701: the zip pull's gloss is its own diffuse
+- `zip_pull_steel` (`00000439`) wires port 0 and port 2 each from a multiply of the same two
+  samplers (brushed `684` on UV0 x AO `e93` on UV1). Its compiled program adds
+  `2 x light x pow(R.L, CosinePower) x P` with P that same product, and no constant on the
+  spec (the knit `000025e2` damps its spec by its colour box `ta4`). FOUND (gmat graph and
+  the program's listing via `local-analysis/shading/scripts/cgb.py blobs zip_pull_steel`).
+- Rule: a gloss port wired from a static multiply equal to the diffuse's (same inputs,
+  ports and swizzles) tints the gloss by the diffuse colour (`specular_diffuse`, viewer mode
+  `graph_info.y` 3). Test `d701_a_gloss_multiply_equal_to_the_diffuse_is_the_diffuse`.
+- Effect in the matched Pod view is small (CosinePower 22 keeps the highlight tight): the
+  pull stays about 0.7x the game's brightness (ours median 64/70/64, game 86/97/86) while
+  the knit matches. Not explained yet; ruled out: the pull's normals (they agree with the
+  belly's), the zip morphs (`zip04_morph` opens the teeth, so 0 is right), the light `.w`
+  weight on the gloss (no change when dropped), the textures' sRGB flags (all four alike).
+
 ## Probes
-- `material_graph_dump` now prints the texture slots' GUIDs (for `tex_dump`).
+- `material_graph_dump` now prints the texture slots' GUIDs (for `tex_dump`) and (D701)
+  the stored scalars (CosinePower, BumpLevel, AlphaTestLevel, alpha mode).
 - `morph_probe SNAPSHOT GAME-DIRS MESH ANIM`: morph names, vertices moved, frame-0
   weight. Sackboy has 29 morphs (brows, eyelids, mouth, zip); `asymmetry_morph` is 1.0
   in frame 0 of clip `0001a697`, the rest 0.
 
+- `eye_probe SNAPSHOT GAME-DIRS MESH ANIM EYE-MATERIAL` (D702): per primitive its material, costume region and bounds (bind and frame 0), each eye's bounds, the morphs that reach the eye vertices and the bones the eyes follow with their local, world and bind scale.
+
 ## Open
-- Eyes (`0000053c`: black, specular colour 1.81 on port 2): compare against a close
-  RPCS3 frame.
+- Eyes (`0000053c`, `eye.gmat`). The owner (2026-10-18): they look off all the time. In the
+  matched Pod frame the game's eyes are about 7-8 px wide and 8-9 px tall, ours about 10 x 10
+  at a 1.14x larger Sackboy, so ours are about 1.1-1.25x too wide and about right in height;
+  at 720p this is near the 1 px limit. MEASURED (eye_probe, mesh `0000043f`, clip `0001a697`):
+  the eyes follow only `bone_eye_left` / `bone_eye_right` (children of `bone_eye_pos_*`, under
+  `Bip01 Head`), whose local scale in the clip (0.596 / 0.600) equals their bind scale, so
+  we draw the authored size; no morph moves an eye vertex (the eyelid morphs move 13 lid
+  vertices each). A smaller eye in the game would come from runtime code on the eye bones.
+  The EBOOT pass on that is in `local-analysis/results/2026-10-18-ghidra-sackboy-eyes.md`.
+  A close game frame (Customize Character) is needed to verify any change.
+- Zip pull brightness (D701 above).
+- Program decoding: the local `cgb.py` now prints the dst scale (`_x2`, `_d2`, ...; SRC1 bits
+  28-30). Knit and pull end alike: `out = light^2 x P + 2 x spec x P'` (MUL_x2), then tint and a
+  per-channel sqrt (DIVSQ x, x), so the pull's 0.7x gap is not in the combine. Earlier note: `cgb.py` dropped the
+  instruction dst scale (bits 28-30 of word 3), so the N.V DP3 carries a hidden x2 (a true
+  reflection) and the N.y ADD is /2; the decoded spec combine never reads a light's `.w`,
+  while `gloss_term` multiplies by `w`. Re-check the shading doc before changing either.

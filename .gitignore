@@ -44,6 +44,7 @@
 !/tests/**/*.py
 !/tests/**/*.rs
 !/tests/**/*.md
+!/tests/parity/manifest.json
 !/schemas/
 !/schemas/*.schema.json
 # Hard exclusions override allowed extensions.

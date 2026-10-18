@@ -278,6 +278,57 @@ impl OverlayGrow {
     }
 }
 
+/// D352 FOUND (0x42b4c8-0x42b534, in the fill loop 0x42a92c): a card's own scale is a
+/// spring, at card+0x210 with its speed at card+0x21c: each update speed = 0.7 speed
+/// (TOC-0x799c) + 0.25 (target - scale) (TOC-0x7998), then scale += speed; the same
+/// constants as an overlay's ([`OverlayGrow`]). The target is the slot's scale times
+/// planet+0x114/+0x118 (0x42ae84), 0 once the card's slot is gone. FOUND (0x42bc50 to
+/// 0x6fc414): a new card is made at its target with speed 0, so opening the Story search
+/// shows the cards at full size at once; only closing animates. FOUND (0x42afa4): a card
+/// whose scale and target are 0 or below is erased with its slots. INFERRED: closing
+/// sends the target to 0 (the slot's scale, not planet+0x114, which only follows a
+/// settings object) and the card is drawn while its scale is above 0, so from 1 it shows
+/// at 0.75, 0.3875 and 0.0369, then is gone (the overshoot to -0.2178 is never drawn).
+/// Left out: the snap when `*(planets+0x20)+0xb0` is set (scale = target, speed 0) and
+/// the 0.05 kick a CPlanets method adds to the speed (0x4279a8).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CardScale {
+    pub scale: f32,
+    pub speed: f32,
+}
+
+impl CardScale {
+    /// A new card, at rest on `target`.
+    pub fn made(target: f32) -> Self {
+        Self {
+            scale: target,
+            speed: 0.,
+        }
+    }
+
+    /// One update towards `target`.
+    pub fn step(&mut self, target: f32) {
+        self.speed = 0.7 * self.speed + 0.25 * (target - self.scale);
+        self.scale += self.speed;
+    }
+
+    /// Whether the fill loop erases the card (0x42afa4).
+    pub fn erased(&self, target: f32) -> bool {
+        self.scale <= 0. && target <= 0.
+    }
+}
+
+/// D352: the Story card shrinking out after the search closed (`None` while open or once
+/// it is erased). Set in the planets' tick (`follow_story_world`), drawn by
+/// `grow_badge_overlays`.
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
+pub struct StoryCard(pub Option<CardScale>);
+
+/// D352: whether a scene item is the badge's card itself (the polaroid).
+pub fn is_card(item: &crate::thing_view::Item) -> bool {
+    item.alternate && item.mesh == Some(POLAROID_MESH)
+}
+
 /// D349: whether a scene item is one of a badge's overlays (they can spring in, D350).
 pub fn is_overlay(item: &crate::thing_view::Item) -> bool {
     item.alternate
@@ -530,6 +581,20 @@ pub fn wanted(item: &crate::thing_view::Item, globe: u32, open: bool) -> Option<
     })
 }
 
+/// D352: [`wanted`], except that the badge's card and overlays stay drawn while the card
+/// shrinks out after closing ([`CardScale`]).
+pub fn wanted_closing(
+    item: &crate::thing_view::Item,
+    globe: u32,
+    open: bool,
+    shrinking: bool,
+) -> Option<Visibility> {
+    if shrinking && item.thing == globe && (is_card(item) || is_overlay(item)) {
+        return Some(Visibility::Inherited);
+    }
+    wanted(item, globe, open)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -584,6 +649,25 @@ mod tests {
         assert_eq!(drawn, [true, true, true, false]);
         assert!(g.scale.0 < 0.);
         assert_eq!(g.spin.0, 0.3);
+    }
+
+    #[test]
+    fn d352_card_opens_full_and_shrinks_out() {
+        // Opening: a new card rests on its target.
+        let mut c = CardScale::made(1.);
+        c.step(1.);
+        assert_eq!(c, CardScale::made(1.));
+        // Closing: target 0; drawn while above 0, erased on the fourth update.
+        let mut drawn = Vec::new();
+        while !c.erased(0.) {
+            c.step(0.);
+            drawn.push(c.scale);
+        }
+        let want = [0.75, 0.3875, 0.036875, -0.217_781_25];
+        assert_eq!(drawn.len(), want.len());
+        for (a, b) in drawn.iter().zip(want) {
+            assert!((a - b).abs() < 1e-5, "{drawn:?}");
+        }
     }
 
     #[test]
@@ -655,6 +739,25 @@ mod tests {
         assert_eq!(wanted(&item(1, false), 1, false), shown);
         assert_eq!(wanted(&item(4, false), 1, false), shown);
         assert_eq!(wanted(&item(7, false), 1, true), None);
+    }
+
+    #[test]
+    fn d352_a_shrinking_card_stays_drawn_after_closing() {
+        let card = crate::thing_view::Item {
+            mesh: Some(POLAROID_MESH),
+            ..item(1, true)
+        };
+        let shown = Some(Visibility::Inherited);
+        assert_eq!(wanted_closing(&card, 1, false, true), shown);
+        assert_eq!(
+            wanted_closing(&card, 1, false, false),
+            Some(Visibility::Hidden)
+        );
+        // The pasted Earth goes at once; only the card shrinks out.
+        assert_eq!(
+            wanted_closing(&item(1, true), 1, false, true),
+            Some(Visibility::Hidden)
+        );
     }
 
     #[test]

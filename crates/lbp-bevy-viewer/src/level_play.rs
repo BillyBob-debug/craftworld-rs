@@ -108,9 +108,10 @@ struct Play {
     /// chosen on tick N (as `level_scripts --menu=N:choose`); none once that is done.
     choose_at: Option<u64>,
     /// Level1 part 3: the player's close button (C or Circle) on the open speech bubble,
-    /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N.
+    /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N. Part 4:
+    /// the option takes a comma list (`120,600`), one press per tick, in order.
     close: bool,
-    close_at: Option<u64>,
+    close_at: Vec<u64>,
     /// D411: the planets level's camera when its scripts are not there (no decrypted
     /// patch.edat): the Pod's shell layer with no script loaded draws with
     /// [`POD_REST_CAMERA`] instead of the camera the script would write.
@@ -196,6 +197,35 @@ fn tick_option(all: &[String], flag: &str) -> Result<Option<u64>, String> {
                 .map_err(|_| format!("{flag} takes a tick count"))
         })
         .transpose()
+}
+
+/// A QA option of comma-separated tick counts (level1 part 4), sorted.
+fn tick_list(all: &[String], flag: &str) -> Result<Vec<u64>, String> {
+    let mut ticks = value(all, flag)
+        .map(|v| {
+            v.split(',')
+                .map(|t| {
+                    t.trim()
+                        .parse::<u64>()
+                        .map_err(|_| format!("{flag} takes tick counts, comma-separated"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    ticks.sort_unstable();
+    Ok(ticks)
+}
+
+/// Whether the earliest press of a tick list falls on `next` or before: it is taken
+/// from the list, so one press is made per tick.
+fn press_next(at: &mut Vec<u64>, next: u64) -> bool {
+    if at.first().is_some_and(|n| next >= *n) {
+        at.remove(0);
+        true
+    } else {
+        false
+    }
 }
 
 /// `--level-scripts-in-use-at N` (QA, part 27): whether to set "pod computer in use"
@@ -417,7 +447,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let in_use_at = tick_option(&all, "--level-scripts-in-use-at")?;
     let press_at = tick_option(&all, "--level-scripts-press-at")?;
     let choose_at = tick_option(&all, "--level-scripts-choose-at")?;
-    let close_at = tick_option(&all, "--level-scripts-close-at")?;
+    let close_at = tick_list(&all, "--level-scripts-close-at")?;
     if press_at.is_some() && shell_guid.is_none() {
         println!(
             "--level-scripts-press-at is not used without the Pod's shell layer (--pod-camera N --pod-shell HEX): the engage press is read by the shell level's script"
@@ -633,6 +663,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     }))
     .insert_resource(Time::<Fixed>::from_hz(f64::from(TICK_HZ)))
     .init_resource::<crate::pod_menu::ScriptMenu>()
+    .init_resource::<crate::story_world::StoryCard>()
     .init_resource::<crate::pod_menu::PodCoronas>()
     .init_resource::<crate::pod_menu::CoronaPrims>()
     .add_systems(
@@ -941,7 +972,7 @@ fn step(
     }
     // Level1 part 3: the close button, before the tick (the game's net message is
     // handled before the switch pass that carries the bubble's output).
-    let close_now = press_now(&mut p.close_at, p.scripts.ticks + 1);
+    let close_now = press_next(&mut p.close_at, p.scripts.ticks + 1);
     if std::mem::take(&mut p.close) || close_now {
         let o = p
             .scripts
@@ -1472,6 +1503,8 @@ fn follow_level(
 /// 0x42a92c erases a card once its scale reaches 0, 0x4221d8 to 0x6fbaa0), so the next
 /// opening builds new cards, a first fill; hidden here means the card is gone, so the
 /// overlays vanish with it rather than shrink out one by one.
+/// D352 (part 99): the card itself shrinks out after closing (`story_world::CardScale`),
+/// the overlays with it, about the card's place.
 #[allow(clippy::type_complexity)]
 fn grow_badge_overlays(
     v: Res<crate::Viewer>,
@@ -1485,10 +1518,32 @@ fn grow_badge_overlays(
         std::collections::HashMap<Entity, (crate::story_world::OverlayGrow, Transform, Transform)>,
     >,
     mut filled: Local<bool>,
+    card: Res<crate::story_world::StoryCard>,
+    mut card_placed: Local<std::collections::HashMap<Entity, (Transform, Transform)>>,
 ) {
     use crate::story_world::{overlay_spins, OverlayGrow, BADGE_OVERLAYS, OVERLAY_SEED};
     let spins = overlay_spins(v.level.profile_overlays, OVERLAY_SEED);
     let was_filled = std::mem::take(&mut *filled);
+    // D352 (part 99): the card's own scale (1 while open, shrinking after closing), about
+    // the card's place; the overlays sit in the card's space, so they scale with it.
+    let card_scale = card.0.map_or(1., |c| c.scale);
+    let mut about = None;
+    for (e, tag, mut transform, _) in &mut entities {
+        if !crate::story_world::is_card(&tag.item) {
+            continue;
+        }
+        let (placed, written) = card_placed.entry(e).or_insert((*transform, *transform));
+        if *transform != *written {
+            *placed = *transform;
+        }
+        let at = placed.translation;
+        let now = scaled_about(*placed, at, card_scale);
+        if *transform != now {
+            *transform = now;
+        }
+        *written = now;
+        about = Some(at);
+    }
     for (e, tag, mut transform, visibility) in &mut entities {
         if !crate::story_world::is_overlay(&tag.item) {
             continue;
@@ -1517,11 +1572,15 @@ fn grow_badge_overlays(
             }
             *filled = true;
             spring.step(spins[n]);
-            placed.mul_transform(Transform {
+            let own = placed.mul_transform(Transform {
                 rotation: Quat::from_rotation_y(spring.spin.0 - spins[n]),
                 scale: Vec3::splat(spring.scale.0),
                 ..Default::default()
-            })
+            });
+            match about {
+                Some(at) => scaled_about(own, at, card_scale),
+                None => own,
+            }
         };
         if *transform != now {
             *transform = now;
@@ -1530,10 +1589,21 @@ fn grow_badge_overlays(
     }
 }
 
+/// D352: `t` scaled by `s` about the point `at` (in `t`'s parent space); `t` itself at 1.
+fn scaled_about(t: Transform, at: Vec3, s: f32) -> Transform {
+    if s == 1. {
+        return t;
+    }
+    Transform::from_translation(at * (1. - s))
+        .with_scale(Vec3::splat(s))
+        .mul_transform(t)
+}
+
 /// D331 (part 82): while the Story search is up the planet world pasted onto the Pod's
 /// Earth (`story_world`) is shown and the Pod's own Earth and Moon are hidden. Set each
 /// tick after [`follow_things`] while it is up, so a script's visibility change does not
 /// undo it; on closing the Pod's planets are shown again once.
+#[allow(clippy::too_many_arguments)]
 fn follow_story_world(
     play: NonSend<Play>,
     mut v: ResMut<crate::Viewer>,
@@ -1548,14 +1618,40 @@ fn follow_story_world(
         Without<crate::thing_view::LevelThing>,
     >,
     mut was: Local<Option<bool>>,
+    mut card: ResMut<crate::story_world::StoryCard>,
 ) {
     let (Some(things), Some(globe)) = (things, v.level.pod) else {
         return;
     };
     let open = crate::story_world::story_open(&play.host.world);
+    // D352 (part 99): the card opens at full size; on closing it shrinks out (one spring
+    // update per tick, target 0) and stays drawn until the fill loop would erase it.
+    let stepped = if open {
+        card.0 = None;
+        false
+    } else {
+        if *was == Some(true) {
+            card.0 = Some(crate::story_world::CardScale::made(1.));
+        }
+        match card.0.as_mut() {
+            Some(c) => {
+                c.step(0.);
+                if c.erased(0.) {
+                    card.0 = None;
+                    println!(
+                        "Story card at tick {}: shrunk out and erased",
+                        play.scripts.ticks
+                    );
+                }
+                true
+            }
+            None => false,
+        }
+    };
+    let shrinking = card.0.is_some();
     // Closed and never opened: the scripts' own visibility stands (the pasted items are
     // spawned hidden).
-    if !open && *was != Some(true) {
+    if !open && *was != Some(true) && !stepped {
         *was = Some(false);
         return;
     }
@@ -1566,7 +1662,9 @@ fn follow_story_world(
             let Ok((tag, mut visibility)) = entities.get_mut(e) else {
                 continue;
             };
-            if let Some(want) = crate::story_world::wanted(&tag.item, globe, open) {
+            if let Some(want) =
+                crate::story_world::wanted_closing(&tag.item, globe, open, shrinking)
+            {
                 if *visibility != want {
                     *visibility = want;
                     changed += 1;
@@ -2549,6 +2647,19 @@ mod tests {
     use bevy::camera::CameraProjection;
     use lbp_runtime::OVERRIDE_FOV_DEG;
 
+    #[test]
+    fn d352_card_scales_about_its_place() {
+        let at = Vec3::new(10., 0., 0.);
+        let overlay = Transform::from_xyz(14., 2., 0.);
+        let t = scaled_about(overlay, at, 0.5);
+        assert!(t.translation.abs_diff_eq(Vec3::new(12., 1., 0.), 1e-5));
+        assert_eq!(t.scale, Vec3::splat(0.5));
+        // The card's own place does not move.
+        let card = scaled_about(Transform::from_translation(at), at, 0.3875);
+        assert!(card.translation.abs_diff_eq(at, 1e-5));
+        assert_eq!(scaled_about(overlay, at, 1.), overlay);
+    }
+
     /// Two levels with display matrices of their own (`level_home`: a scale after a
     /// shift), the planets level's and the shell's.
     fn two_displays() -> (Mat4, Mat4) {
@@ -3358,6 +3469,37 @@ mod tests {
             })
             .collect();
         assert_eq!(words, [0, 0, 0x80, 0, 0]);
+    }
+
+    /// D503. `--level-scripts-close-at` takes a comma list of ticks (sorted); each press
+    /// is made once, on the first tick about to run that is its tick or a later one, and
+    /// two that fall due together go out on consecutive ticks.
+    #[test]
+    fn d503_the_close_option_is_a_list_of_ticks_pressed_in_order() {
+        let args = |list: &[&str]| -> Vec<String> { list.iter().map(|a| a.to_string()).collect() };
+        let flag = "--level-scripts-close-at";
+        assert_eq!(tick_list(&args(&["--level-scripts"]), flag), Ok(vec![]));
+        assert_eq!(tick_list(&args(&[flag, "120"]), flag), Ok(vec![120]));
+        assert_eq!(
+            tick_list(&args(&[flag, "600, 120"]), flag),
+            Ok(vec![120, 600])
+        );
+        for bad in ["120,", "soon", "1,-2"] {
+            let e = tick_list(&args(&[flag, bad]), flag).unwrap_err();
+            assert_eq!(
+                e,
+                "--level-scripts-close-at takes tick counts, comma-separated"
+            );
+        }
+        let mut at = vec![120, 600];
+        let pressed: Vec<u64> = (1..=700)
+            .filter(|&next| press_next(&mut at, next))
+            .collect();
+        assert_eq!(pressed, [120, 600]);
+        assert!(at.is_empty());
+        let mut at = vec![3, 3];
+        let pressed: Vec<u64> = (1..=6).filter(|&next| press_next(&mut at, next)).collect();
+        assert_eq!(pressed, [3, 4]);
     }
 
     /// D279. The path from the press to "in use" over a session of two worlds, with the

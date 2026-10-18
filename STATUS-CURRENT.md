@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D350
+# Current state (overwrite each milestone) — after D352
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,119 +11,18 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D351 a left overlay shrinks out; the cards go when Story closes (2026-10-17)
+## Latest: D352 the Story card opens at full size and shrinks out (2026-10-17)
+- Part 99 (`docs/level-scripts/part-99.md`): the card's own scale is the slot spring
+  (0.7, 0.25; FOUND 0x42b4c8); a new card is made at its target (FOUND 0x6fc414), so
+  opening shows it at once. On closing it shrinks 0.75, 0.3875, 0.0369 and is erased
+  (`CardScale`, INFERRED target 0), the overlays with it.
+
+## D351 a left overlay shrinks out; the cards go when Story closes (2026-10-17)
 - Part 98 (`docs/level-scripts/part-98.md`): a slot no longer wanted springs to scale 0 and
   is freed once its scale is 0 or below (FOUND 0x6fcc68, 0x6fec94), drawn until then
   (`OverlayGrow::leave`). A card is erased with all its slots once its scale is 0 (FOUND
   0x42b3e0); the rebuild runs on `SetDecorations` or a new planet resource, not on each
   opening, so a reopened search is a first fill by new cards (INFERRED).
-
-## D350 the overlays' turn axis and the badge's first fill (2026-10-17)
-- Part 97 (`docs/level-scripts/part-97.md`): the overlay turn is about the mesh's Y, the
-  card's depth axis (FOUND 0x6ff06c, as the viewer had it). The card's grow flag is set
-  after its first fill (FOUND 0x42b288), so a badge's overlays show settled when the Story
-  search opens and only later ones spring in (the rebuild on opening is INFERRED).
-
-## D349 the badge overlays' spin and spring-in (2026-10-17)
-- Part 96 (`docs/level-scripts/part-96.md`): each overlay's spin is one draw of the game's
-  shared generator (FOUND 0x6fcc0c, x 0x2e90edd + 0xe908fc1, times pi/8), and scale and spin
-  spring in from 0 (FOUND 0x6fec44: + 0.7 (cur - prev) + 0.25 (target - cur)). The
-  generator's state is INFERRED (seed 1); one update per game tick INFERRED.
-
-## D348 the goodies disc's pie (2026-10-17)
-- Part 95 (`docs/level-scripts/part-95.md`): a part-filled goodies disc is two segments in one
-  draw (FOUND 0x4f5abc / 0x4a3824): the collected share in the profile's colour, a 0.1 radian
-  gap, the rest in the shade (0, 0, 0, 0.3). The viewer's `MenuShape::Pie`; the shader's
-  zero axis and turn (straight up, clockwise) are INFERRED.
-## D401 Popit pages picked by the game's script (2026-10-17)
-- Popit part 2 (`docs/d401-popit-pages-from-script.md`): the viewer runs
-  `Poppet.DoMainMenuButtonResponse` per button in create and play mode and opens the inventory
-  page of the collection the script pushes (create 0:1, 1:2, 4:4, 5:3, 6:0, 10:8; play the
-  same without the Goodies Bag). Page contents stay MEASURED (`DoInventoryGrid` is native).
-
-## D400 the Popit card from the game's script (2026-10-17)
-- Popit part 1 (`docs/d400-popit-script-card.md`): the viewer runs `Poppet.DoMainMenu` on the
-  Gooey host with a single-player create session pinned and takes the card's rows, icons
-  (new `ATXb` animated-texture reader), tooltip keys, focus and pitch from it; same card as
-  the game's frame. Tables stay as the fallback.
-
-## D347 the info bubble's size and goodies row (2026-10-17)
-- Part 94 (`docs/level-scripts/part-94.md`): the goodies row is the game's play stat widget
-  (FOUND 0x496700 / 0x4f5400: a disc in the profile's second colour, the percent at S x 1.9,
-  the label at S x 0.9 below); the bubble's texts at the Gooey scale 1.42 (MEASURED), its
-  rows by a fitted line height, and the half-white line under the author. 345 x 148 pixels
-  against the game's 348 x 144.
-
-## D346 the Story badge's medals and bubble (2026-10-17)
-- Part 93 (`docs/level-scripts/part-93.md`): the badge's overlay slots 1..12 (FOUND: GUIDs,
-  offsets on the card, SearchResultSlot flags); `--profile-records` `overlays` lines (written
-  by `scripts/rpcs3_profile_records.py`) pick them, so The Cosmos's card shows the gold ace,
-  finish and collect medals. The info bubble's tail is pinned to the card's right rim.
-
-## D345 the Story badge's frame colour (2026-10-17)
-- Part 92 (`docs/level-scripts/part-92.md`): the badge's frame group (a solid grey; neither
-  of the card's gmats has a ThingColor box) is multiplied by the profile's first colour from
-  `--profile-records`, so the frame is gold as in the game. Left out: the light mat inside
-  the rim, the goodies icons, the bubble overlap.
-
-## D344 the Story badge's size (2026-10-17)
-- Part 91 (`docs/level-scripts/part-91.md`): the game's group badge angle is 0.27 (RPCS3
-  memory, planet results +0x210), not 0.18; at the Earth Thing's scale the card is 157 px
-  tall against the game's ~161 (was 194). FOUND for next: the frame tint is the profile's
-  first colour (0xffceb424 in the badge's instance).
-
-## D343 the Story view's badge card (2026-10-17)
-- Part 90 (`docs/level-scripts/part-90.md`): the default group's badge, `cosmos_polaroid.mol`
-  with The Cosmos's icon on its picture, drawn on Earth while Story is up at the game's
-  matrix (FOUND 0x6ffff4) in the Earth Thing's frame; its centre matches the owner's frame,
-  its size about 1.18x. Left out: the yellow frame tint, goodies icons, the bubble overlap.
-
-## D342 the profile's colour (2026-10-17)
-- Part 89 (`docs/level-scripts/part-89.md`): the Story view's Gooey takes the local profile's
-  colours each frame (FOUND 0x4381d8, `*(profile+0x514)` +0x4c..); `--profile-records` now
-  carries them (`colours` line) and the viewer's bubble is the owner's yellow. The green was a
-  new profile's default.
-- FOUND for next: the planet badge is a mesh (`cosmos_polaroid.mol` 0x6a1a etc., result+0x220)
-  with the slot icon in mesh 0's texture slot (0x6fe974).
-
-## D341 the profile's per-slot records (2026-10-17)
-- Part 88 (`docs/level-scripts/part-88.md`): the save is encrypted, so
-  `scripts/rpcs3_profile_records.py` reads the local profile's per-slot records from LBP2 in
-  RPCS3 (FOUND chain 0xE4F800 / 0xE50A04, records profile+0x280, owned list +0x78) and the
-  viewer's `--profile-records PATH` shows the goodies row from them.
-
-## D340 the info bubble's goodies row (2026-10-16)
-- Part 87 (`docs/level-scripts/part-87.md`): a story level or group's bubble adds "N%" and
-  "Goodies & prizes won" (key 0xd9b1b864) 15 frames after it is up, when its total is not
-  0; FOUND: the counts come from the profile's per-slot records (0x199c9c, 0x43982c).
-- Left out: reading the profile (row hidden, as for a fresh profile), the stat's icon and
-  divider line, linked-level recursion.
-
-## D339 the Story view's info bubble (2026-10-16)
-- Part 86 (`docs/level-scripts/part-86.md`): while Story is up a filled speech bubble in the
-  player's colour (style 13, FOUND 0x7006c0) shows the default result's name and author,
-  its tail at the badge's measured screen place.
-- Left out: text wrapping, the badge card.
-
-## D338 the Story globe's AO overlays blended (2026-10-16)
-- Part 85 (`docs/level-scripts/part-85.md`): a solid material with its alpha port wired
-  (the AO overlays `cloth_earth_land_ao` / `cloth_earth_sea_ao`) blends by that port, so
-  the Story globe's continents show copper.
-
-## D337 the Story globe's jelly on the glass route (2026-10-16)
-- Part 84 (`docs/level-scripts/part-84.md`): `proc_victoria_jelly_glassy` (0x1a6f5) takes
-  the glass route (opacity 1, rim in full); a static gloss colour above 1 no longer drops a
-  material's whole surface in lbp-preview.
-- FOUND: the globe's black continents are the AO overlays `cloth_earth_land_ao` /
-  `cloth_earth_sea_ao` (black on port 0, texture x 0.8 alpha on port 1), drawn opaque.
-
-## D336 the Story backdrop and its lighting (2026-10-16)
-- Part 83 (`docs/level-scripts/part-83.md`): while Story is up the viewer swaps the Pod's
-  backdrop for The Cosmos's own (0xdb2c4, FOUND) and lights the Pod world with that
-  backdrop plan's preset under The Cosmos's PWorld factors (0xda074, FOUND). With
-  `--lbp-lighting` the room fades to dark with coloured dots as in the game.
-- D331 (part 82): Story turns Earth to The Cosmos; Story never zooms (view 6).
-- D330 (part 81): the Story title's speech bubble.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
