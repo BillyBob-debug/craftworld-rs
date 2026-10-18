@@ -304,6 +304,17 @@ pub fn unpack_colour(c: u32) -> [f32; 4] {
     [ch(16), ch(8), ch(0), ch(24)]
 }
 
+/// D362: what a Cross on a story result did ([`LevelWorld::cross_on_level`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LevelCross {
+    /// Not a level slot (a group, or no result).
+    NotLevel,
+    /// Kind 0: the pod's pending or current level; nothing happens.
+    Current((i32, i32)),
+    /// Kind 4: the level's launch asked for (`TriggerOnLevelLaunch(slot, Play)`).
+    Launch((i32, i32)),
+}
+
 /// A read level as the VM's world.
 #[derive(Debug, Default)]
 pub struct LevelWorld {
@@ -2802,6 +2813,29 @@ impl LevelWorld {
         search.cur_result.or(search.default_result)
     }
 
+    /// D362 (part 109): Cross on a story level result of the Earth planet. FOUND (01.33):
+    /// the script's `OnPlanetSearchResultSelected` declines in story play, so the engine's
+    /// dispatcher (0x4037bc) classifies the result (0x452324): a level slot (type 0 or 1)
+    /// that is the pod's pending or current level is kind 0 and does nothing; any other is
+    /// kind 4, `TriggerOnLevelLaunch(slot, Play)` (0x4033b4 mode 0), which cancels an
+    /// older pending launch and keeps this one as the pod's pending SlotID, so
+    /// `IsLaunchingLevel` is true from then on. No pod state is pushed. Left out: the
+    /// level's load and start, the launch warnings (0x402b24) and the select sound.
+    pub fn cross_on_level(&mut self, result: usize) -> LevelCross {
+        let Some(slot) = self.story_slots.get(result).map(|s| s.id) else {
+            return LevelCross::NotLevel;
+        };
+        if !matches!(slot.0, 0 | 1) {
+            return LevelCross::NotLevel;
+        }
+        let pod = &mut self.pod;
+        if pod.launch.or(pod.current_level) == Some(slot) {
+            return LevelCross::Current(slot);
+        }
+        pod.launch = Some(slot);
+        LevelCross::Launch(slot)
+    }
+
     /// D361 (part 108): the stick or d-pad pushed in `dir` (x right, y up) on the Earth
     /// planet's search: the cursor flies to the result that direction, which is returned.
     /// FOUND (01.33, 0x42df50 from the planet update 0x42f43c; the pick 0x42d584, applied by
@@ -2893,6 +2927,43 @@ impl LevelWorld {
             .position(|s| s.group == Some(group) && s.id.0 != 4)
     }
 
+    /// `Slot.toString`: the tag's `_NAME` translation, else the tag, else the stored name,
+    /// else "Unnamed Level" (key 0xeca1a592).
+    fn slot_name(&self, slot: &SearchSlot) -> String {
+        match &slot.tag {
+            Some(tag) => {
+                let key = format!("{tag}_NAME");
+                (self.translations.iter())
+                    .find_map(|t| t.translate(&key))
+                    .unwrap_or(tag)
+                    .to_owned()
+            }
+            None if slot.name.is_empty() => {
+                self.lams(0xeca1_a592).unwrap_or("Unnamed Level").to_owned()
+            }
+            None => slot.name.clone(),
+        }
+    }
+
+    /// D362 (part 109): the group search's title text. FOUND (`SearchDetailsGroup.DoTitle`,
+    /// script a2fad144): for a group of type 4 or 9, only when
+    /// `Slot.GetNumCompletableLevelsInGroup(slot)` is not 0, the group's
+    /// `GetTranslatedLevelName(slot, true)` (text style 1), then a break and a bubble of
+    /// "<completed> of <total> Levels". The count is not bound offline (the scripts read
+    /// 0, as no completable count is known here), so the title is empty, as MEASURED for
+    /// the default Story group (D359). INFERRED: the translated name is the slot's
+    /// `Slot.toString` name. Left out: the count bubble.
+    pub fn group_title(&self, group: (i32, i32)) -> String {
+        let completable = self.pod.group_levels.get(&group).map_or(0, |c| c[1]);
+        if !matches!(group.0, 4 | 9) || completable == 0 {
+            return String::new();
+        }
+        (self.story_slots.iter())
+            .find(|s| s.id == group)
+            .map(|s| self.slot_name(s))
+            .unwrap_or_default()
+    }
+
     /// D339 (part 86): the info bubble the planets draw by the selected Story result, as a
     /// Gooey frame in the root frame's units. FOUND (01.33, 0x7006c0): a frame of style 13
     /// (`GCS_SPEECH_BUBBLE`, filled), borders 48, child spacing 32, corner radius 64,
@@ -2906,21 +2977,7 @@ impl LevelWorld {
     /// (the text is not wrapped) and the row's icon.
     pub fn story_info_bubble(&self) -> Option<GooeyFrame> {
         let slot = self.story_info_slot()?;
-        // `Slot.toString`: the tag's `_NAME` translation, else the tag, else the stored
-        // name, else "Unnamed Level" (key 0xeca1a592).
-        let name = match &slot.tag {
-            Some(tag) => {
-                let key = format!("{tag}_NAME");
-                (self.translations.iter())
-                    .find_map(|t| t.translate(&key))
-                    .unwrap_or(tag)
-                    .to_owned()
-            }
-            None if slot.name.is_empty() => {
-                self.lams(0xeca1_a592).unwrap_or("Unnamed Level").to_owned()
-            }
-            None => slot.name.clone(),
-        };
+        let name = self.slot_name(slot);
         let text = |text: String, style| GooeyItem::Text {
             text,
             style,
@@ -4213,9 +4270,11 @@ impl LevelScripts {
         let puter = host.world.pod.planet_cancel.take()?;
         // D360: Back out of a group search: the Story search under it is up again, its
         // cursor back on its own default result. INFERRED: each search keeps its own
-        // cursor; the Story state's resume does not ask for a new default.
+        // cursor; the Story state's resume does not ask for a new default. D362: not while
+        // a level launch is pending, when `OnPlanetCancel` returns without popping.
+        let pending = host.world.pod.launch.is_some();
         let search = &mut host.world.pod.search;
-        if search.group.take().is_some() {
+        if !pending && search.group.take().is_some() {
             search.cur_result = None;
         }
         let class = vm.class_of(puter)?;

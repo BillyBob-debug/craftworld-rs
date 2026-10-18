@@ -109,6 +109,17 @@ pub struct PodState {
     /// D359: the SlotID the last group choice passed (`SearchDetails.CreateGroup`), which
     /// the group's details answer from `SearchDetailsGroup.GetSlotID__`.
     pub group_slot: Option<lbp_script_vm::ObjectId>,
+    /// D362: the level a Cross on a story level asked to launch (the pod's pending
+    /// SlotID, pod+0x954, FOUND 0x4033b4); `PodComputer.IsLaunchingLevel__` is true
+    /// while it is set. Nothing loads the level yet: the load's end was not traced.
+    pub launch: Option<(i32, i32)>,
+    /// D362: the level the pod is in (the current SlotID the classifier compares with,
+    /// 0x3fce40); none in the pod itself (INFERRED).
+    pub current_level: Option<(i32, i32)>,
+    /// D362: a group's `[completed, completable]` level counts
+    /// (`Slot.GetNumCompletedLevelsInGroup`, `GetNumCompletableLevelsInGroup`); nothing
+    /// fills it offline, so every group reads 0 as the unbound natives do.
+    pub group_levels: BTreeMap<(i32, i32), [u32; 2]>,
 }
 
 /// D327 (part 78): the values the search state (`PodStateSearch`) hands the planets and

@@ -117,6 +117,8 @@ struct Play {
     /// right, up or down on tick N, moving the Earth planet's cursor (the engine's pick,
     /// after the tick), in tick order.
     move_at: Vec<(u64, [f32; 2])>,
+    /// D362: `--level-scripts-cross-at N`: Cross on the selected story level after tick N.
+    cross_at: Option<u64>,
     /// Level1 part 3: the player's close button (C or Circle) on the open speech bubble,
     /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N. Part 4:
     /// the option takes a comma list (`120,600`), one press per tick, in order.
@@ -502,6 +504,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let back_at = tick_list(&all, "--level-scripts-back-at")?;
     let group_at = tick_option(&all, "--level-scripts-group-at")?;
     let move_at = move_list(&all)?;
+    let cross_at = tick_option(&all, "--level-scripts-cross-at")?;
     let trace = value(&all, "--level-scripts-trace")
         .map(|path| crate::story_fallback::Trace::create(&path))
         .transpose()?;
@@ -738,6 +741,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         back_at,
         group_at,
         move_at,
+        cross_at,
         fallback_camera: (loaded == 0 && shell_present).then_some(POD_REST_CAMERA),
         trace,
         story: (loaded == 0 && shell_present).then(|| crate::story_fallback::Fallback {
@@ -1320,6 +1324,18 @@ fn step(
         println!(
             "Cursor moved after tick {} ({dir:?}): result {to:?} (D361)",
             p.scripts.ticks
+        );
+    }
+    // D362: Cross on a story level, after the tick as the engine's dispatcher (the same
+    // in both modes: the script declines and the engine asks for the launch).
+    if p.cross_at == Some(p.scripts.ticks) {
+        p.cross_at = None;
+        let result = p.host.world.selected_result();
+        let cross = result.map(|i| p.host.world.cross_on_level(i));
+        println!(
+            "Cross after tick {} (result {result:?}): {cross:?}, launching {} (D362)",
+            p.scripts.ticks,
+            p.host.world.pod.launch.is_some()
         );
     }
     if let Some(trace) = p.trace.as_mut() {

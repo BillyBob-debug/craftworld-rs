@@ -913,8 +913,10 @@ impl LevelWorld {
             | ("SearchDetails", "IsPaged__")
             | ("SearchDetails", "RequiresOnline__")
             | ("SearchDetails", "CheckOverlayNeedsUpdate__")
-            | ("PodComputer", "IsLaunchingLevel__")
             | ("PodComputerPlanets", "IsLoading__") => Value::Bool(false),
+            // D362 (part 109): true while a Cross on a story level's launch is pending
+            // (FOUND 0x615858 -> 0x3fce40, the pod's pending SlotID).
+            ("PodComputer", "IsLaunchingLevel__") => Value::Bool(self.pod.launch.is_some()),
             ("SearchDetails", "GetCurrentPage__")
             | ("SearchDetails", "GetCrossplaySearchMode__") => Value::Int(0),
             ("SearchDetails", "ShowErrorMessage__") => {

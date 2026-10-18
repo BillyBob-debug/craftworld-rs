@@ -1029,6 +1029,7 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
             | "--level-scripts-back-at"
             | "--level-scripts-group-at"
             | "--level-scripts-move-at"
+            | "--level-scripts-cross-at"
             | "--level-scripts-trace"
             | "--pod-card-pins"
             | "--play-sackboy-at"

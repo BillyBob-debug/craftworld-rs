@@ -6362,3 +6362,9 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 104 (`docs/level-scripts/part-104.md`): with no scripts, engaging the pod computer
   gives the main menu (the scripted frame exactly, tick 601), Story is chosen from it
   (tick 640) and Back pops each state; `--story` is no longer needed to reach Story.
+
+## D358 the Pod search state as a native port (2026-10-18)
+- Part 105 (`docs/level-scripts/part-105.md`): `PodStateSearch` replaces the Story
+  stand-in; with no scripts Back from Story (`--level-scripts-back-at`) returns to the main
+  menu with the scripted search state on every tick 640-780, and the scripted run's
+  main menu now draws after Back too (a draw tie went to the popped Story frame).

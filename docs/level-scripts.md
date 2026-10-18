@@ -112,6 +112,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 106: choosing a Story group, and Back to Story (2026-10-18, D359)](level-scripts/part-106.md)
 - [Part 107: a Story group zooms in on its planet (2026-10-18, D360)](level-scripts/part-107.md)
 - [Part 108: moving between results on the planet (2026-10-18, D361)](level-scripts/part-108.md)
+- [Part 109: choosing a story level (2026-10-18, D362)](level-scripts/part-109.md)
 
 ## Next
 
