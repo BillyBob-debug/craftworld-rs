@@ -1,37 +1,36 @@
-# Lane state: pod / Story (2026-10-18, seeded from handoff-pc-2026-10-18-pod-part45.md)
+# Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. STATUS-CURRENT.md
-2. `docs/level-scripts/part-99.md`
+1. `docs/level-scripts/part-100.md`
+2. `crates/lbp-runtime/src/native_script.rs` (the Popit lane's shared trait, PR 152)
 
 ## State
-- PR 137 (D352, the Story card opens at full size and shrinks out on closing), worktree
-  `E:\Projects\wt-d324`, branch `d352-story`; handed to the coordinator for merge once rust
-  and python are green.
-- The Story lane keeps D348-D399; next free decision number: D353.
+- PR for D353 (branch `d353-story`, worktree `E:\Projects\wt-d324`): the Story screen
+  without the game's scripts; handed to the coordinator for merge once rust and python
+  are green.
+- The lane also owns the Pod/Popit native scripts from here (Popit lane stopped,
+  2026-10-18). Decision numbers: D348-D399, next free D354.
 
 ## Facts
-- Owner rule (2026-10-18): the shipped app needs only the updated USA ISO plus the RPCS3
-  update folder, never a decrypted copy or keys. Cross-lane finding (Popit lane): all 426
-  game scripts live only in patch.edat, so with disc and update alone the Pod and Story
-  load no scripts. Story needs a built-in fallback; the launcher thread planned a built-in
-  Story screen as its part two, and the Popit lane owns the Pod/Popit fallback.
 - Toolchain from Git Bash: `source E:/Projects/d321-env.sh`,
   `CARGO_TARGET_DIR=E:/Projects/wt-d324/target-d320`; viewer tests
-  `cargo test -p lbp-bevy-viewer --bins`. Ghidra helper `local-analysis/d349/g.py`; dumps
-  for part 45 (full `.text` disassembly `full.txt`) in `local-analysis/d352/`.
-- Open: the card's snap flag `*(planets+0x20)+0xb0` and the 0.05 speed kick (0x4279a8),
-  card+0x214/+0x218 (0x89568c), whether the rest of the Story world stays up while the
-  cards shrink, the dispatcher above CPlanets slot 0x1c (0x43d900), the generator seed
-  (1 INFERRED), the pie's zero axis (shader 0x109ee), the Gooey scale 1.42 and the
-  bubble's line metrics (fitted).
+  `cargo test -p lbp-bevy-viewer --bins`.
+- Scripted run (from the canonical checkout): `--snapshot
+  local-analysis/d133-inventory-0133-edat.json --game-dir
+  "game-data/a1-disc;game-data/a1-update-0133;local-analysis/d133-edat-overlay"
+  --level-guid 00018fdb --pod-camera 1 --pod-shell 000027b9 --level-scripts --window-16-9
+  --preview-lighting --qa-hide-ui --story` (scripted: in use 600, choice 640). Add
+  `--level-scripts-none` for the shipped case, `--level-scripts-trace PATH` for a trace.
+- Traces and captures: `local-analysis/d353/` (trace-vm3.jsonl the scripted golden run,
+  trace-native.jsonl the stand-in; vm-900.png vs native-120.png, mean abs 0.36).
+- The decrypted overlay holds only scripts (.ff) and SPU code; every Story data file is on
+  the disc or update (slot list in DATA.FARC, strings in patch_0133.farc).
+- Measured stand-ins in `story_fallback.rs` (pod open, mesh 0x23959 on shell Thing 2,
+  planets Things 0-4, in-use camera) belong to pod.bin and the planets world script.
 
 ## Next
-1. Story's script fallback as native Rust (owner-approved, `docs/project-boost.md` item 1),
-   one script per task, the RScript VM kept as a dev oracle: list the scripts the Story
-   search runs (from `native_coverage`, starting with the one that opens it and sets
-   `story_open`, then the planets/badge fill), record a VM golden trace per script with
-   decrypted data (inputs, native calls, globals per tick; derived data, kept in ignored
-   local-analysis/), write each native entry behind the shared trait, test it against its
-   trace. Coordinate with the launcher thread's built-in Story screen.
-2. Do not edit STATUS-CURRENT.md's structure or .github/workflows (another thread owns them).
+1. Move `PodStateSearchStory` behind `NativeScript` (PR 152) and replace the measured
+   pod/planets stand-ins with native pod.bin (already in PR 152) and planets world scripts.
+2. Play the moves (pod change-over, world Thing move in, Earth's turn, frame slide) from
+   the trace instead of snapping to the end state.
+3. Leaving Story (back to the main menu); more searches.

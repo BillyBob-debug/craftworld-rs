@@ -116,6 +116,12 @@ struct Play {
     /// patch.edat): the Pod's shell layer with no script loaded draws with
     /// [`POD_REST_CAMERA`] instead of the camera the script would write.
     fallback_camera: Option<DisplayCamera>,
+    /// D353 `--level-scripts-trace PATH` (development): a JSON line per tick
+    /// ([`crate::story_fallback::Trace`]).
+    trace: Option<crate::story_fallback::Trace>,
+    /// D353 `--story` without the game's scripts: the Story screen run natively
+    /// ([`crate::story_fallback::Fallback`]).
+    story: Option<crate::story_fallback::Fallback>,
 }
 
 /// D411: the camera the Pod's planets script writes once it comes to rest (MEASURED from
@@ -444,10 +450,20 @@ pub fn install(app: &mut App) -> Result<(), String> {
         .map(|g| u32::from_str_radix(&g, 16).map_err(|_| "--pod-shell requires hex digits"))
         .transpose()?;
     let hold_at = tick_option(&all, "--level-scripts-hold-at")?;
+    // D353 `--story`: the Story screen. With the game's scripts it is the scripted path
+    // (the pod computer in use after tick 600, Story chosen on tick 640, as part 80);
+    // without them the native stand-in opens it after the first tick.
+    let story = all.iter().any(|a| a == "--story");
     let in_use_at = tick_option(&all, "--level-scripts-in-use-at")?;
     let press_at = tick_option(&all, "--level-scripts-press-at")?;
     let choose_at = tick_option(&all, "--level-scripts-choose-at")?;
     let close_at = tick_list(&all, "--level-scripts-close-at")?;
+    let trace = value(&all, "--level-scripts-trace")
+        .map(|path| crate::story_fallback::Trace::create(&path))
+        .transpose()?;
+    // D353 (development): play as a player without the decrypted patch.edat does, with
+    // no script loaded, also from a snapshot that has them.
+    let no_scripts = all.iter().any(|a| a == "--level-scripts-none");
     if press_at.is_some() && shell_guid.is_none() {
         println!(
             "--level-scripts-press-at is not used without the Pod's shell layer (--pod-camera N --pod-shell HEX): the engage press is read by the shell level's script"
@@ -491,7 +507,10 @@ pub fn install(app: &mut App) -> Result<(), String> {
             let control = LoadControl::default();
             let catalog = lbp_catalog::load(Path::new(&snapshot), &control)?;
             let source = AttachedSource::attach(Path::new(&game), &catalog, &control)?;
-            let (scripts, not_read) = lbp_ui_script::load::load(&source, &catalog, &control)?;
+            let (mut scripts, not_read) = lbp_ui_script::load::load(&source, &catalog, &control)?;
+            if no_scripts {
+                scripts.clear();
+            }
             let mut vm = Vm::default();
             // The shell level's scripts run on a VM of their own, loaded in the same
             // order (as the `level_scripts` example's second level).
@@ -644,7 +663,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         override_frames: 0,
         override_printed: (false, false, false),
         hold_at,
-        in_use_at,
+        in_use_at: in_use_at.or((story && loaded > 0).then_some(600)),
         press_at,
         script_frames: 0,
         script_state: ScriptCameraState::Out,
@@ -658,10 +677,12 @@ pub fn install(app: &mut App) -> Result<(), String> {
         dissolve_printed: false,
         dissolve_edge_printed: false,
         dof_printed: None,
-        choose_at,
+        choose_at: choose_at.or((story && loaded > 0).then_some(640)),
         close: false,
         close_at,
         fallback_camera: (loaded == 0 && shell_present).then_some(POD_REST_CAMERA),
+        trace,
+        story: (story && loaded == 0 && shell_present).then(Default::default),
     })
     .insert_resource(crate::CaptureHold(hold_at.is_some()))
     .insert_resource(menu_assets.unwrap_or_default())
@@ -1147,6 +1168,22 @@ fn step(
             .scripts
             .tick_level(&mut p.vm, &mut p.host, BUDGET_PER_CALL),
     };
+    if let Some(story) = p.story.as_mut() {
+        let shell = p.shell.as_mut().map(|s| &mut s.host.world);
+        if story.after_tick(&mut p.host.world, shell) {
+            let shell = p.shell.as_mut().map(|s| &mut s.host.world);
+            set_in_use(&mut p.host.world, shell, true);
+            p.fallback_camera = Some(crate::story_fallback::POD_IN_USE_CAMERA);
+            println!(
+                "Story at tick {}: opened by the native stand-in (no scripts loaded): the pod open, the planets where the scripts leave them, the search state's Story entry (D353)",
+                p.scripts.ticks
+            );
+        }
+    }
+    if let Some(trace) = p.trace.as_mut() {
+        let shell = p.shell.as_ref().map(|s| &s.host.world);
+        trace.tick(p.scripts.ticks, &p.host.world, shell);
+    }
     p.ticks_with_faults += usize::from(!r.faults.is_empty());
     note(p, &r);
     p.totals.absorb(r);

@@ -11,7 +11,14 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D352 the Story card opens at full size and shrinks out (2026-10-17)
+## Latest: D353 the Story screen without the game's scripts (2026-10-18)
+- Part 100 (`docs/level-scripts/part-100.md`): the first native stand-in for a game script,
+  the search state's Story entry (`lbp_runtime::PodStateSearchStory`), tested against a
+  golden trace of the scripted run (`--level-scripts-trace`). Viewer `--story` opens Story
+  with no scripts loaded; the friends exe's Story button is on. Mean abs 0.36 levels
+  against the scripted frame.
+
+## D352 the Story card opens at full size and shrinks out (2026-10-17)
 - Part 99 (`docs/level-scripts/part-99.md`): the card's own scale is the slot spring
   (0.7, 0.25; FOUND 0x42b4c8); a new card is made at its target (FOUND 0x6fc414), so
   opening shows it at once. On closing it shrinks 0.75, 0.3875, 0.0369 and is erased

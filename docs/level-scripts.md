@@ -103,6 +103,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 97: the overlays' turn axis and the badge's first fill (2026-10-17, D350)](level-scripts/part-97.md)
 - [Part 98: a left overlay shrinks out, and the cards go when Story closes (2026-10-17, D351)](level-scripts/part-98.md)
 - [Part 99: the Story card opens at full size and shrinks out on closing (2026-10-17, D352)](level-scripts/part-99.md)
+- [Part 100: the Story screen without the game's scripts (2026-10-18, D353)](level-scripts/part-100.md)
 
 ## Next
 
