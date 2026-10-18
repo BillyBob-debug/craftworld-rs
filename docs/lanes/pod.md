@@ -1,18 +1,18 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-106.md` (part 105 for Back, part 104 for the pod computer's
-   stack and main menu)
+1. `docs/level-scripts/part-107.md` (part 106 for choosing a group, part 105 for Back,
+   part 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 161 (D358) merged. PR for D359 (branch `pod-story-browse`,
-  worktree `E:\Projects\wt-d324`): choosing a Story group pushes the group search over
-  Story, and Back resumes Story; handed to the coordinator for merge once rust and python
+- PRs 153 (D353) through 162 (D359) merged. PR for D360 (branch `pod-story-results`,
+  worktree `E:\Projects\wt-d324`): a chosen group selects its default level and zooms
+  in (view 7, extra zoom 500); handed to the coordinator for merge once rust and python
   are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D360.
+  Decision numbers: D348-D399, next free D361.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -27,14 +27,18 @@
   --level-scripts-trace PATH --qa-capture PNG` (each capture needs a new name).
   Disc + update only: `--snapshot local-analysis/d79-inventory-0133.json --game-dir
   "game-data/a1-disc;game-data/a1-update-0133"`. A run takes several minutes.
-- D359 runs: `local-analysis/d359/` (trace-vm-groupback2.jsonl scripted,
-  trace-nat-groupback3.jsonl native). The native menus are drawn at rest while the scripted
+- D360 runs: `local-analysis/d360/` (trace-vm-3.jsonl scripted, trace-nat-3.jsonl
+  native; identical planets level 640-760). The native menus are drawn at rest while the scripted
   ones slide in (Story 640-659, the group 680-695, Story again from 721); not ported yet.
 - Group chain (FOUND): Cross runs `TriggerOnPlanetSearchResultSelected` 0x615664, then the
   script's `OnPlanetSearchResultSelected` via 0x4037bc; when false, jump table 0x4038ac
   (0x3fa448, 0x6589f8) calls `OnPlanetGroupSelected(SlotID,true,true)`. Left/Right between
   results is engine-only. `GetPlanetsViewType`: planet 1 in Story is 7 with
-  `GetWantZoom`, else 6 (offline false, so 6).
+  `GetWantZoom` (group types 4, 8, 9), else 6. Group extra zoom 500 for types 4 and 9.
+- Result kinds (vtable+0x50, 0xd83ea0 -> 0x452324): group types 3 and 4 are kind 1
+  (`OnPlanetGroupSelected`); 8 and 9 go to `OnTweak`; a story level (type 0) is kind 0 if
+  it is the pod's current slot, else kind 4 (UI event, 0x4033b4). `OnTweak` pushes
+  `PodStateTweakLevel`, whose Play calls `TriggerOnLevelLaunch(slot,1)`.
 - Back in the scripts: `PopState` calls `OnLoseFocus`/`OnDeactivate(false)` on the popped
   state and keeps it drawing in `OldStates` until `HasTransitionedOut`; the state below
   gets `OnGainFocus` only. `GooeyState::drawn_menu` breaks same-frame ties toward the
@@ -48,8 +52,9 @@
   data file is on the disc or update.
 
 ## Next
-1. Story browsing: Left/Right between results (engine-side cursor), choosing a level from
-   a group, the group's zoom view (7) and its title; then the other searches.
+1. Story browsing: Left/Right between results (engine-side cursor, comparator 0x4285d8),
+   Cross on a story level (kind 4; who pushes `PodStateTweakLevel` is unknown) and the
+   group's title; then the other searches.
 2. The default result before the search opens (scripts 23 from tick 600, native none),
    the menus' slide-in for the native ports, and pruning `OldStates` frames.
 3. The main menu's move in and the other entries' states as they unlock.

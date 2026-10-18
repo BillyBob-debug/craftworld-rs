@@ -144,7 +144,7 @@ fn opt<T: std::fmt::Display>(v: Option<T>) -> String {
 
 fn search_json(s: &lbp_runtime::PlanetsSearch) -> String {
     format!(
-        "{{\"selected_planet\":{},\"cursor_mode\":{},\"browse_mode\":{},\"allowed_browse_modes\":{},\"loader\":{},\"earth_has_control\":{},\"want_search_details_calls\":{},\"publish_cursor_badge_calls\":{},\"error_message_calls\":{},\"default_result\":{},\"cur_result\":{},\"set_search_results_calls\":{},\"info_bubble_since\":{}}}",
+        "{{\"selected_planet\":{},\"cursor_mode\":{},\"browse_mode\":{},\"allowed_browse_modes\":{},\"loader\":{},\"earth_has_control\":{},\"want_search_details_calls\":{},\"publish_cursor_badge_calls\":{},\"error_message_calls\":{},\"default_result\":{},\"cur_result\":{},\"set_search_results_calls\":{},\"info_bubble_since\":{},\"group\":{}}}",
         opt(s.selected_planet),
         opt(s.cursor_mode),
         opt(s.browse_mode),
@@ -158,6 +158,7 @@ fn search_json(s: &lbp_runtime::PlanetsSearch) -> String {
         opt(s.cur_result),
         s.set_search_results_calls,
         opt(s.info_bubble_since),
+        s.group.map_or("null".into(), |(t, n)| format!("[{t},{n}]")),
     )
 }
 

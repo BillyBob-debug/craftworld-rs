@@ -11,7 +11,12 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D359 choosing a Story group, and Back to Story (2026-10-18)
+## Latest: D360 a Story group zooms in on its planet (2026-10-18)
+- Part 107 (`docs/level-scripts/part-107.md`): with no scripts, a chosen Story group
+  selects its default level, wants the zoom view (7) and the 500 extra planet zoom, so the
+  planets zoom in as the scripted run does (planets level identical on every tick 680-760).
+
+## D359 choosing a Story group, and Back to Story (2026-10-18)
 - Part 106 (`docs/level-scripts/part-106.md`): with no scripts, choosing a Story group
   (`--level-scripts-group-at`) pushes the group's search state over Story and Back brings
   Story back on top, with the scripted search state on every tick 640-760.
@@ -26,11 +31,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Part 104 (`docs/level-scripts/part-104.md`): with no scripts, engaging the pod computer
   gives the main menu (the scripted frame exactly, tick 601), Story is chosen from it
   (tick 640) and Back pops each state; `--story` is no longer needed to reach Story.
-
-## D356 the Pod planets' world script as a native port (2026-10-18)
-- Part 103 (`docs/level-scripts/part-103.md`): `PlanetsWorld`/`PlanetsView` run natively;
-  with no scripts the Story camera dolly, the level's view blend, Earth and the Moon match
-  the scripted run exactly, and the plain Pod shows its planets. No measured stand-ins left.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

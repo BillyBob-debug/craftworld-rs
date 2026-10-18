@@ -128,11 +128,16 @@ impl PodStateSearch {
         self.opened = Some(frame);
         self.ticks = 0;
         self.browse_mode = self.details.default_browse_mode();
-        if let SearchDetails::Group(_) = self.details {
+        if let SearchDetails::Group(group) = self.details {
+            // D360: the group's results ask for the zoom and the planet picks the
+            // group's default level ([`LevelWorld::group_default_result`]).
+            let pick = world.group_default_result(group);
             let search = &mut world.pod.search;
             search.selected_planet = Some(self.details.planet());
             search.want_search_details_calls += 1;
             search.cursor_mode = Some(1);
+            search.group = Some(group);
+            search.cur_result = pick;
             return;
         }
         let default = world
@@ -182,6 +187,11 @@ impl PodStateSearch {
         }
         self.ticks = 0;
         let search = &mut world.pod.search;
+        // D360: a group search closed: the Story search's own cursor again.
+        if !keep && matches!(self.details, SearchDetails::Group(_)) && search.group.take().is_some()
+        {
+            search.cur_result = None;
+        }
         if keep {
             search.default_result = search.cur_result.or(search.default_result);
         }
@@ -514,6 +524,32 @@ mod tests {
         let menu = &w.gooey.frames[&GROUP_FRAME_KEY];
         assert_eq!(menu.sizing, Some([2400., 1250.]));
         assert_eq!(w.gooey.item_matrices[&GROUP_FRAME_KEY], GROUP_FRAME_MATRIX);
+    }
+
+    /// D360: the group search wants the zoom view (7) and the planets world's extra zoom
+    /// (500 for a type 4 group), selects its default level, and Back clears both.
+    #[test]
+    fn d360_group_zoom_and_default_level() {
+        use lbp_script_vm::natives::World;
+        let mut w = world();
+        let mut story = PodStateSearch::new(SearchDetails::StoryLevels);
+        story.open(&mut w);
+        w.pworld.frame += 1;
+        story.update(&mut w);
+        assert_eq!(w.extra_planet_zoom(), Ok(0.));
+        let mut group = PodStateSearch::new(SearchDetails::Group(STORY_DEFAULT_GROUP));
+        story.suspend(&mut w);
+        group.open(&mut w);
+        assert_eq!(w.pod.search.group, Some(STORY_DEFAULT_GROUP));
+        assert_eq!(
+            w.pod.search.cur_result,
+            w.group_default_result(STORY_DEFAULT_GROUP)
+        );
+        assert_eq!(w.selected_result(), w.pod.search.cur_result.or(Some(2)));
+        assert_eq!(w.extra_planet_zoom(), Ok(500.));
+        group.close(&mut w);
+        assert_eq!((w.pod.search.group, w.pod.search.cur_result), (None, None));
+        assert_eq!(w.extra_planet_zoom(), Ok(0.));
     }
 
     #[test]

@@ -1087,12 +1087,15 @@ impl PlanetsWorldScript {
             Self::make_views(host, this, kind)?;
         }
         // The pod computer state's extra zoom (`GetExtraPlanetZoom`, a script method of
-        // the state): none without the state's script.
-        let target_zoom = 0.;
+        // the state), asked of the host (D360: 500 in a type 4 or 9 group search; the
+        // natively run pod computer has no script object to ask).
+        let mut target_zoom = 0.;
         if b17 && !b4 {
             if let Ok(pc) = call(host, "PodComputer", "GetPodComputer__", &[]) {
                 let _ = call(host, "PodComputer", "GetState__", &[pc]);
             }
+            target_zoom = call(host, "PodComputer", "HostExtraPlanetZoom__", &[])
+                .map_or(0., |v| as_float(&v));
         }
         let desired = PlanetsView::get(host, this, "DesiredView");
         if snap {

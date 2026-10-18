@@ -138,6 +138,11 @@ pub struct PlanetsSearch {
     /// into [`LevelWorld::story_results`].
     pub default_result: Option<usize>,
     pub cur_result: Option<usize>,
+    /// D360: the group whose search is up (a Story group chosen), `None` for the Story
+    /// search itself. FOUND (01.33, 0x44dfc0): a group search's results ask for the zoom
+    /// (`GetWantZoom__`, view 7) and pick their own default result
+    /// ([`crate::LevelWorld::group_default_result`]).
+    pub group: Option<(i32, i32)>,
     /// D328: `Planet.SetSearchResults__Q13SearchResults` calls.
     pub set_search_results_calls: u64,
     /// D340: `PWorld.Frame` when the Story info bubble was first up (the page's frame

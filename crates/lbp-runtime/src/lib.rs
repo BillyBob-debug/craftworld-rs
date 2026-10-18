@@ -2360,6 +2360,14 @@ impl World for LevelWorld {
     fn pod_computer_in_use(&mut self) -> Result<bool, String> {
         Ok(self.pod_computer_in_use)
     }
+    /// D360: `PodStateSearch.GetExtraPlanetZoom` asks its details; a group search answers
+    /// 500 for a group of slot type 4 or 9 (`SearchDetailsGroup`, a2fad144), others 0.
+    fn extra_planet_zoom(&mut self) -> Result<f32, String> {
+        Ok(match self.pod.search.group {
+            Some((4 | 9, _)) => 500.,
+            _ => 0.,
+        })
+    }
     /// [`LevelWorld::in_pad_zone`], counted.
     fn in_pad_zone(&mut self, thing: u32) -> Result<bool, String> {
         self.state(thing)?;
@@ -2742,7 +2750,7 @@ impl LevelWorld {
         if !self.story_open() {
             return None;
         }
-        let slot = self.story_slots.get(self.pod.search.default_result?)?;
+        let slot = self.story_slots.get(self.selected_result()?)?;
         let [x, y, z, _] = slot.location;
         Some([x * EARTH_RADIUS, y * EARTH_RADIUS, z * EARTH_RADIUS, 0.])
     }
@@ -2782,7 +2790,32 @@ impl LevelWorld {
         if !self.story_open() {
             return None;
         }
-        self.story_slots.get(self.pod.search.default_result?)
+        self.story_slots.get(self.selected_result()?)
+    }
+
+    /// D360: the result the Story view is about: a group search's cursor result (its
+    /// default level, [`Self::group_default_result`]), else the search's default result.
+    pub fn selected_result(&self) -> Option<usize> {
+        let search = &self.pod.search;
+        match search.group {
+            Some(_) => search.cur_result.or(search.default_result),
+            None => search.default_result,
+        }
+    }
+
+    /// D360 (part 107): the result a group search selects when it opens with
+    /// `SetWantSearchDetails`'s select-default flag. FOUND (01.33): the group's results
+    /// are the planet's slot table in table order whose group is the chosen one
+    /// (0x413944); `PickDefaultResult` (0x4290b8, comparator 0x4285d8) takes the
+    /// selectable result first, then unlocked (lock state above 0), then the lowest state
+    /// (unplayed before played before complete), then the last result, then the one
+    /// nearest the cursor, then list order; a group (type 4) is not selectable in a group
+    /// search. INFERRED: no lock or play state is read, so every level ties and the first
+    /// in list order wins (the cursor tie-break is left out).
+    pub fn group_default_result(&self, group: (i32, i32)) -> Option<usize> {
+        self.story_slots
+            .iter()
+            .position(|s| s.group == Some(group) && s.id.0 != 4)
     }
 
     /// D339 (part 86): the info bubble the planets draw by the selected Story result, as a
@@ -4077,6 +4110,8 @@ impl LevelScripts {
         let slot = host.world.story_results.get(result)?.slot_id;
         let class = vm.class_of(puter)?;
         host.world.pod.group_slot = Some(slot);
+        // D360: the group's search is the one up from here (its zoom and default level).
+        host.world.pod.search.group = host.world.story_slots.get(result).map(|s| s.id);
         let mut b = budget;
         // FOUND (the listing): the receiver in register 0, the SlotID in 4, the two
         // flags in 8 and 9.
@@ -4101,6 +4136,13 @@ impl LevelScripts {
         budget: u64,
     ) -> Option<Result<Step, lbp_script_vm::Fault>> {
         let puter = host.world.pod.planet_cancel.take()?;
+        // D360: Back out of a group search: the Story search under it is up again, its
+        // cursor back on its own default result. INFERRED: each search keeps its own
+        // cursor; the Story state's resume does not ask for a new default.
+        let search = &mut host.world.pod.search;
+        if search.group.take().is_some() {
+            search.cur_result = None;
+        }
         let class = vm.class_of(puter)?;
         let mut b = budget;
         // The receiver in register 0, as for a thread's main.

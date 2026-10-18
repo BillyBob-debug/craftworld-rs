@@ -6352,3 +6352,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 101 (`docs/level-scripts/part-101.md`): the Story stand-in sets the pod computer in
   use and the D417 port of pod.bin opens the pod (0.05 a tick, open on tick 21, mesh
   swapped), as the scripts do; the measured pod-open values are gone.
+
+## D356 the Pod planets' world script as a native port (2026-10-18)
+- Part 103 (`docs/level-scripts/part-103.md`): `PlanetsWorld`/`PlanetsView` run natively;
+  with no scripts the Story camera dolly, the level's view blend, Earth and the Moon match
+  the scripted run exactly, and the plain Pod shows its planets. No measured stand-ins left.

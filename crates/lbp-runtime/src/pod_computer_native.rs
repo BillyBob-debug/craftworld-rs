@@ -41,6 +41,8 @@ pub const MAIN_MENU_STORY_BUTTON: i32 = 6;
 pub const MAIN_MENU_PLANETS_VIEW: i32 = 1;
 /// INFERRED (part 82): the search state's view under Earth for Story.
 pub const STORY_PLANETS_VIEW: i32 = 6;
+/// D360: a Story group's search (the zoomed Story view).
+pub const GROUP_PLANETS_VIEW: i32 = 7;
 pub const NO_STATE_PLANETS_VIEW: i32 = 0;
 
 /// The main menu frame's matrix, root frame units to the planets level's world. MEASURED:
@@ -78,10 +80,10 @@ impl PuterState {
     pub fn planets_view(self) -> i32 {
         match self {
             Self::MainMenu => MAIN_MENU_PLANETS_VIEW,
-            // D359: the group's view is the Story search's while the group's results do
-            // not ask for a zoom (`GetPlanetsViewType`: 7 with `GetWantZoom`, offline
-            // false as in the scripted run).
-            Self::StorySearch | Self::GroupSearch => STORY_PLANETS_VIEW,
+            Self::StorySearch => STORY_PLANETS_VIEW,
+            // D360: a group's results ask for the zoom (`GetPlanetsViewType`: 7 with
+            // `GetWantZoom`, FOUND 0x44dfc0).
+            Self::GroupSearch => GROUP_PLANETS_VIEW,
         }
     }
 }
