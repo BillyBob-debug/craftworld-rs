@@ -41,11 +41,23 @@ FOUND = read from the 01.33 data or its compiled programs; INFERRED = our readin
   weight. Sackboy has 29 morphs (brows, eyelids, mouth, zip); `asymmetry_morph` is 1.0
   in frame 0 of clip `0001a697`, the rest 0.
 
+- `eye_probe SNAPSHOT GAME-DIRS MESH ANIM EYE-MATERIAL` (D702): per primitive its material, costume region and bounds (bind and frame 0), each eye's bounds, the morphs that reach the eye vertices and the bones the eyes follow with their local, world and bind scale.
+
 ## Open
-- Eyes (`0000053c`: black, specular colour 1.81 on port 2): compare against a close
-  RPCS3 frame.
+- Eyes (`0000053c`, `eye.gmat`). The owner (2026-10-18): they look off all the time. In the
+  matched Pod frame the game's eyes are about 7-8 px wide and 8-9 px tall, ours about 10 x 10
+  at a 1.14x larger Sackboy, so ours are about 1.1-1.25x too wide and about right in height;
+  at 720p this is near the 1 px limit. MEASURED (eye_probe, mesh `0000043f`, clip `0001a697`):
+  the eyes follow only `bone_eye_left` / `bone_eye_right` (children of `bone_eye_pos_*`, under
+  `Bip01 Head`), whose local scale in the clip (0.596 / 0.600) equals their bind scale, so
+  we draw the authored size; no morph moves an eye vertex (the eyelid morphs move 13 lid
+  vertices each). A smaller eye in the game would come from runtime code on the eye bones.
+  The EBOOT pass on that is in `local-analysis/results/2026-10-18-ghidra-sackboy-eyes.md`.
+  A close game frame (Customize Character) is needed to verify any change.
 - Zip pull brightness (D701 above).
-- Program decoding (an unverified reading of the listings): `cgb.py` drops the
+- Program decoding: the local `cgb.py` now prints the dst scale (`_x2`, `_d2`, ...; SRC1 bits
+  28-30). Knit and pull end alike: `out = light^2 x P + 2 x spec x P'` (MUL_x2), then tint and a
+  per-channel sqrt (DIVSQ x, x), so the pull's 0.7x gap is not in the combine. Earlier note: `cgb.py` dropped the
   instruction dst scale (bits 28-30 of word 3), so the N.V DP3 carries a hidden x2 (a true
   reflection) and the N.y ADD is /2; the decoded spec combine never reads a light's `.w`,
   while `gloss_term` multiplies by `w`. Re-check the shading doc before changing either.
