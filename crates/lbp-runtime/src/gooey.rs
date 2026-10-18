@@ -262,6 +262,10 @@ pub struct GooeyState {
     pub builds: u64,
     /// The build number (`builds`) of each top-level frame's last build.
     pub last_build: BTreeMap<(i32, i32), u64>,
+    /// D370: the top-level frames built this tick.
+    pub built_this_tick: std::collections::BTreeSet<(i32, i32)>,
+    /// D370: the tick each menu frame was first left out of a tick's builds.
+    pub left_at: BTreeMap<(i32, i32), i32>,
     /// The node that has the focus (high bits, id), by `EnsureNodeOrDescendantHasFocus`.
     pub focus: Option<(i32, i32)>,
     pub high_bits: i32,
@@ -412,6 +416,7 @@ impl GooeyState {
             self.frames.insert(key, f);
             self.builds += 1;
             self.last_build.insert(key, self.builds);
+            self.built_this_tick.insert(key);
             if self.build_frames.len() < 256 {
                 self.build_frames.push(frame);
             }
@@ -444,6 +449,46 @@ impl GooeyState {
                     .filter(|((b, _), _)| *b == bits)
                     .find_map(|(_, f)| within(f, id))
             })
+    }
+
+    /// D370 (part 117): drop the menu frames that have transitioned out. A popped state
+    /// stays in the pod computer's `OldStates`, still drawn (its matrix set every tick),
+    /// until `HasTransitionedOut` finds its frame gone (FOUND, scripts); `UpdateUI` builds
+    /// only the active states. INFERRED: a menu frame left out of a tick's builds was
+    /// left at that tick and goes once its out time (`SetFrameTransitionTime`'s second
+    /// value, frames) has passed; its tree, matrix and build are dropped. Its first build
+    /// is kept, so a state pushed over and back keeps it (D359). Called once per tick.
+    pub fn prune_transitioned_out(&mut self, frame: i32) {
+        let built = std::mem::take(&mut self.built_this_tick);
+        if !built.is_empty() {
+            for k in self.item_matrices.keys() {
+                if built.contains(k) {
+                    self.left_at.remove(k);
+                } else {
+                    self.left_at.entry(*k).or_insert(frame);
+                }
+            }
+        }
+        let gone: Vec<_> = self
+            .left_at
+            .iter()
+            .filter(|(k, left)| {
+                let out = self
+                    .frames
+                    .get(*k)
+                    .and_then(|f| f.transition)
+                    .map_or(0., |t| t[1]);
+                (frame - **left) as f32 >= out
+            })
+            .map(|(k, _)| *k)
+            .collect();
+        for k in gone {
+            self.frames.remove(&k);
+            self.item_matrices.remove(&k);
+            self.item_matrix_frames.remove(&k);
+            self.last_build.remove(&k);
+            self.left_at.remove(&k);
+        }
     }
 
     /// The root frame of a menu that has been drawn: the top-level frame with an item
@@ -1890,6 +1935,35 @@ mod tests {
         assert!(picked(&g));
         g.item_matrix_frames.insert((2, 1), 702);
         assert!(!picked(&g));
+    }
+
+    #[test]
+    fn d370_a_frame_left_out_of_a_build_goes_after_its_out_time() {
+        let mut g = GooeyState::default();
+        let frame = GooeyFrame {
+            transition: Some([15., 15.]),
+            ..Default::default()
+        };
+        for key in [(1, 1), (2, 1)] {
+            g.frames.insert(key, frame.clone());
+            g.item_matrices.insert(key, [0.; 16]);
+            g.item_matrix_frames.insert(key, 700);
+            g.first_built.insert(key, 600);
+            g.last_build.insert(key, 1);
+        }
+        // No build at 699: nothing is left. At 700 only the main menu is built.
+        g.prune_transitioned_out(699);
+        assert!(g.left_at.is_empty());
+        g.built_this_tick.insert((1, 1));
+        g.prune_transitioned_out(700);
+        // Story's frame, left at 700, still fades out until 714.
+        g.prune_transitioned_out(714);
+        assert!(g.frames.contains_key(&(2, 1)));
+        g.prune_transitioned_out(715);
+        assert!(!g.frames.contains_key(&(2, 1)));
+        assert!(!g.item_matrices.contains_key(&(2, 1)));
+        assert!(g.frames.contains_key(&(1, 1)));
+        assert_eq!(g.first_built.get(&(2, 1)), Some(&600));
     }
 
     #[test]

@@ -6404,3 +6404,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 112 (`docs/level-scripts/part-112.md`): a level the Pod launches (or one loaded
   with `--level-entrance-camera`) starts at the game's default camera over Sackboy's
   spawn at its first checkpoint (Trash Valley: its entrance pipe).
+
+## D366 Sackboy plays in the launched level (2026-10-18)
+- Part 113 (`docs/level-scripts/part-113.md`): after the Pod's switch the viewer reads
+  the launched level's physics and spawns Sackboy at its entrance to play (Trash
+  Valley: checkpoint Thing 33, in both modes).
