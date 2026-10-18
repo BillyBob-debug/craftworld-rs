@@ -141,6 +141,9 @@ mod tests {
     struct OwnedDir(PathBuf);
     impl OwnedDir {
         fn new() -> Self {
+            // A fresh clone (CI) has no ignored local-analysis directory yet.
+            let workspace = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+            std::fs::create_dir_all(workspace.join("local-analysis")).unwrap();
             let path = private_root().unwrap().join(format!(
                 "test-diagnostic-export-{}-{}",
                 std::process::id(),
