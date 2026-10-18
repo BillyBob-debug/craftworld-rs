@@ -6399,3 +6399,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 111 (`docs/level-scripts/part-111.md`): after the pod's hand-off the viewer reads
   the chosen level on a worker thread and replaces the pod with it, in both modes
   (switch after tick 761 in the part 109 runs).
+
+## D365 the launched level starts at its entrance (2026-10-18)
+- Part 112 (`docs/level-scripts/part-112.md`): a level the Pod launches (or one loaded
+  with `--level-entrance-camera`) starts at the game's default camera over Sackboy's
+  spawn at its first checkpoint (Trash Valley: its entrance pipe).

@@ -1,20 +1,20 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-115.md` (114 for the launch warnings, 113 for Sackboy,
-   112 for the entrance camera, 111 for the switch, 110 for the hand-off,
+1. `docs/level-scripts/part-116.md` (115 for the cursor's flight, 114 for the
+   launch warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the
+   switch, 110 for the hand-off,
    109 for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for
    choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 170 (D367) merged. PR for D368 (branch `pod-cursor-flight`,
-  worktree `E:\Projects\wt-d324`): the cursor's flight (`pod.rs` `move_cursor_to`,
-  `cursor_flight_step`); handed to the coordinator for merge once rust and python
-  are green.
+- PRs 153 (D353) through 171 (D368) merged. PR for D369 (branch `pod-menu-slide`,
+  worktree `E:\Projects\wt-d324`): the menus slide in (`sliding_frame_matrix`);
+  handed to the coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D369.
+  Decision numbers: D348-D399, next free D370.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -29,6 +29,8 @@
   --level-scripts-trace PATH --qa-capture PNG` (each capture needs a new name).
   Disc + update only: `--snapshot local-analysis/d79-inventory-0133.json --game-dir
   "game-data/a1-disc;game-data/a1-update-0133"`. A run takes several minutes.
+- D369 runs: `local-analysis/d369/*-a1*` (`run369.ps1`): native menus follow the
+  scripted path (group exact, main menu and Story a tick later).
 - D368 runs: `local-analysis/d368/*-a1*`, `*-a2*` (`run368.ps1`): moves at 700, 720,
   740 land at 707, 726, 743; a move mid-flight is refused.
 - D367 runs: `local-analysis/d367/*-a1*` (`run367.ps1`, as D366's): no warnings for
@@ -50,8 +52,10 @@
 - D362 runs: `local-analysis/d362/` (run 2: group at 680, right 700 and 720, left 740,
   Cross 760, Back 775: both launch slot (0, 127795) and stay on the group; run 3 without
   Cross: both pop; notes in story-level-notes.md). D361 runs in `local-analysis/d361/`.
-  The native menus are drawn at rest while the scripted ones slide in (Story 640-659, the
-  group 680-695, Story again from 721); not ported yet.
+  The native menus slide in with the world Thing (D369); Story again from 721, where the
+  view moves, is still drawn at rest.
+- Other searches (D369): offline only Story is open; Community, Recent Activity, Store
+  and Me are locked (state 6), the rest need the network, My Levels sits under Me.
 - Group chain (FOUND): Cross runs `TriggerOnPlanetSearchResultSelected` 0x615664, then the
   script's `OnPlanetSearchResultSelected` via 0x4037bc; when false, jump table 0x4038ac
   (0x3fa448, 0x6589f8) calls `OnPlanetGroupSelected(SlotID,true,true)`. Left/Right between
@@ -78,11 +82,12 @@
   data file is on the disc or update.
 
 ## Next
-1. The other searches. Open: the cursor's height and drawing, the player-count
-   texts (0x16e3b0, 0x16de78) and the warning popup's drawing. Later: the game's
-   entrance animation and state 6/7 load.
-2. The default result before the search opens (scripts 23 from tick 600, native none),
-   the menus' slide-in for the native ports, and pruning `OldStates` frames.
-3. The main menu's move in and the other entries' states as they unlock.
+1. The default result before the search opens (scripts 23 from tick 600, native none)
+   and pruning `OldStates` frames.
+2. Story's slide back from a group (721-730, the view moves) and the native world
+   Thing's tick of lag. Open: the cursor's height and drawing, the player-count texts
+   (0x16e3b0, 0x16de78), the warning popup's drawing, the game's entrance animation
+   and state 6/7 load.
+3. The other entries' states as they unlock (the other searches need the network).
 4. The cutscene threads (`PodIntroductionThread`, `LevelUnlockingThread`) and
    `OnEnterPod__`'s voice-over; the interactive music.

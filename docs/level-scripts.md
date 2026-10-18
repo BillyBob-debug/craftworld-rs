@@ -119,6 +119,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 113: Sackboy plays in the launched level (2026-10-18, D366)](level-scripts/part-113.md)
 - [Part 114: the launch warnings (2026-10-18, D367)](level-scripts/part-114.md)
 - [Part 115: the cursor's flight (2026-10-18, D368)](level-scripts/part-115.md)
+- [Part 116: the menus slide in (2026-10-18, D369)](level-scripts/part-116.md)
 
 ## Next
 
