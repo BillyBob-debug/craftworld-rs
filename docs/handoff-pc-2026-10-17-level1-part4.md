@@ -21,6 +21,12 @@
   self-contained bin on PATH); CARGO_TARGET_DIR E:\Projects\wt-level1\target. A background
   cargo build may still hold the target lock; build in the foreground before running.
 
+- Standing rule (owner, 2026-10-18): the app must never need a decrypted copy of anything;
+  the only requirement is the fully updated USA LBP2 ISO plus the RPCS3-installed update
+  folder, and no keys go in the repo. The route run above uses
+  local-analysis/d133-edat-overlay (decrypted EDAT files): fine for research, but whatever
+  Rookie Test needs from encrypted files must get a built-in fallback before it ships.
+
 ## Next
 1. The route past x -385: get a game reference (RPCS3 F12 frames past line 2, background
    only) or try jumps and layer moves there.
