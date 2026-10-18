@@ -63,6 +63,21 @@ impl PodStateSearchStory {
         search.info_bubble_since = Some(frame);
     }
 
+    /// D357: the search state popped (back out of Story): what [`Self::open`] and
+    /// [`Self::update`] set is cleared, the counts are kept. INFERRED: the search state's
+    /// `OnDeactivate` was not traced; the Story search is no longer up.
+    pub fn close(&mut self, world: &mut LevelWorld) {
+        self.opened = None;
+        self.ticks = 0;
+        let search = &mut world.pod.search;
+        search.selected_planet = None;
+        search.cursor_mode = None;
+        search.browse_mode = None;
+        search.earth_has_control = None;
+        search.default_result = None;
+        search.info_bubble_since = None;
+    }
+
     /// One tick of the open Story search, after [`Self::open`]'s tick. MEASURED (tick
     /// 641 on): the cursor mode 4, browse mode 1, Earth has control, the cursor badge
     /// published once, and the Story frame built.

@@ -6335,3 +6335,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
   (0.7, 0.25; FOUND 0x42b4c8); a new card is made at its target (FOUND 0x6fc414), so
   opening shows it at once. On closing it shrinks 0.75, 0.3875, 0.0369 and is erased
   (`CardScale`, INFERRED target 0), the overlays with it.
+
+## D355 the Pod planets' scripts as native ports (2026-10-18)
+- Part 102 (`docs/level-scripts/part-102.md`): `Earth` and `OrbitingMoon` (PlanetThing)
+  run as native ports; with no scripts Earth turns to the Story group and rests exactly
+  where the scripted run leaves it. The world Thing and camera stay measured stand-ins.

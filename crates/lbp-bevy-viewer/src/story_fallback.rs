@@ -177,37 +177,33 @@ fn camera_json(world: &LevelWorld) -> String {
     }
 }
 
-/// The planets view the pod computer asks the planets world for while the Story search
-/// is up: 6 (INFERRED, part 82: the search state's `GetPlanetsViewType__` answers 6 or 7
-/// under Earth, and the game's settled Story frame matches view 6's Earth size).
-pub const STORY_PLANETS_VIEW: i32 = 6;
-
-/// `--story` without the game's scripts: the Story screen from the first tick, the pod
-/// opened by pod.bin's native port, the planets world's by its own (D356) and the search
-/// state's Story entry run natively
-/// ([`lbp_runtime::PodStateSearchStory`]).
+/// The Pod without the game's scripts (D357): the pod computer's menu states run natively
+/// ([`lbp_runtime::NativePodComputer`]), so engaging the pod computer gives the main menu
+/// and Story is chosen from it. `--story` pushes the Story search on the first tick.
 #[derive(Default)]
 pub struct Fallback {
-    pub search: lbp_runtime::PodStateSearchStory,
+    pub puter: lbp_runtime::NativePodComputer,
+    /// `--story`: the Story search is opened on the first tick.
+    pub story_at_start: bool,
+}
+
+/// What [`Fallback::after_tick`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FallbackEvent {
+    /// `--story`'s first tick: the caller sets the pod computer in use, and pod.bin's
+    /// native port (D417) opens the pod.
+    StoryAtStart,
+    Puter(lbp_runtime::PodComputerEvent),
 }
 
 impl Fallback {
-    /// After a tick: on the first, the planets world asked for the Story view (its
-    /// native port, D356, then blends there and moves the camera) and Story chosen; on
-    /// every later one the open search's update. True on the tick it opens; the caller
-    /// then sets the pod computer in use, and pod.bin's native port (D417) opens the pod.
-    pub fn after_tick(&mut self, host: &mut Bindings<LevelWorld>) -> bool {
-        if self.search.is_open() {
-            self.search.update(&mut host.world);
-            return false;
+    /// After a tick of the planets level: the pod computer's states (the planets world's
+    /// native port, D356, blends to each state's view and moves the camera).
+    pub fn after_tick(&mut self, host: &mut Bindings<LevelWorld>) -> Option<FallbackEvent> {
+        if std::mem::take(&mut self.story_at_start) {
+            self.puter.open_story(host);
+            return Some(FallbackEvent::StoryAtStart);
         }
-        if let Some(world) = host.world.world {
-            let args = [(4, lbp_script_vm::Value::Int(STORY_PLANETS_VIEW))];
-            let set_view = "SetViewFromRemotePodComputer__i";
-            let port = &lbp_runtime::PLANETS_WORLD_PORT;
-            lbp_runtime::start_native(port, host, world, set_view, &args);
-        }
-        self.search.open(&mut host.world);
-        true
+        self.puter.after_tick(host).map(FallbackEvent::Puter)
     }
 }

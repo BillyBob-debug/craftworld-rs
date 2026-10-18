@@ -37,6 +37,7 @@ mod native_bubble;
 mod native_planets_world;
 mod native_script;
 mod pod;
+mod pod_computer_native;
 mod sensors;
 mod story_native;
 mod switches;
@@ -52,6 +53,7 @@ pub use native_bubble::*;
 pub use native_planets_world::*;
 pub use native_script::*;
 pub use pod::*;
+pub use pod_computer_native::*;
 pub use story_native::*;
 pub use switches::*;
 

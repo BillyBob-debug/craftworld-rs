@@ -107,6 +107,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 101: the Story screen's pod opens through pod.bin's native port (2026-10-18, D354)](level-scripts/part-101.md)
 - [Part 102: the Pod planets' scripts as native ports (2026-10-18, D355)](level-scripts/part-102.md)
 - [Part 103: the Pod planets' world script as a native port (2026-10-18, D356)](level-scripts/part-103.md)
+- [Part 104: the pod computer's menu states as native ports (2026-10-18, D357)](level-scripts/part-104.md)
 
 ## Next
 
