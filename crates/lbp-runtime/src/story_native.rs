@@ -574,13 +574,57 @@ mod tests {
         w.pod.search.group = Some(g);
         w.pod.search.cur_result = Some(0);
         assert_eq!(w.move_result_cursor([1., 0.]), Some(1));
+        while w.cursor_flight_step().is_none() {}
         // No wrap, and neither a group nor a slot of no group counts in a group search.
         assert_eq!(w.move_result_cursor([1., 0.]), None);
         assert_eq!(w.selected_result(), Some(1));
         // Left: the nearer of the two that way.
         assert_eq!(w.move_result_cursor([-1., 0.]), Some(0));
+        while w.cursor_flight_step().is_none() {}
         assert_eq!(w.move_result_cursor([-1., 0.]), Some(2));
+        while w.cursor_flight_step().is_none() {}
         assert_eq!(w.move_result_cursor([0., 1.]), None);
+    }
+
+    #[test]
+    fn d368_cursor_flies_to_the_result_and_waits_to_land() {
+        let slot = |id, location| crate::pod::SearchSlot {
+            id,
+            location,
+            ..Default::default()
+        };
+        let mut w = LevelWorld {
+            story_slots: vec![
+                slot((0, 1), [0., 0., 1., 0.]),
+                slot((0, 2), [0.6, 0., 0.8, 0.]),
+            ],
+            ..Default::default()
+        };
+        w.pod.search.cur_result = Some(0);
+        assert_eq!(w.move_result_cursor([1., 0.]), Some(1));
+        assert_eq!(w.pod.search.cur_result, Some(1));
+        assert_eq!(w.sounds_played.get("pod/pod_cursor_move"), Some(&1));
+        // No next move until it lands.
+        assert_eq!(w.move_result_cursor([-1., 0.]), None);
+        let mut frames = 0;
+        let mut last = 0.;
+        while w.cursor_flight_step().is_none() {
+            frames += 1;
+            assert!(w.pod.search.cursor_step >= last && w.pod.search.cursor_step < 1.);
+            last = w.pod.search.cursor_step;
+        }
+        // d = acos(0.8) = 0.6435: (0.6435 / pi * 240 + 60) / 2500 = 0.0437 a frame.
+        assert_eq!(frames, 14);
+        assert_eq!(w.pod.search.cursor_step, 1.);
+        let dir = w.pod.search.cursor_dir.unwrap();
+        assert!((dir[0] - 0.6).abs() < 1e-6 && (dir[2] - 0.8).abs() < 1e-6);
+        assert_eq!(w.move_result_cursor([-1., 0.]), Some(0));
+        // A snap lands at once.
+        w.pod
+            .search
+            .move_cursor_to(1, Some([0.6, 0., 0.8, 0.]), None, true);
+        assert_eq!(w.pod.search.cursor_flight, None);
+        assert_eq!(w.pod.search.cursor_dir, Some([0.6, 0., 0.8]));
     }
 
     #[test]

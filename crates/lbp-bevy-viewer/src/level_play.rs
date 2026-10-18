@@ -1463,6 +1463,13 @@ fn step(
             p.scripts.ticks
         );
     }
+    // D368: the cursor's flight, last in the planet update.
+    if let Some(at) = p.host.world.cursor_flight_step() {
+        println!(
+            "Cursor landed after tick {}: result {at} (D368)",
+            p.scripts.ticks
+        );
+    }
     // D363: the pod's launch step (its update, before this tick's input): a pending
     // launch's request is done, so the slot goes to the game's level load.
     if let Some(start) = p.host.world.pod_launch_step() {

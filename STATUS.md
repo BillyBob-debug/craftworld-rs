@@ -6394,3 +6394,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 110 (`docs/level-scripts/part-110.md`): once a launch's request is done the pod
   hands the slot's root level to the game's level load (FUN_004022fc), in both modes;
   the viewer prints it and the trace records it, but does not switch levels yet.
+
+## D364 the viewer switches to the chosen level (2026-10-18)
+- Part 111 (`docs/level-scripts/part-111.md`): after the pod's hand-off the viewer reads
+  the chosen level on a worker thread and replaces the pod with it, in both modes
+  (switch after tick 761 in the part 109 runs).
