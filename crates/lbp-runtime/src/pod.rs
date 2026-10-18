@@ -172,6 +172,10 @@ pub struct PlanetsSearch {
     pub cursor_dir: Option<[f32; 3]>,
     pub cursor_flight: Option<CursorFlight>,
     pub cursor_step: f32,
+    /// D374: the planets' land-at-once byte (Planets+0xb0), from `SetWantSearchDetails`'
+    /// first flag: a flight lands on its first frame (FOUND 01.33, 0x4298e8). INFERRED:
+    /// set at the call; the game copies it over on its next planet change (0x43c9dc).
+    pub land_at_once: bool,
     /// D340: `PWorld.Frame` when the Story info bubble was first up (the page's frame
     /// count starts there; [`crate::LevelWorld::story_info_bubble`]), `None` while it is not.
     pub info_bubble_since: Option<i32>,
@@ -240,15 +244,15 @@ impl PlanetsSearch {
     /// under 0.001) the cursor lands: step 1, the target direction, no flight. Else
     /// `s` = smoothstep(progress / d), the step `s * s` and the direction the slerp from
     /// start to target by `s` (a normalized lerp above a dot of 0.999). Returns the result
-    /// landed on. Left out: the cursor's height and blend (+0x1a0, +0x1b0) and the planets'
-    /// flag that lands it at once (Planets+0xb0).
+    /// landed on. D374: it lands at once while [`Self::land_at_once`] is set. Left out:
+    /// the cursor's height and blend (+0x1a0, +0x1b0), which nothing reads (part 121).
     pub fn cursor_flight_step(&mut self) -> Option<usize> {
         let f = self.cursor_flight.as_mut()?;
         let cos = dot3(f.start, f.target).clamp(-1., 1.);
         let d = cos.acos();
         f.progress +=
             ((d / std::f32::consts::PI) * 240. + 60.) / (CURSOR_FLIGHT_PLANET_SIZE * 0.5 + 2500.);
-        if f.progress >= d || d < 0.001 {
+        if f.progress >= d || d < 0.001 || self.land_at_once {
             let target = f.target;
             self.cursor_flight = None;
             self.cursor_step = 1.;

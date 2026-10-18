@@ -664,6 +664,45 @@ mod tests {
         assert_eq!(w.pod.search.cursor_dir, Some([0.6, 0., 0.8]));
     }
 
+    /// D374: `HasCursorArrived` answers the flight's end, and `SetWantSearchDetails`' first
+    /// flag lands a flight on its first frame.
+    #[test]
+    fn d374_cursor_arrives_and_lands_at_once_on_the_first_flag() {
+        use lbp_script_vm::Value;
+        let mut w = LevelWorld::default();
+        let arrived =
+            |w: &mut LevelWorld| w.ui_call("PodComputer", "HasCursorArrived__", None, &[]);
+        let want = |w: &mut LevelWorld, first| {
+            let args = [
+                Value::Object(None),
+                Value::Bool(first),
+                Value::Bool(false),
+                Value::Bool(false),
+            ];
+            w.ui_call(
+                "PodComputerPlanets",
+                "SetWantSearchDetails__Q13SearchDetailsbbb",
+                None,
+                &args,
+            );
+        };
+        let fly = |w: &mut LevelWorld| {
+            let search = &mut w.pod.search;
+            search.cursor_dir = Some([0., 0., 1.]);
+            search.move_cursor_to(0, Some([0.6, 0., 0.8, 0.]), None, false);
+        };
+        assert_eq!(arrived(&mut w), Some(Value::Bool(true)));
+        want(&mut w, false);
+        fly(&mut w);
+        assert_eq!(arrived(&mut w), Some(Value::Bool(false)));
+        assert_eq!(w.cursor_flight_step(), None);
+        want(&mut w, true);
+        fly(&mut w);
+        assert_eq!(w.cursor_flight_step(), Some(0));
+        assert_eq!(arrived(&mut w), Some(Value::Bool(true)));
+        assert_eq!(w.pod.search.cursor_step, 1.);
+    }
+
     #[test]
     fn d362_cross_on_a_story_level_asks_for_its_launch() {
         use crate::LevelCross;

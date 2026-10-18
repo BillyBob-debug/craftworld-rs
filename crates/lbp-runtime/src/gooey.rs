@@ -932,6 +932,10 @@ impl LevelWorld {
             }
             ("PodComputerPlanets", "SetWantSearchDetails__Q13SearchDetailsbbb") => {
                 search.want_search_details_calls += 1;
+                // D374: FOUND (01.33): the first flag (Planets+0x5d9, 0x43c530 -> 0x43c484)
+                // becomes the planets' land-at-once byte (+0xb0, 0x43c9dc). The Story
+                // and group searches pass false (FOUND, listings).
+                search.land_at_once = matches!(args.get(1), Some(Value::Bool(true)));
                 // D360: FOUND (01.33): the last flag (Planets+0x5d8, 0x43c530) makes the
                 // planet pick its default result on its next update (0x42f43c ->
                 // 0x4290b8). The Story results keep the default their setup found
@@ -1086,6 +1090,9 @@ impl LevelWorld {
             // D368 FOUND (0x610a3c, 0x6109a8): Planet+0x140 != 0 and Planet+0x148.
             ("Planet", "IsCursorMoving__") => Value::Bool(search.cursor_flight.is_some()),
             ("Planet", "GetMoveCursorStep__") => Value::Float(search.cursor_step),
+            // D374 FOUND (0x615998): the focus planet's vtable +0x3c (0x420868),
+            // Planet+0x140 == 0, the Earth's cursor not in flight.
+            ("PodComputer", "HasCursorArrived__") => Value::Bool(search.cursor_flight.is_none()),
             ("Planet", "GetCurResult__") => handle_of(search.cur_result.or(search.default_result)),
             // D359: the search state's `OnDeactivateImpl` keeps it as the default result
             // when a group is pushed over it (a handle, used without a null check).
