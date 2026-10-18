@@ -23,7 +23,7 @@
 //! (d-pad press edges, levels 1-3, anticipation -> emote -> to_neutral, mood stands) and the
 //! three additive head-look layers.
 use crate::sackboy::{Sackboy, WALK_SPEED};
-use std::f32::consts::FRAC_PI_2;
+use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 pub use crate::sackboy::Mood;
 
@@ -109,11 +109,15 @@ pub enum ClipId {
     LookUpdown,
     LookLeftright,
     LookRoll,
+    /// D416, 0x4e0 / 0x4f4: the neutral arm-acting clips, one frame per arm angle (FOUND,
+    /// loader 0x204438; the mood variants 0x4e4.. / 0x4f8.. are not used here).
+    ActNeutralArmSmall,
+    ActNeutralArmBig,
 }
 
 impl ClipId {
     /// Stand first: the viewer's clip bank binds the rest to stand's rig.
-    pub const ALL: [ClipId; 56] = [
+    pub const ALL: [ClipId; 58] = [
         ClipId::Stand,
         ClipId::WalkSlow,
         ClipId::WalkMedium,
@@ -170,6 +174,8 @@ impl ClipId {
         ClipId::LookUpdown,
         ClipId::LookLeftright,
         ClipId::LookRoll,
+        ClipId::ActNeutralArmSmall,
+        ClipId::ActNeutralArmBig,
     ];
 
     /// Index into [`ClipId::ALL`] (for clip banks).
@@ -236,6 +242,8 @@ impl ClipId {
             ClipId::LookUpdown => 0x124c,
             ClipId::LookLeftright => 0x124b,
             ClipId::LookRoll => 0x124d,
+            ClipId::ActNeutralArmSmall => 0x3ef0,
+            ClipId::ActNeutralArmBig => 0x3eef,
         }
     }
 
@@ -253,7 +261,7 @@ impl ClipId {
             ClipId::IdleYawn => 76,
             ClipId::IdleShiftFeet => 26,
             ClipId::IdleFidget => 81,
-            ClipId::StandIIdleBored => 33,
+            ClipId::StandIIdleBored | ClipId::ActNeutralArmSmall | ClipId::ActNeutralArmBig => 33,
             ClipId::IdleBored => 25,
             ClipId::IdleBoredIStand => 28,
             ClipId::StandIIdleSit => 22,
@@ -350,6 +358,8 @@ impl ClipId {
             ClipId::LookUpdown => "look_updown",
             ClipId::LookLeftright => "look_leftright",
             ClipId::LookRoll => "look_roll",
+            ClipId::ActNeutralArmSmall => "act_neutral_arm_small",
+            ClipId::ActNeutralArmBig => "act_neutral_arm_big",
         }
     }
 }
@@ -492,6 +502,39 @@ pub fn look_frames(clip: ClipId, v: f32) -> (f32, f32) {
     ((0.5 * v.clamp(-1., 1.) + 0.5) * n, 0.5 * n)
 }
 
+/// D416: each smoothed stick vector eases this far toward the raw stick per tick (FOUND,
+/// 0x1fb0e4, 0.3 at 0xd994cc).
+pub const ARM_STICK_EASE: f32 = 0.3;
+/// D416: an arm only turns toward the stick when |x| + |y| is above this (FOUND, 0x20936c,
+/// 0.2 at 0xd994f0).
+pub const ARM_DEAD_ZONE: f32 = 0.2;
+
+/// D416, one arm's angle step (FOUND, 0x20936c): `stick` is the vector the arm is given
+/// (x, y). With m = |x| + |y| over [`ARM_DEAD_ZONE`] the target is atan2(-y, -x) + pi, i.e.
+/// atan2(y, x) in (0, 2pi]; else the target is the current angle. The target is moved by a
+/// whole turn into [cur - pi, cur + pi) (the short way round) and the angle eases toward it
+/// by w = clamp(m, 0, 1); the result is not re-wrapped. Returns (new angle, w).
+pub fn arm_angle_step(cur: f32, stick: [f32; 2]) -> (f32, f32) {
+    let [x, y] = stick;
+    let m = x.abs() + y.abs();
+    let w = m.clamp(0., 1.);
+    if m <= ARM_DEAD_ZONE || !m.is_finite() {
+        return (cur, w);
+    }
+    let target = (-y).atan2(-x) + PI;
+    let near = target - TAU * ((target - (cur - PI)) / TAU).floor();
+    (cur + w * (near - cur), w)
+}
+
+/// D416: the frame of the act arm clips for an arm angle: angle / 2pi times (frames - 1)
+/// (FOUND, 0x20936c; 32 for the 33-frame clips). The game passes the unwrapped phase on;
+/// here it is taken modulo one turn so the clamped sampler sees the same pose (INFERRED:
+/// that the clips loop, frame 32 = frame 0).
+pub fn arm_frame(angle: f32) -> f32 {
+    let n = f32::from(ClipId::ActNeutralArmSmall.frames() - 1);
+    (angle / TAU).rem_euclid(1.) * n
+}
+
 /// How a layer combines with the pose built so far.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Blend {
@@ -504,6 +547,15 @@ pub enum Blend {
     /// every bone below it except `Bip01 Head` and the bones below the head (`0x1eaccc`, mask
     /// at skeleton+0x3a0 built in `0x1e79d8`, FOUND).
     UpperBody,
+    /// D416 (FOUND, 0x20936c): pose += weight * (lerp(clip at `frame`, `big` at `frame`,
+    /// `mix`) - `base` at `base_frame`), with `mirror` mirroring both the mixed pose and
+    /// the reference (`0x1ebb48` then `0x1eafc0`). The arm-acting pose over the base clip.
+    MixAdditive {
+        big: ClipId,
+        mix: f32,
+        base: ClipId,
+        base_frame: f32,
+    },
 }
 
 /// Weight of the stand clip over the bind pose: full (D246). D242-D244 lowered it to 0.25
@@ -812,6 +864,12 @@ pub struct SackboyAnim {
     /// D415: the target look 0x874 / 0x878 (up-down, left-right) and its weight 0x880.
     target_look: [f32; 2],
     target_weight: f32,
+    /// D416: the raw (left, right) sticks while the Popit cursor is shown
+    /// ([`SackboyAnim::set_arm_sticks`]); `None` poses no arms.
+    arm_sticks: Option<[[f32; 2]; 2]>,
+    /// D416: the smoothed sticks anim+0xac0 / anim+0xad0 and the arm angles anim+0xa40.
+    arm_smooth: [[f32; 2]; 2],
+    arm_angles: [f32; 2],
 }
 
 impl Default for SackboyAnim {
@@ -859,7 +917,22 @@ impl SackboyAnim {
             look_target: None,
             target_look: [0.; 2],
             target_weight: 0.,
+            arm_sticks: None,
+            arm_smooth: [[0.; 2]; 2],
+            arm_angles: [0.; 2],
         }
+    }
+
+    /// D416: the raw (left, right) stick vectors (x right, y up; INFERRED to match the
+    /// game's) while the Popit cursor is shown, `None` otherwise. From the next tick on both
+    /// arms take the act arm pose for the smoothed sticks.
+    pub fn set_arm_sticks(&mut self, sticks: Option<[[f32; 2]; 2]>) {
+        self.arm_sticks = sticks;
+    }
+
+    /// D416: the arm angles anim+0xa40 (arm 0, arm 1), radians, unwrapped.
+    pub fn arm_angles(&self) -> [f32; 2] {
+        self.arm_angles
     }
 
     /// D415: what his head turns toward from the next tick on: the direction (x right, y
@@ -1372,6 +1445,43 @@ impl SackboyAnim {
         };
         self.yaw += FACING_EASE * (target - self.yaw);
 
+        // D416 arms (FOUND, 0x2097e0 cursor branch 0x209ce0 -> 0x20936c), before the head
+        // look as in the dispatcher. The sticks ease 0.3 a tick toward the raw ones (0x1fb0e4;
+        // toward 0 without a cursor here: the no-cursor drift of 0x2097e0 is not modelled).
+        // While the cursor is shown: arm 0 takes the left vector with x negated, arm 1 the
+        // right one mirrored (one authored arm clip for both), each at weight 1 onto frame 0
+        // of the base clip (0x2022b8, as for the upper-body layer). The 0x208dec merge lands
+        // that at about u = 1 - air ease (full when standing; the airborne split is INFERRED).
+        let raw = self.arm_sticks.unwrap_or_default();
+        for (v, r) in self.arm_smooth.iter_mut().zip(raw) {
+            for (c, rc) in v.iter_mut().zip(r) {
+                *c += ARM_STICK_EASE * (rc - *c);
+            }
+        }
+        if self.arm_sticks.is_some() {
+            let base = self
+                .mood_stand
+                .map_or(ClipId::Stand, |m| MOOD_STANDS[m.index()]);
+            let [[lx, ly], right] = self.arm_smooth;
+            // Arm 1 first, as 0x2097e0 calls them.
+            for (arm, stick) in [(1, right), (0, [-lx, ly])] {
+                let (angle, mix) = arm_angle_step(self.arm_angles[arm], stick);
+                self.arm_angles[arm] = angle;
+                layers.push(Layer {
+                    clip: ClipId::ActNeutralArmSmall,
+                    frame: arm_frame(angle),
+                    weight: 1. - s0,
+                    mirror: arm == 1,
+                    blend: Blend::MixAdditive {
+                        big: ClipId::ActNeutralArmBig,
+                        mix,
+                        base,
+                        base_frame: 0.,
+                    },
+                });
+            }
+        }
+
         // Head look (FOUND, 0x200aa0 -> 0x2007e4), last in the stack: the dispatcher runs
         // it after the arms. Attention w eases 0.1 toward 1 - S and is then scaled in place
         // by clamp(1 - |0x6d4| / scale). S = P + |v - cfg[0xc]| / scale (0x1fb6dc) is taken
@@ -1495,6 +1605,81 @@ mod tests {
         assert!(a.target_look().1 < 1e-6);
     }
 
+    /// D416: inside the dead zone the angle stays; outside it eases by w = |x| + |y|
+    /// (clamped to 1) toward atan2(y, x).
+    #[test]
+    fn d416_arm_angle_dead_zone_and_ease() {
+        assert_eq!(arm_angle_step(1., [0.1, 0.1]), (1., 0.2));
+        assert_eq!(arm_angle_step(1., [0., 0.]), (1., 0.));
+        // Straight up from 0: target pi/2, w 0.5 -> halfway.
+        let (a, w) = arm_angle_step(0., [0., 0.5]);
+        assert!(close(a, FRAC_PI_2 * 0.5) && close(w, 0.5), "{a} {w}");
+        // Full stick (w clamped to 1) lands on the target in one tick.
+        let (a, w) = arm_angle_step(0., [-1., 1.]);
+        assert!(close(a, 0.75 * PI) && w == 1., "{a} {w}");
+    }
+
+    /// D416: the target is taken the short way round and the angle is not re-wrapped.
+    #[test]
+    fn d416_arm_angle_short_way_round() {
+        // From 0.1 toward just below the x axis (target ~2pi - 0.1): goes down through 0.
+        let below = [1., -0.1f32.tan()];
+        let (a, _) = arm_angle_step(0.1, below);
+        assert!(close(a, -0.1), "{a}");
+        // From 2pi - 0.1 toward just above the x axis: goes up past 2pi.
+        let above = [1., 0.1f32.tan()];
+        let (a, _) = arm_angle_step(TAU - 0.1, above);
+        assert!(close(a, TAU + 0.1), "{a}");
+    }
+
+    /// D416: angle / 2pi times 32 frames, wrapped into one turn.
+    #[test]
+    fn d416_arm_frame_mapping() {
+        assert_eq!(ClipId::ActNeutralArmSmall.frames(), 33);
+        assert!(close(arm_frame(0.), 0.));
+        assert!(close(arm_frame(PI), 16.));
+        assert!(close(arm_frame(FRAC_PI_2), 8.));
+        assert!(close(arm_frame(-FRAC_PI_2), 24.));
+        assert!(close(arm_frame(TAU + FRAC_PI_2), 8.));
+    }
+
+    /// D416: arm layers only while the sticks are set; arm 1 mirrored, the left stick's x
+    /// negated for arm 0, the smoothed sticks easing 0.3 a tick.
+    #[test]
+    fn d416_arm_layers_follow_the_sticks() {
+        let arms = |f: &AnimFrame| {
+            f.layers
+                .iter()
+                .filter(|l| matches!(l.blend, Blend::MixAdditive { .. }))
+                .copied()
+                .collect::<Vec<_>>()
+        };
+        let mut a = SackboyAnim::new();
+        assert!(arms(&a.tick(&moving(0.), true)).is_empty());
+        a.set_arm_sticks(Some([[1., 0.], [0., 1.]]));
+        let f = a.tick(&moving(0.), true);
+        let l = arms(&f);
+        assert_eq!(l.len(), 2);
+        assert!(l[0].mirror && !l[1].mirror);
+        // First tick: the smoothed sticks are 0.3 of the raw ones, so w = 0.3 for both.
+        for layer in &l {
+            let Blend::MixAdditive { mix, base, .. } = layer.blend else {
+                unreachable!()
+            };
+            assert!(close(mix, 0.3) && base == ClipId::Stand, "{mix}");
+        }
+        for _ in 0..100 {
+            a.tick(&moving(0.), true);
+        }
+        // Arm 0: left stick (1, 0) with x negated -> pi (half a turn from 0, reached as -pi:
+        // the window is [cur - pi, cur + pi)); arm 1: right stick up -> pi/2.
+        let [a0, a1] = a.arm_angles();
+        assert!(close(a0, -PI) && close(a1, FRAC_PI_2), "{a0} {a1}");
+        assert!(close(arm_frame(a0), 16.));
+        a.set_arm_sticks(None);
+        assert!(arms(&a.tick(&moving(0.), true)).is_empty());
+    }
+
     fn moving(vx: f32) -> Sackboy {
         let mut s = Sackboy::at_lane(0.);
         s.vx = vx;
@@ -1555,11 +1740,11 @@ mod tests {
     #[test]
     fn clip_table() {
         let guids: Vec<u32> = ClipId::ALL.iter().map(|c| c.guid()).collect();
-        assert_eq!(guids.len(), 56);
+        assert_eq!(guids.len(), 58);
         let mut unique = guids.clone();
         unique.sort_unstable();
         unique.dedup();
-        assert_eq!(unique.len(), 56);
+        assert_eq!(unique.len(), 58);
         assert_eq!(ClipId::EmoteAnticipation.guid(), 0x25bf);
         assert_eq!(ClipId::EmoteSad3Loop.frames(), 51);
         assert_eq!(
