@@ -81,7 +81,7 @@ const MODES: &[Mode] = &[
     },
     Mode {
         name: "The Pod",
-        blurb: "Sackboy in the Pod (the planets aren't placed yet).",
+        blurb: "Sackboy in the Pod, with Earth and the Moon outside.",
         args: &[
             "--level-guid",
             "00018fdb",

@@ -79,6 +79,7 @@ pub const NATIVE_SCRIPTS: &[&dyn NativeScript] = &[
     &TriggerPodScript,
     &EARTH,
     &ORBITING_MOON,
+    &crate::PLANETS_WORLD_PORT,
     &crate::native_bubble::TriggerSpeechBubbleScript,
 ];
 
@@ -116,11 +117,16 @@ pub fn start_native(
 
 /// A native call. A host that answers nothing gets the default of the declared return
 /// type, as the VM does (`Value::default_for`): that is the `as_*` readers below.
-fn call(host: &mut dyn Host, class: &str, function: &str, args: &[Value]) -> Result<Value, String> {
+pub(crate) fn call(
+    host: &mut dyn Host,
+    class: &str,
+    function: &str,
+    args: &[Value],
+) -> Result<Value, String> {
     host.call_native(class, function, args)
 }
 
-fn site(host: &mut dyn Host, class: &str, function: &str) {
+pub(crate) fn site(host: &mut dyn Host, class: &str, function: &str) {
     if host.tracing() {
         let s = Site {
             class: class.to_owned(),
@@ -131,7 +137,7 @@ fn site(host: &mut dyn Host, class: &str, function: &str) {
     }
 }
 
-fn as_bool(v: &Value) -> bool {
+pub(crate) fn as_bool(v: &Value) -> bool {
     match v {
         Value::Bool(b) => *b,
         Value::Int(i) => *i != 0,
@@ -139,7 +145,7 @@ fn as_bool(v: &Value) -> bool {
     }
 }
 
-fn as_int(v: &Value) -> i32 {
+pub(crate) fn as_int(v: &Value) -> i32 {
     match v {
         Value::Int(i) => *i,
         Value::Raw(r) => *r as i32,
@@ -147,21 +153,21 @@ fn as_int(v: &Value) -> i32 {
     }
 }
 
-fn as_float(v: &Value) -> f32 {
+pub(crate) fn as_float(v: &Value) -> f32 {
     match v {
         Value::Float(f) => *f,
         _ => 0.0,
     }
 }
 
-fn as_thing(v: &Value) -> Option<u32> {
+pub(crate) fn as_thing(v: &Value) -> Option<u32> {
     match v {
         Value::Thing(t) => *t,
         _ => None,
     }
 }
 
-fn as_vec4(v: &Value) -> [f32; 4] {
+pub(crate) fn as_vec4(v: &Value) -> [f32; 4] {
     match v {
         Value::Vec4(a) => *a,
         _ => [0.0; 4],
@@ -559,7 +565,7 @@ pub static ORBITING_MOON: PlanetScript = PlanetScript {
     position: [2000., 0., 0., 1.],
 };
 
-const PLANET_THING: &str = "PlanetThing";
+pub(crate) const PLANET_THING: &str = "PlanetThing";
 const HALF_TURN: f32 = std::f32::consts::PI;
 const QUARTER_TURN: f32 = std::f32::consts::FRAC_PI_2;
 /// `GetDefaultMaxVel__`, `GetDefaultMaxAcc__`; 0.01 is also the "arrived" tolerance.
@@ -595,7 +601,7 @@ fn planet_float(host: &mut dyn Host, this: u32, field: &str, default: f32) -> f3
     }
 }
 
-fn as_mat44(v: &Value) -> [f32; 16] {
+pub(crate) fn as_mat44(v: &Value) -> [f32; 16] {
     match v {
         Value::Mat44(m) => *m,
         _ => crate::transform::IDENTITY,
