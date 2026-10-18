@@ -100,6 +100,9 @@ pub struct PodState {
     pub player_colour_calls: u64,
     /// D327: what the pod's search state told the planets and the pod computer.
     pub search: PlanetsSearch,
+    /// D358: the pod computer `PodComputer.TriggerOnPlanetCancel__` was called on this
+    /// tick (the search state's Back), for [`crate::LevelScripts::planet_cancel`].
+    pub planet_cancel: Option<lbp_script_vm::ObjectId>,
 }
 
 /// D327 (part 78): the values the search state (`PodStateSearch`) hands the planets and

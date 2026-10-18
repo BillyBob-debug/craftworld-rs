@@ -26,7 +26,7 @@ use lbp_script_vm::natives::Bindings;
 use lbp_script_vm::Value;
 
 use crate::{
-    start_native, GooeyButton, GooeyFrame, GooeyItem, LevelWorld, PodStateSearchStory,
+    start_native, GooeyButton, GooeyFrame, GooeyItem, LevelWorld, PodStateSearch, SearchDetails,
     PLANETS_WORLD_PORT, STORY_FRAME_KEY,
 };
 
@@ -96,7 +96,7 @@ pub enum PodComputerEvent {
 #[derive(Debug, Clone, Default)]
 pub struct NativePodComputer {
     stack: Vec<PuterState>,
-    search: PodStateSearchStory,
+    search: PodStateSearch,
     /// The last state was popped and the host asked to stop using the pod computer: no
     /// new main menu until the answer has come (the pod computer seen not in use).
     released: bool,
@@ -169,6 +169,8 @@ impl NativePodComputer {
         self.stack.push(state);
         Self::set_view(host, state.planets_view());
         if state == PuterState::StorySearch {
+            // The Story button's push: `PodStateSearch(SearchDetails.CreateStoryLevels())`.
+            self.search = PodStateSearch::new(SearchDetails::StoryLevels);
             self.search.open(&mut host.world);
         }
     }

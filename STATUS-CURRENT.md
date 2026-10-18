@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D357 the pod computer's menu states as native ports (2026-10-18)
+## Latest: D358 the Pod search state as a native port (2026-10-18)
+- Part 105 (`docs/level-scripts/part-105.md`): `PodStateSearch` replaces the Story
+  stand-in; with no scripts Back from Story (`--level-scripts-back-at`) returns to the main
+  menu with the scripted search state on every tick 640-780, and the scripted run's
+  main menu now draws after Back too (a draw tie went to the popped Story frame).
+
+## D357 the pod computer's menu states as native ports (2026-10-18)
 - Part 104 (`docs/level-scripts/part-104.md`): with no scripts, engaging the pod computer
   gives the main menu (the scripted frame exactly, tick 601), Story is chosen from it
   (tick 640) and Back pops each state; `--story` is no longer needed to reach Story.
@@ -25,13 +31,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Part 101 (`docs/level-scripts/part-101.md`): the Story stand-in sets the pod computer in
   use and the D417 port of pod.bin opens the pod (0.05 a tick, open on tick 21, mesh
   swapped), as the scripts do; the measured pod-open values are gone.
-
-## D353 the Story screen without the game's scripts (2026-10-18)
-- Part 100 (`docs/level-scripts/part-100.md`): the first native stand-in for a game script,
-  the search state's Story entry (`lbp_runtime::PodStateSearchStory`), tested against a
-  golden trace of the scripted run (`--level-scripts-trace`). Viewer `--story` opens Story
-  with no scripts loaded; the friends exe's Story button is on. Mean abs 0.36 levels
-  against the scripted frame.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

@@ -6340,3 +6340,10 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 102 (`docs/level-scripts/part-102.md`): `Earth` and `OrbitingMoon` (PlanetThing)
   run as native ports; with no scripts Earth turns to the Story group and rests exactly
   where the scripted run leaves it. The world Thing and camera stay measured stand-ins.
+
+## D353 the Story screen without the game's scripts (2026-10-18)
+- Part 100 (`docs/level-scripts/part-100.md`): the first native stand-in for a game script,
+  the search state's Story entry (`lbp_runtime::PodStateSearchStory`), tested against a
+  golden trace of the scripted run (`--level-scripts-trace`). Viewer `--story` opens Story
+  with no scripts loaded; the friends exe's Story button is on. Mean abs 0.36 levels
+  against the scripted frame.
