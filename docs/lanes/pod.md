@@ -1,20 +1,20 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-113.md` (112 for the entrance camera, 111 for the
-   switch, 110 for the hand-off,
+1. `docs/level-scripts/part-114.md` (113 for Sackboy, 112 for the entrance camera,
+   111 for the switch, 110 for the hand-off,
    109 for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for
    choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 168 (D365) merged. PR for D366 (branch `pod-level-sackboy`,
-  worktree `E:\Projects\wt-d324`): Sackboy plays in the launched level from its
-  entrance (`sackboy_play.rs` `start_respawn`, `respawn`); handed to the coordinator
-  for merge once rust and python are green.
+- PRs 153 (D353) through 169 (D366) merged. PR for D367 (branch `pod-launch-warnings`,
+  worktree `E:\Projects\wt-d324`): the launch warnings (`pod.rs` `launch_warnings`,
+  `answer_launch_warning`); handed to the coordinator for merge once rust and python
+  are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D367.
+  Decision numbers: D348-D399, next free D368.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -29,6 +29,9 @@
   --level-scripts-trace PATH --qa-capture PNG` (each capture needs a new name).
   Disc + update only: `--snapshot local-analysis/d79-inventory-0133.json --game-dir
   "game-data/a1-disc;game-data/a1-update-0133"`. A run takes several minutes.
+- D367 runs: `local-analysis/d367/*-a1*` (`run367.ps1`, as D366's): no warnings for
+  Trash Valley, switch at tick 761. Dispatcher disassembly:
+  `local-analysis/d367/disp*.asm`.
 - D366 runs: `local-analysis/d366/*-a*` (`run366.ps1`, as D365's): both read Trash
   Valley's physics after the switch and spawn Sackboy at Thing 33, (-11560, 19306, 200).
 - D365 runs: `local-analysis/d365/*-a*` (`run365.ps1`, as D364's): both start
@@ -73,8 +76,9 @@
   data file is on the disc or update.
 
 ## Next
-1. The warnings (0x402b24) and the select sound; then the cursor's flight and sound,
-   and the other searches. Later: the game's entrance animation and state 6/7 load.
+1. The cursor's flight and sound, then the other searches. Open: the player-count
+   texts (0x16e3b0, 0x16de78) and the warning popup's drawing. Later: the game's
+   entrance animation and state 6/7 load.
 2. The default result before the search opens (scripts 23 from tick 600, native none),
    the menus' slide-in for the native ports, and pruning `OldStates` frames.
 3. The main menu's move in and the other entries' states as they unlock.

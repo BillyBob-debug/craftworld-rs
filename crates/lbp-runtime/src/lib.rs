@@ -2820,8 +2820,10 @@ impl LevelWorld {
     /// kind 4, `TriggerOnLevelLaunch(slot, Play)` (0x4033b4 mode 0), which cancels an
     /// older pending launch and keeps this one as the pod's pending SlotID, so
     /// `IsLaunchingLevel` is true from then on. No pod state is pushed; the hand-off to the
-    /// game is [`Self::pod_launch_step`]. Left out: the launch warnings (0x402b24) and the
-    /// select sound.
+    /// game is [`Self::pod_launch_step`]. D367: the launch (0x402b24) also raises its
+    /// warnings ([`pod::launch_warnings`]) for the local party. FOUND (D367): there is no
+    /// select sound; the dispatcher (0x403b3c) only looks up the resource
+    /// `pod/pod_select_badge` (0x2d37c4) and drops the handle at once, so nothing is ported.
     pub fn cross_on_level(&mut self, result: usize) -> LevelCross {
         let Some(slot) = self.story_slots.get(result).map(|s| s.id) else {
             return LevelCross::NotLevel;
@@ -2835,7 +2837,28 @@ impl LevelWorld {
         }
         pod.launch = Some(slot);
         pod.level_start = None;
+        let party = pod::party_or_default(&pod.party);
+        pod.launch_warnings = pod::launch_warnings(&self.story_slots[result], &party);
+        pod.warning_flags = pod.launch_warnings.iter().fold(0, |f, w| f | w.flag());
         LevelCross::Launch(slot)
+    }
+
+    /// D367: the player answers the launch warning that is up: Continue takes it down
+    /// (the next one shows, or the hand-off goes ahead); Cancel drops the launch.
+    /// INFERRED: the popup's result handler was not traced; Cancel is taken to cancel
+    /// the pending launch as a new Cross on another level does.
+    pub fn answer_launch_warning(&mut self, carry_on: bool) {
+        let pod = &mut self.pod;
+        if pod.launch_warnings.is_empty() {
+            return;
+        }
+        if carry_on {
+            pod.launch_warnings.remove(0);
+        } else {
+            pod.launch_warnings.clear();
+            pod.launch = None;
+            pod.level_start = None;
+        }
     }
 
     /// D363 (part 110): the pod's launch step, every frame from the pod's update
@@ -2851,7 +2874,7 @@ impl LevelWorld {
     pub fn pod_launch_step(&mut self) -> Option<LevelStart> {
         let pod = &self.pod;
         let slot = pod.launch?;
-        if pod.level_start.is_some() {
+        if pod.level_start.is_some() || !pod.launch_warnings.is_empty() {
             return None;
         }
         let root = self
