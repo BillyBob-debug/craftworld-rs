@@ -1,4 +1,4 @@
-# Current state (overwrite each milestone) — after D351
+# Current state (overwrite each milestone) — after D352
 
 ## Product
 Independent LBP2 Asset Explorer (Rust): Bevy viewer (main) and legacy viewer read the
@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D351 a left overlay shrinks out; the cards go when Story closes (2026-10-17)
+## Latest: D352 the Story card opens at full size and shrinks out (2026-10-17)
+- Part 99 (`docs/level-scripts/part-99.md`): the card's own scale is the slot spring
+  (0.7, 0.25; FOUND 0x42b4c8); a new card is made at its target (FOUND 0x6fc414), so
+  opening shows it at once. On closing it shrinks 0.75, 0.3875, 0.0369 and is erased
+  (`CardScale`, INFERRED target 0), the overlays with it.
+
+## D351 a left overlay shrinks out; the cards go when Story closes (2026-10-17)
 - Part 98 (`docs/level-scripts/part-98.md`): a slot no longer wanted springs to scale 0 and
   is freed once its scale is 0 or below (FOUND 0x6fcc68, 0x6fec94), drawn until then
   (`OverlayGrow::leave`). A card is erased with all its slots once its scale is 0 (FOUND
