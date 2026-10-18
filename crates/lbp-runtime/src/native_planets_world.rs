@@ -9,9 +9,11 @@
 //! of field. The view objects are kept as members of the world Thing, one per field
 //! (`CurrentView.Yaw`, ...): a port has no script objects of its own.
 //!
-//! Not ported: the pod introduction and level unlocking cutscene threads
-//! (`PodIntroductionThread`, `LevelUnlockingThread`; the state machine runs, the threads
-//! are null), the "level created" voice-over and the interactive music.
+//! D379: the pod introduction (`PodIntroductionThread`) is ported as the world's own
+//! state 1: its camera zoom over 451 ticks, then the progression flags. Not ported: the
+//! level unlocking cutscene thread (`LevelUnlockingThread`, null: state 2 ends on the
+//! next frame), the intro's video and voice-over requests, the "level created"
+//! voice-over and the interactive music.
 use lbp_script_vm::{Host, MemberKind, Value};
 
 use crate::native_script::{
@@ -32,6 +34,12 @@ const IN_USE_FOC: [f32; 4] = [0., 500., -1500., 1.];
 const REST_POS: [f32; 4] = [0., -250., 1130., 1.];
 const REST_FOC: [f32; 4] = [0., 100., -1500., 1.];
 const UP: [f32; 4] = [0., 1., 0., 0.];
+/// The camera (from, to) the pod introduction zooms in from (FOUND, constants of the
+/// script); it ends at the rest framing.
+const INTRO_FAR_POS: [f32; 4] = [-500., -2000., 2000., 1.];
+const INTRO_FAR_FOC: [f32; 4] = [-100., -800., 1000., 1.];
+/// `PodIntroductionThread`'s zoom runs 0 to 1 in this many steps, one a tick (FOUND).
+const INTRO_STEPS: i32 = 450;
 
 /// The three view objects of the world.
 const VIEWS: [&str; 3] = ["CurrentView", "OldView", "DesiredView"];
@@ -877,14 +885,16 @@ impl PlanetsWorldScript {
         Ok(())
     }
 
-    /// `UpdateState__`, without the cutscene threads (they are null, so a cutscene
-    /// state ends on the next frame).
+    /// `UpdateState__`: a cutscene state ends once its thread has finished. The pod
+    /// introduction is the port's own (`IntroRunning`); the level unlocking thread is
+    /// null, so state 2 ends on the next frame.
     fn update_state(host: &mut dyn Host, this: u32) -> Result<(), String> {
         site(host, PLANETS_WORLD, "UpdateState__");
         // The pod computer object is fetched and not used (none without the scripts).
         let _ = call(host, "PodComputer", "GetPodComputer__", &[]);
         let state = int(host, this, "State");
-        if state == 1 || state == 2 {
+        let running = state == 1 && Self::intro_tick(host, this)?;
+        if (state == 1 && !running) || state == 2 {
             Self::set_state(host, this, 0)?;
         }
         if int(host, this, "State") != 0 {
@@ -908,7 +918,56 @@ impl PlanetsWorldScript {
 
     fn set_state(host: &mut dyn Host, this: u32, s: i32) -> Result<(), String> {
         let _ = call(host, "PodComputer", "GetPodComputer__", &[]);
-        set_member(host, this, "State", Value::Int(s))
+        set_member(host, this, "State", Value::Int(s))?;
+        if s == 1 {
+            // The thread's first run, at the end of the step that started it: zoom 0.
+            set_member(host, this, "IntroStep", Value::Int(0))?;
+            set_member(host, this, "IntroZoom", Value::Float(0.))?;
+            set_member(host, this, "IntroRunning", Value::Bool(true))?;
+        }
+        Ok(())
+    }
+
+    /// One tick of `PodIntroductionThread`, resumed before the world's update: the zoom
+    /// steps by 1/450 to 1, then the thread waits while a voice-over or the pod
+    /// computer's video plays (neither does here: the video handle is -1) and sets the
+    /// progression flags 3 (8188 when LBP1's Moon is unlocked and this is not a demo or
+    /// kiosk build, 8064 in the PSN demo). Whether it is still running. The video and
+    /// voice-over requests the thread makes first are not ported.
+    fn intro_tick(host: &mut dyn Host, this: u32) -> Result<bool, String> {
+        if !get_member(host, this, "IntroRunning").is_ok_and(|v| as_bool(&v)) {
+            return Ok(false);
+        }
+        let step = int(host, this, "IntroStep") + 1;
+        if step <= INTRO_STEPS {
+            set_member(host, this, "IntroStep", Value::Int(step))?;
+            let zoom = step as f32 / INTRO_STEPS as f32;
+            set_member(host, this, "IntroZoom", Value::Float(zoom))?;
+            return Ok(true);
+        }
+        let ask = |host: &mut dyn Host, class, function| {
+            call(host, class, function, &[]).is_ok_and(|v| as_bool(&v))
+        };
+        if ask(host, "Audio", "IsVoiceOverPlaying__") {
+            return Ok(true);
+        }
+        let set = |host: &mut dyn Host, mask: i32| {
+            let args = [Value::Int(mask)];
+            call(host, "Profile", "SetLBP2GameProgressionFlag__i", &args).map(|_| ())
+        };
+        set(host, 3)?;
+        let demo = ask(host, "Game", "IsPSNDemoBuild__");
+        if ask(host, "Profile", "HasPlayedLBP1AndUnlockedMoon__")
+            && !demo
+            && !ask(host, "Game", "IsKioskBuild__")
+        {
+            set(host, 8188)?;
+        }
+        if demo {
+            set(host, 8064)?;
+        }
+        set_member(host, this, "IntroRunning", Value::Bool(false))?;
+        Ok(false)
     }
 
     /// `UpdatePodCamera__Q11PlanetThingbb`: the camera eases (`Math.Smooth3D`, 10, 100)
@@ -917,6 +976,7 @@ impl PlanetsWorldScript {
     /// script has them (their natives answer nothing here).
     fn update_pod_camera(host: &mut dyn Host, this: u32, snap: bool) -> Result<(), String> {
         site(host, PLANETS_WORLD, "UpdatePodCamera__Q11PlanetThingbb");
+        let mut snap = snap;
         let mut up = UP;
         let (mut pos, mut foc);
         if as_bool(&call(host, "PodComputer", "GetPodComputerInUse__", &[])?) {
@@ -963,7 +1023,18 @@ impl PlanetsWorldScript {
                 }
             }
         }
-        // State 1 frames the introduction thread's zoom: no thread here.
+        // State 1 frames the introduction's zoom, from far below the planets to the rest
+        // framing, set without easing.
+        if int(host, this, "State") == 1 {
+            let z = float(host, this, "IntroZoom");
+            let mix = |near, far| add(scaled(near, z), scaled(far, 1. - z));
+            (pos, foc, up) = (
+                mix(REST_POS, INTRO_FAR_POS),
+                mix(REST_FOC, INTRO_FAR_FOC),
+                UP,
+            );
+            snap = true;
+        }
         let mut badge = float(host, this, "badge_lerp");
         badge = if as_bool(&call(host, "PodComputer", "GetCrashZoom__", &[])?) {
             badge + 0.03

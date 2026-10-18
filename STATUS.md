@@ -6443,3 +6443,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D374 the cursor arrives (2026-10-18)
 - Part 121 (`docs/level-scripts/part-121.md`): the native planets answer
   `HasCursorArrived` and land a flight at once on `SetWantSearchDetails`' first flag.
+
+## D375 the player-count texts (2026-10-18)
+- Part 122 (`docs/level-scripts/part-122.md`): the native launch warnings carry the
+  slot's player bounds and give the popup text from the disc's LAMS tables.

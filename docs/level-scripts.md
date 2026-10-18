@@ -129,6 +129,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 123: the checkpoint's spawn hold (2026-10-18, D376)](level-scripts/part-123.md)
 - [Part 124: the start checkpoint (2026-10-18, D377)](level-scripts/part-124.md)
 - [Part 125: the launch warning popup (2026-10-18, D378)](level-scripts/part-125.md)
+- [Part 126: the level load and the pod introduction (2026-10-18, D379)](level-scripts/part-126.md)
 
 ## Next
 

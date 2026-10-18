@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D378 the launch warning popup (2026-10-18)
+## Latest: D379 the pod introduction (2026-10-18)
+- Part 126 (`docs/level-scripts/part-126.md`): a fresh profile's Pod zooms in from
+  below the planets over 451 ticks without the scripts; the level load needs no change.
+
+## D378 the launch warning popup (2026-10-18)
 - Part 125 (`docs/level-scripts/part-125.md`): a launch warning shows in a built-in
   box; Cross carries on, Circle cancels the launch (handler 0x3c).
 
@@ -22,10 +26,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D376 the checkpoint's spawn hold (2026-10-18)
 - Part 123 (`docs/level-scripts/part-123.md`): Sackboy is held still for the game's 11
   frames when the launched level spawns him at its checkpoint.
-
-## D375 the player-count texts (2026-10-18)
-- Part 122 (`docs/level-scripts/part-122.md`): the native launch warnings carry the
-  slot's player bounds and give the popup text from the disc's LAMS tables.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

@@ -85,6 +85,8 @@ fn assert_near(got: &[f32], want: &[f32], tol: f32) {
 #[test]
 fn d356_story_view_settles_as_the_script_does() {
     let mut h = host();
+    // A profile that has seen the pod introduction.
+    h.world.progression_flags = 3;
     assert_eq!(run(&mut h, "OnCreate__", &[]), Value::Void);
     assert!(!frame(&mut h, true));
     h.world.pod_computer_in_use = true;
@@ -123,6 +125,41 @@ fn d356_story_view_settles_as_the_script_does() {
     let earth = Value::Thing(Some(EARTH));
     let spin = h.get_member(MemberKind::Thing, &earth, "PlanetThing", "SpinOffset");
     assert_eq!(spin, Ok(Value::Float(-0.7)));
+}
+
+fn vec(h: &mut Bindings<LevelWorld>, field: &str) -> [f32; 4] {
+    match member(h, field) {
+        Value::Vec4(v) => v,
+        other => panic!("{field} is {other:?}"),
+    }
+}
+
+/// D379: on a fresh profile the pod introduction starts on the first frame with the
+/// camera far below the planets, zooms straight in over 450 more frames to the rest
+/// framing, then sets the progression flags 3 and is not started again.
+#[test]
+fn d379_pod_introduction_zooms_in_then_sets_the_flags() {
+    let mut h = host();
+    assert_eq!(run(&mut h, "OnCreate__", &[]), Value::Void);
+    frame(&mut h, true);
+    assert_eq!(member(&mut h, "State"), Value::Int(1));
+    assert_near(&vec(&mut h, "cur_pos"), &[-500., -2000., 2000., 1.], 1e-3);
+    assert_near(&vec(&mut h, "cur_foc"), &[-100., -800., 1000., 1.], 1e-3);
+    for _ in 0..225 {
+        frame(&mut h, false);
+    }
+    assert_near(&vec(&mut h, "cur_pos"), &[-250., -1125., 1565., 1.], 1e-2);
+    for _ in 0..225 {
+        frame(&mut h, false);
+    }
+    assert_eq!(member(&mut h, "State"), Value::Int(1));
+    assert_near(&vec(&mut h, "cur_pos"), &[0., -250., 1130., 1.], 1e-3);
+    assert_eq!(h.world.progression_flags, 0);
+    frame(&mut h, false);
+    assert_eq!(member(&mut h, "State"), Value::Int(0));
+    assert_eq!(h.world.progression_flags, 3);
+    frame(&mut h, false);
+    assert_eq!(member(&mut h, "State"), Value::Int(0));
 }
 
 /// The view table's Story row and the blend speeds (FOUND, `PlanetsView`).
