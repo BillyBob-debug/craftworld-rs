@@ -6378,3 +6378,9 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 107 (`docs/level-scripts/part-107.md`): with no scripts, a chosen Story group
   selects its default level, wants the zoom view (7) and the 500 extra planet zoom, so the
   planets zoom in as the scripted run does (planets level identical on every tick 680-760).
+
+## D361 moving between results on the planet (2026-10-18)
+- Part 108 (`docs/level-scripts/part-108.md`): the stick moves the planet's cursor to the
+  result that way, scored on Earth's surface as the engine does (0x42d584); the QA option
+  `--level-scripts-move-at N:DIR` gives the same picks and an identical frame with and
+  without the scripts.
