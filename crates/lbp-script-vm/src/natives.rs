@@ -714,6 +714,8 @@ pub struct Bindings<W> {
     /// into the default of the call's return machine type (false, 0, null, zero vector).
     /// Off by default, so tests see a missing binding as a fault.
     pub default_unbound: bool,
+    /// D417: a golden trace of every host call, when on (dev only).
+    pub trace: Option<crate::trace::Trace>,
 }
 
 impl<W: World> Bindings<W> {
@@ -723,6 +725,7 @@ impl<W: World> Bindings<W> {
             unbound: BTreeMap::new(),
             calls: BTreeMap::new(),
             default_unbound: false,
+            trace: None,
         }
     }
 
@@ -807,7 +810,7 @@ impl<W: World> Host for Bindings<W> {
     ) -> Result<Value, String> {
         let name = format!("{class}.{function}");
         *self.calls.entry(name.clone()).or_default() += 1;
-        match dispatch(&mut self.world, class, function, args) {
+        let result = match dispatch(&mut self.world, class, function, args) {
             Some(r) => r.map_err(|e| format!("{name}: {e}")),
             None => {
                 *self.unbound.entry(name.clone()).or_default() += 1;
@@ -817,7 +820,11 @@ impl<W: World> Host for Bindings<W> {
                     Err(format!("unbound native {name}"))
                 }
             }
+        };
+        if let Some(t) = self.trace.as_mut() {
+            t.push("native", name, args.to_vec(), result.clone());
         }
+        result
     }
     fn get_member(
         &mut self,
@@ -826,7 +833,12 @@ impl<W: World> Host for Bindings<W> {
         class: &str,
         field: &str,
     ) -> Result<Value, String> {
-        self.world.get_member(kind, base, class, field)
+        let result = self.world.get_member(kind, base, class, field);
+        if let Some(t) = self.trace.as_mut() {
+            let name = crate::trace::member_name(kind, class, field);
+            t.push("get", name, vec![base.clone()], result.clone());
+        }
+        result
     }
     fn set_member(
         &mut self,
@@ -836,10 +848,22 @@ impl<W: World> Host for Bindings<W> {
         field: &str,
         value: Value,
     ) -> Result<(), String> {
-        self.world.set_member(kind, base, class, field, value)
+        let traced = self.trace.is_some().then(|| value.clone());
+        let result = self.world.set_member(kind, base, class, field, value);
+        if let (Some(t), Some(value)) = (self.trace.as_mut(), traced) {
+            let name = crate::trace::member_name(kind, class, field);
+            let r = result.clone().map(|()| Value::Void);
+            t.push("set", name, vec![base.clone(), value], r);
+        }
+        result
     }
     fn thing_is(&mut self, thing: u32, class: &str) -> bool {
-        self.world.thing_is(thing, class)
+        let is = self.world.thing_is(thing, class);
+        if let Some(t) = self.trace.as_mut() {
+            let args = vec![Value::Thing(Some(thing))];
+            t.push("is", class.to_owned(), args, Ok(Value::Bool(is)));
+        }
+        is
     }
     fn thing_script(&mut self, thing: u32) -> Option<u32> {
         self.world.thing_script(thing)
@@ -853,6 +877,14 @@ impl<W: World> Host for Bindings<W> {
     }
     fn write(&mut self, text: &str) {
         self.world.write(text)
+    }
+    fn tracing(&self) -> bool {
+        self.trace.is_some()
+    }
+    fn trace(&mut self, mark: crate::trace::TraceMark<'_>) {
+        if let Some(t) = self.trace.as_mut() {
+            t.mark(mark);
+        }
     }
 }
 

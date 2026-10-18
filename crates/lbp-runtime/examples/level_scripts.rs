@@ -4,7 +4,8 @@
 //! level_scripts SNAPSHOT GAME-DIRS LEVEL-PATH NEW-JSON --play=TICKS [--flags=MASK,..]
 //!     [--puter-in-use=TICK] [--our-pod] [--enter-pad-zone=TICK] [--press=TICK:MASK,..]
 //!     [--menu=TICK:KEY,..] (D325: up, down, left, right, choose, back on the drawn menu)
-//!     [--player-colour=AARRGGBB] [--with-level=LEVEL-PATH]
+//!     [--player-colour=AARRGGBB] [--with-level=LEVEL-PATH] [--native-scripts]
+//!     [--trace=NEW-JSON[@A-B,..]] (D417: native ports forced; golden trace of the ports)
 //! level_scripts SNAPSHOT GAME-DIRS --all NEW-JSON [--play=TICKS] [--strict]
 //!     [--visit-triggers] [--pulse-switches]
 //!
@@ -593,6 +594,23 @@ fn add_level(vm: &Vm, world: &LevelWorld, t: &mut Totals) -> serde_json::Value {
     })
 }
 
+/// D417 `--trace=NEW-JSON[@A-B,..]`: the path and the tick ranges.
+fn parse_trace_option(t: &str) -> Result<(String, Vec<(u64, u64)>), String> {
+    let (path, ranges) = t.split_once('@').unwrap_or((t, ""));
+    let ranges = ranges
+        .split(',')
+        .filter(|r| !r.is_empty())
+        .map(|r| {
+            let (a, b) = r.split_once('-').unwrap_or((r, r));
+            Ok((
+                a.parse().map_err(|e| format!("--trace {r}: {e}"))?,
+                b.parse().map_err(|e| format!("--trace {r}: {e}"))?,
+            ))
+        })
+        .collect::<Result<_, String>>()?;
+    Ok((path.to_owned(), ranges))
+}
+
 /// What one `--play` run is given.
 struct PlayOptions {
     ticks: u64,
@@ -613,6 +631,11 @@ struct PlayOptions {
     menu_keys: Vec<(u64, String)>,
     /// `--player-colour`: the players' stored colour, 0xAARRGGBB.
     colour: Option<u32>,
+    /// D417 `--native-scripts`: run the native ports even when the class is loaded.
+    native: bool,
+    /// D417 `--trace=NEW-JSON[@A-B,..]`: write the golden trace of the ported scripts
+    /// (only the ticks A to B, when given).
+    trace: Option<(String, Vec<(u64, u64)>)>,
 }
 
 /// The start state of a level world for a play run. A level is started as our Pod when
@@ -1645,6 +1668,10 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
     host.default_unbound = !opts.strict;
     let engine_faults = lbp_runtime::add_engine_objects(vm, &mut host, BUDGET_PER_CALL);
     let mut level = LevelScripts::new(vm, &host.world);
+    level.set_force_native(opts.native);
+    if opts.trace.is_some() {
+        host.trace = Some(lbp_script_vm::trace::Trace::default());
+    }
     let created = level.create(vm, &mut host, BUDGET_PER_CALL);
     let mut sum = StepReport::default();
     let mut fault_kinds = BTreeMap::<String, usize>::new();
@@ -1996,6 +2023,21 @@ fn play_level(vm: &mut Vm, mut world: LevelWorld, opts: &PlayOptions) -> Played 
     });
     json["lighting_in_force_at_load"] = serde_json::json!(host.world.settings_at_load.lighting);
     json["lighting_stored_current"] = serde_json::json!(host.world.pworld.lighting_stored);
+    if let (Some((path, ranges)), Some(trace)) = (&opts.trace, &host.trace) {
+        let keep = |t: u64| ranges.iter().any(|&(a, b)| (a..=b).contains(&t));
+        let keep: Option<&dyn Fn(u64) -> bool> = (!ranges.is_empty()).then_some(&keep);
+        let guid = |t: u32| host.world.things.get(t as usize)?.script_guid;
+        let events = lbp_runtime::ported_events(&trace.events, guid, keep);
+        let text = lbp_script_vm::trace::events_json(&events, trace.dropped);
+        match std::fs::write(path, text) {
+            Ok(()) => println!(
+                "trace: {} events of {} to {path}",
+                events.len(),
+                trace.events.len()
+            ),
+            Err(e) => println!("trace not written ({path}): {e}"),
+        }
+    }
     Played {
         json,
         instances: level.instances.len(),
@@ -2680,6 +2722,7 @@ fn run() -> Result<(), String> {
         .transpose()
         .map_err(|e| format!("--player-colour: {e}"))?;
     let with_level = option("--with-level=");
+    let trace = option("--trace=").map(parse_trace_option).transpose()?;
     let args: Vec<&String> = all
         .iter()
         .filter(|a| {
@@ -2693,6 +2736,8 @@ fn run() -> Result<(), String> {
                 && !a.starts_with("--menu=")
                 && !a.starts_with("--player-colour=")
                 && !a.starts_with("--with-level=")
+                && !a.starts_with("--trace=")
+                && *a != "--native-scripts"
                 && *a != "--our-pod"
                 && *a != "--strict"
                 && *a != "--visit-triggers"
@@ -2730,6 +2775,8 @@ fn run() -> Result<(), String> {
         presses,
         menu_keys,
         colour,
+        native: all.iter().any(|a| a == "--native-scripts"),
+        trace: trace.clone(),
     });
     if play.is_some() && !entries.is_empty() {
         return Err("use --play or --entry, not both".into());

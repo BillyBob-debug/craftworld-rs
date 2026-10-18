@@ -33,6 +33,7 @@ mod gooey;
 mod media;
 mod message_view;
 mod messages;
+mod native_script;
 mod pod;
 mod sensors;
 mod switches;
@@ -44,6 +45,7 @@ pub use gooey::*;
 pub use media::*;
 pub use message_view::*;
 pub use messages::*;
+pub use native_script::*;
 pub use pod::*;
 pub use switches::*;
 
@@ -1069,6 +1071,12 @@ impl LevelWorld {
         for t in &mut self.things {
             let Some((guid, class)) = t.script_guid.and_then(|g| Some((g, vm.class_by_guid(g)?)))
             else {
+                // D417: a script whose class is not loaded but that has a native port
+                // still names its classes (`Trigger_Pod` for the pad zone, casts).
+                if let Some(n) = t.script_guid.and_then(native_script) {
+                    let chain = std::iter::once(n.class()).chain(n.superclasses().iter().copied());
+                    t.script_classes = chain.map(str::to_owned).collect();
+                }
                 continue;
             };
             let chain = vm.class_chain(class);
@@ -2953,10 +2961,23 @@ pub enum Outcome {
     Fault(String),
 }
 
+/// A suspended script: a VM task, or a native script ([`NativeScript`]) to resume.
+enum Pending {
+    Vm(Task),
+    Native(&'static dyn NativeScript),
+}
+
 /// Runs entry functions on scripted Things and keeps yielded ones for later ticks.
+///
+/// D417: a Thing whose script class is not loaded (the scripts are in the encrypted
+/// `patch.edat`) runs the native port of its script ([`native_script`], by the script
+/// GUID) when there is one; [`Runner::force_native`] runs the native port even when the
+/// class is loaded (dev check against the VM).
 #[derive(Default)]
 pub struct Runner {
-    tasks: Vec<(u32, Task)>,
+    tasks: Vec<(u32, Pending)>,
+    /// Run a script's native port even when its class is loaded.
+    pub force_native: bool,
 }
 
 impl Runner {
@@ -3006,6 +3027,21 @@ impl Runner {
         args: &[(u16, Value)],
         budget: &mut u64,
     ) -> (Outcome, Option<Value>) {
+        let native = (inst.class.is_none() || self.force_native)
+            .then(|| native_script(inst.guid))
+            .flatten();
+        if let Some(n) = native {
+            trace_call(host, inst.thing, function, args);
+            let Some(step) = start_native(n, host, inst.thing, function, args) else {
+                trace_end(host, &Outcome::NoFunction);
+                return (Outcome::NoFunction, None);
+            };
+            let value = match &step {
+                Ok(NativeStep::Done(v)) => Some(v.clone()),
+                _ => None,
+            };
+            return (self.settle_native(host, inst.thing, n, step), value);
+        }
         let Some(class) = inst.class else {
             return (Outcome::NoClass, None);
         };
@@ -3014,12 +3050,13 @@ impl Runner {
         }
         let mut regs = vec![(0, Value::Thing(Some(inst.thing)))];
         regs.extend_from_slice(args);
+        trace_call(host, inst.thing, function, args);
         let mut step = vm.start_registers(host, class, function, &regs, budget);
         let value = match &mut step {
             Ok(Step::Done(v)) => Some(std::mem::replace(v, Value::Void)),
             _ => None,
         };
-        (self.settle(vm, inst.thing, step), value)
+        (self.settle(vm, host, inst.thing, step), value)
     }
 
     /// Resumes every yielded script once, in the order they yielded.
@@ -3032,24 +3069,95 @@ impl Runner {
         let tasks = std::mem::take(&mut self.tasks);
         let mut out = Vec::with_capacity(tasks.len());
         for (thing, task) in tasks {
-            let step = vm.resume(host, task, budget);
-            out.push((thing, self.settle(vm, thing, step)));
+            trace_call(host, thing, lbp_script_vm::trace::RESUME, &[]);
+            let o = match task {
+                Pending::Vm(task) => {
+                    let step = vm.resume(host, task, budget);
+                    self.settle(vm, host, thing, step)
+                }
+                Pending::Native(n) => {
+                    let step = n
+                        .update(host, thing)
+                        .unwrap_or(Ok(NativeStep::Done(Value::Void)));
+                    self.settle_native(host, thing, n, step)
+                }
+            };
+            out.push((thing, o));
         }
         out
     }
 
-    fn settle(&mut self, vm: &Vm, thing: u32, step: Result<Step, lbp_script_vm::Fault>) -> Outcome {
-        match step {
+    fn settle(
+        &mut self,
+        vm: &Vm,
+        host: &mut dyn Host,
+        thing: u32,
+        step: Result<Step, lbp_script_vm::Fault>,
+    ) -> Outcome {
+        let o = match step {
             Ok(Step::Done(_)) => Outcome::Done,
             Ok(Step::Yielded(task)) => {
-                self.tasks.push((thing, task));
+                self.tasks.push((thing, Pending::Vm(task)));
                 Outcome::Yielded
             }
             Err(f) => {
                 let site = vm.last_site().map_or(String::new(), |s| s.to_string());
                 Outcome::Fault(format!("{f:?} at {site}"))
             }
-        }
+        };
+        trace_end(host, &o);
+        o
+    }
+
+    fn settle_native(
+        &mut self,
+        host: &mut dyn Host,
+        thing: u32,
+        script: &'static dyn NativeScript,
+        step: Result<NativeStep, String>,
+    ) -> Outcome {
+        let o = match step {
+            Ok(NativeStep::Done(_)) => Outcome::Done,
+            Ok(NativeStep::Yielded) => {
+                self.tasks.push((thing, Pending::Native(script)));
+                Outcome::Yielded
+            }
+            Err(e) => Outcome::Fault(format!("{e} in native {}", script.class())),
+        };
+        trace_end(host, &o);
+        o
+    }
+}
+
+/// D417: tells a tracing host the tick (0: the create pass, then 1, 2, ..).
+fn trace_tick(host: &mut dyn Host, tick: u64) {
+    if host.tracing() {
+        host.trace(lbp_script_vm::trace::TraceMark::Tick(tick));
+    }
+}
+
+/// D417: tells a tracing host that a script entry starts or resumes.
+fn trace_call(host: &mut dyn Host, thing: u32, function: &str, args: &[(u16, Value)]) {
+    if host.tracing() {
+        host.trace(lbp_script_vm::trace::TraceMark::Call {
+            thing,
+            function,
+            args,
+        });
+    }
+}
+
+/// D417: tells a tracing host how the entry ended.
+fn trace_end(host: &mut dyn Host, o: &Outcome) {
+    if host.tracing() {
+        use lbp_script_vm::trace::{END_DONE, END_FAULT, END_NO_FUNCTION, END_YIELDED};
+        let end = match o {
+            Outcome::Yielded => END_YIELDED,
+            Outcome::NoFunction | Outcome::NoClass => END_NO_FUNCTION,
+            Outcome::Fault(_) => END_FAULT,
+            _ => END_DONE,
+        };
+        host.trace(lbp_script_vm::trace::TraceMark::End(end));
     }
 }
 
@@ -3423,6 +3531,13 @@ impl LevelScripts {
         }
     }
 
+    /// D417: run the native port of a script ([`native_script`]) even when its class is
+    /// loaded (`--native-scripts`, a dev check against the VM). Without it the native
+    /// port runs only for a Thing whose class is not loaded.
+    pub fn set_force_native(&mut self, on: bool) {
+        self.runner.force_native = on;
+    }
+
     /// The host's point for a planet: the point on it to turn toward the camera, in the
     /// planet's own space (the first argument of [`PLANET_UPDATE`]). A point unlike the
     /// one before clears "arrived", so the planet eases to it (FOUND: every path of the
@@ -3595,6 +3710,7 @@ impl LevelScripts {
 
     /// Runs [`CREATE`] on every instance; `budget` is per call.
     pub fn create(&mut self, vm: &mut Vm, host: &mut dyn Host, budget: u64) -> StepReport {
+        trace_tick(host, self.ticks);
         let mut report = self.run_all(
             vm,
             host,
@@ -4030,6 +4146,7 @@ impl LevelScripts {
         budget: u64,
     ) -> StepReport {
         let frame_tick = self.ticks;
+        trace_tick(host, self.ticks + 1);
         let mut report = self.pod_computer_frame(vm, host, budget);
         let (things, busy) = self.tick_entries(vm, host, budget, Entries::WithoutPlanets);
         report.absorb(things);
@@ -4062,6 +4179,7 @@ impl LevelScripts {
 
     /// One game tick; `budget` is per call or resume.
     pub fn tick(&mut self, vm: &mut Vm, host: &mut dyn Host, budget: u64) -> StepReport {
+        trace_tick(host, self.ticks + 1);
         self.tick_entries(vm, host, budget, Entries::All).0
     }
 

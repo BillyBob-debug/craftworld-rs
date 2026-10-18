@@ -562,7 +562,10 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let mut host = Bindings::defaulting(world);
     let mut faults = lbp_runtime::add_engine_objects(&mut vm, &mut host, BUDGET_PER_CALL);
     faults.truncate(MAX_FAULT_LINES);
-    let scripts = LevelScripts::new(&vm, &host.world);
+    let mut scripts = LevelScripts::new(&vm, &host.world);
+    // D417: `--native-scripts` runs the native script ports even with the scripts loaded.
+    let native_scripts = all.iter().any(|a| a == "--native-scripts");
+    scripts.set_force_native(native_scripts);
     let header = format!(
         "{header}; scripted Things {}; objects built {built}, unconverted {}",
         scripts.instances.len(),
@@ -585,7 +588,15 @@ pub fn install(app: &mut App) -> Result<(), String> {
         let engine = lbp_runtime::add_engine_objects(&mut shell_vm, &mut shell_host, BUDGET_PER_CALL);
         let room = MAX_FAULT_LINES.saturating_sub(faults.len());
         faults.extend(engine.into_iter().take(room).map(|f| format!("shell: {f}")));
-        let shell_scripts = LevelScripts::new(&shell_vm, &shell_host.world);
+        let mut shell_scripts = LevelScripts::new(&shell_vm, &shell_host.world);
+        shell_scripts.set_force_native(native_scripts);
+        // D417: the Things a native port runs (all of them without the scripts).
+        let ported = shell_scripts
+            .instances
+            .iter()
+            .filter(|i| lbp_runtime::native_script(i.guid).is_some())
+            .count();
+        println!("Level scripts, shell level: native script ports for {ported} Things (Pod, Trigger_Pod; D417)");
         // The session is our Pod when the shell has a pod Thing: the stand-in of the
         // `level_scripts` example. PLACEHOLDER: the game tests the slot the level was
         // entered from. Then the two worlds agree on the state outside a level.
