@@ -1,22 +1,22 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-125.md` (124 for the start checkpoint, 123 for the spawn hold,
-   122 for the player texts, 121 for the cursor, 120 for Back, 119 for the pushes, 118 for
-   Story back, 117 for closed menus, 116 for the slide-in, 115 for the cursor's flight,
-   114 for the launch warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the
-   switch, 110 for the hand-off, 109 for Cross on a level, 108 for the cursor, 107 for the
-   group zoom, 106 for choosing a group, 105 for Back, 104 for the pod computer's stack
-   and main menu)
+1. `docs/level-scripts/part-126.md` (125 for the warning popup, 124 for the start
+   checkpoint, 123 for the spawn hold, 122 for the player texts, 121 for the cursor, 120
+   for Back, 119 for the pushes, 118 for Story back, 117 for closed menus, 116 for the
+   slide-in, 115 for the cursor's flight, 114 for the launch warnings, 113 for Sackboy,
+   112 for the entrance camera, 111 for the switch, 110 for the hand-off, 109 for Cross on
+   a level, 108 for the cursor, 107 for the group zoom, 106 for choosing a group, 105 for
+   Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 181 (D377) merged. PR for D378 (branch `pod-next`,
-  worktree `E:\Projects\wt-d324`): the launch warning popup;
+- PRs 153 (D353) through 182 (D378) merged. PR for D379 (branch `pod-next`,
+  worktree `E:\Projects\wt-d324`): the pod introduction;
   handed to the coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D379.
+  Decision numbers: D348-D399, next free D380.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -93,11 +93,11 @@
   data file is on the disc or update.
 
 ## Next
-1. Open: the state 6/7 load. (Spawn hold D376, start checkpoint D377, warning popup
-   D378 done.)
+1. Done: the launch path (spawn hold D376, start checkpoint D377, warning popup D378;
+   the state 6/7/8 load is a handshake the viewer's switch matches, D379).
    (The native and scripted menus match through Back, D373; the default result 23
    before tick 640 is scripted mode's own seeding at load, native's none is kept, D369.
    The cursor's height and blend have no reader and its drawing is script-side, D374.)
 2. The other entries' states as they unlock (the other searches need the network).
-3. The cutscene threads (`PodIntroductionThread`, `LevelUnlockingThread`) and
-   `OnEnterPod__`'s voice-over; the interactive music.
+3. `LevelUnlockingThread` (the pod introduction is ported, D379) and `OnEnterPod__`'s
+   voice-over; the interactive music.
