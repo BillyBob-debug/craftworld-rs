@@ -6,7 +6,7 @@
 //! the no-scripts run for the first ticks. Numbers only.
 use lbp_runtime::{
     native_script, start_native, LevelWorld, NativeStep, ThingState, EARTH_SCRIPT,
-    ORBITING_MOON_SCRIPT, STORY_EARTH_SPIN_OFFSET,
+    ORBITING_MOON_SCRIPT,
 };
 use lbp_script_vm::natives::Bindings;
 use lbp_script_vm::{Host, MemberKind, Value};
@@ -101,7 +101,8 @@ fn d355_earth_turns_to_the_story_group_as_the_script_does() {
         1e-6,
     );
     // Story opens: the view's spin offset, a new point, eased from here.
-    let offset = Value::Float(STORY_EARTH_SPIN_OFFSET);
+    // The Story view's `EarthSpinOffset` (PlanetsView view 6), as `PlanetsWorld` hands it.
+    let offset = Value::Float(-0.7);
     let this = Value::Thing(Some(EARTH));
     h.set_member(
         MemberKind::Thing,

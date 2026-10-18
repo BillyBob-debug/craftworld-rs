@@ -582,6 +582,17 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let mut faults = lbp_runtime::add_engine_objects(&mut vm, &mut host, BUDGET_PER_CALL);
     faults.truncate(MAX_FAULT_LINES);
     let mut scripts = LevelScripts::new(&vm, &host.world);
+    // D356: the scripted Things and the native port each runs, when it runs one.
+    let ports: Vec<String> = (scripts.instances.iter())
+        .map(|i| {
+            let port = lbp_runtime::native_script(i.guid).map_or("none", |n| n.class());
+            format!("{} g{:08x} {port}", i.thing, i.guid)
+        })
+        .collect();
+    println!(
+        "Level scripts: scripted Things and their native ports: {}",
+        ports.join(", ")
+    );
     // D417: `--native-scripts` runs the native script ports even with the scripts loaded.
     let native_scripts = all.iter().any(|a| a == "--native-scripts");
     scripts.set_force_native(native_scripts);
@@ -1169,12 +1180,11 @@ fn step(
             .tick_level(&mut p.vm, &mut p.host, BUDGET_PER_CALL),
     };
     if let Some(story) = p.story.as_mut() {
-        if story.after_tick(&mut p.host.world) {
+        if story.after_tick(&mut p.host) {
             let shell = p.shell.as_mut().map(|s| &mut s.host.world);
             set_in_use(&mut p.host.world, shell, true);
-            p.fallback_camera = Some(crate::story_fallback::POD_IN_USE_CAMERA);
             println!(
-                "Story at tick {}: opened by the native stand-in (no scripts loaded): the pod computer in use (pod.bin's native port opens the pod, D354), the planets where the scripts leave them, the search state's Story entry (D353)",
+                "Story at tick {}: opened by the native stand-in (no scripts loaded): the pod computer in use (pod.bin's native port opens the pod, D354), the planets world asked for the Story view (its native port blends there, D356), the search state's Story entry (D353)",
                 p.scripts.ticks
             );
         }

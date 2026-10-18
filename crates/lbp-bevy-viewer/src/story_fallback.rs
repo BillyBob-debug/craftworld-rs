@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::io::Write as _;
 
 use lbp_runtime::LevelWorld;
+use lbp_script_vm::natives::Bindings;
 
 /// `--level-scripts-trace PATH`: a JSON line per tick.
 pub struct Trace {
@@ -176,36 +177,14 @@ fn camera_json(world: &LevelWorld) -> String {
     }
 }
 
-/// The planets level's world Thing (Thing 0) as the scripted run leaves it once the pod
-/// computer is in use (MEASURED, the golden trace: at rest from tick 659). STAND-IN for
-/// the planets world script (`PlanetsWorld`, not ported yet); until that exists the Story
-/// screen puts the world Thing where the script leaves it, without the move. The planets
-/// themselves run as native ports (`Earth`, `OrbitingMoon`, D355).
-pub const STORY_LEVEL_THINGS: [(u32, [f32; 16]); 1] = [(
-    0,
-    [
-        1.5296844, 0.44180164, -1.210321, 0., 0., 1.8787454, 0.6857956, 0., 1.2884353, -0.5245254,
-        1.4369438, 0., 1912.1056, 3423.4658, -9460.587, 1.,
-    ],
-)];
-
-/// The camera the planets world script writes while the pod computer is in use (MEASURED,
-/// steady from tick 620 to the end of the run: eye, direction, 1 rad, near 10, far
-/// 100,000, level units). STAND-IN for that script (the Popit lane's).
-pub const POD_IN_USE_CAMERA: lbp_runtime::DisplayCamera = lbp_runtime::DisplayCamera {
-    source: lbp_runtime::CameraSource::Script,
-    pose: lbp_runtime::CameraPose {
-        eye: [0., -299.48035, 902.39044],
-        direction: [0., 0.31498626, -0.94909626],
-    },
-    up: [0., 1., 0.],
-    fov_y_deg: Some(57.29578),
-    near: 10.,
-    far: 100_000.,
-};
+/// The planets view the pod computer asks the planets world for while the Story search
+/// is up: 6 (INFERRED, part 82: the search state's `GetPlanetsViewType__` answers 6 or 7
+/// under Earth, and the game's settled Story frame matches view 6's Earth size).
+pub const STORY_PLANETS_VIEW: i32 = 6;
 
 /// `--story` without the game's scripts: the Story screen from the first tick, the pod
-/// opened by pod.bin's native port and the search state's Story entry run natively
+/// opened by pod.bin's native port, the planets world's by its own (D356) and the search
+/// state's Story entry run natively
 /// ([`lbp_runtime::PodStateSearchStory`]).
 #[derive(Default)]
 pub struct Fallback {
@@ -213,22 +192,22 @@ pub struct Fallback {
 }
 
 impl Fallback {
-    /// After a tick: on the first, the planets placed and Story chosen; on every later
-    /// one the open search's update. True on the tick it opens; the caller then sets the
-    /// pod computer in use, and pod.bin's native port (D417) opens the pod (D354).
-    pub fn after_tick(&mut self, level: &mut LevelWorld) -> bool {
+    /// After a tick: on the first, the planets world asked for the Story view (its
+    /// native port, D356, then blends there and moves the camera) and Story chosen; on
+    /// every later one the open search's update. True on the tick it opens; the caller
+    /// then sets the pod computer in use, and pod.bin's native port (D417) opens the pod.
+    pub fn after_tick(&mut self, host: &mut Bindings<LevelWorld>) -> bool {
         if self.search.is_open() {
-            self.search.update(level);
+            self.search.update(&mut host.world);
             return false;
         }
-        for (thing, m) in STORY_LEVEL_THINGS {
-            level.place_thing(thing, m);
+        if let Some(world) = host.world.world {
+            let args = [(4, lbp_script_vm::Value::Int(STORY_PLANETS_VIEW))];
+            let set_view = "SetViewFromRemotePodComputer__i";
+            let port = &lbp_runtime::PLANETS_WORLD_PORT;
+            lbp_runtime::start_native(port, host, world, set_view, &args);
         }
-        if let Some(earth) = level.thing_with_script(lbp_runtime::EARTH_SCRIPT) {
-            let offset = lbp_script_vm::Value::Float(lbp_runtime::STORY_EARTH_SPIN_OFFSET);
-            level.set_script_member(earth, "SpinOffset", offset);
-        }
-        self.search.open(level);
+        self.search.open(&mut host.world);
         true
     }
 }
