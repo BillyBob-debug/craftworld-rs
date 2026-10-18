@@ -1398,6 +1398,20 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
         let (a, b) = (vec4(param(c, 0)?)?, vec4(param(c, 1)?)?);
         Ok(Value::Vec4(std::array::from_fn(|i| a[i] * b[i])))
     }),
+    // D384: the pending-link clusters' angle test and `CalcAverageDir` (FOUND names and
+    // types, the 01.33 listings; the usual 3D dot and per-element meanings, INFERRED).
+    ("Math", "dot3__rr", |_, c| {
+        let (a, b) = (vec4(param(c, 0)?)?, vec4(param(c, 1)?)?);
+        Ok(Value::Float(a[0] * b[0] + a[1] * b[1] + a[2] * b[2]))
+    }),
+    ("Math", "minPerElem__rr", |_, c| {
+        let (a, b) = (vec4(param(c, 0)?)?, vec4(param(c, 1)?)?);
+        Ok(Value::Vec4(std::array::from_fn(|i| a[i].min(b[i]))))
+    }),
+    ("Math", "maxPerElem__rr", |_, c| {
+        let (a, b) = (vec4(param(c, 0)?)?, vec4(param(c, 1)?)?);
+        Ok(Value::Vec4(std::array::from_fn(|i| a[i].max(b[i]))))
+    }),
     ("Math", "length3__r", |_, c| {
         Ok(Value::Float(len3(vec4(param(c, 0)?)?)))
     }),
@@ -3338,7 +3352,7 @@ pub const UI_CLASSES: [&str; 2] = ["Gooey", "Callout"];
 /// D319: natives of other classes the pod computer's per-frame step and its main menu ask
 /// (part 46 found 28 kinds of them unbound in the planets level), also answered by
 /// [`World::ui_call`].
-pub const UI_NATIVES: [(&str, &str); 76] = [
+pub const UI_NATIVES: [(&str, &str); 88] = [
     ("Planets", "CheckOverlayNeedsUpdate__"),
     ("PodComputer", "GetPodComputerUserPlayerNumber__"),
     (
@@ -3425,6 +3439,19 @@ pub const UI_NATIVES: [(&str, &str); 76] = [
     ("Planet", "MoveCursorToResult__Q18SearchResultHandleb"),
     ("Planet", "GetCurResult__"),
     ("GriefReport", "SetContext__Q18SearchResultHandle"),
+    // D384: the scripted level unlocking thread and its pending-link clusters.
+    ("Game", "GetPendingLink__i"),
+    ("Game", "ClearPendingLink__Q8SlotLink"),
+    ("PlanetsWorld", "CanStartEndOfLevelSequence__"),
+    ("PodComputer", "IsLinkInCurrentSearch__Q8SlotLink"),
+    ("PodComputer", "GetBadgeDir__Q6SlotID"),
+    ("PodComputer", "SetBadgeUnlocking__Q6SlotID"),
+    ("PodComputer", "UnlockBadge__Q6SlotID"),
+    ("PodComputer", "MoveCursorToPos__rb"),
+    ("PodComputer", "MoveCursorToResult__Q6SlotIDb"),
+    ("PodComputer", "HasCursorArrived__"),
+    ("PodComputer", "GetFocusPlanet__"),
+    ("SearchDetails", "UpdateAllSearchDetailsCachedInfo__"),
 ];
 
 #[cfg(test)]
@@ -4080,8 +4107,8 @@ mod tests {
         assert_eq!(pressed, Ok(Value::Bool(false)));
         assert_eq!(w.0[7].pad.unwrap().now, START_BUTTON);
         // The table: 249 natives before these six; D274 added two, D295 four, D319 one, D360 one
-        // (host-only), D381 one.
-        assert_eq!(bound().count(), 265);
+        // (host-only), D381 one, D384 three.
+        assert_eq!(bound().count(), 268);
     }
 
     #[test]
@@ -4140,8 +4167,9 @@ mod tests {
         assert!((wrap(-2. * TAU - 0.5) + 0.5).abs() < 1e-4);
         assert!(call("Math", "ModAngleToWithinPI__f", &[Value::Int(1)]).is_err());
         assert_eq!(mod_angle_to_within_pi(0.25), wrap(0.25));
-        // The table: 255 natives before these two; D295 added four, D319 one, D360 one, D381 one.
-        assert_eq!(bound().count(), 265);
+        // The table: 255 natives before these two; D295 added four, D319 one, D360 one, D381 one,
+        // D384 three.
+        assert_eq!(bound().count(), 268);
     }
 
     #[test]
@@ -4267,8 +4295,8 @@ mod tests {
         );
         assert_eq!(w.0, 3);
         // The table: 238 natives before these eleven; D273 added six, D274 two, D295 four, D319
-        // one, D360 one, D381 one.
-        assert_eq!(bound().count(), 265);
+        // one, D360 one, D381 one, D384 three.
+        assert_eq!(bound().count(), 268);
     }
 
     #[test]
@@ -4293,6 +4321,17 @@ mod tests {
             call("Math", "length3__r", &[Value::Vec4([3., 4., 0., 9.])]),
             Ok(Value::Float(5.))
         );
+        // D384: the 3D dot ignores w; min and max go per element.
+        let (u, v) = (
+            Value::Vec4([1., 2., 3., 9.]),
+            Value::Vec4([4., -5., 6., 9.]),
+        );
+        let two = [u.clone(), v.clone()];
+        assert_eq!(call("Math", "dot3__rr", &two), Ok(Value::Float(12.)));
+        let min = Value::Vec4([1., -5., 3., 9.]);
+        assert_eq!(call("Math", "minPerElem__rr", &two), Ok(min));
+        let max = Value::Vec4([4., 2., 6., 9.]);
+        assert_eq!(call("Math", "maxPerElem__rr", &[u, v]), Ok(max));
         assert_eq!(
             call(
                 "Math",

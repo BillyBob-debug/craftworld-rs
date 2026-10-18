@@ -6463,3 +6463,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D379 the pod introduction (2026-10-18)
 - Part 126 (`docs/level-scripts/part-126.md`): a fresh profile's Pod zooms in from
   below the planets over 451 ticks without the scripts; the level load needs no change.
+
+## D380 the level unlocking sequence (2026-10-18)
+- Part 127 (`docs/level-scripts/part-127.md`): the Pod's unlock sequence read for a
+  later port; it needs a level finish and audio, which the viewer lacks.

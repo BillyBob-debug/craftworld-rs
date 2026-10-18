@@ -881,6 +881,9 @@ impl LevelWorld {
         if let Some(v) = self.story_result_query(class, mangled, receiver, args) {
             return Some(v);
         }
+        if let Some(v) = self.unlock_query(class, mangled, args) {
+            return Some(v);
+        }
         let int = || match args.first() {
             Some(Value::Int(i)) => Some(*i),
             _ => None,
@@ -896,7 +899,8 @@ impl LevelWorld {
                 Value::Void
             }
             // The selected crafteroid; null before a planet is selected.
-            ("Planets", "GetFocusPlanet__") => Value::Object(
+            // D384: the pod computer's is the same planet (INFERRED).
+            ("Planets", "GetFocusPlanet__") | ("PodComputer", "GetFocusPlanet__") => Value::Object(
                 search
                     .selected_planet
                     .and_then(|i| usize::try_from(i).ok()?.checked_sub(1))
@@ -1044,7 +1048,13 @@ impl LevelWorld {
             }
             ("SearchResults", "GetDefaultResult__") => handle_of(search.default_result),
             ("SearchResults", "SetDefaultResult__Q18SearchResultHandle") => {
-                search.default_result = by_handle(args.first());
+                // D384: a handle a script built (the pending-link cluster's, for its
+                // group) is not one the world can read; the default stays (INFERRED).
+                let built = matches!(args.first(), Some(Value::Object(Some(_))));
+                match by_handle(args.first()) {
+                    None if built => {}
+                    found => search.default_result = found,
+                }
                 Value::Void
             }
             // INFERRED: 1 is the slot kind (the SearchResultHandle of a slot has `_Type` 1,
