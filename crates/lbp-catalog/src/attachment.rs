@@ -286,8 +286,13 @@ impl AttachedSource {
                 return Err("Protected container; stopped at prefix".into());
             }
             let mut checked = CheckedFile { file, control };
-            let parsed =
+            let mut parsed =
                 read_farc(&mut checked, ReadLimits::default()).map_err(|e| e.to_string())?;
+            // D600: the scanner saves each table sorted (lbp-cli), and the game's own
+            // `cumulative_0133.farc` in an RPCS3 install is not, so compare in that order.
+            parsed
+                .entries
+                .sort_by_key(|e| (e.sha1, e.offset, e.entry_index));
             if parsed.file_size != archive.file_size
                 || parsed.table_offset != archive.table_offset
                 || parsed.entries.len() != archive.entries.len()
@@ -328,9 +333,23 @@ impl AttachedSource {
                     .iter()
                     .find(|a| a.path == candidate.archive)
                     .ok_or("Candidate archive absent")?;
+                // D600: `entry_index` is the archive table's own index; saved entries are
+                // sorted by hash, so a table that is not (RPCS3's cumulative archive) needs
+                // the hash's run searched.
+                let sha1 = r.map_row.sha1.to_ascii_lowercase();
                 let entry = archive
                     .entries
                     .get(candidate.entry_index)
+                    .filter(|e| e.entry_index == candidate.entry_index)
+                    .or_else(|| {
+                        let from = archive
+                            .entries
+                            .partition_point(|e| e.sha1.to_ascii_lowercase() < sha1);
+                        archive.entries[from..]
+                            .iter()
+                            .take_while(|e| e.sha1.eq_ignore_ascii_case(&sha1))
+                            .find(|e| e.entry_index == candidate.entry_index)
+                    })
                     .ok_or("Candidate archive entry absent")?;
                 if candidate.offset != entry.offset
                     || candidate.size != entry.size

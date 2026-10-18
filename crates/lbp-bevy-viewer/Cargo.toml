@@ -19,6 +19,13 @@ lbp-level.workspace = true
 lbp-runtime.workspace = true
 lbp-resource.workspace = true
 lbp-sim.workspace = true
+# D600: the launcher builds the asset index in-process.
+lbp-cli.workspace = true
+lbp-io.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+# D600: the launcher's Browse button (native folder picker).
+rfd = { version = "0.15", default-features = false }
 
 [dev-dependencies]
 # D121: headless WGSL validation of the authored preview shader (same major as Bevy).

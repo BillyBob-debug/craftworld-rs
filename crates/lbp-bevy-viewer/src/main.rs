@@ -6,6 +6,7 @@ mod fog_tint;
 mod game_font;
 mod glow_post;
 mod gooey_ui;
+mod launcher;
 mod menu_layer;
 mod mlaa_post;
 mod pod_menu;
@@ -1106,6 +1107,11 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
     Ok(v)
 }
 fn main() {
+    // D600: double-clicked with no arguments (or `--launcher`) opens the friends' menu.
+    if launcher::wanted() {
+        launcher::run();
+        return;
+    }
     if std::env::args().skip(1).any(|a| a == "--ui-demo") {
         gooey_ui::run_ui_demo();
         return;
@@ -1241,6 +1247,11 @@ pub(crate) fn place_on_second_monitor(
                 );
                 window.visible = true;
             }
+        }
+    } else if !monitors.is_empty() {
+        // D600: a one-monitor PC (a friend's) shows the window where it is.
+        for mut window in &mut windows {
+            window.visible = true;
         }
     }
 }
