@@ -484,9 +484,7 @@ fn pill_side(
     let outward = if t >= 0.499 { Side::Right } else { Side::Left };
     if lo - pw / 2. < safe[0] {
         Side::Right
-    } else if hi + pw / 2. > safe[1] {
-        Side::Left
-    } else if card_ndc_x > 0.6 {
+    } else if hi + pw / 2. > safe[1] || card_ndc_x > 0.6 {
         Side::Left
     } else if card_ndc_x < -0.6 {
         Side::Right
@@ -1281,12 +1279,43 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
                 popit_input,
                 popit_turn,
                 popit_layout,
+                popit_look,
                 popit_page_ui,
                 popit_slide,
             )
                 .chain()
                 .after(crate::sackboy_play::show_sackboy),
-        );
+        )
+        .init_resource::<crate::sackboy_play::LookTarget>();
+}
+
+/// D415: his head's height over his feet in the figure's own space (level units; INFERRED
+/// from the ~205-unit standing mesh, D242: the head's middle at about 0.8 of it).
+const HEAD_Y: f32 = 165.;
+
+/// D415: while the Popit cursor is shown, the direction from his head to it on screen
+/// (x right, y up) for the picker's target look (FOUND rule 0x20e28c: the cursor's world
+/// place minus the head's, x and y only; the screen direction stands in for it, INFERRED
+/// close enough with the camera looking down the level's z).
+fn popit_look(
+    p: Res<Popit>,
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    figure: Query<&GlobalTransform, With<crate::sackboy_play::Figure>>,
+    mut look: ResMut<crate::sackboy_play::LookTarget>,
+) {
+    let dir = (|| {
+        let c = p.cursor?;
+        let scale = windows.single().ok()?.height() / FRAME_H;
+        let (cam, cam_t) = cameras.iter().find(|(c, _)| c.is_active)?;
+        let head = figure.single().ok()?.transform_point(Vec3::Y * HEAD_Y);
+        let at = cam.world_to_viewport(cam_t, head).ok()?;
+        let d = c * scale - at;
+        Some([d.x, -d.y])
+    })();
+    if look.0 != dir {
+        look.0 = dir;
+    }
 }
 
 impl Popit {

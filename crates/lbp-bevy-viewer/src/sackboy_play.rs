@@ -1262,10 +1262,16 @@ fn pod_report(
 }
 
 /// The picker's layers and facing for this tick, after the controller step.
+/// D415: the direction (x right, y up, screen px) from his head to the Popit cursor while
+/// it is shown; `popit_play` writes it, the picker turns his head toward it.
+#[derive(Resource, Default)]
+pub(crate) struct LookTarget(pub(crate) Option<[f32; 2]>);
+
 fn tick_anim(
     sackboy: Query<&SackboyBody>,
     mut figure: Query<&mut Figure>,
     mut pod: Option<ResMut<PodSackboy>>,
+    look: Option<Res<LookTarget>>,
 ) {
     // D320: the pod computer clips' own frame counts, once his figure has them.
     if let (Some(pod), Ok(f)) = (pod.as_mut(), figure.single()) {
@@ -1300,6 +1306,7 @@ fn tick_anim(
             f.picked += 1;
         }
     }
+    f.picker.set_look_target(look.and_then(|l| l.0));
     let a = f.picker.tick(&body.controller, body.grounded);
     // D282: at the pod computer he turns to face into the screen.
     let in_use = pod.as_ref().is_some_and(|p| p.in_use);
