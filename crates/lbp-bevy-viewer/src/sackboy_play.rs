@@ -38,7 +38,7 @@ use lbp_preview::skinned::{
 };
 use lbp_sim::avian2d::prelude::*;
 use lbp_sim::character::{
-    spawn_sackboy, SackboyBody, SackboyPlugin, CENTRE_ABOVE, FLOOR_REST, HALF_SEGMENT, HEIGHT,
+    spawn_sackboy_held, SackboyBody, SackboyPlugin, CENTRE_ABOVE, FLOOR_REST, HALF_SEGMENT, HEIGHT,
     RADIUS,
 };
 use lbp_sim::sackboy::{Input, Mood, FOOT_PLANT_X, WALK_SPEED};
@@ -65,6 +65,9 @@ pub(crate) struct Play {
     /// The follow camera has taken the game's default framing for this Sackboy
     /// ([`show_sackboy`]).
     framed: bool,
+    /// D376: the ticks the next spawn is held at its checkpoint
+    /// ([`lbp_sim::character::SPAWN_HOLD_TICKS`] for a level the Pod launched).
+    hold: u8,
 }
 
 /// A level's checkpoints in reader order: (Thing index, world matrix).
@@ -1087,6 +1090,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             engage,
             tick: 0,
             framed: false,
+            hold: 0,
         })
         .add_systems(
             Update,
@@ -1325,6 +1329,9 @@ fn respawn(
     play.scene = Some(scene);
     play.spawn = spawn;
     play.framed = false;
+    // D376: the launched level's checkpoint holds him before releasing him. INFERRED: the
+    // game holds every checkpoint spawn; the other spawns keep their measured timing.
+    play.hold = lbp_sim::character::SPAWN_HOLD_TICKS;
 }
 
 fn spawn_world(mut commands: Commands, mut play: ResMut<Play>) {
@@ -1333,7 +1340,8 @@ fn spawn_world(mut commands: Commands, mut play: ResMut<Play>) {
     };
     spawn_scene(&mut commands, &scene);
     let [x, y, z] = play.spawn;
-    spawn_sackboy(&mut commands, [x, y], z);
+    let hold = std::mem::take(&mut play.hold);
+    spawn_sackboy_held(&mut commands, [x, y], z, hold);
 }
 
 fn read_pad(
