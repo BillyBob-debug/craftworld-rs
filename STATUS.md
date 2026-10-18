@@ -6427,3 +6427,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D370 closed menus go (2026-10-18)
 - Part 117 (`docs/level-scripts/part-117.md`): a closed or covered Pod menu's frame
   goes 15 ticks after it is last built, so the scripts' `OldStates` empty again.
+
+## D371 Story slides back (2026-10-18)
+- Part 118 (`docs/level-scripts/part-118.md`): native Pod menus follow the world Thing
+  every tick, so Story back from a group slides in and settles as the scripted one.

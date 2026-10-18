@@ -1524,6 +1524,10 @@ fn step(
                 slot.max_players.unwrap_or(4),
                 slot.move_recommended
             );
+            for &warning in &pod.launch_warnings {
+                let text = p.host.world.launch_warning_text(warning);
+                println!("Launch warning {warning:?}: {text:?} (D375)");
+            }
         }
     }
     if let Some(trace) = p.trace.as_mut() {

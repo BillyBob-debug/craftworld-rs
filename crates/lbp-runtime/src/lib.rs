@@ -2797,6 +2797,13 @@ impl LevelWorld {
         self.translations.iter().find_map(|t| t.get(key))
     }
 
+    /// D375 (part 122): a launch warning's popup text, its key's text with the warning's
+    /// numbers put in ([`format_lams`]); `None` for a key in no loaded table.
+    pub fn launch_warning_text(&self, warning: LaunchWarning) -> Option<String> {
+        let (key, args) = warning.text();
+        self.lams(key).map(|t| format_lams(t, &args))
+    }
+
     /// D342: the slot the Story view's info bubble and badge card are about: the
     /// search's default result while Story is up.
     pub fn story_info_slot(&self) -> Option<&SearchSlot> {
