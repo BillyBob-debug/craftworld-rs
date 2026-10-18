@@ -14,44 +14,10 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
-  # Non-GUI crates only; lbp-bevy-viewer and lbp-viewer are excluded (see docs/d72-ci.md).
-  CRATES: >-
-    -p lbp-core -p lbp-io -p lbp-archive -p lbp-resource -p lbp-texture
-    -p lbp-mesh -p lbp-catalog -p lbp-preview -p lbp-cli -p lbp-gooey
-    -p lbp-level -p lbp-script-vm -p lbp-ui-script -p lbp-runtime -p lbp-sim
 
 jobs:
+  # The whole workspace, viewers included (their tests run headless; see docs/d72-ci.md).
   rust:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-      # Pinned to the PC toolchain so new Clippy lints don't surprise branches.
-      # Bump together with the PC (docs/workflow.md section 7).
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: "1.99.0"
-          components: rustfmt, clippy
-      - uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: cargo-${{ runner.os }}-1.99.0-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-1.99.0-
-      - name: Format
-        run: cargo fmt --all --check
-      - name: Test
-        run: cargo test -q --locked $CRATES
-      - name: Clippy
-        run: cargo clippy -q --locked $CRATES --all-targets -- -D warnings
-
-  # The viewers only compile here (no display). Runs on main pushes only to save
-  # Actions minutes; the PC builds both viewers before every merge.
-  viewers:
-    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
@@ -60,21 +26,23 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends libfontconfig1-dev libasound2-dev libudev-dev libwayland-dev libxkbcommon-dev
+      # Pinned to the PC toolchain so new Clippy lints don't surprise branches.
+      # Bump together with the PC (docs/workflow.md section 7).
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: "1.99.0"
-      - uses: actions/cache@v4
+          components: rustfmt, clippy
+      # Keyed on the toolchain and Cargo.lock; only main saves, so PR branches don't
+      # evict each other's caches.
+      - uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-            target
-          key: cargo-viewers-${{ runner.os }}-1.99.0-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-viewers-${{ runner.os }}-1.99.0-
-      - name: Check viewers
-        run: cargo check -q --locked -p lbp-viewer -p lbp-bevy-viewer --all-targets
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - name: Format
+        run: cargo fmt --all --check
+      - name: Test
+        run: cargo test -q --locked --workspace
+      - name: Clippy
+        run: cargo clippy -q --locked --workspace --all-targets -- -D warnings
 
   python:
     runs-on: ubuntu-latest
