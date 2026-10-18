@@ -365,9 +365,11 @@ pub struct RegionOverride {
 
 /// PCheckpoint as stored, the fields kept (D307): the spawns left, the most it holds and
 /// whether this instance spawns without limit. The game's per-frame checkpoint update
-/// (01.33, 0x5aa9c) lights the checkpoint's ring from the share left.
+/// (01.33, 0x5aa9c) lights the checkpoint's ring from the share left. D377: `active` is
+/// the stored activeFlags, which the start pick (0x5b46c) scores.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub struct Checkpoint {
+    pub active: bool,
     pub spawns_left: i32,
     pub max_spawns_left: i32,
     pub infinite_spawns: bool,
@@ -1177,7 +1179,7 @@ fn part_body(
             });
         }
         "CHECKPOINT" => {
-            r.bool()?;
+            let active = r.bool()?;
             r.i32()?;
             let spawns_left = r.s32()?;
             let max_spawns_left = r.s32()?;
@@ -1187,6 +1189,7 @@ fn part_body(
             r.i32()?;
             r.i32()?;
             things.list[me].data.checkpoint = Some(Checkpoint {
+                active,
                 spawns_left,
                 max_spawns_left,
                 infinite_spawns,

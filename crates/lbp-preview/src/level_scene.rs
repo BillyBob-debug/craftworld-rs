@@ -2749,9 +2749,10 @@ fn apply_runtime_textures(
     );
 }
 
-/// P2c: CHECKPOINT Things with a usable POS world matrix (spawn candidates).
+/// P2c: CHECKPOINT Things with a usable POS world matrix (spawn candidates), in Thing
+/// order except that the game's start checkpoint comes first (D377).
 pub fn checkpoints(things: &[ThingRecord]) -> Vec<(usize, [f32; 16])> {
-    things
+    let mut found: Vec<(usize, [f32; 16])> = things
         .iter()
         .filter(|t| t.parts.contains(&"CHECKPOINT"))
         .filter_map(|t| {
@@ -2759,7 +2760,51 @@ pub fn checkpoints(things: &[ThingRecord]) -> Vec<(usize, [f32; 16])> {
             world_matrix_check(&pos.world).ok()?;
             Some((t.index, pos.world))
         })
-        .collect()
+        .collect();
+    let mut best: Option<(usize, i32)> = None;
+    for (k, (index, _)) in found.iter().enumerate() {
+        let score = start_checkpoint_score(things, *index);
+        if best.is_none_or(|(_, b)| b < score) {
+            best = Some((k, score));
+        }
+    }
+    if let Some((k, _)) = best {
+        let start = found.remove(k);
+        found.insert(0, start);
+    }
+    found
+}
+
+/// D377: the parent mesh GUIDs the game's classifier (01.33, 0x3ed2c via 0x58770) counts
+/// as category 'n', scored +4. INFERRED: the entrance gates.
+pub const START_CHECKPOINT_MESHES: [u32; 4] = [0x7a06, 0x1d1b5, 0x1d1bc, 0x1dd3f];
+/// D377: the parent mesh GUID of category 'r' (0x584e4), scored -3.
+pub const AVOIDED_CHECKPOINT_MESH: u32 = 0x2d4f;
+
+/// D377: the game's start-checkpoint score (FOUND, 01.33, 0x5b46c): +2 when active, then
+/// by category, read from the GUID on the checkpoint's parent: 'r' -3, 'n' +4, else
+/// infinite ('q') or double ('p') +1. The highest wins, the first on ties. INFERRED:
+/// the runtime +0x50 is the parent's render mesh, and a double holds 6 spawns.
+/// Not ported: revisions up to 0x26d (lowest x), and the world flag that activates every
+/// checkpoint but 'r'.
+pub fn start_checkpoint_score(things: &[ThingRecord], index: usize) -> i32 {
+    let Some(thing) = things.get(index) else {
+        return 0;
+    };
+    let cp = thing.data.checkpoint.unwrap_or_default();
+    let mesh = thing
+        .parent
+        .and_then(|p| things.get(p))
+        .and_then(|p| p.data.render_mesh.as_ref())
+        .and_then(|r| r.mesh.as_ref())
+        .and_then(|d| d.guid);
+    let category = match mesh {
+        Some(AVOIDED_CHECKPOINT_MESH) => -3,
+        Some(g) if START_CHECKPOINT_MESHES.contains(&g) => 4,
+        _ if cp.infinite_spawns || cp.max_spawns_left >= 6 => 1,
+        _ => 0,
+    };
+    category + if cp.active { 2 } else { 0 }
 }
 
 /// D160: decodes a decal texture as a plain clamped texture material sampled with the
@@ -4590,10 +4635,66 @@ mod tests {
 
     /// D308: an infinite checkpoint's ring is white (x = 1, alpha 0.5) whatever its counts,
     /// and every checkpoint's RGB is white in normal play.
+    /// D377: the game's start pick (0x5b46c) puts an entrance-gate checkpoint, or an
+    /// active one, ahead of earlier Things; 'r' loses to a plain one; ties keep the first.
+    #[test]
+    fn d377_start_checkpoint_follows_the_game_score() {
+        use lbp_level::parts::Checkpoint;
+        let cp = |index, parent: Option<usize>, active, max, infinite| {
+            let mut t = thing(index, None, Some(identity_at(index as f32)));
+            t.parts = vec!["POS", "CHECKPOINT"];
+            t.parent = parent;
+            t.data.render_mesh = None;
+            t.data.checkpoint = Some(Checkpoint {
+                active,
+                spawns_left: max,
+                max_spawns_left: max,
+                infinite_spawns: infinite,
+            });
+            t
+        };
+        let order =
+            |things: &[ThingRecord]| checkpoints(things).iter().map(|c| c.0).collect::<Vec<_>>();
+        // 0: a plain gate's mesh; 1: an entrance mesh; 2: the avoided mesh.
+        let meshes = [
+            thing(0, Some(0x1d1bb), None),
+            thing(1, Some(0x7a06), None),
+            thing(2, Some(AVOIDED_CHECKPOINT_MESH), None),
+        ];
+        let level = |cps: Vec<ThingRecord>| meshes.iter().cloned().chain(cps).collect::<Vec<_>>();
+        // The entrance (+4) beats an earlier active plain one (+2).
+        let a = level(vec![
+            cp(3, Some(0), true, 3, false),
+            cp(4, Some(1), false, 3, false),
+        ]);
+        assert_eq!(order(&a), [4, 3]);
+        // Active (+2) beats infinite (+1), which beats plain (0); the rest keep order.
+        let b = level(vec![
+            cp(3, Some(0), false, 3, false),
+            cp(4, None, false, 0, true),
+            cp(5, Some(0), true, 3, false),
+        ]);
+        assert_eq!(order(&b), [5, 3, 4]);
+        // 'r' scores -3, so even active (-1) it loses to a plain one (0).
+        let c = level(vec![
+            cp(3, Some(2), true, 3, false),
+            cp(4, Some(0), false, 3, false),
+        ]);
+        assert_eq!(order(&c), [4, 3]);
+        // Ties keep the first; a double (6 spawns) counts like infinite.
+        let d = level(vec![
+            cp(3, Some(0), false, 6, false),
+            cp(4, None, false, 0, true),
+        ]);
+        assert_eq!(order(&d), [3, 4]);
+        assert_eq!(start_checkpoint_score(&d, 3), 1);
+    }
+
     #[test]
     fn d308_infinite_checkpoint_ring_white() {
         use lbp_level::parts::Checkpoint;
         let c = |left, max, inf| Checkpoint {
+            active: false,
             spawns_left: left,
             max_spawns_left: max,
             infinite_spawns: inf,
@@ -4614,6 +4715,7 @@ mod tests {
     fn d307_checkpoint_light_alpha() {
         use lbp_level::parts::Checkpoint;
         let c = |left, max| Checkpoint {
+            active: false,
             spawns_left: left,
             max_spawns_left: max,
             infinite_spawns: false,
