@@ -260,6 +260,8 @@ pub struct GooeyState {
     pub first_built: BTreeMap<(i32, i32), i32>,
     /// Builds of top-level frames.
     pub builds: u64,
+    /// The build number (`builds`) of each top-level frame's last build.
+    pub last_build: BTreeMap<(i32, i32), u64>,
     /// The node that has the focus (high bits, id), by `EnsureNodeOrDescendantHasFocus`.
     pub focus: Option<(i32, i32)>,
     pub high_bits: i32,
@@ -307,6 +309,10 @@ pub struct GooeyInput {
 pub const GOOEY_ACTIVATE: i32 = 256;
 /// D325: the back bit of `EndFrameInput`'s answer and mask.
 pub const GOOEY_BACK: i32 = 512;
+
+/// D358: `Network.EPartyOperation` with no party operation under way (INFERRED: the value
+/// the pod computer's scripts compare with before they act on a cancel).
+pub const NO_PARTY_OPERATION: i32 = 20;
 
 impl GooeyState {
     fn font_scale(&self) -> f32 {
@@ -405,6 +411,7 @@ impl GooeyState {
             self.first_built.entry(key).or_insert(frame);
             self.frames.insert(key, f);
             self.builds += 1;
+            self.last_build.insert(key, self.builds);
             if self.build_frames.len() < 256 {
                 self.build_frames.push(frame);
             }
@@ -440,9 +447,14 @@ impl GooeyState {
     }
 
     /// The root frame of a menu that has been drawn: the top-level frame with an item
-    /// matrix, the last one set.
+    /// matrix, the last one set. On the same frame the last built wins (D358): a popped
+    /// state still draws from `OldStates` until it has transitioned out, but only the
+    /// states on the stack rebuild their frame.
     pub fn drawn_menu(&self) -> Option<DrawnMenu<'_>> {
-        let (key, frame_set) = self.item_matrix_frames.iter().max_by_key(|(_, f)| **f)?;
+        let (key, frame_set) = self
+            .item_matrix_frames
+            .iter()
+            .max_by_key(|(k, f)| (**f, self.last_build.get(*k).copied().unwrap_or(0)))?;
         Some(DrawnMenu {
             frame: self.frames.get(key)?,
             matrix: *self.item_matrices.get(key)?,
@@ -780,6 +792,12 @@ impl LevelWorld {
                 Value::Int(0)
             }
             ("Start_Menu", "GetFriendStatus__Q13PodFriendData") => Value::Int(0),
+            // D358: no party operation is under way. INFERRED: 20 is the value the scripts
+            // test for "none" (`PodComputer.OnPlanetCancel__` plays the error sound and
+            // stays put for any other, `PodStateSearchList` tests the same value).
+            ("Network", "GetPartyOperation__") => Value::Int(NO_PARTY_OPERATION),
+            // No dive-in is under way to cancel.
+            ("PodComputer", "CancelDiveIn__") => Value::Void,
             ("Network", "CrossPlayDisconnect__")
             | ("Network", "SendPodStateChangedTelemetryMessage__Q6String")
             | ("PartyManagement", "GatherFriendData__[Q13PodFriendData") => Value::Void,
@@ -890,6 +908,16 @@ impl LevelWorld {
             }
             // No grief report is open.
             ("GriefReport", "ClearContext__") => Value::Void,
+            // D358: the search state's Back (`EndFrameInput` bit 0x200). FOUND (01.33
+            // listings): a native on the pod computer; the game answers it with the
+            // exported `OnPlanetCancel__`, which pops the state. A native cannot call the
+            // script, so the pod computer is kept for the host to call after the tick.
+            ("PodComputer", "TriggerOnPlanetCancel__") => {
+                if let Some(Value::Object(Some(o))) = receiver {
+                    self.pod.planet_cancel = Some(*o);
+                }
+                Value::Void
+            }
             _ => return None,
         })
     }
@@ -1803,6 +1831,27 @@ mod tests {
         g(w, "EndFrame__", &[]);
         g(w, "EndFrameInput__i", &[i(512)]);
         g(w, "ResetScriptUIDHighBits__", &[]);
+    }
+
+    #[test]
+    fn d358_a_tie_goes_to_the_frame_built_last() {
+        // After Back the popped Story frame (2, 1) still draws from OldStates on the same
+        // frame as the main menu (1, 1), but only the main menu rebuilds.
+        let mut g = GooeyState::default();
+        for (key, build) in [((1, 1), 3), ((2, 1), 2)] {
+            g.frames.insert(key, GooeyFrame::default());
+            g.item_matrices.insert(key, [0.; 16]);
+            g.item_matrix_frames.insert(key, 701);
+            g.last_build.insert(key, build);
+        }
+        assert_eq!(g.drawn_menu().map(|m| m.matrix_frame), Some(701));
+        let picked = |g: &GooeyState| {
+            let m = g.drawn_menu().expect("drawn");
+            std::ptr::eq(m.frame, &g.frames[&(1, 1)])
+        };
+        assert!(picked(&g));
+        g.item_matrix_frames.insert((2, 1), 702);
+        assert!(!picked(&g));
     }
 
     #[test]

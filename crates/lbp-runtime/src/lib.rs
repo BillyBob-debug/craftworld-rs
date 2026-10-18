@@ -4053,6 +4053,29 @@ impl LevelScripts {
         Some(o)
     }
 
+    /// D358: `PodComputer.OnPlanetCancel__()` on the pod computer whose
+    /// `TriggerOnPlanetCancel__` was called on the tick before (the search state's Back),
+    /// so the state is popped back to the main menu. INFERRED: the game calls it from
+    /// the native at once; here it runs right after the tick that asked for it.
+    pub fn planet_cancel(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut Bindings<LevelWorld>,
+        budget: u64,
+    ) -> Option<Result<Step, lbp_script_vm::Fault>> {
+        let puter = host.world.pod.planet_cancel.take()?;
+        let class = vm.class_of(puter)?;
+        let mut b = budget;
+        // The receiver in register 0, as for a thread's main.
+        Some(vm.start_registers(
+            host,
+            class,
+            "OnPlanetCancel__",
+            &[(0, Value::Object(Some(puter)))],
+            &mut b,
+        ))
+    }
+
     /// The per-frame call of the global settings: for each of the eight slots in order,
     /// `ApplyGlobalSettings__()` on the scripted Thing that holds the slot
     /// ([`LevelWorld::global_settings_holder`], which also clears a slot whose Thing is

@@ -107,6 +107,9 @@ struct Play {
     /// D329 `--level-scripts-choose-at N` (QA): the focused entry of the scripts' menu is
     /// chosen on tick N (as `level_scripts --menu=N:choose`); none once that is done.
     choose_at: Option<u64>,
+    /// D358 `--level-scripts-back-at N[,M...]` (QA): the menu's Back on tick N (as the
+    /// Puter key's Back), one press per listed tick, in order.
+    back_at: Vec<u64>,
     /// Level1 part 3: the player's close button (C or Circle) on the open speech bubble,
     /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N. Part 4:
     /// the option takes a comma list (`120,600`), one press per tick, in order.
@@ -458,6 +461,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let press_at = tick_option(&all, "--level-scripts-press-at")?;
     let choose_at = tick_option(&all, "--level-scripts-choose-at")?;
     let close_at = tick_list(&all, "--level-scripts-close-at")?;
+    let back_at = tick_list(&all, "--level-scripts-back-at")?;
     let trace = value(&all, "--level-scripts-trace")
         .map(|path| crate::story_fallback::Trace::create(&path))
         .transpose()?;
@@ -691,6 +695,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         choose_at: choose_at.or((story && loaded > 0).then_some(640)),
         close: false,
         close_at,
+        back_at,
         fallback_camera: (loaded == 0 && shell_present).then_some(POD_REST_CAMERA),
         trace,
         story: (loaded == 0 && shell_present).then(|| crate::story_fallback::Fallback {
@@ -1016,6 +1021,14 @@ fn step(
             p.scripts.ticks + 1
         );
     }
+    // D358, `--level-scripts-back-at N`: the menu's Back on tick N.
+    if press_next(&mut p.back_at, p.scripts.ticks + 1) {
+        p.host.world.gooey.input.back = true;
+        println!(
+            "Menu back on tick {}, from --level-scripts-back-at",
+            p.scripts.ticks + 1
+        );
+    }
     // Level1 part 3: the close button, before the tick (the game's net message is
     // handled before the switch pass that carries the bubble's output).
     let close_now = press_next(&mut p.close_at, p.scripts.ticks + 1);
@@ -1182,6 +1195,16 @@ fn step(
             .scripts
             .tick_level(&mut p.vm, &mut p.host, BUDGET_PER_CALL),
     };
+    // D358: the scripted search state's Back asked the pod computer to cancel.
+    if let Some(r) = p
+        .scripts
+        .planet_cancel(&mut p.vm, &mut p.host, BUDGET_PER_CALL)
+    {
+        println!(
+            "Planet cancel after tick {}: PodComputer.OnPlanetCancel__: {r:?}",
+            p.scripts.ticks
+        );
+    }
     if let Some(story) = p.story.as_mut() {
         use crate::story_fallback::FallbackEvent;
         use lbp_runtime::{PodComputerEvent, PuterState};
