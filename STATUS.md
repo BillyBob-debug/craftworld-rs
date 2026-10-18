@@ -6368,3 +6368,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
   stand-in; with no scripts Back from Story (`--level-scripts-back-at`) returns to the main
   menu with the scripted search state on every tick 640-780, and the scripted run's
   main menu now draws after Back too (a draw tie went to the popped Story frame).
+
+## D359 choosing a Story group, and Back to Story (2026-10-18)
+- Part 106 (`docs/level-scripts/part-106.md`): with no scripts, choosing a Story group
+  (`--level-scripts-group-at`) pushes the group's search state over Story and Back brings
+  Story back on top, with the scripted search state on every tick 640-760.

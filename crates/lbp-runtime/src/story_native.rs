@@ -610,6 +610,37 @@ mod tests {
     }
 
     #[test]
+    fn d363_a_done_launch_hands_the_root_level_to_the_game() {
+        use lbp_level::serial::Descriptor;
+        let root = Descriptor {
+            flags: None,
+            kind_byte: 2,
+            guid: Some(0x1_8fdb),
+            sha1: None,
+        };
+        let mut w = LevelWorld {
+            story_slots: vec![crate::pod::SearchSlot {
+                id: (1, 42),
+                root: Some(root),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        // Nothing pending: no hand-off.
+        assert_eq!(w.pod_launch_step(), None);
+        w.cross_on_level(0);
+        let start = w.pod_launch_step().unwrap();
+        assert_eq!(
+            (start.slot, start.root, start.mode),
+            ((1, 42), Some(root), 0)
+        );
+        // Once only, and the launch stays pending until the level takes over.
+        assert_eq!(w.pod_launch_step(), None);
+        assert_eq!(w.pod.launch, Some((1, 42)));
+        assert_eq!(w.pod.level_start, Some(start));
+    }
+
+    #[test]
     fn d359_group_default_browse_mode_by_slot_type() {
         assert_eq!(SearchDetails::Group((4, 27)).default_browse_mode(), 1);
         assert_eq!(SearchDetails::Group((9, 1)).default_browse_mode(), 1);
