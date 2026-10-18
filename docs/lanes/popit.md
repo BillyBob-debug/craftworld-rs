@@ -1,30 +1,37 @@
-# Lane state: popit (2026-10-18, seeded from handoff-pc-2026-10-18-popit-part11.md)
+# Lane state: popit (2026-10-18)
 
 ## Read first
-1. `docs/d414-popit-tooltip-side-rule.md` (the full 0x417b78 rule and its Open list).
-2. `docs/d415-popit-head-look-at-cursor.md` (head look, body-facing finding, Open).
-3. Research notes (canonical, ignored): `local-analysis/d415/tooltip-rule.md`,
-   `local-analysis/d414/popit-facing-headlook.md`.
+1. `docs/d416-popit-arms-follow-sticks.md` (arm rule, port, Open).
+2. `docs/project-boost.md` "Decide first" item 1 (native script fallback strategy).
+3. Research notes (canonical, ignored): `local-analysis/d416/arms-cursor.md`.
 
 ## State
-- PR #143 (branch `popit-13`, worktree `E:\Projects\wt-popit`): D414 + D415; the
-  coordinator merges once `rust` + `python` are green. RPCS3 not used. Nothing running.
-- Decision numbers: D416 and up.
+- PR #150 (branch `popit-14`, worktree `E:\Projects\wt-popit`): D416 arms follow the
+  sticks while the Popit cursor is shown; coordinator merges once `rust` + `python` green.
+- Branch `popit-15` (same worktree): D417 native script registry
+  (`crates/lbp-runtime/src/native_script.rs`, trait `NativeScript`) + native `Pod` and
+  `Trigger_Pod`; in progress, no PR yet.
+- Split agreed with the Story lane: Popit owns the trait, pod.bin (Pod, Trigger_Pod,
+  pod-open change-over) and the planets world script; Story owns PodStateSearch's Story
+  entry and its `story_fallback.rs`, then moves onto the trait.
+- Decision numbers: D416-D499, next free D418.
 
 ## Facts
-- Toolchain: `. "E:\Projects\LBP2 Rust Rewrite\scripts\use-local-rust.ps1"` (the worktree's
-  copy throws: no local Rust there).
-- No-decrypted run (absolute canonical paths): `--snapshot ...\local-analysis\d79-inventory-0133.json
-  --game-dir "...\game-data\a1-disc;...\game-data\a1-update-0133"`. Blank level for quick
-  checks: `--level-path gamedata/levels/palettes/borders/blank_level_large.bin --play-sackboy`.
-- `--popit-cursor` starts in cursor mode; the Pod capture holds ticks, so the pose freezes.
-- EBOOT: no Popit body-turn rule (0x2002ac); pi only for the pod computer's user. Head look
-  target branches at 0x20e28c; arms toward the cursor at 0x2097e0 (not ported).
-- Tooltip y side is still the MEASURED row rule (the y test is too close to call with the
-  port's pill size).
+- Toolchain: `. "E:\Projects\LBP2 Rust Rewrite\scripts\use-local-rust.ps1"`.
+- No-decrypted run: `--snapshot ...\local-analysis\d79-inventory-0133.json --game-dir
+  "...\game-data\a1-disc;...\game-data\a1-update-0133"`; blank level
+  `--level-path gamedata/levels/palettes/borders/blank_level_large.bin --play-sackboy`.
+- Arms (0x2097e0 cursor branch 0x209ce0 -> 0x20936c x2, weight 1.0): angle atan2(y, x),
+  dead zone |x|+|y| <= 0.2, ease w = clamp(m, 0, 1), frame = angle / 2pi * 32; clips
+  act_neutral_arm_small 0x3ef0 / big 0x3eef; arm 0 left stick x-negated, arm 1 right
+  stick mirrored; sticks ease 0.3 a tick. QA flag `--popit-arm-sticks LX,LY,RX,RY`.
+- `--qa-capture` opens the window unfocused (SW_SHOWNOACTIVATE); run it from the
+  canonical folder (capture path must be under its local-analysis).
+- Planets world camera (Story's VM trace): eye (0,-299.48,902.39), dir
+  (0,0.31499,-0.94910), fov 1 rad, near 10, far 100000, steady from tick 620.
 
 ## Next
-1. Arms toward the cursor (0x2097e0 / 0x20936c, clips anim+0x4e0..0x4f8).
-2. Which Popit screens are cursor-active; the Pod's look up at the card (branches 2-3).
-3. Compare D414's outward lean with the Moon create frame side by side.
-4. Pod planets without the scripts (D411 Open); highlight sizing (D400 Open).
+1. Finish D417 (registry + native Pod / Trigger_Pod), PR, tell Story the PR number.
+2. Native planets world script (PlanetsWorld / Earth / OrbitingMoon placement).
+3. RPCS3 memory read of anim+0xac0/0xad0/0xa40 with the cursor shown (D416 Open).
+4. Which Popit screens are cursor-active; D414 lean vs the Moon create frame.
