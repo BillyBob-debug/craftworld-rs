@@ -693,7 +693,10 @@ pub fn install(app: &mut App) -> Result<(), String> {
         close_at,
         fallback_camera: (loaded == 0 && shell_present).then_some(POD_REST_CAMERA),
         trace,
-        story: (story && loaded == 0 && shell_present).then(Default::default),
+        story: (loaded == 0 && shell_present).then(|| crate::story_fallback::Fallback {
+            story_at_start: story,
+            ..Default::default()
+        }),
     })
     .insert_resource(crate::CaptureHold(hold_at.is_some()))
     .insert_resource(menu_assets.unwrap_or_default())
@@ -1180,13 +1183,40 @@ fn step(
             .tick_level(&mut p.vm, &mut p.host, BUDGET_PER_CALL),
     };
     if let Some(story) = p.story.as_mut() {
-        if story.after_tick(&mut p.host) {
-            let shell = p.shell.as_mut().map(|s| &mut s.host.world);
-            set_in_use(&mut p.host.world, shell, true);
-            println!(
-                "Story at tick {}: opened by the native stand-in (no scripts loaded): the pod computer in use (pod.bin's native port opens the pod, D354), the planets world asked for the Story view (its native port blends there, D356), the search state's Story entry (D353)",
-                p.scripts.ticks
-            );
+        use crate::story_fallback::FallbackEvent;
+        use lbp_runtime::{PodComputerEvent, PuterState};
+        let ticks = p.scripts.ticks;
+        match story.after_tick(&mut p.host) {
+            Some(FallbackEvent::StoryAtStart) => {
+                let shell = p.shell.as_mut().map(|s| &mut s.host.world);
+                set_in_use(&mut p.host.world, shell, true);
+                println!(
+                    "Story at tick {ticks}: opened by --story (no scripts loaded): the pod computer in use (pod.bin's native port opens the pod, D354), the planets world asked for the Story view (its native port blends there, D356), the search state's Story entry (D353)"
+                );
+            }
+            Some(FallbackEvent::Puter(PodComputerEvent::Pushed(state))) => println!(
+                "Pod computer at tick {ticks}: {} pushed by the native pod computer (D357), planets view {}",
+                match state {
+                    PuterState::MainMenu => "the main menu",
+                    PuterState::StorySearch => "the Story search",
+                },
+                match state {
+                    PuterState::MainMenu => lbp_runtime::MAIN_MENU_PLANETS_VIEW,
+                    PuterState::StorySearch => lbp_runtime::STORY_PLANETS_VIEW,
+                }
+            ),
+            Some(FallbackEvent::Puter(PodComputerEvent::Popped(top))) => {
+                println!("Pod computer at tick {ticks}: back, {top:?} on top again (D357)")
+            }
+            Some(FallbackEvent::Puter(PodComputerEvent::Released)) => {
+                if let Some(shell) = p.shell.as_mut() {
+                    ask_to_close(&mut shell.host.world, &mut p.host.world);
+                }
+                println!(
+                    "Pod computer at tick {ticks}: back out of the main menu, the host asked to stop using it, planets view 0 (D357)"
+                );
+            }
+            None => {}
         }
     }
     if let Some(trace) = p.trace.as_mut() {

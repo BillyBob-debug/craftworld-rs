@@ -11,15 +11,15 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D356 the Pod planets' world script as a native port (2026-10-18)
+## Latest: D357 the pod computer's menu states as native ports (2026-10-18)
+- Part 104 (`docs/level-scripts/part-104.md`): with no scripts, engaging the pod computer
+  gives the main menu (the scripted frame exactly, tick 601), Story is chosen from it
+  (tick 640) and Back pops each state; `--story` is no longer needed to reach Story.
+
+## D356 the Pod planets' world script as a native port (2026-10-18)
 - Part 103 (`docs/level-scripts/part-103.md`): `PlanetsWorld`/`PlanetsView` run natively;
   with no scripts the Story camera dolly, the level's view blend, Earth and the Moon match
   the scripted run exactly, and the plain Pod shows its planets. No measured stand-ins left.
-
-## D355 the Pod planets' scripts as native ports (2026-10-18)
-- Part 102 (`docs/level-scripts/part-102.md`): `Earth` and `OrbitingMoon` (PlanetThing)
-  run as native ports; with no scripts Earth turns to the Story group and rests exactly
-  where the scripted run leaves it. The world Thing and camera stay measured stand-ins.
 
 ## D354 the Story screen's pod opens through pod.bin's native port (2026-10-18)
 - Part 101 (`docs/level-scripts/part-101.md`): the Story stand-in sets the pod computer in
