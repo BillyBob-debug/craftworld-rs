@@ -31,4 +31,7 @@
 1. The route past x -385: get a game reference (RPCS3 F12 frames past line 2, background
    only) or try jumps and layer moves there.
 2. The camera at x -938 (a frame at tick 1600 looks through a front wall).
-3. Sackboy pushed into a wall turns to the camera and plays `stand`, not a push.
+3. Under the no-decrypted-copy rule: all 426 game scripts live only in patch.edat (Popit
+   lane finding), so without the overlay Rookie Test loads no scripts. It needs a built-in
+   fallback for the script behaviour it relies on (Da Vinci's lines, the bubble switches).
+4. Sackboy pushed into a wall turns to the camera and plays `stand`, not a push.
