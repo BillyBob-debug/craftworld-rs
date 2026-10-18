@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D372 the pod computer pushes first (2026-10-18)
+## Latest: D373 Back's main menu (2026-10-18)
+- Part 120 (`docs/level-scripts/part-120.md`): native Back from Story builds the main
+  menu on the next tick, so the Pod's native and scripted menus now match every tick.
+
+## D372 the pod computer pushes first (2026-10-18)
 - Part 119 (`docs/level-scripts/part-119.md`): the native pod computer pushes the main
   menu and Story before the tick, so the Pod world moves on the scripted tick.
 
@@ -22,10 +26,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D370 closed menus go (2026-10-18)
 - Part 117 (`docs/level-scripts/part-117.md`): a closed or covered Pod menu's frame
   goes 15 ticks after it is last built, so the scripts' `OldStates` empty again.
-
-## D369 the menus slide in (2026-10-18)
-- Part 116 (`docs/level-scripts/part-116.md`): the native Pod menus slide in with the
-  world Thing as the scripted ones do; no other search can be ported offline.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

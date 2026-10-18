@@ -6419,3 +6419,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 115 (`docs/level-scripts/part-115.md`): the Pod cursor flies to the next
   result over a few frames (0x4298e8), plays `pod/pod_cursor_move` and takes no new
   move until it lands.
+
+## D369 the menus slide in (2026-10-18)
+- Part 116 (`docs/level-scripts/part-116.md`): the native Pod menus slide in with the
+  world Thing as the scripted ones do; no other search can be ported offline.

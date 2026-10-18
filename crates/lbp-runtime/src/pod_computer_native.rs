@@ -271,10 +271,11 @@ impl NativePodComputer {
         match self.top() {
             Some(top) => {
                 Self::set_view(host, top.planets_view());
-                match top {
-                    PuterState::MainMenu => self.main_menu_ui(&mut host.world),
-                    PuterState::StorySearch => self.search.resume(&mut host.world),
-                    PuterState::GroupSearch => {}
+                // D373: the main menu is built on the next tick's `UpdateUI`, as the
+                // scripts' `OnPlanetCancel` pops after the frame's update (MEASURED: the
+                // scripted run draws Story on Back's tick 740, the main menu from 741).
+                if top == PuterState::StorySearch {
+                    self.search.resume(&mut host.world);
                 }
                 PodComputerEvent::Popped(top)
             }
@@ -550,6 +551,9 @@ mod tests {
         );
         assert!(!h.world.story_open());
         assert!(!h.world.gooey.frames.contains_key(&crate::STORY_FRAME_KEY));
+        // D373: the main menu is built on the tick after Back's.
+        assert!(h.world.gooey.drawn_menu().is_none());
+        tick(&mut puter, &mut h, NONE);
         assert_eq!(
             h.world.gooey.drawn_menu().unwrap().matrix,
             MAIN_MENU_FRAME_MATRIX
