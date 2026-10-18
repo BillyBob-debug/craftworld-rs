@@ -1,29 +1,31 @@
-# Lane state: sackboy model (2026-10-18, seeded from handoff-pc-2026-10-18-sackboy-part3.md)
+# Lane state: sackboy model (2026-10-18)
 
 ## Read first
-1. `docs/d700-sackboy-model.md`: the Open list (eyes, zip pull, program decoding).
-2. `local-analysis/results/2026-10-18-ghidra-sackboy-eyes.md` (the EBOOT pass on the eye
-   bones; may be missing if it did not finish).
+1. `docs/d700-sackboy-model.md`: D703 (eye width) and the Open list (where the game narrows
+   the eyes, zip pull brightness, program decoding).
 
 ## State
-- Branch `sackboy-model-3` (worktree `E:\Projects\wt-sackboy-model`): the `eye_probe`
-  example and the D702 notes. No visual change.
-- The owner said the eyes look off all the time (2026-10-18). Nothing visual was committed:
-  the 720p Pod frame can't separate a 10-20% eye size difference.
-- Decision numbers: D700 series; D702 used.
+- PR for branch `sackboy-model-4` (worktree `E:\Projects\wt-sackboy-model`): D703 narrows
+  the eyes to the game's measured width and adds `--window-scale N`; merge via coordinator.
+- RPCS3 closed. Decision numbers: D700 series, next free D704.
 
 ## Facts
-- Eye measurements (Pod frame `d156-rpcs3-pod-default.png` vs ours `d700-podplay-stand.png`):
-  game eyes 7-8 px wide and 8-9 px tall, ours 10 x 10 at a 1.14x larger Sackboy. Ours look
-  wider and rounder.
-- `eye_probe ... 0000043f 0001a697 0000053c`: eye vertices follow only `bone_eye_left/right`
-  (bones 27, 28; local scale 0.596/0.600 = bind). No morph touches an eye vertex.
-- Pull gap: knit and pull programs end alike (`light^2 x P + 2 x spec`, tint, per-channel
-  sqrt), so look elsewhere: the pull's light inputs (aomap u8 / `aotweak`, rim terms) or the
-  texture data.
-- The local `cgb.py` prints dst scales now (SRC1 bits 28-30). Its old `|abs|` on `w[2]`
-  bit 29 is probably that scale field, not abs.
+- Close game frames: launch with `rpcs3_launch.launch(('--no-gui', '--config', COPY, L.ISO))`
+  where COPY is a copy of `config/config.yml` with `Resolution Scale: 300` (nothing
+  persistent changes). The window itself shows white; F12 via bgpad saves real 3840x2160
+  frames (`local-analysis/pc-helpers/f12cap.py OUT.png 640`, waits for the write, deletes
+  the original). Pod: X, X (intro, profile), then the default Pod view.
+- Viewer match: the D700 Pod play command plus `--window-scale 3`; our Sackboy face sits
+  45 px lower than the game's at 3x (crop game 1790,1450 / ours 1795,1495, 240 px).
+- Eye blobs (luma < 12): game left eye 23-26 x 31-32 px; ours before 29 x 32, after D703
+  24-26 x 32, eye spacing ours 91 px vs game 87.
+- The game's eyes sit in a soft dark ring (socket AO); ours have a crisp edge.
+- `eye_probe`: eye vertices follow only `bone_eye_left/right` (27, 28); no morph reaches them.
+- Pull gap: knit and pull programs end alike, so look at the pull's light inputs
+  (aomap u8 / `aotweak`, rim terms) or its texture data.
 
 ## Next
-1. A close Customize Character game frame needs an RPCS3 launch, which needs the owner's
-   fresh ask through the coordinator.
+1. Find where the game narrows the eyes (EBOOT: eye bones, eye material, draw scale) and
+   replace `EYE_WIDTH` with that rule.
+2. The dark ring around the eyes.
+3. Zip pull brightness (D701).

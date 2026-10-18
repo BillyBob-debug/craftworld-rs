@@ -11,7 +11,17 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D353 the Story screen without the game's scripts (2026-10-18)
+## Latest: D355 the Pod planets' scripts as native ports (2026-10-18)
+- Part 102 (`docs/level-scripts/part-102.md`): `Earth` and `OrbitingMoon` (PlanetThing)
+  run as native ports; with no scripts Earth turns to the Story group and rests exactly
+  where the scripted run leaves it. The world Thing and camera stay measured stand-ins.
+
+## D354 the Story screen's pod opens through pod.bin's native port (2026-10-18)
+- Part 101 (`docs/level-scripts/part-101.md`): the Story stand-in sets the pod computer in
+  use and the D417 port of pod.bin opens the pod (0.05 a tick, open on tick 21, mesh
+  swapped), as the scripts do; the measured pod-open values are gone.
+
+## D353 the Story screen without the game's scripts (2026-10-18)
 - Part 100 (`docs/level-scripts/part-100.md`): the first native stand-in for a game script,
   the search state's Story entry (`lbp_runtime::PodStateSearchStory`), tested against a
   golden trace of the scripted run (`--level-scripts-trace`). Viewer `--story` opens Story

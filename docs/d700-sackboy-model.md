@@ -43,17 +43,23 @@ FOUND = read from the 01.33 data or its compiled programs; INFERRED = our readin
 
 - `eye_probe SNAPSHOT GAME-DIRS MESH ANIM EYE-MATERIAL` (D702): per primitive its material, costume region and bounds (bind and frame 0), each eye's bounds, the morphs that reach the eye vertices and the bones the eyes follow with their local, world and bind scale.
 
+## D703: the eyes are narrowed to the game's width
+- MEASURED: RPCS3 at 300% resolution scale (a `--config` copy of the config, nothing
+  persistent changed), F12 frame of the default Pod view, against the viewer with the new
+  `--window-scale 3` (3840x2160, scale factor 1) on the D700 Pod play command. Dark-core eye
+  blobs (luma < 12 / < 20): game left eye 23-26 px wide, 31-32 px tall; ours 29 x 32 px at
+  a 1.05x larger eye spacing (91 px against 87). So ours were about 1.1-1.15x too wide at the
+  right height, and round where the game's are upright ovals.
+- The viewer narrows the eye vertices (material `0000053c`) across the face (model X) about
+  each eye's centre by `EYE_WIDTH` 0.88 (`narrow_eyes`, main.rs). The eyes follow only their
+  bones and no morph reaches them (D702), so the bind positions carry it to every pose.
+- The game's eyes also sit in a soft dark ring (the face texture's AO around the socket);
+  ours have a crisp edge. Not changed.
+
 ## Open
-- Eyes (`0000053c`, `eye.gmat`). The owner (2026-10-18): they look off all the time. In the
-  matched Pod frame the game's eyes are about 7-8 px wide and 8-9 px tall, ours about 10 x 10
-  at a 1.14x larger Sackboy, so ours are about 1.1-1.25x too wide and about right in height;
-  at 720p this is near the 1 px limit. MEASURED (eye_probe, mesh `0000043f`, clip `0001a697`):
-  the eyes follow only `bone_eye_left` / `bone_eye_right` (children of `bone_eye_pos_*`, under
-  `Bip01 Head`), whose local scale in the clip (0.596 / 0.600) equals their bind scale, so
-  we draw the authored size; no morph moves an eye vertex (the eyelid morphs move 13 lid
-  vertices each). A smaller eye in the game would come from runtime code on the eye bones.
-  The EBOOT pass on that is in `local-analysis/results/2026-10-18-ghidra-sackboy-eyes.md`.
-  A close game frame (Customize Character) is needed to verify any change.
+- Eyes: where the game narrows them (D703 is a measured width, not the game's rule). The
+  EBOOT pass on the eye bones was not written; the eye bones, the eye material and a draw
+  call scale are the places to look.
 - Zip pull brightness (D701 above).
 - Program decoding: the local `cgb.py` now prints the dst scale (`_x2`, `_d2`, ...; SRC1 bits
   28-30). Knit and pull end alike: `out = light^2 x P + 2 x spec x P'` (MUL_x2), then tint and a

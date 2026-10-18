@@ -104,6 +104,8 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 98: a left overlay shrinks out, and the cards go when Story closes (2026-10-17, D351)](level-scripts/part-98.md)
 - [Part 99: the Story card opens at full size and shrinks out on closing (2026-10-17, D352)](level-scripts/part-99.md)
 - [Part 100: the Story screen without the game's scripts (2026-10-18, D353)](level-scripts/part-100.md)
+- [Part 101: the Story screen's pod opens through pod.bin's native port (2026-10-18, D354)](level-scripts/part-101.md)
+- [Part 102: the Pod planets' scripts as native ports (2026-10-18, D355)](level-scripts/part-102.md)
 
 ## Next
 

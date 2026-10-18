@@ -162,16 +162,37 @@ pub fn story_frame() -> GooeyFrame {
     }
 }
 
+/// D355: Earth's `SpinOffset` while the Story view is up. FOUND (the 01.33 scripts,
+/// `PlanetsView.SetPlanetsView__i`): the views that focus Earth set `Yaw` 0.7 and
+/// `EarthSpinOffset` to minus `Yaw`, and `PlanetsWorld.UpdatePlanetsView` hands it to
+/// Earth's `SpinOffset`. MEASURED: the scripted Story frame's Earth is turned by -0.70
+/// against the port's without it. STAND-IN for `PlanetsWorld` (not ported yet).
+pub const STORY_EARTH_SPIN_OFFSET: f32 = -0.7;
+
 impl LevelWorld {
+    /// D355: a script field of a Thing, as a script's member write stores it; for native
+    /// stand-ins of scripts that are not ported (here `PlanetsWorld` writing a planet's).
+    pub fn set_script_member(&mut self, thing: u32, field: &str, value: lbp_script_vm::Value) {
+        if let Some(t) = self.things.get_mut(thing as usize) {
+            t.members
+                .get_or_insert_with(Default::default)
+                .insert(field.to_owned(), value);
+        }
+    }
+
+    /// D355: the Thing whose script is `guid`, the first in Thing order.
+    pub fn thing_with_script(&self, guid: u32) -> Option<u32> {
+        let t = self
+            .things
+            .iter()
+            .position(|t| t.script_guid == Some(guid))?;
+        u32::try_from(t).ok()
+    }
+
     /// D353: put a Thing at a world matrix, as a script's `WorldPosition` write does (on
     /// the display's dirty list); for native stand-ins of scripts.
     pub fn place_thing(&mut self, thing: u32, world: [f32; 16]) {
         self.change_display(thing, |t| t.world_matrix = Some(world));
-    }
-
-    /// D353: show another mesh on a Thing's PRenderMesh, as a script's mesh write does.
-    pub fn set_thing_mesh(&mut self, thing: u32, mesh: u32) {
-        self.change_display(thing, |t| t.mesh_guid = Some(mesh));
     }
 }
 

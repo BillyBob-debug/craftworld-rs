@@ -77,6 +77,8 @@ pub trait NativeScript: Sync {
 pub const NATIVE_SCRIPTS: &[&dyn NativeScript] = &[
     &PodScript,
     &TriggerPodScript,
+    &EARTH,
+    &ORBITING_MOON,
     &crate::native_bubble::TriggerSpeechBubbleScript,
 ];
 
@@ -509,6 +511,266 @@ impl NativeScript for TriggerPodScript {
                 Self::world(host, thing).map(|_| DONE)
             }
             "IsPodComputerTrigger__" => Ok(NativeStep::Done(Value::Bool(true))),
+            _ => return None,
+        })
+    }
+}
+
+// ---- PlanetThing, Earth, OrbitingMoon ------------------------------------------------
+
+/// The script GUIDs of the Pod planets' classes (FOUND: the 01.33 patch's script rows
+/// `gamedata/scripts/earth.ff`, `orbitingmoon.ff`; their superclass `PlanetThing`,
+/// `planetthing.ff`, is g00016e09).
+pub const EARTH_SCRIPT: u32 = 0x53d0;
+pub const ORBITING_MOON_SCRIPT: u32 = 0x53ce;
+
+/// A planet of the Pod's planets level: `PlanetThing` with the place its subclass gives
+/// (`GetPosition__`, the subclass's only override).
+///
+/// FOUND (the 01.33 scripts): `OnCreate__` zeroes `Pitch` and `Spin`, keeps the world
+/// matrix as `OriginalPos`, clears `Updated` and sets `MaxVel` 10 and `MaxAcc` 0.01.
+/// `Update__rb(point, arrived)` turns the planet so that `point` (in the planet's own
+/// space, scaled by the axis lengths of `OriginalPos` times `Scale`) faces the camera:
+/// the target spin is `-atan2(x, z)` taken within half a turn of `Spin`, the target
+/// pitch `atan2(y, |xz|)` clamped to a quarter turn. After the first update and while
+/// not `arrived` it eases there (`Math.Smooth2D` on spin and pitch, acceleration
+/// `MaxAcc`, speed `MaxVel`), else it snaps. The world matrix becomes
+/// `rotateY(SpinOffset) * rotateX(Pitch) * rotateY(Spin) * scale` at the subclass's
+/// place, and the answer is whether both angles are within 0.01 of their targets.
+pub struct PlanetScript {
+    class: &'static str,
+    guid: u32,
+    /// `GetPosition__` (FOUND: a constant of the subclass; MEASURED Earth (-1250, 0, 0),
+    /// the Moon (2000, 0, 0), the places the scripted run gives them).
+    position: [f32; 4],
+}
+
+/// `Earth` (g000053d0).
+pub static EARTH: PlanetScript = PlanetScript {
+    class: "Earth",
+    guid: EARTH_SCRIPT,
+    position: [-1250., 0., 0., 1.],
+};
+
+/// `OrbitingMoon` (g000053ce).
+pub static ORBITING_MOON: PlanetScript = PlanetScript {
+    class: "OrbitingMoon",
+    guid: ORBITING_MOON_SCRIPT,
+    position: [2000., 0., 0., 1.],
+};
+
+const PLANET_THING: &str = "PlanetThing";
+const HALF_TURN: f32 = std::f32::consts::PI;
+const QUARTER_TURN: f32 = std::f32::consts::FRAC_PI_2;
+/// `GetDefaultMaxVel__`, `GetDefaultMaxAcc__`; 0.01 is also the "arrived" tolerance.
+const PLANET_MAX_VEL: f32 = 10.;
+const PLANET_MAX_ACC: f32 = 0.01;
+/// [`crate::PLANET_UPDATE`].
+const PLANET_UPDATE_NAME: &str = "Update__rb";
+
+fn get_planet(host: &mut dyn Host, this: u32, field: &str) -> Result<Value, String> {
+    host.get_member(
+        MemberKind::Thing,
+        &Value::Thing(Some(this)),
+        PLANET_THING,
+        field,
+    )
+}
+
+fn set_planet(host: &mut dyn Host, this: u32, field: &str, v: Value) -> Result<(), String> {
+    host.set_member(
+        MemberKind::Thing,
+        &Value::Thing(Some(this)),
+        PLANET_THING,
+        field,
+        v,
+    )
+}
+
+/// A float field; a Thing that stores none has `default` (the `.init__` value).
+fn planet_float(host: &mut dyn Host, this: u32, field: &str, default: f32) -> f32 {
+    match get_planet(host, this, field) {
+        Ok(Value::Float(f)) => f,
+        _ => default,
+    }
+}
+
+fn as_mat44(v: &Value) -> [f32; 16] {
+    match v {
+        Value::Mat44(m) => *m,
+        _ => crate::transform::IDENTITY,
+    }
+}
+
+fn math(host: &mut dyn Host, function: &str, args: &[Value]) -> Result<Value, String> {
+    call(host, "Math", function, args)
+}
+
+fn column(m: &[f32; 16], c: usize) -> [f32; 4] {
+    [m[c * 4], m[c * 4 + 1], m[c * 4 + 2], m[c * 4 + 3]]
+}
+
+fn atan2(host: &mut dyn Host, y: f32, x: f32) -> Result<f32, String> {
+    let args = [Value::Float(y), Value::Float(x)];
+    Ok(as_float(&math(host, "atan2__ff", &args)?))
+}
+
+/// The argument the VM staged at byte offset `offset`.
+fn arg_at(args: &[(u16, Value)], offset: u16) -> Option<&Value> {
+    args.iter().find(|(o, _)| *o == offset).map(|(_, v)| v)
+}
+
+impl PlanetScript {
+    fn create(host: &mut dyn Host, this: u32) -> Result<NativeStep, String> {
+        site(host, PLANET_THING, "OnCreate__");
+        set_planet(host, this, "Pitch", Value::Float(0.))?;
+        set_planet(host, this, "Spin", Value::Float(0.))?;
+        Self::initialise(host, this)?;
+        set_planet(host, this, "Updated", Value::Bool(false))?;
+        set_planet(host, this, "MaxVel", Value::Float(PLANET_MAX_VEL))?;
+        set_planet(host, this, "MaxAcc", Value::Float(PLANET_MAX_ACC))?;
+        Ok(DONE)
+    }
+
+    /// `Initialise__`: `OriginalPos` is the world matrix now.
+    fn initialise(host: &mut dyn Host, this: u32) -> Result<(), String> {
+        let at = call(
+            host,
+            "Thing",
+            "GetWorldPosition__",
+            &[Value::Thing(Some(this))],
+        )?;
+        set_planet(host, this, "OriginalPos", at)
+    }
+
+    fn update(
+        &self,
+        host: &mut dyn Host,
+        this: u32,
+        point: [f32; 4],
+        arrived: bool,
+    ) -> Result<NativeStep, String> {
+        site(host, PLANET_THING, PLANET_UPDATE_NAME);
+        let max_vel = planet_float(host, this, "MaxVel", 0.);
+        let max_acc = planet_float(host, this, "MaxAcc", 0.);
+        let original = as_mat44(&get_planet(host, this, "OriginalPos")?);
+        let mut axes = [0., 0., 0., 1.];
+        for (c, axis) in axes.iter_mut().take(3).enumerate() {
+            let len = as_float(&math(
+                host,
+                "length3__r",
+                &[Value::Vec4(column(&original, c))],
+            )?);
+            *axis = len * planet_float(host, this, "Scale", 1.);
+        }
+        let mut place = as_mat44(&math(host, "scale__r", &[Value::Vec4(axes)])?);
+        place[12..16].copy_from_slice(&self.position);
+        let mut p = point;
+        p[3] = 0.;
+        let args = [Value::Mat44(place), Value::Vec4(p)];
+        let p = as_vec4(&math(host, "transform__mr", &args)?);
+        let mut spin_to = -atan2(host, p[0], p[2])?;
+        if spin_to - planet_float(host, this, "Spin", 0.) > HALF_TURN {
+            spin_to -= 2. * HALF_TURN;
+        }
+        if spin_to - planet_float(host, this, "Spin", 0.) < -HALF_TURN {
+            spin_to += 2. * HALF_TURN;
+        }
+        let flat = (p[0] * p[0] + p[2] * p[2]).sqrt();
+        let pitch_to = atan2(host, p[1], flat)?.clamp(-QUARTER_TURN, QUARTER_TURN);
+        let updated = as_bool(&get_planet(host, this, "Updated")?);
+        if updated && !arrived {
+            let now = [
+                planet_float(host, this, "Spin", 0.),
+                planet_float(host, this, "Pitch", 0.),
+                0.,
+                0.,
+            ];
+            let speed = [
+                planet_float(host, this, "SpinSpeed", 0.),
+                planet_float(host, this, "PitchSpeed", 0.),
+                0.,
+                0.,
+            ];
+            let args = [
+                Value::Vec4(now),
+                Value::Vec4(speed),
+                Value::Vec4([spin_to, pitch_to, 0., 0.]),
+                Value::Float(max_acc),
+                Value::Float(max_vel),
+            ];
+            let step = as_vec4(&math(host, "Smooth2D__pppff", &args)?);
+            set_planet(host, this, "Spin", Value::Float(now[0] + step[0]))?;
+            let spin = planet_float(host, this, "Spin", 0.);
+            let spin = math(host, "ModAngleToWithinPI__f", &[Value::Float(spin)])?;
+            set_planet(host, this, "Spin", spin)?;
+            set_planet(host, this, "SpinSpeed", Value::Float(step[0]))?;
+            set_planet(host, this, "Pitch", Value::Float(now[1] + step[1]))?;
+            set_planet(host, this, "PitchSpeed", Value::Float(step[1]))?;
+        } else {
+            set_planet(host, this, "Spin", Value::Float(spin_to))?;
+            set_planet(host, this, "Pitch", Value::Float(pitch_to))?;
+            set_planet(host, this, "SpinSpeed", Value::Float(0.))?;
+            set_planet(host, this, "PitchSpeed", Value::Float(0.))?;
+        }
+        let offset = planet_float(host, this, "SpinOffset", 0.);
+        let a = as_mat44(&math(host, "rotateY__f", &[Value::Float(offset)])?);
+        let pitch = planet_float(host, this, "Pitch", 0.);
+        let b = as_mat44(&math(host, "rotateX__f", &[Value::Float(pitch)])?);
+        let ab = crate::transform::mul(&a, &b);
+        let spin = planet_float(host, this, "Spin", 0.);
+        let c = as_mat44(&math(host, "rotateY__f", &[Value::Float(spin)])?);
+        let mut world = crate::transform::mul(&crate::transform::mul(&ab, &c), &place);
+        world[12..16].copy_from_slice(&place[12..16]);
+        let args = [Value::Thing(Some(this)), Value::Mat44(world)];
+        call(host, "Thing", "SetWorldPosition__m", &args)?;
+        set_planet(host, this, "Updated", Value::Bool(true))?;
+        let mut done = (planet_float(host, this, "Spin", 0.) - spin_to).abs() < PLANET_MAX_ACC;
+        if done {
+            done = (planet_float(host, this, "Pitch", 0.) - pitch_to).abs() < PLANET_MAX_ACC;
+        }
+        Ok(NativeStep::Done(Value::Bool(done)))
+    }
+}
+
+impl NativeScript for PlanetScript {
+    fn class(&self) -> &'static str {
+        self.class
+    }
+    fn guid(&self) -> Option<u32> {
+        Some(self.guid)
+    }
+    fn superclasses(&self) -> &'static [&'static str] {
+        &[PLANET_THING, "Thing"]
+    }
+    fn on_create(&self, host: &mut dyn Host, thing: u32) -> NativeResult {
+        Some(Self::create(host, thing))
+    }
+    fn call(
+        &self,
+        host: &mut dyn Host,
+        thing: u32,
+        function: &str,
+        args: &[(u16, Value)],
+    ) -> NativeResult {
+        Some(match function {
+            PLANET_UPDATE_NAME => {
+                let point = arg_at(args, 16).map_or([0.; 4], as_vec4);
+                let arrived = arg_at(args, 32).is_some_and(as_bool);
+                self.update(host, thing, point, arrived)
+            }
+            "Initialise__" => {
+                site(host, PLANET_THING, "Initialise__");
+                Self::initialise(host, thing).map(|()| DONE)
+            }
+            "Snap__" => {
+                site(host, PLANET_THING, "Snap__");
+                set_planet(host, thing, "Updated", Value::Bool(false)).map(|()| DONE)
+            }
+            "GetPosition__" => Ok(NativeStep::Done(Value::Vec4(self.position))),
+            "GetDefaultMaxVel__" => Ok(NativeStep::Done(Value::Float(PLANET_MAX_VEL))),
+            "GetDefaultMaxAcc__" => Ok(NativeStep::Done(Value::Float(PLANET_MAX_ACC))),
+            "OnScriptReloaded__" => Ok(DONE),
             _ => return None,
         })
     }

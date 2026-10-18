@@ -1169,13 +1169,12 @@ fn step(
             .tick_level(&mut p.vm, &mut p.host, BUDGET_PER_CALL),
     };
     if let Some(story) = p.story.as_mut() {
-        let shell = p.shell.as_mut().map(|s| &mut s.host.world);
-        if story.after_tick(&mut p.host.world, shell) {
+        if story.after_tick(&mut p.host.world) {
             let shell = p.shell.as_mut().map(|s| &mut s.host.world);
             set_in_use(&mut p.host.world, shell, true);
             p.fallback_camera = Some(crate::story_fallback::POD_IN_USE_CAMERA);
             println!(
-                "Story at tick {}: opened by the native stand-in (no scripts loaded): the pod open, the planets where the scripts leave them, the search state's Story entry (D353)",
+                "Story at tick {}: opened by the native stand-in (no scripts loaded): the pod computer in use (pod.bin's native port opens the pod, D354), the planets where the scripts leave them, the search state's Story entry (D353)",
                 p.scripts.ticks
             );
         }

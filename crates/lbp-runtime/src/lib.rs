@@ -3294,7 +3294,7 @@ fn planets_view_args(cx: &FrameContext<'_>) -> Vec<(u16, Value)> {
     let find = |name: &str| {
         cx.instances
             .iter()
-            .find(|i| i.class.is_some_and(|c| cx.vm.class_name(c) == name))
+            .find(|i| instance_class(cx.vm, i) == Some(name))
             .map(|i| i.thing)
     };
     vec![
@@ -3348,6 +3348,21 @@ pub const POD_COMPUTER_PER_FRAME: &str = "PerFrameUpdate__b";
 /// The per-tick entry for a class, if it has one other than [`UPDATE`].
 pub fn frame_entry(vm: &Vm, class: ClassId) -> Option<&'static FrameEntry> {
     let name = vm.class_name(class);
+    FRAME_ENTRIES.iter().find(|e| e.class == name)
+}
+
+/// D355: an instance's class name: its loaded class's, else its native port's
+/// ([`native_script`]), for a level whose scripts could not be read.
+pub fn instance_class<'a>(vm: &'a Vm, inst: &Instance) -> Option<&'a str> {
+    match inst.class {
+        Some(c) => Some(vm.class_name(c)),
+        None => native_script(inst.guid).map(|n| n.class()),
+    }
+}
+
+/// [`frame_entry`] by [`instance_class`]: also for a Thing that runs a native port.
+pub fn instance_frame_entry(vm: &Vm, inst: &Instance) -> Option<&'static FrameEntry> {
+    let name = instance_class(vm, inst)?;
     FRAME_ENTRIES.iter().find(|e| e.class == name)
 }
 
@@ -3557,7 +3572,7 @@ impl LevelScripts {
     /// The instances in the order a tick calls their entries: Thing order, but the
     /// planets come just before the level's first [`PLANETS_WORLD_CLASS`] instance.
     fn tick_order(&self, vm: &Vm) -> Vec<Instance> {
-        let entry = |i: &Instance| i.class.and_then(|c| frame_entry(vm, c));
+        let entry = |i: &Instance| instance_frame_entry(vm, i);
         let world = self
             .instances
             .iter()
@@ -4167,7 +4182,7 @@ impl LevelScripts {
             let earth = self
                 .instances
                 .iter()
-                .find(|i| i.class.is_some_and(|c| vm.class_name(c) == "Earth"))
+                .find(|i| instance_class(vm, i) == Some("Earth"))
                 .map(|i| i.thing);
             if let Some(earth) = earth {
                 self.set_planet_point(earth, point);
@@ -4254,7 +4269,7 @@ impl LevelScripts {
                 continue;
             }
             if function.is_none() {
-                let planets_object = inst.class.and_then(|c| frame_entry(vm, c)).is_some();
+                let planets_object = instance_frame_entry(vm, &inst).is_some();
                 let run = match entries {
                     Entries::All => true,
                     Entries::WithoutPlanets => !planets_object,
@@ -4268,7 +4283,7 @@ impl LevelScripts {
             // `None`: the tick's entry, a frame entry or `Update__`.
             let entry = match function {
                 Some(_) => None,
-                None => inst.class.and_then(|c| frame_entry(vm, c)),
+                None => instance_frame_entry(vm, &inst),
             };
             let o = match entry {
                 Some(e) => {

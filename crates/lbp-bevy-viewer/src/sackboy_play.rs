@@ -733,7 +733,11 @@ pub(crate) fn spawn_figure(
     match clip {
         None => line += "; no clip",
         Some(Err(e)) => line += &format!("; clip not played: {e}"),
-        Some(Ok(clip)) => {
+        Some(Ok(mut clip)) => {
+            // D703: the CPU morph path writes positions from the clip's bind positions.
+            if let Some(p) = crate::narrow_eyes(preview, &clip.bind_positions) {
+                clip.bind_positions = p;
+            }
             // Raw model units: the identity display frame.
             let frame = ([0.; 3], 1.);
             let gpu = if v.cpu_skinning {
