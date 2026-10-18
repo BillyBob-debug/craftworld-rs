@@ -121,6 +121,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 115: the cursor's flight (2026-10-18, D368)](level-scripts/part-115.md)
 - [Part 116: the menus slide in (2026-10-18, D369)](level-scripts/part-116.md)
 - [Part 117: closed menus go (2026-10-18, D370)](level-scripts/part-117.md)
+- [Part 118: Story slides back (2026-10-18, D371)](level-scripts/part-118.md)
 
 ## Next
 

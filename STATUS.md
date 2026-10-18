@@ -6409,3 +6409,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 113 (`docs/level-scripts/part-113.md`): after the Pod's switch the viewer reads
   the launched level's physics and spawns Sackboy at its entrance to play (Trash
   Valley: checkpoint Thing 33, in both modes).
+
+## D367 the launch warnings (2026-10-18)
+- Part 114 (`docs/level-scripts/part-114.md`): a Pod launch raises the game's Move and
+  player-count warnings (0x402b24) and waits for them; Trash Valley raises none. The
+  select sound is only a badge lookup.

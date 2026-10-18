@@ -231,8 +231,8 @@ impl PodStateSearch {
                 GROUP_WORLD_REST,
             ),
         };
-        let since = *world.gooey.first_built.entry(key).or_insert(frame);
-        let matrix = sliding_frame_matrix(world, frame - since, rest, world_rest);
+        world.gooey.first_built.entry(key).or_insert(frame);
+        let matrix = sliding_frame_matrix(world, rest, world_rest);
         let g = &mut world.gooey;
         g.frames.insert(key, menu);
         g.item_matrices.insert(key, matrix);
@@ -254,26 +254,17 @@ pub const GROUP_WORLD_REST: [f32; 16] = [
     1.4369438, 0., 1912.1056, 1973.3236, -5172.7827, 1.,
 ];
 
-/// D369: how long a menu frame follows the world Thing after it is first built. INFERRED:
-/// the measured slides settle in 15 to 19 ticks (601-619, 641-659, 681-695); the window
-/// allows the native world Thing's tick of lag. Later the frame is drawn at rest.
-pub const FRAME_SLIDE_TICKS: i32 = 30;
-
-/// D369 (part 116): the frame's matrix while the menu slides in. The scripts set it every
+/// D369 (part 116): the frame's matrix as the menu slides. The scripts set it every
 /// tick to the world Thing's position times a fixed view (`SetupFrameMatrix`, FOUND), so
-/// the frame moves with the world Thing: `W(t) * inverse(world_rest) * rest`. For `age`
-/// ticks after the first build up to [`FRAME_SLIDE_TICKS`]; then, or with no world Thing,
-/// `rest`. Not done: a frame built again later (Story back from a group, 721-730), where
-/// the game's view itself moves; that frame is drawn at rest.
+/// the frame moves with the world Thing: `W(t) * inverse(world_rest) * rest`. With no
+/// world Thing, `rest`. D371 (part 118): followed every tick, not only for a window after
+/// the first build, so Story built again after a group slides back with the world Thing
+/// and stays where it settles (MEASURED, not at its first rest).
 pub fn sliding_frame_matrix(
     world: &LevelWorld,
-    age: i32,
     rest: [f32; 16],
     world_rest: [f32; 16],
 ) -> [f32; 16] {
-    if age > FRAME_SLIDE_TICKS {
-        return rest;
-    }
     let now = world.world.and_then(|t| world.thing_display(t)?.world);
     match (now, crate::transform::inverse(&world_rest)) {
         (Some(now), Some(inv)) => crate::transform::mul(&crate::transform::mul(&now, &inv), &rest),
@@ -804,22 +795,19 @@ mod tests {
             }],
             ..Default::default()
         };
-        let at = |w: &LevelWorld, age| {
-            sliding_frame_matrix(w, age, STORY_FRAME_MATRIX, STORY_WORLD_REST)
-        };
+        let at = |w: &LevelWorld| sliding_frame_matrix(w, STORY_FRAME_MATRIX, STORY_WORLD_REST);
         let close =
             |a: [f32; 16], b: [f32; 16]| a.iter().zip(&b).all(|(a, b)| (a - b).abs() < 0.01);
         // At rest the frame is where it was measured.
-        assert!(close(at(&w, 0), STORY_FRAME_MATRIX));
+        assert!(close(at(&w), STORY_FRAME_MATRIX));
         // The world Thing 1000 further down z: the frame goes with it.
         w.things[0].world_matrix.as_mut().unwrap()[14] -= 1000.;
-        let m = at(&w, 5);
+        let m = at(&w);
         let mut moved = STORY_FRAME_MATRIX;
         moved[14] -= 1000.;
         assert!(close(m, moved));
-        // After the slide window, or with no world Thing, it is drawn at rest.
-        assert_eq!(at(&w, FRAME_SLIDE_TICKS + 1), STORY_FRAME_MATRIX);
+        // With no world Thing it is drawn at rest.
         w.world = None;
-        assert_eq!(at(&w, 5), STORY_FRAME_MATRIX);
+        assert_eq!(at(&w), STORY_FRAME_MATRIX);
     }
 }
