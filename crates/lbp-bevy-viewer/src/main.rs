@@ -24,6 +24,7 @@ mod lighting;
 mod pod_dissolve;
 mod sackboy_play;
 mod speech_overlay;
+mod story_fallback;
 mod story_world;
 mod thing_view;
 mod water;
@@ -839,6 +840,10 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
             // Read by popit_play.rs.
             continue;
         }
+        if flag == "--level-scripts-none" || flag == "--story" {
+            // Read by level_play.rs (D353).
+            continue;
+        }
         if flag == "--level-scripts" {
             // Read by level_play.rs; here for the Thing map of the level scene (D268).
             v.level.scripts = true;
@@ -1010,6 +1015,7 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
             | "--level-scripts-press-at"
             | "--level-scripts-choose-at"
             | "--level-scripts-close-at"
+            | "--level-scripts-trace"
             | "--pod-card-pins"
             | "--play-sackboy-at"
             | "--popit-mode"

@@ -35,6 +35,7 @@ mod message_view;
 mod messages;
 mod pod;
 mod sensors;
+mod story_native;
 mod switches;
 pub mod transform;
 pub use camera::*;
@@ -45,6 +46,7 @@ pub use media::*;
 pub use message_view::*;
 pub use messages::*;
 pub use pod::*;
+pub use story_native::*;
 pub use switches::*;
 
 /// One Thing as the runtime sees it.

@@ -46,7 +46,8 @@ struct Mode {
 // The command lines the lanes' docs use (docs/level-scripts/part-30.md,
 // docs/d403-popit-in-the-pod.md, docs/handoff-pc-2026-10-11b-moon-anim.md). Game modes hide
 // the explorer's panels. The game's scripts sit in the encrypted patch.edat, so the Pod uses
-// the viewer's own camera when none load (D411); Story waits for its own fallback.
+// the viewer's own camera when none load (D411); Story opens through the search state's
+// native stand-in (D353).
 const MODES: &[Mode] = &[
     Mode {
         name: "Rookie Test",
@@ -117,9 +118,21 @@ const MODES: &[Mode] = &[
     },
     Mode {
         name: "Story screen",
-        blurb: "Coming soon, with the Pod menu.",
-        args: &[],
-        later: true,
+        blurb: "The Pod's Story search on Earth, with the first story group.",
+        args: &[
+            "--level-guid",
+            "00018fdb",
+            "--pod-camera",
+            "1",
+            "--pod-shell",
+            "000027b9",
+            "--level-scripts",
+            "--story",
+            "--window-16-9",
+            "--preview-lighting",
+            "--qa-hide-ui",
+        ],
+        later: false,
     },
 ];
 
