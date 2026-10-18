@@ -701,11 +701,13 @@ fn ramp(t: f32) -> [u8; 3] {
     [0, 1, 2].map(|k| (f32::from(c0[k]) + (f32::from(c1[k]) - f32::from(c0[k])) * f) as u8)
 }
 
-/// Reads every atlas, the tooltips and the Square glyph (load worker).
+/// Reads every atlas, the tooltips and the Square glyph (load worker). `worn` is the
+/// player's colour (packed ARGB, the profile's first colour) for the Player Color page.
 pub(crate) fn load_assets(
     source: &AttachedSource,
     catalog: &lbp_catalog::Catalog,
     control: &LoadControl,
+    worn: u32,
 ) -> Result<PopitAssets, String> {
     let (strings, _) = load_strings(source, catalog, control);
     let (cards, mut card_source, icons, opens) = match script_cards(source, catalog, control) {
@@ -922,7 +924,7 @@ pub(crate) fn load_assets(
                     return Vec::new();
                 }
                 if PlanStyle::of(types) == PlanStyle::Swatch {
-                    return swatch_sections(source, catalog, control, &popit);
+                    return swatch_sections(source, catalog, control, &popit, worn);
                 }
                 if PlanStyle::of(types) == PlanStyle::Wide {
                     let keep = owned_backgrounds(&popit);
@@ -1016,6 +1018,7 @@ fn swatch_sections(
     catalog: &lbp_catalog::Catalog,
     control: &LoadControl,
     popit: &lbp_preview::popit::Popit,
+    worn: u32,
 ) -> Sections {
     let Ok(sheet) = decode_icon(source, catalog, ResourceKey::Guid(0x19149), control) else {
         return Vec::new();
@@ -1033,8 +1036,8 @@ fn swatch_sections(
         .into_iter()
         .map(|(ix, it)| {
             let (primary, _) = PLAYER_COLOURS[ix];
-            let worn = primary == lbp_script_vm::natives::DEFAULT_PLAYER_COLOUR & 0xff_ffff;
-            (it.title.clone(), swatch(&fig, PLAYER_COLOURS[ix], worn))
+            let ticked = primary == worn & 0xff_ffff;
+            (it.title.clone(), swatch(&fig, PLAYER_COLOURS[ix], ticked))
         })
         .collect();
     vec![(String::new(), items)]
@@ -1072,7 +1075,8 @@ fn owned_backgrounds(popit: &lbp_preview::popit::Popit) -> std::collections::Has
 /// the figure filled with the primary colour (MEASURED placement, game frame 2026-10-17).
 /// D407: the colour Sackboy wears gets a white check mark over its square (MEASURED: the
 /// tick runs from the square's left middle down to its lower centre and out past its top
-/// right corner). Without a profile that is palette entry 0, the default colour.
+/// right corner). D409: the worn colour is `--profile-records`' first colour; without a
+/// profile that is palette entry 0, the default colour.
 fn swatch(fig: &[f32], (primary, secondary): (u32, u32), worn: bool) -> Image {
     let rgb = |c: u32| [(c >> 16) as u8, (c >> 8) as u8, c as u8];
     let (p, q) = (rgb(primary), rgb(secondary));
@@ -1354,9 +1358,13 @@ fn popit_input(
     mut p: ResMut<Popit>,
     mut sackboy: Query<&mut lbp_sim::character::SackboyBody>,
     assets: Res<PopitAssets>,
-    pod: Option<Res<crate::sackboy_play::PodSackboy>>,
+    mut pod: Option<ResMut<crate::sackboy_play::PodSackboy>>,
 ) {
     let pad = pads.iter().next();
+    // D410: an input script's `e` click in the Pod is Square for the Popit too.
+    let scripted = pod
+        .as_mut()
+        .is_some_and(|s| std::mem::take(&mut s.popit_square));
     if let Some(at) = p.cursor {
         // Cursor mode: the left stick (WASD) moves the ring, Circle/Square leave it (Square
         // brings the Popit back); Sackboy stands still.
@@ -1391,7 +1399,8 @@ fn popit_input(
     // D403: in the Pod's pad zone (or at the pod computer) Square is the pod computer's.
     let at_computer = !p.open && pod.is_some_and(|s| s.at_computer);
     if !at_computer
-        && (keys.just_pressed(KeyCode::KeyZ)
+        && (scripted
+            || keys.just_pressed(KeyCode::KeyZ)
             || pad.is_some_and(|g| g.just_pressed(GamepadButton::West)))
     {
         p.open = !p.open;
