@@ -374,6 +374,11 @@ struct Popit {
     /// D404: each collection's current page (kept per collection, FOUND 0x463b98 +0x38).
     tabs: BTreeMap<u32, usize>,
     built: Option<(u32, usize, usize, usize)>,
+    /// D408: page slide after L1 / R1: direction (+1 next, -1 previous) and seconds since.
+    slide: Option<(f32, f32)>,
+    /// QA `--popit-slide-at K`: one R1 once the page is up, the slide held at fraction K
+    /// (`true` once pressed).
+    qa_slide: Option<(f32, bool)>,
     /// Cursor mode (Popit Cursor button): cursor position in 720p screen px.
     cursor: Option<Vec2>,
 }
@@ -397,6 +402,35 @@ const PAGE_FEET_BELOW_CENTRE: f32 = 165.;
 
 #[derive(Component)]
 struct PageNode;
+
+/// D408: nodes that stay put while the page contents slide (MEASURED 2026-10-17: the
+/// panel card, the page counter, which switches at once, and the arrows).
+#[derive(Component)]
+struct PageFixed;
+
+/// D408: the panel-sized node that clips the page contents (MEASURED: both pages are cut
+/// at the panel's edges mid-slide).
+#[derive(Component)]
+struct PageClip;
+
+/// D408: the previous page's contents, sliding out; despawned when the slide ends.
+#[derive(Component)]
+struct OldPage;
+
+/// D408: a sliding node's resting left edge, window px.
+#[derive(Component)]
+struct SlideBase(f32);
+
+/// The current page's nodes and the old page's, still sliding out.
+type AnyPage = Or<(With<PageNode>, With<OldPage>)>;
+type ClipNode = (With<PageClip>, With<PageFixed>);
+type OldNode = (Entity, Has<PageFixed>, Has<PageClip>, Has<OldPage>);
+type SlideNode = (
+    Entity,
+    &'static mut Node,
+    Option<&'static SlideBase>,
+    Has<OldPage>,
+);
 
 #[derive(Component)]
 struct Part(Role);
@@ -1171,6 +1205,12 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
                 .into_iter()
                 .collect(),
             built: None,
+            slide: None,
+            qa_slide: all
+                .windows(2)
+                .find(|w| w[0] == "--popit-slide-at")
+                .and_then(|w| w[1].parse::<f32>().ok())
+                .map(|k| (k.clamp(0., 1.), false)),
             cursor: all
                 .iter()
                 .any(|a| a == "--popit-cursor")
@@ -1178,7 +1218,13 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
         })
         .add_systems(
             Update,
-            (popit_input, popit_turn, popit_layout, popit_page_ui)
+            (
+                popit_input,
+                popit_turn,
+                popit_layout,
+                popit_page_ui,
+                popit_slide,
+            )
                 .chain()
                 .after(crate::sackboy_play::show_sackboy),
         );
@@ -1381,8 +1427,12 @@ fn popit_input(
     let back = keys.just_pressed(KeyCode::KeyC)
         || pad.is_some_and(|g| g.just_pressed(GamepadButton::East));
     // D404: L1 / R1 (Q / E on the keyboard) are the previous / next page keys (FOUND 0x463b98).
-    let shoulder = i32::from(dir(KeyCode::KeyE, GamepadButton::RightTrigger))
+    let mut shoulder = i32::from(dir(KeyCode::KeyE, GamepadButton::RightTrigger))
         - i32::from(dir(KeyCode::KeyQ, GamepadButton::LeftTrigger));
+    if let Some((k, false)) = p.qa_slide.filter(|_| p.built.is_some()) {
+        p.qa_slide = Some((k, true));
+        shoulder = 1;
+    }
     let open_page = assets.pages.iter().find(|pg| Some(pg.id) == p.page);
     if p.page.is_some() {
         if back {
@@ -1400,6 +1450,7 @@ fn popit_input(
             if to != cur {
                 p.tabs.insert(pg.id, to);
                 p.cell = (0, 0);
+                p.slide = Some((shoulder.signum() as f32, 0.));
             }
         } else {
             let (r, c) = p.cell;
@@ -1909,13 +1960,75 @@ fn popit_layout(
 
 /// The inventory page: panel, title, section headers, icon grid, counter, tooltip pill and
 /// the USE!/More! prompts (rebuilt whenever the page or the focused cell changes).
+/// D408: the page slide (MEASURED 2026-10-17, RPCS3 30 Hz frames of R1 / L1): the pages
+/// sit side by side 297 px apart (FOUND 0x463b98: one strip) and R1 moves the strip left,
+/// so the old contents leave to the left as the new ones come in from the right, both cut
+/// at the panel's edges. The move takes 10 frames (333 ms) and eases in and out: measured
+/// fractions 0.02, 0.09, 0.20, 0.34, 0.54, 0.71, 0.85, 0.94, 0.99, 1 (smoothstep within
+/// 0.06). The panel card, counter and arrows stay put; L1 mirrors it.
+const SLIDE_SECONDS: f32 = 1. / 3.;
+const SLIDE_PX: f32 = 297.;
+
+/// Moves each new page node into the current clip node (left / top made relative to the
+/// panel, kept as its `SlideBase`), then shifts the sliding nodes while a slide runs.
+fn popit_slide(
+    mut commands: Commands,
+    mut p: ResMut<Popit>,
+    time: Res<Time>,
+    windows: Query<&Window>,
+    clips: Query<(Entity, &Node, Has<OldPage>), ClipNode>,
+    mut nodes: Query<SlideNode, (AnyPage, Without<PageFixed>)>,
+) {
+    let scale = windows.single().map_or(1., |w| w.height() / FRAME_H);
+    let clip = clips.iter().find(|c| !c.2);
+    let slide = p.slide.map(|(dir, t)| (dir, (t / SLIDE_SECONDS).min(1.)));
+    for (ent, mut node, base, old) in &mut nodes {
+        let base = match (base, clip) {
+            (Some(b), _) => b.0,
+            (None, Some((clip, at, _))) => {
+                let (Val::Px(l), Val::Px(t), Val::Px(cl), Val::Px(ct)) =
+                    (node.left, node.top, at.left, at.top)
+                else {
+                    continue;
+                };
+                node.top = Val::Px(t - ct);
+                commands
+                    .entity(ent)
+                    .insert((SlideBase(l - cl), ChildOf(clip)));
+                l - cl
+            }
+            (None, None) => continue,
+        };
+        let shift = match slide {
+            Some((dir, k)) if old => -dir * smooth(k),
+            Some((dir, k)) => dir * (1. - smooth(k)),
+            None => 0.,
+        };
+        node.left = Val::Px(base + shift * SLIDE_PX * scale);
+    }
+    let Some((dir, k)) = slide else {
+        return;
+    };
+    if k >= 1. {
+        for (e, _, old) in &clips {
+            if old {
+                commands.entity(e).despawn();
+            }
+        }
+        p.slide = None;
+    } else {
+        let hold = p.qa_slide.map_or(1., |q| q.0) * SLIDE_SECONDS;
+        p.slide = Some((dir, (k * SLIDE_SECONDS + time.delta_secs()).min(hold)));
+    }
+}
+
 fn popit_page_ui(
     mut commands: Commands,
     mut p: ResMut<Popit>,
     assets: Res<PopitAssets>,
     mut images: ResMut<Assets<Image>>,
     windows: Query<&Window>,
-    old: Query<Entity, With<PageNode>>,
+    old: Query<OldNode, AnyPage>,
 ) {
     let want = p.page.filter(|_| p.page_blend > 0.5).map(|id| {
         let tab = assets
@@ -1928,9 +2041,19 @@ fn popit_page_ui(
     if want == p.built {
         return;
     }
+    // D408: a page change keeps the old contents to slide out; anything else (focus moves,
+    // closing) replaces them in place.
+    let turned = p.slide.is_some_and(|(_, t)| t == 0.)
+        && want
+            .zip(p.built)
+            .is_some_and(|(w, b)| w.0 == b.0 && w.1 != b.1);
     p.built = want;
-    for e in &old {
-        commands.entity(e).despawn();
+    for (e, fixed, clip, was_old) in &old {
+        if turned && (clip || !fixed) && !was_old {
+            commands.entity(e).remove::<PageNode>().insert(OldPage);
+        } else {
+            commands.entity(e).despawn();
+        }
     }
     let (Some((id, tab, row, col)), Ok(window)) = (want, windows.single()) else {
         return;
@@ -1948,23 +2071,25 @@ fn popit_page_ui(
         ..default()
     };
     let text = |commands: &mut Commands, s: &str, x: f32, y: f32, size: f32, z: i32| {
-        commands.spawn((
-            PageNode,
-            Text::new(s),
-            TextFont {
-                font: bevy::text::FontSource::SansSerif,
-                weight: bevy::text::FontWeight::BOLD,
-                ..TextFont::from_font_size(size * scale)
-            },
-            TextColor(Color::WHITE),
-            Node {
-                position_type: PositionType::Absolute,
-                left: Val::Px(x * scale),
-                top: Val::Px((y - size * 0.62) * scale),
-                ..default()
-            },
-            GlobalZIndex(z),
-        ));
+        commands
+            .spawn((
+                PageNode,
+                Text::new(s),
+                TextFont {
+                    font: bevy::text::FontSource::SansSerif,
+                    weight: bevy::text::FontWeight::BOLD,
+                    ..TextFont::from_font_size(size * scale)
+                },
+                TextColor(Color::WHITE),
+                Node {
+                    position_type: PositionType::Absolute,
+                    left: Val::Px(x * scale),
+                    top: Val::Px((y - size * 0.62) * scale),
+                    ..default()
+                },
+                GlobalZIndex(z),
+            ))
+            .id()
     };
     let [px, py, pw, ph] = PANEL;
     // MEASURED 2026-10-12 (play frame): in play mode the star opens "Heart Items", a bare
@@ -1973,9 +2098,19 @@ fn popit_page_ui(
     let panel = images.add(card_image_at([pw, ph], [0., 0.57 * ph], 18.));
     commands.spawn((
         PageNode,
+        PageFixed,
         node(px, py, pw, ph),
         ImageNode::new(panel),
         GlobalZIndex(40),
+    ));
+    commands.spawn((
+        PageNode,
+        PageFixed,
+        PageClip,
+        Node {
+            overflow: Overflow::clip(),
+            ..node(px, py, pw, ph)
+        },
     ));
     // The game's handwritten title is narrower than our sans: shrink long titles to the panel.
     let page_title = if tab == page.home {
@@ -1995,26 +2130,36 @@ fn popit_page_ui(
     if vis.len() > 1 {
         let at = vis.iter().position(|&t| t == tab).unwrap_or(0);
         let counter = format!("{}/{}", at + 1, vis.len());
-        text(&mut commands, &counter, px + pw / 2. - 14., 646., 20., 42);
+        let mut still = vec![text(
+            &mut commands,
+            &counter,
+            px + pw / 2. - 14.,
+            646.,
+            20.,
+            42,
+        )];
         if at > 0 {
-            text(
+            still.push(text(
                 &mut commands,
                 "‹",
                 PAGE_ARROW_X.0 - 5.,
                 PAGE_ARROW_Y,
                 26.,
                 42,
-            );
+            ));
         }
         if at + 1 < vis.len() {
-            text(
+            still.push(text(
                 &mut commands,
                 "›",
                 PAGE_ARROW_X.1 - 5.,
                 PAGE_ARROW_Y,
                 26.,
                 42,
-            );
+            ));
+        }
+        for e in still {
+            commands.entity(e).insert(PageFixed);
         }
     }
     // D405: the open page draws its own fields; the other pages are a grid of their plans.
@@ -2301,9 +2446,12 @@ fn popit_page_ui(
         .max(4) as f32;
     let (lw, lh) = (widest * 13. - 2., PILL_H + (lines.len() as f32 - 1.) * 22.);
     let (lx, ly) = (focus_at.0 - 32. - 8. - lw, focus_at.1 - 8. - lh / 2.);
+    // D408: the tooltip and its prompts jump to the new page's focus at once and are not
+    // cut at the panel (MEASURED 2026-10-17 mid-slide frames).
     if !header_focus {
         commands.spawn((
             PageNode,
+            PageFixed,
             Node {
                 border_radius: BorderRadius::all(Val::Px(PILL_H / 2. * scale)),
                 ..node(lx, ly, lw, lh)
@@ -2315,6 +2463,7 @@ fn popit_page_ui(
             let (len, h) = (TAIL_LEN_H / TAIL_STEPS as f32, 11. - 2. * k as f32);
             commands.spawn((
                 PageNode,
+                PageFixed,
                 node(
                     lx + lw - 1. + k as f32 * len,
                     ly + lh / 2. - h / 2.,
@@ -2326,7 +2475,7 @@ fn popit_page_ui(
             ));
         }
         for (i, l) in lines.iter().enumerate() {
-            text(
+            let e = text(
                 &mut commands,
                 l,
                 lx + 10.,
@@ -2334,6 +2483,7 @@ fn popit_page_ui(
                 19.,
                 44,
             );
+            commands.entity(e).insert(PageFixed);
         }
     }
     // The header's prompts are "Hide" above and "More!" below the bar (MEASURED).
@@ -2354,6 +2504,7 @@ fn popit_page_ui(
         let (hx, hy) = (cx + dx, cy + dy);
         commands.spawn((
             PageNode,
+            PageFixed,
             Node {
                 border_radius: BorderRadius::all(Val::Px(18. * scale)),
                 ..node(hx - 62., hy - 20., 124., 36.)
@@ -2361,8 +2512,10 @@ fn popit_page_ui(
             BackgroundColor(Color::srgba(0.66, 0.6, 0.15, 0.9)),
             GlobalZIndex(43),
         ));
-        text(&mut commands, label, hx - 50., hy - 1., 24., 44);
-        text(&mut commands, glyph, hx + 34., hy - 1., 20., 44);
+        for (s, x, size) in [(label, hx - 50., 24.), (glyph, hx + 34., 20.)] {
+            let e = text(&mut commands, s, x, hy - 1., size, 44);
+            commands.entity(e).insert(PageFixed);
+        }
     }
 }
 
