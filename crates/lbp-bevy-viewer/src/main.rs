@@ -238,8 +238,13 @@ impl LevelMode {
     }
     /// Level selector: point at `entry` and drop Pod/QA framing from the previous target.
     fn retarget(&mut self, entry: &lbp_preview::level_list::LevelEntry) {
-        self.guid = entry.guid;
-        self.path = Some(entry.path.clone());
+        self.switch_to(entry.guid, Some(entry.path.clone()));
+    }
+    /// The level at `guid` or `path`, without the Pod/QA framing of the previous target
+    /// (D364: also the level the Pod launches, `level_play::switch_level`).
+    fn switch_to(&mut self, guid: Option<u32>, path: Option<String>) {
+        self.guid = guid;
+        self.path = path;
         self.focus = None;
         self.pod = None;
         self.shell = None;
@@ -1329,11 +1334,13 @@ fn clear(
     materials: &mut Assets<ViewerMaterial>,
     images: &mut Assets<Image>,
 ) {
+    // D364: the Pod figure and a scene under the Pod's roots went with them
+    // (`clear_pod_shell`).
     if let Some(gpu) = v.playing.take().and_then(|p| p.gpu) {
-        commands.entity(gpu.root).despawn();
+        commands.entity(gpu.root).try_despawn();
     }
     for (entity, mesh, material, image) in v.scene.drain(..) {
-        commands.entity(entity).despawn();
+        commands.entity(entity).try_despawn();
         meshes.remove(mesh.id());
         if let Some(second) = materials
             .get(material.id())

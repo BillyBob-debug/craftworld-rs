@@ -134,6 +134,13 @@ struct Play {
     /// D353 `--story` without the game's scripts: the Story screen run natively
     /// ([`crate::story_fallback::Fallback`]).
     story: Option<crate::story_fallback::Fallback>,
+    /// D364: what the level's world was built from, to build a launched level the same
+    /// way; the launched level while it is read ([`switch_level`]); and the session's
+    /// ticks run by the levels before this one (the Pod's), so that the QA ticks
+    /// (`--level-scripts-hold-at`) count on across the switch.
+    from: WorldSource,
+    switch: Option<Switch>,
+    tick_base: u64,
 }
 
 /// D411: the camera the Pod's planets script writes once it comes to rest (MEASURED from
@@ -184,6 +191,183 @@ struct ShellLevel {
     /// Part 32: whether the viewer's own Sackboy was in the pad zone after the last tick,
     /// as last printed.
     zone: Option<bool>,
+}
+
+/// D364: what a level's script world is built from, kept so that a level the Pod hands
+/// to the game's level load is built the same way while the viewer runs.
+#[derive(Clone)]
+struct WorldSource {
+    snapshot: String,
+    game: String,
+    /// D353 `--level-scripts-none`.
+    no_scripts: bool,
+    /// D341 `--profile-records`.
+    profile: lbp_runtime::ProfileRecords,
+    /// `--level-scripts-flags`.
+    flags: u32,
+    /// D417 `--native-scripts`.
+    native_scripts: bool,
+}
+
+/// D364: a level read by [`WorldSource::read`]: the scripts on a VM (and on a second VM
+/// for the shell level, when asked), the level's world and its identity, and the header.
+struct LevelRead {
+    vm: Vm,
+    shell_vm: Option<Vm>,
+    world: LevelWorld,
+    identity: String,
+    header: String,
+    /// Scripts loaded (none without the decrypted patch.edat).
+    loaded: usize,
+}
+
+impl WorldSource {
+    fn attach(
+        &self,
+        control: &LoadControl,
+    ) -> Result<(lbp_catalog::Catalog, AttachedSource), String> {
+        let catalog = lbp_catalog::load(Path::new(&self.snapshot), control)?;
+        let source = AttachedSource::attach(Path::new(&self.game), &catalog, control)?;
+        Ok((catalog, source))
+    }
+
+    /// The scripts, the level at `guid` or `path` with the story slots, the translation
+    /// tables and the profile (everything of [`install`]'s load but the shell level, the
+    /// menu assets and the colour presets).
+    fn read(
+        &self,
+        (catalog, source, control): (&lbp_catalog::Catalog, &AttachedSource, &LoadControl),
+        guid: Option<u32>,
+        path: Option<&str>,
+        shell: bool,
+    ) -> Result<LevelRead, String> {
+        let (mut scripts, not_read) = lbp_ui_script::load::load(source, catalog, control)?;
+        if self.no_scripts {
+            scripts.clear();
+        }
+        let mut vm = Vm::default();
+        // The shell level's scripts run on a VM of their own, loaded in the same
+        // order (as the `level_scripts` example's second level).
+        let mut shell_vm = shell.then(Vm::default);
+        let loaded = scripts.len();
+        for (g, s) in scripts {
+            if let Some(shell_vm) = shell_vm.as_mut() {
+                shell_vm.load(s.clone(), g);
+            }
+            vm.load(s, g);
+        }
+        let (mut world, identity) = read_world((catalog, source, control), guid, path)?;
+        // D328: the Story search's results are the story slot list's slots. A list
+        // that cannot be read leaves the search with no results.
+        match lbp_preview::story::read_story_slot_list(source, catalog, control) {
+            Ok(list) => world.story_slots = lbp_runtime::SearchSlot::from_list(&list),
+            Err(e) => println!("Story slots not read: {e}"),
+        }
+        // The English tables, patch first, as the `level_scripts` example loads them
+        // (INFERRED that these are the tables loaded while a level plays). A table
+        // that cannot be read is left out: the scripts then give their own text for
+        // a missing key and a bubble shows no close prompt.
+        let (strings, _) = lbp_preview::story::load_strings(source, catalog, control);
+        // D342: the profile's colours, when the file gives them, colour the players.
+        world.profile_goodies = self.profile.goodies.clone();
+        world.set_profile_colour(self.profile.colours);
+        world.translations = [strings.patch, strings.base]
+            .into_iter()
+            .flatten()
+            .map(std::sync::Arc::new)
+            .collect();
+        let header = format!(
+            "Level scripts: {identity}; scripts loaded {loaded} (not read {not_read}); translation tables {}",
+            world.translations.len()
+        );
+        Ok(LevelRead {
+            vm,
+            shell_vm,
+            world,
+            identity,
+            header,
+            loaded,
+        })
+    }
+
+    /// The read level's world bound to its VM and its scripts set up: the objects built,
+    /// the class defaults, the progression flags, the engine objects (their faults, at
+    /// most [`MAX_FAULT_LINES`]) and the scripted Things. Prints the header.
+    fn start(
+        &self,
+        read: LevelRead,
+    ) -> (Vm, Bindings<LevelWorld>, LevelScripts, Vec<String>, String) {
+        let LevelRead {
+            mut vm,
+            mut world,
+            header,
+            ..
+        } = read;
+        let built = world.bind_objects(&mut vm);
+        world.add_class_defaults(&vm);
+        world.progression_flags = self.flags;
+        // Unbound natives return their type's default and are counted (rscript-plan stage 1).
+        let mut host = Bindings::defaulting(world);
+        let mut faults = lbp_runtime::add_engine_objects(&mut vm, &mut host, BUDGET_PER_CALL);
+        faults.truncate(MAX_FAULT_LINES);
+        let mut scripts = LevelScripts::new(&vm, &host.world);
+        // D356: the scripted Things and the native port each runs, when it runs one.
+        let ports: Vec<String> = (scripts.instances.iter())
+            .map(|i| {
+                let port = lbp_runtime::native_script(i.guid).map_or("none", |n| n.class());
+                format!("{} g{:08x} {port}", i.thing, i.guid)
+            })
+            .collect();
+        println!(
+            "Level scripts: scripted Things and their native ports: {}",
+            ports.join(", ")
+        );
+        scripts.set_force_native(self.native_scripts);
+        let header = format!(
+            "{header}; scripted Things {}; objects built {built}, unconverted {}",
+            scripts.instances.len(),
+            host.world.unconverted
+        );
+        println!("{header}");
+        (vm, host, scripts, faults, header)
+    }
+}
+
+/// A level's world read from its resource, and the level's identity.
+fn read_world(
+    (catalog, source, control): (&lbp_catalog::Catalog, &AttachedSource, &LoadControl),
+    guid: Option<u32>,
+    path: Option<&str>,
+) -> Result<(LevelWorld, String), String> {
+    let (key, identity) = level_scene::resolve_level(catalog, guid, path)?;
+    let bytes = level_scene::read_level_bytes(source, &key, control)?;
+    let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
+        .map_err(|e| e.to_string())?;
+    Ok((LevelWorld::from_things(&report.things), identity))
+}
+
+/// D364: the level the Pod handed to the game's level load (`LevelWorld::pod_launch_step`),
+/// read on a worker thread with the level reader's stack while the viewer runs.
+struct Switch {
+    guid: u32,
+    receiver: std::sync::mpsc::Receiver<Result<LevelRead, String>>,
+}
+
+fn start_switch(from: &WorldSource, guid: u32) -> Result<Switch, String> {
+    let (send, receiver) = std::sync::mpsc::channel();
+    let from = from.clone();
+    std::thread::Builder::new()
+        .stack_size(level_scene::LEVEL_STACK_BYTES)
+        .spawn(move || {
+            let control = LoadControl::default();
+            let read = from.attach(&control).and_then(|(catalog, source)| {
+                from.read((&catalog, &source, &control), Some(guid), None, false)
+            });
+            // The receiver is gone only when the viewer is.
+            let _ = send.send(read);
+        })
+        .map_err(|e| format!("level switch thread: {e}"))?;
+    Ok(Switch { guid, receiver })
 }
 
 /// What the camera a script writes itself did since the tick before.
@@ -538,117 +722,60 @@ pub fn install(app: &mut App) -> Result<(), String> {
         })
         .transpose()?
         .unwrap_or_default();
+    // D417: `--native-scripts` runs the native script ports even with the scripts loaded.
+    let native_scripts = all.iter().any(|a| a == "--native-scripts");
+    // D364: kept to build a level the Pod launches the same way.
+    let from = WorldSource {
+        snapshot,
+        game,
+        no_scripts,
+        profile,
+        flags,
+        native_scripts,
+    };
     // The level reader recurses deeply: same worker stack as the level scene.
     type Loaded = (
-        Vm,
-        LevelWorld,
-        String,
-        usize,
+        LevelRead,
         Option<(Vm, LevelWorld, String)>,
         Option<(crate::pod_menu::MenuAssets, String)>,
         Result<[crate::colour_grade::Record; 8], String>,
     );
-    let (mut vm, mut world, header, loaded, shell, menu_assets, cc_presets) = std::thread::Builder::new()
+    let worker = from.clone();
+    let (read, shell, menu_assets, cc_presets) = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
         .spawn(move || -> Result<Loaded, String> {
             let control = LoadControl::default();
-            let catalog = lbp_catalog::load(Path::new(&snapshot), &control)?;
-            let source = AttachedSource::attach(Path::new(&game), &catalog, &control)?;
-            let (mut scripts, not_read) = lbp_ui_script::load::load(&source, &catalog, &control)?;
-            if no_scripts {
-                scripts.clear();
-            }
-            let mut vm = Vm::default();
-            // The shell level's scripts run on a VM of their own, loaded in the same
-            // order (as the `level_scripts` example's second level).
-            let mut shell_vm = shell_guid.map(|_| Vm::default());
-            let loaded = scripts.len();
-            for (g, s) in scripts {
-                if let Some(shell_vm) = shell_vm.as_mut() {
-                    shell_vm.load(s.clone(), g);
-                }
-                vm.load(s, g);
-            }
-            let read_world = |guid: Option<u32>, path: Option<&str>| {
-                let (key, identity) = level_scene::resolve_level(&catalog, guid, path)?;
-                let bytes = level_scene::read_level_bytes(&source, &key, &control)?;
-                let report = lbp_level::read(&bytes, lbp_level::Limits::default(), &|| false)
-                    .map_err(|e| e.to_string())?;
-                Ok::<_, String>((LevelWorld::from_things(&report.things), identity))
-            };
-            let (mut world, identity) = read_world(guid, path.as_deref())?;
-            // D328: the Story search's results are the story slot list's slots. A list
-            // that cannot be read leaves the search with no results.
-            match lbp_preview::story::read_story_slot_list(&source, &catalog, &control) {
-                Ok(list) => world.story_slots = lbp_runtime::SearchSlot::from_list(&list),
-                Err(e) => println!("Story slots not read: {e}"),
-            }
-            // The English tables, patch first, as the `level_scripts` example loads them
-            // (INFERRED that these are the tables loaded while a level plays). A table
-            // that cannot be read is left out: the scripts then give their own text for
-            // a missing key and a bubble shows no close prompt.
-            let (strings, _) = lbp_preview::story::load_strings(&source, &catalog, &control);
-            // D342: the profile's colours, when the file gives them, colour the players.
-            let lbp_runtime::ProfileRecords {
-                goodies, colours, ..
-            } = profile;
-            world.profile_goodies = goodies;
-            world.set_profile_colour(colours);
-            world.translations = [strings.patch, strings.base]
-                .into_iter()
-                .flatten()
-                .map(std::sync::Arc::new)
-                .collect();
-            let header = format!(
-                "Level scripts: {identity}; scripts loaded {loaded} (not read {not_read}); translation tables {}",
-                world.translations.len()
-            );
-            let shell = shell_vm
+            let (catalog, source) = worker.attach(&control)?;
+            let at = (&catalog, &source, &control);
+            let mut read = worker.read(at, guid, path.as_deref(), shell_guid.is_some())?;
+            let shell = read
+                .shell_vm
+                .take()
                 .zip(shell_guid)
                 .map(|(shell_vm, g)| {
-                    let (mut shell, identity) = read_world(Some(g), None)?;
-                    shell.translations.clone_from(&world.translations);
+                    let (mut shell, identity) = read_world(at, Some(g), None)?;
+                    shell.translations.clone_from(&read.world.translations);
                     Ok::<_, String>((shell_vm, shell, identity))
                 })
                 .transpose()?;
             let menu_assets = shell.is_some().then(|| {
-                crate::pod_menu::load_menu_assets(&game, &source, &catalog, &control, &card_pins)
+                crate::pod_menu::load_menu_assets(
+                    &worker.game,
+                    &source,
+                    &catalog,
+                    &control,
+                    &card_pins,
+                )
             });
             // D331: the colour correction's presets.
             let cc_presets = crate::colour_grade::load_presets(&source, &catalog, &control);
-            Ok((vm, world, header, loaded, shell, menu_assets, cc_presets))
+            Ok((read, shell, menu_assets, cc_presets))
         })
         .map_err(|e| format!("level scripts thread: {e}"))?
         .join()
         .map_err(|_| "level scripts thread panicked".to_string())??;
-    let built = world.bind_objects(&mut vm);
-    world.add_class_defaults(&vm);
-    world.progression_flags = flags;
-    // Unbound natives return their type's default and are counted (rscript-plan stage 1).
-    let mut host = Bindings::defaulting(world);
-    let mut faults = lbp_runtime::add_engine_objects(&mut vm, &mut host, BUDGET_PER_CALL);
-    faults.truncate(MAX_FAULT_LINES);
-    let mut scripts = LevelScripts::new(&vm, &host.world);
-    // D356: the scripted Things and the native port each runs, when it runs one.
-    let ports: Vec<String> = (scripts.instances.iter())
-        .map(|i| {
-            let port = lbp_runtime::native_script(i.guid).map_or("none", |n| n.class());
-            format!("{} g{:08x} {port}", i.thing, i.guid)
-        })
-        .collect();
-    println!(
-        "Level scripts: scripted Things and their native ports: {}",
-        ports.join(", ")
-    );
-    // D417: `--native-scripts` runs the native script ports even with the scripts loaded.
-    let native_scripts = all.iter().any(|a| a == "--native-scripts");
-    scripts.set_force_native(native_scripts);
-    let header = format!(
-        "{header}; scripted Things {}; objects built {built}, unconverted {}",
-        scripts.instances.len(),
-        host.world.unconverted
-    );
-    println!("{header}");
+    let loaded = read.loaded;
+    let (vm, mut host, scripts, mut faults, header) = from.start(read);
     let menu_assets = menu_assets.map(|(assets, line)| {
         println!("{line}");
         assets
@@ -748,6 +875,9 @@ pub fn install(app: &mut App) -> Result<(), String> {
             story_at_start: story,
             ..Default::default()
         }),
+        from,
+        switch: None,
+        tick_base: 0,
     })
     .insert_resource(crate::CaptureHold(hold_at.is_some()))
     .insert_resource(menu_assets.unwrap_or_default())
@@ -798,6 +928,9 @@ pub fn install(app: &mut App) -> Result<(), String> {
             .before(crate::capture),
     )
     .add_systems(Update, (menu_keys, close_key))
+    // D364: before the display's load (and the Pod shell's clearing), which the switch
+    // asks for.
+    .add_systems(Update, switch_level.before(crate::clear_pod_shell))
     .add_systems(EguiPrimaryContextPass, (speech, window));
     Ok(())
 }
@@ -1015,7 +1148,10 @@ fn step(
     mut pod: Option<&mut crate::sackboy_play::PodSackboy>,
 ) {
     // `--level-scripts-hold-at N`: a capture waits for tick N, and no tick follows it.
-    let held = p.hold_at.is_some_and(|n| p.scripts.ticks >= n);
+    // D364: the session's ticks, counted on across a level switch.
+    let held = p
+        .hold_at
+        .is_some_and(|n| p.tick_base + p.scripts.ticks >= n);
     // Part 32: the viewer's own Sackboy in the Pod holds his input and pose with them.
     if let Some(pod) = pod.as_deref_mut() {
         if pod.held != held {
@@ -1044,7 +1180,8 @@ fn step(
         p.created = Some(r);
         return;
     }
-    if held {
+    // D364: no tick while a launched level is read.
+    if held || p.switch.is_some() {
         return;
     }
     // Part 27, `--level-scripts-in-use-at N`: a player is at the pod computer from the
@@ -1331,11 +1468,26 @@ fn step(
     if let Some(start) = p.host.world.pod_launch_step() {
         let root = start
             .root
+            .as_ref()
             .map(|d| (d.guid.map(|g| format!("{g:08x}")), d.sha1.is_some()));
         println!(
             "Level start after tick {}: slot {:?}, root level {root:?} (guid, has sha1), mode {} (D363)",
             p.scripts.ticks, start.slot, start.mode
         );
+        // D364: the game's level load: the root level is read in the background, and
+        // the Pod's ticks wait for it ([`step`]; INFERRED: the game's loading screen).
+        if let Some(guid) = start.root.and_then(|d| d.guid) {
+            match start_switch(&p.from, guid) {
+                Ok(switch) => {
+                    p.switch = Some(switch);
+                    println!(
+                        "Level switch after tick {}: reading level {guid:08x}; the Pod's ticks wait for it (D364)",
+                        p.scripts.ticks
+                    );
+                }
+                Err(e) => println!("Level switch to {guid:08x} not started: {e} (D364)"),
+            }
+        }
     }
     // D362: Cross on a story level, after the tick as the engine's dispatcher (the same
     // in both modes: the script declines and the engine asks for the launch).
@@ -1366,6 +1518,83 @@ fn note_shell(faults: &mut Vec<String>, r: &StepReport) {
             faults.push(format!("shell thing {thing}: {f}"));
         }
     }
+}
+
+/// D364: the launched level, once read, replaces the Pod, as the game's level load
+/// does: the level's world, VM and scripts take the place of the planets level's, the
+/// shell level and the Pod's story and menu state go, and the display loads the level as
+/// the browser's Load button does (the scene cleared and spawned again, with the
+/// viewer's own level framing: the Pod rig no longer has the camera). The session's
+/// ticks count on from the Pod's. The trace (`--level-scripts-trace`) ends here: its
+/// fields are the Pod's. A level that cannot be read leaves the Pod playing.
+fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut commands: Commands) {
+    use std::sync::mpsc::TryRecvError;
+    let p = &mut *play;
+    let Some(switch) = p.switch.as_ref() else {
+        return;
+    };
+    let read = match switch.receiver.try_recv() {
+        Ok(read) => read,
+        Err(TryRecvError::Empty) => return,
+        Err(TryRecvError::Disconnected) => Err("the reading thread ended".into()),
+    };
+    let guid = switch.guid;
+    p.switch = None;
+    let read = match read {
+        Ok(read) => read,
+        Err(e) => {
+            println!("Level switch to {guid:08x} failed: {e}; the Pod plays on (D364)");
+            return;
+        }
+    };
+    let identity = read.identity.clone();
+    let (vm, host, scripts, faults, header) = p.from.start(read);
+    p.tick_base += p.scripts.ticks;
+    p.vm = vm;
+    p.host = host;
+    p.scripts = scripts;
+    p.created = None;
+    p.totals = StepReport::default();
+    p.ticks_with_faults = 0;
+    p.faults = faults;
+    p.header = header;
+    p.player = None;
+    p.messages_printed = (0, 0);
+    p.light = None;
+    p.things_scene = None;
+    p.followed = Default::default();
+    p.script_last = None;
+    p.depths_printed = None;
+    p.puter_open = None;
+    p.world_root = None;
+    p.world_root_placed = 0;
+    p.shell = None;
+    p.script_eye_y = None;
+    p.dof_printed = None;
+    p.fallback_camera = None;
+    p.story = None;
+    // The Pod's QA presses.
+    p.in_use_at = None;
+    p.press_at = None;
+    p.choose_at = None;
+    p.back_at.clear();
+    p.group_at = None;
+    p.move_at.clear();
+    p.cross_at = None;
+    p.trace = None;
+    // The display: the level as the Load button loads it, without the Pod's rig, Puter
+    // state, Story lights and the old scene's Thing map.
+    v.level.switch_to(Some(guid), None);
+    v.requested = true;
+    v.ready_frames = 0;
+    commands.remove_resource::<crate::PodRigRes>();
+    commands.remove_resource::<crate::pod_menu::PuterState>();
+    commands.remove_resource::<crate::story_world::StoryLight>();
+    commands.remove_resource::<crate::thing_view::LevelThings>();
+    println!(
+        "Level switched after tick {}: {identity} (D364)",
+        p.tick_base
+    );
 }
 
 /// The Puter state to hand to the script world as "pod computer in use": `now` when it
