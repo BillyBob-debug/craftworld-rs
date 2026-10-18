@@ -110,6 +110,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 104: the pod computer's menu states as native ports (2026-10-18, D357)](level-scripts/part-104.md)
 - [Part 105: the Pod search state as a native port, and Back from Story (2026-10-18, D358)](level-scripts/part-105.md)
 - [Part 106: choosing a Story group, and Back to Story (2026-10-18, D359)](level-scripts/part-106.md)
+- [Part 107: a Story group zooms in on its planet (2026-10-18, D360)](level-scripts/part-107.md)
 
 ## Next
 

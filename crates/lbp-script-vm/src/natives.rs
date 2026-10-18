@@ -567,6 +567,11 @@ pub trait World {
     fn pod_computer_in_use(&mut self) -> Result<bool, String> {
         Err(not_available("the pod computer"))
     }
+    /// The pod computer state's extra planet zoom (`PodComputerState.GetExtraPlanetZoom__`, a
+    /// script method) when the host runs the pod computer natively: 0 by default.
+    fn extra_planet_zoom(&mut self) -> Result<f32, String> {
+        Ok(0.)
+    }
     /// `PodComputer.GetCrashZoom__` (bool; INFERRED a zoom-to-crash state of the planet view).
     fn crash_zoom(&mut self) -> Result<bool, String> {
         Err(not_available("the pod computer"))
@@ -1948,6 +1953,11 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     }),
     ("PodComputer", "GetCrashZoom__", |w, _| {
         Ok(Value::Bool(w.crash_zoom()?))
+    }),
+    // Not a game native: the native planets world (D360) asks the host for the extra zoom
+    // that `PodComputerState.GetExtraPlanetZoom__` (a script method) would give.
+    ("PodComputer", "HostExtraPlanetZoom__", |w, _| {
+        Ok(Value::Float(w.extra_planet_zoom()?))
     }),
     // FOUND (01.33, 0x6430a0 -> 0x753bfc -> 0xf26bc). Declared `void SetWorldPosition(m44)`.
     // Nothing for a null Thing or one without a PPos. The matrix becomes the world matrix;
@@ -4051,8 +4061,9 @@ mod tests {
         let pressed = dispatch(&mut w, "Video", start, &[]).unwrap();
         assert_eq!(pressed, Ok(Value::Bool(false)));
         assert_eq!(w.0[7].pad.unwrap().now, START_BUTTON);
-        // The table: 249 natives before these six; D274 added two, D295 four, D319 one.
-        assert_eq!(bound().count(), 263);
+        // The table: 249 natives before these six; D274 added two, D295 four, D319 one, D360 one
+        // (host-only).
+        assert_eq!(bound().count(), 264);
     }
 
     #[test]
@@ -4111,8 +4122,8 @@ mod tests {
         assert!((wrap(-2. * TAU - 0.5) + 0.5).abs() < 1e-4);
         assert!(call("Math", "ModAngleToWithinPI__f", &[Value::Int(1)]).is_err());
         assert_eq!(mod_angle_to_within_pi(0.25), wrap(0.25));
-        // The table: 255 natives before these two; D295 added four, D319 one.
-        assert_eq!(bound().count(), 263);
+        // The table: 255 natives before these two; D295 added four, D319 one, D360 one.
+        assert_eq!(bound().count(), 264);
     }
 
     #[test]
@@ -4238,8 +4249,8 @@ mod tests {
         );
         assert_eq!(w.0, 3);
         // The table: 238 natives before these eleven; D273 added six, D274 two, D295 four, D319
-        // one.
-        assert_eq!(bound().count(), 263);
+        // one, D360 one.
+        assert_eq!(bound().count(), 264);
     }
 
     #[test]

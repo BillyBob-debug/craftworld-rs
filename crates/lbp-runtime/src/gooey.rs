@@ -887,6 +887,14 @@ impl LevelWorld {
             }
             ("PodComputerPlanets", "SetWantSearchDetails__Q13SearchDetailsbbb") => {
                 search.want_search_details_calls += 1;
+                // D360: FOUND (01.33): the last flag (Planets+0x5d8, 0x43c530) makes the
+                // planet pick its default result on its next update (0x42f43c ->
+                // 0x4290b8). The Story results keep the default their setup found
+                // (D331); a group search's is picked from the group's levels.
+                if let (Some(Value::Bool(true)), Some(group)) = (args.get(3), search.group) {
+                    let pick = self.group_default_result(group);
+                    self.pod.search.cur_result = pick;
+                }
                 Value::Void
             }
             // The search's results: one SearchResults object (D328: its results are
@@ -898,7 +906,9 @@ impl LevelWorld {
             // The Story results are made by the Story setup (0x449ce8), not a group
             // search: false, view 6 (the game's settled Story frame matches view 6's Earth
             // size, view 7 would be ~1.8x larger).
-            ("SearchResults", "GetWantZoom__") => Value::Bool(false),
+            // D360 (part 107): a group search's results ask for it (0x44dfc0 sets the byte
+            // for group type 4), so a chosen Story group is seen in view 7.
+            ("SearchResults", "GetWantZoom__") => Value::Bool(search.group.is_some()),
             ("SearchDetails", "IsBusyObtainingResults__")
             | ("SearchDetails", "IsPaged__")
             | ("SearchDetails", "RequiresOnline__")
