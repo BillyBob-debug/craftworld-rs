@@ -539,6 +539,11 @@ pub trait World {
     fn clear_pending_links(&mut self) -> Result<(), String> {
         Err(not_available("the profile"))
     }
+    /// D383: one tick of the Pod's `LevelUnlockingThread` (state 2 of the planets
+    /// world); whether it is still running. A world without the story ends it at once.
+    fn level_unlocking_tick(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
     /// `Native.GetIsInPadZone__Q5Thing` for a Thing that is not null: the level is our
     /// Pod, the Thing is the primary player's Sackboy, a pod-computer trigger holds him
     /// and his world z is at least [`PAD_ZONE_MIN_Z`].
@@ -873,6 +878,9 @@ impl<W: World> Host for Bindings<W> {
             t.push("is", class.to_owned(), args, Ok(Value::Bool(is)));
         }
         is
+    }
+    fn level_unlocking_tick(&mut self) -> Result<bool, String> {
+        self.world.level_unlocking_tick()
     }
     fn thing_script(&mut self, thing: u32) -> Option<u32> {
         self.world.thing_script(thing)

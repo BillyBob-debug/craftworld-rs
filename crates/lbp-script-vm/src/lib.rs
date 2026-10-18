@@ -209,6 +209,11 @@ pub trait Host {
     fn thing_script(&mut self, _thing: u32) -> Option<u32> {
         None
     }
+    /// D383: one tick of the Pod's `LevelUnlockingThread`, which a native port of the
+    /// planets world runs (`World::level_unlocking_tick`); whether it is still running.
+    fn level_unlocking_tick(&mut self) -> Result<bool, String> {
+        Ok(false)
+    }
     /// D326: a native that makes a script object (the engine's factory, e.g.
     /// `SearchDetails.CreateStoryLevels__`, whose declared return type is a script class
     /// with code): the class to make. The VM then makes it as `NEW_OBJECT` does and runs
