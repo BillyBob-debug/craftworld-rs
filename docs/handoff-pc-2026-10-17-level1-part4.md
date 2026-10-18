@@ -34,4 +34,6 @@
 3. Under the no-decrypted-copy rule: all 426 game scripts live only in patch.edat (Popit
    lane finding), so without the overlay Rookie Test loads no scripts. It needs a built-in
    fallback for the script behaviour it relies on (Da Vinci's lines, the bubble switches).
+   Approved strategy (docs/project-boost.md): native Rust per script, one script per task,
+   with the RScript VM kept as a dev oracle that records golden traces to test it.
 4. Sackboy pushed into a wall turns to the camera and plays `stand`, not a push.
