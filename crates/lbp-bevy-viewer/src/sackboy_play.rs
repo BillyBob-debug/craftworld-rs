@@ -73,14 +73,24 @@ pub(crate) struct Play {
 /// A level's checkpoints in reader order: (Thing index, world matrix).
 type Checkpoints = Vec<(usize, [f32; 16])>;
 
-/// What [`start_respawn`]'s worker thread reads: the scene, checkpoints and identity.
-type RespawnRead = Result<(PhysicsScene, Checkpoints, String), String>;
+/// What [`start_respawn`]'s worker thread reads: the scene, checkpoints, the Pod's
+/// controller (D382) and identity.
+type RespawnRead = Result<
+    (
+        PhysicsScene,
+        Checkpoints,
+        Option<(usize, Option<f32>)>,
+        String,
+    ),
+    String,
+>;
 
 /// D366: the launched level's physics, read on a worker thread after the Pod's switch
-/// ([`start_respawn`]); [`respawn`] swaps it in.
+/// ([`start_respawn`]); [`respawn`] swaps it in. D382: or the Pod's, on the way back.
 #[derive(Resource)]
 struct Respawn {
-    guid: u32,
+    label: String,
+    pod: bool,
     receiver: std::sync::Mutex<std::sync::mpsc::Receiver<RespawnRead>>,
 }
 
@@ -1253,13 +1263,20 @@ fn checkpoint_spawn(scene: &PhysicsScene, m: &[f32; 16]) -> [f32; 3] {
 
 /// D366: after the Pod's level switch (`level_play::switch_level`), reads the launched
 /// level's physics on a worker thread; [`respawn`] then replaces the shell level's world
-/// and puts Sackboy at the level's entrance, as `--play-sackboy` does at startup.
-pub(crate) fn start_respawn(commands: &mut Commands, guid: u32) {
+/// and puts Sackboy at the level's entrance, as `--play-sackboy` does at startup. D382:
+/// with `pod`, the shell level's again on the return, where he arrives as at the start.
+pub(crate) fn start_respawn(
+    commands: &mut Commands,
+    guid: Option<u32>,
+    path: Option<String>,
+    pod: bool,
+) {
     let all: Vec<String> = std::env::args().collect();
     let (Some(snapshot), Some(game)) = (value(&all, "--snapshot"), value(&all, "--game-dir"))
     else {
         return;
     };
+    let label = guid.map_or_else(|| path.clone().unwrap_or_default(), |g| format!("{g:08x}"));
     let (send, receiver) = std::sync::mpsc::channel();
     let started = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
@@ -1268,19 +1285,18 @@ pub(crate) fn start_respawn(commands: &mut Commands, guid: u32) {
             let read = (|| -> RespawnRead {
                 let catalog = lbp_catalog::load(Path::new(&snapshot), &control)?;
                 let source = AttachedSource::attach(Path::new(&game), &catalog, &control)?;
-                let (scene, checkpoints, _, identity) =
-                    read_physics((&catalog, &source, &control), Some(guid), None, false)?;
-                Ok((scene, checkpoints, identity))
+                read_physics((&catalog, &source, &control), guid, path.as_deref(), pod)
             })();
             // The receiver is gone only when the viewer is.
             let _ = send.send(read);
         });
     match started {
         Ok(_) => commands.insert_resource(Respawn {
-            guid,
+            label,
+            pod,
             receiver: std::sync::Mutex::new(receiver),
         }),
-        Err(e) => println!("Play Sackboy: level {guid:08x} not read: {e} (D366)"),
+        Err(e) => println!("Play Sackboy: level {label} not read: {e} (D366)"),
     }
 }
 
@@ -1304,34 +1320,56 @@ fn respawn(
         Ok(Ok(read)) => read,
         _ => Err("the reading thread ended".into()),
     };
-    let guid = pending.guid;
+    let (label, pod) = (pending.label.clone(), pending.pod);
     commands.remove_resource::<Respawn>();
-    let (scene, checkpoints, identity) = match read {
+    let (scene, checkpoints, controller, identity) = match read {
         Ok(read) => read,
         Err(e) => {
-            println!("Play Sackboy: level {guid:08x} not read: {e}; he stays in the Pod (D366)");
+            println!("Play Sackboy: level {label} not read: {e}; he stays where he is (D366)");
             return;
         }
     };
     let Some((_, m)) = checkpoints.first() else {
-        println!("Play Sackboy: {identity} has no CHECKPOINT; he stays in the Pod (D366)");
+        println!("Play Sackboy: {identity} has no CHECKPOINT; he stays where he is (D366)");
         return;
     };
-    let spawn = checkpoint_spawn(&scene, m);
+    // D382: back in the Pod he arrives by the Pod's checkpoint spawn rule, as at the start.
+    let spawn = if pod {
+        checkpoint_arrival(m, None, 0)
+    } else {
+        checkpoint_spawn(&scene, m)
+    };
     for e in &old {
         commands.entity(e).try_despawn();
     }
     commands.remove_resource::<PodSackboy>();
+    if pod {
+        commands.insert_resource(PodSackboy {
+            target: engage_target(controller.and_then(|c| c.1)),
+            frames: POD_CLIP_FRAMES,
+            ..default()
+        });
+    }
     println!(
-        "{} (D366: after the level switch)",
-        spawn_line(&scene_header(&identity, &scene), &checkpoints, spawn)
+        "{} ({})",
+        spawn_line(&scene_header(&identity, &scene), &checkpoints, spawn),
+        if pod {
+            "D382: back in the Pod"
+        } else {
+            "D366: after the level switch"
+        }
     );
     play.scene = Some(scene);
     play.spawn = spawn;
     play.framed = false;
     // D376: the launched level's checkpoint holds him before releasing him. INFERRED: the
-    // game holds every checkpoint spawn; the other spawns keep their measured timing.
-    play.hold = lbp_sim::character::SPAWN_HOLD_TICKS;
+    // game holds every checkpoint spawn; the other spawns keep their measured timing. The
+    // Pod's arrival keeps the start's (no hold).
+    play.hold = if pod {
+        0
+    } else {
+        lbp_sim::character::SPAWN_HOLD_TICKS
+    };
 }
 
 fn spawn_world(mut commands: Commands, mut play: ResMut<Play>) {

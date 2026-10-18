@@ -145,6 +145,18 @@ struct Play {
     /// `--level-scripts-finish-at N` (QA): the level's end after its tick N.
     launched: Option<(i32, i32)>,
     finish_at: Option<u64>,
+    /// D382: the Pod the session started in, to return to when a launched level ends.
+    home: PodHome,
+}
+
+/// D382: the Pod level, its shell and the viewer's Pod framing (kept at the launch).
+struct PodHome {
+    guid: Option<u32>,
+    path: Option<String>,
+    shell: Option<u32>,
+    target: Option<crate::PodTarget>,
+    /// The pending links' targets on the return, until the Pod's state 2 clears them.
+    linked: Vec<(i32, i32)>,
 }
 
 /// D411: the camera the Pod's planets script writes once it comes to rest (MEASURED from
@@ -353,20 +365,56 @@ fn read_world(
 /// D364: the level the Pod handed to the game's level load (`LevelWorld::pod_launch_step`),
 /// read on a worker thread with the level reader's stack while the viewer runs.
 struct Switch {
-    guid: u32,
-    slot: (i32, i32),
-    receiver: std::sync::mpsc::Receiver<Result<LevelRead, String>>,
+    guid: Option<u32>,
+    label: String,
+    to: SwitchTo,
+    receiver: std::sync::mpsc::Receiver<Result<(LevelRead, Option<ShellRead>), String>>,
 }
 
-fn start_switch(from: &WorldSource, guid: u32, slot: (i32, i32)) -> Result<Switch, String> {
+/// D382: where a [`Switch`] goes: the level at a story slot, or back to the Pod.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SwitchTo {
+    Level((i32, i32)),
+    Pod,
+}
+
+/// The shell level's VM, world and identity, read beside the Pod level.
+type ShellRead = (Vm, LevelWorld, String);
+
+/// Reads the shell level at `shell` for a level read with a shell VM (part 28).
+fn read_shell(
+    at: (&lbp_catalog::Catalog, &AttachedSource, &LoadControl),
+    read: &mut LevelRead,
+    shell: Option<u32>,
+) -> Result<Option<ShellRead>, String> {
+    read.shell_vm
+        .take()
+        .zip(shell)
+        .map(|(shell_vm, g)| {
+            let (mut world, identity) = read_world(at, Some(g), None)?;
+            world.translations.clone_from(&read.world.translations);
+            Ok((shell_vm, world, identity))
+        })
+        .transpose()
+}
+
+fn start_switch(
+    from: &WorldSource,
+    (guid, path, shell): (Option<u32>, Option<String>, Option<u32>),
+    to: SwitchTo,
+) -> Result<Switch, String> {
     let (send, receiver) = std::sync::mpsc::channel();
-    let from = from.clone();
+    let worker = from.clone();
+    let label = guid.map_or_else(|| path.clone().unwrap_or_default(), |g| format!("{g:08x}"));
     std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
         .spawn(move || {
             let control = LoadControl::default();
-            let read = from.attach(&control).and_then(|(catalog, source)| {
-                from.read((&catalog, &source, &control), Some(guid), None, false)
+            let read = worker.attach(&control).and_then(|(catalog, source)| {
+                let at = (&catalog, &source, &control);
+                let mut read = worker.read(at, guid, path.as_deref(), shell.is_some())?;
+                let shell = read_shell(at, &mut read, shell)?;
+                Ok((read, shell))
             });
             // The receiver is gone only when the viewer is.
             let _ = send.send(read);
@@ -374,9 +422,64 @@ fn start_switch(from: &WorldSource, guid: u32, slot: (i32, i32)) -> Result<Switc
         .map_err(|e| format!("level switch thread: {e}"))?;
     Ok(Switch {
         guid,
-        slot,
+        label,
+        to,
         receiver,
     })
+}
+
+/// Part 28: the shell level's world set up as the level's, and the session's start:
+/// the session is our Pod when the shell has a pod Thing, and the level hands the
+/// session's state to it.
+fn start_shell(
+    from: &WorldSource,
+    (mut shell_vm, shell_world, identity): ShellRead,
+    host: &mut Bindings<LevelWorld>,
+    faults: &mut Vec<String>,
+) -> ShellLevel {
+    let mut shell_world = shell_world;
+    let built = shell_world.bind_objects(&mut shell_vm);
+    shell_world.add_class_defaults(&shell_vm);
+    let mut shell_host = Bindings::defaulting(shell_world);
+    let engine = lbp_runtime::add_engine_objects(&mut shell_vm, &mut shell_host, BUDGET_PER_CALL);
+    let room = MAX_FAULT_LINES.saturating_sub(faults.len());
+    faults.extend(engine.into_iter().take(room).map(|f| format!("shell: {f}")));
+    let mut shell_scripts = LevelScripts::new(&shell_vm, &shell_host.world);
+    shell_scripts.set_force_native(from.native_scripts);
+    // D417: the Things a native port runs (all of them without the scripts).
+    let ported = shell_scripts
+        .instances
+        .iter()
+        .filter(|i| lbp_runtime::native_script(i.guid).is_some())
+        .count();
+    println!("Level scripts, shell level: native script ports for {ported} Things (Pod, Trigger_Pod; D417)");
+    // The session is our Pod when the shell has a pod Thing: the stand-in of the
+    // `level_scripts` example. PLACEHOLDER: the game tests the slot the level was
+    // entered from. Then the two worlds agree on the state outside a level.
+    host.world.our_pod = shell_host.world.pod_thing(true).is_some();
+    host.world.hand_session_to(&mut shell_host.world);
+    println!(
+        "Level scripts, shell level: {identity}; scripted Things {}; objects built {built}, unconverted {}; one session with the level above, the shell ticks first; our Pod {}",
+        shell_scripts.instances.len(),
+        shell_host.world.unconverted,
+        host.world.our_pod
+    );
+    ShellLevel {
+        vm: shell_vm,
+        host: shell_host,
+        scripts: shell_scripts,
+        created: None,
+        totals: StepReport::default(),
+        ticks_with_faults: 0,
+        things_scene: None,
+        followed: Default::default(),
+        opening: 0.,
+        sackboy: None,
+        press: false,
+        answers: 0,
+        own_sackboy: crate::sackboy_play::in_pod(),
+        zone: None,
+    }
 }
 
 /// What the camera a script writes itself did since the tick before.
@@ -750,6 +853,13 @@ pub fn install(app: &mut App) -> Result<(), String> {
         Option<(crate::pod_menu::MenuAssets, String)>,
         Result<[crate::colour_grade::Record; 8], String>,
     );
+    let home = PodHome {
+        guid,
+        path: path.clone(),
+        shell: shell_guid,
+        target: None,
+        linked: Vec::new(),
+    };
     let worker = from.clone();
     let (read, shell, menu_assets, cc_presets) = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
@@ -758,16 +868,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             let (catalog, source) = worker.attach(&control)?;
             let at = (&catalog, &source, &control);
             let mut read = worker.read(at, guid, path.as_deref(), shell_guid.is_some())?;
-            let shell = read
-                .shell_vm
-                .take()
-                .zip(shell_guid)
-                .map(|(shell_vm, g)| {
-                    let (mut shell, identity) = read_world(at, Some(g), None)?;
-                    shell.translations.clone_from(&read.world.translations);
-                    Ok::<_, String>((shell_vm, shell, identity))
-                })
-                .transpose()?;
+            let shell = read_shell(at, &mut read, shell_guid)?;
             let menu_assets = shell.is_some().then(|| {
                 crate::pod_menu::load_menu_assets(
                     &worker.game,
@@ -795,50 +896,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         println!("Level scripts: none loaded (patch.edat not decrypted); the Pod draws with the planets script's resting camera (D411 fallback)");
     }
     // Part 28: the shell level's world, set up the same way, and the session's start.
-    let shell = shell.map(|(mut shell_vm, mut shell_world, identity)| {
-        let built = shell_world.bind_objects(&mut shell_vm);
-        shell_world.add_class_defaults(&shell_vm);
-        let mut shell_host = Bindings::defaulting(shell_world);
-        let engine = lbp_runtime::add_engine_objects(&mut shell_vm, &mut shell_host, BUDGET_PER_CALL);
-        let room = MAX_FAULT_LINES.saturating_sub(faults.len());
-        faults.extend(engine.into_iter().take(room).map(|f| format!("shell: {f}")));
-        let mut shell_scripts = LevelScripts::new(&shell_vm, &shell_host.world);
-        shell_scripts.set_force_native(native_scripts);
-        // D417: the Things a native port runs (all of them without the scripts).
-        let ported = shell_scripts
-            .instances
-            .iter()
-            .filter(|i| lbp_runtime::native_script(i.guid).is_some())
-            .count();
-        println!("Level scripts, shell level: native script ports for {ported} Things (Pod, Trigger_Pod; D417)");
-        // The session is our Pod when the shell has a pod Thing: the stand-in of the
-        // `level_scripts` example. PLACEHOLDER: the game tests the slot the level was
-        // entered from. Then the two worlds agree on the state outside a level.
-        host.world.our_pod = shell_host.world.pod_thing(true).is_some();
-        host.world.hand_session_to(&mut shell_host.world);
-        println!(
-            "Level scripts, shell level: {identity}; scripted Things {}; objects built {built}, unconverted {}; one session with the level above, the shell ticks first; our Pod {}",
-            shell_scripts.instances.len(),
-            shell_host.world.unconverted,
-            host.world.our_pod
-        );
-        ShellLevel {
-            vm: shell_vm,
-            host: shell_host,
-            scripts: shell_scripts,
-            created: None,
-            totals: StepReport::default(),
-            ticks_with_faults: 0,
-            things_scene: None,
-            followed: Default::default(),
-            opening: 0.,
-            sackboy: None,
-            press: false,
-            answers: 0,
-            own_sackboy: crate::sackboy_play::in_pod(),
-            zone: None,
-        }
-    });
+    let shell = shell.map(|read| start_shell(&from, read, &mut host, &mut faults));
     app.insert_non_send(Play {
         vm,
         host,
@@ -890,6 +948,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         tick_base: 0,
         launched: None,
         finish_at,
+        home,
     })
     .insert_resource(crate::CaptureHold(hold_at.is_some()))
     .insert_resource(menu_assets.unwrap_or_default())
@@ -1543,7 +1602,11 @@ fn step(
         // D364: the game's level load: the root level is read in the background, and
         // the Pod's ticks wait for it ([`step`]; INFERRED: the game's loading screen).
         if let Some(guid) = start.root.and_then(|d| d.guid) {
-            match start_switch(&p.from, guid, start.slot) {
+            match start_switch(
+                &p.from,
+                (Some(guid), None, None),
+                SwitchTo::Level(start.slot),
+            ) {
                 Ok(switch) => {
                     p.switch = Some(switch);
                     println!(
@@ -1587,6 +1650,18 @@ fn step(
     // D381: the end of a level the Pod launched: the level's `Game.GotoScoreboard__b`,
     // or the QA tick. The game's level-complete path runs (the scoreboard itself is not
     // shown); the return to the Pod is not made yet.
+    // D382: back in the Pod, its state 2 clears the links the finish left.
+    if !p.home.linked.is_empty() && p.host.world.story_progress.pending_links.is_empty() {
+        let linked = std::mem::take(&mut p.home.linked);
+        let unlocked: Vec<_> = linked
+            .iter()
+            .map(|&t| (t, p.host.world.slot_unlocked(t)))
+            .collect();
+        println!(
+            "Pod after the return, tick {}: pending links cleared; their targets unlocked {unlocked:?} (D382)",
+            p.scripts.ticks
+        );
+    }
     let finish = p.finish_at == Some(p.scripts.ticks);
     let asked = std::mem::take(&mut p.host.world.scoreboard_requests);
     if let Some(slot) = p.launched.filter(|_| finish || !asked.is_empty()) {
@@ -1602,6 +1677,20 @@ fn step(
             p.scripts.ticks,
             p.host.world.story_progress.pending_links.len()
         );
+        // D382: back to the Pod (the scoreboard and its choice are not shown).
+        let home = (p.home.guid, p.home.path.clone(), p.home.shell);
+        if p.home.target.is_some() && p.switch.is_none() {
+            match start_switch(&p.from, home, SwitchTo::Pod) {
+                Ok(switch) => {
+                    p.switch = Some(switch);
+                    println!(
+                        "Return to the Pod after tick {}: reading the Pod; the level's ticks wait for it (D382)",
+                        p.scripts.ticks
+                    );
+                }
+                Err(e) => println!("Return to the Pod not started: {e} (D382)"),
+            }
+        }
     }
     if let Some(trace) = p.trace.as_mut() {
         let shell = p.shell.as_ref().map(|s| &s.host.world);
@@ -1640,21 +1729,33 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
         Err(TryRecvError::Empty) => return,
         Err(TryRecvError::Disconnected) => Err("the reading thread ended".into()),
     };
-    let (guid, slot) = (switch.guid, switch.slot);
+    let (guid, to) = (switch.guid, switch.to);
+    let label = std::mem::take(&mut p.switch.as_mut().expect("switch").label);
     p.switch = None;
-    let read = match read {
+    let (read, shell) = match read {
         Ok(read) => read,
         Err(e) => {
-            println!("Level switch to {guid:08x} failed: {e}; the Pod plays on (D364)");
+            println!("Level switch to {label} failed: {e}; the current level plays on (D364)");
             return;
         }
     };
     let identity = read.identity.clone();
-    let (vm, mut host, scripts, faults, header) = p.from.start(read);
+    let loaded = read.loaded;
+    let (vm, mut host, scripts, mut faults, header) = p.from.start(read);
     // D381: the profile's state goes with the session (the game keeps one profile).
     host.world.progression_flags = p.host.world.progression_flags;
     host.world.story_progress = std::mem::take(&mut p.host.world.story_progress);
-    p.launched = Some(slot);
+    // D382: back in the Pod, its shell level plays again with it.
+    let shell = shell.map(|read| start_shell(&p.from, read, &mut host, &mut faults));
+    let shell_present = shell.is_some();
+    p.launched = match to {
+        SwitchTo::Level(slot) => Some(slot),
+        SwitchTo::Pod => None,
+    };
+    if to == SwitchTo::Pod {
+        let links = &host.world.story_progress.pending_links;
+        p.home.linked = links.iter().map(|l| l.to).collect();
+    }
     p.tick_base += p.scripts.ticks;
     p.vm = vm;
     p.host = host;
@@ -1674,11 +1775,13 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
     p.puter_open = None;
     p.world_root = None;
     p.world_root_placed = 0;
-    p.shell = None;
+    p.shell = shell;
     p.script_eye_y = None;
     p.dof_printed = None;
-    p.fallback_camera = None;
-    p.story = None;
+    // As at the start: without the scripts the Pod draws with the resting camera and the
+    // native stand-in (not at the Story screen).
+    p.fallback_camera = (loaded == 0 && shell_present).then_some(POD_REST_CAMERA);
+    p.story = (loaded == 0 && shell_present).then(crate::story_fallback::Fallback::default);
     // The Pod's QA presses.
     p.in_use_at = None;
     p.press_at = None;
@@ -1689,13 +1792,29 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
     p.cross_at = None;
     p.trace = None;
     // The display: the level as the Load button loads it, without the Pod's rig, Puter
-    // state, Story lights and the old scene's Thing map.
-    v.level.switch_to(Some(guid), None);
-    // D365: the view starts over the level's entrance, as the game's camera does.
-    v.level.entrance = true;
-    // D366: and Sackboy plays in it, from its entrance.
-    if crate::sackboy_play::enabled() {
-        crate::sackboy_play::start_respawn(&mut commands, guid);
+    // state, Story lights and the old scene's Thing map. D382: back to the Pod, the
+    // Pod's framing kept at the launch, which the load builds again.
+    match (to, p.home.target.take()) {
+        (SwitchTo::Pod, target) => {
+            match target {
+                Some(target) => v.level.return_to(target),
+                None => v.level.switch_to(guid, p.home.path.clone()),
+            }
+            // Sackboy arrives in the Pod as at the start: in the shell level's physics.
+            if let Some(shell) = p.home.shell.filter(|_| crate::sackboy_play::in_pod()) {
+                crate::sackboy_play::start_respawn(&mut commands, Some(shell), None, true);
+            }
+        }
+        (SwitchTo::Level(_), target) => {
+            p.home.target = target.or_else(|| Some(v.level.pod_target()));
+            v.level.switch_to(guid, None);
+            // D365: the view starts over the level's entrance, as the game's camera does.
+            v.level.entrance = true;
+            // D366: and Sackboy plays in it, from its entrance.
+            if crate::sackboy_play::enabled() {
+                crate::sackboy_play::start_respawn(&mut commands, guid, None, false);
+            }
+        }
     }
     v.requested = true;
     v.ready_frames = 0;
