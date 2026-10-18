@@ -19,11 +19,11 @@ Date: 2026-10-18. Scope: the viewer executable as the only file a friend needs.
 
 ## Modes
 
-Open: Rookie Test, Sackboy on the Moon, the asset explorer (game modes hide the panels).
-Not yet: the Pod, Popit and Story. Their behaviour comes from the game's 426 compiled
-scripts, which exist only in the encrypted `patches/patch.edat` (D133); without them the
-Pod's camera is never placed. They switch on when the viewer has its own fallback (Popit
-lane for the Pod/Popit, Story lane for Story). No key is added to the repository.
+Open: the Pod, Popit (in the Pod, Z), Rookie Test, Sackboy on the Moon and the asset
+explorer; game modes hide the panels. The game's 426 compiled scripts exist only in the
+encrypted `patches/patch.edat` (D133), so the Pod uses the viewer's own resting camera when
+none load (D411, Popit lane); its planets aren't placed yet. Story waits for a script-free
+fallback (Story lane). No key is added to the repository.
 
 ## Fixes found on the way
 
@@ -36,6 +36,6 @@ lane for the Pod/Popit, Story lane for Story). No key is added to the repository
 
 ## Checked
 
-From the ISO plus the RPCS3 install only (no decrypted overlay): Rookie Test and the Moon
-render Sackboy in the level; the explorer opens. Packaging: `local-analysis/friends-build/`
+From the ISO plus the RPCS3 install only (no decrypted overlay): the Pod, Popit, Rookie
+Test and the Moon render Sackboy in place; the explorer opens. Packaging: `local-analysis/friends-build/`
 (ignored), not published.

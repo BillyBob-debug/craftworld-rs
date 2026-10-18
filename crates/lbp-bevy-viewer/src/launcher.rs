@@ -6,7 +6,7 @@
 //! no game file is shipped or modified.
 //!
 //! The game's compiled scripts sit in the encrypted `patches/patch.edat`, which is never
-//! decrypted; the modes that need them wait for the viewer's own fallbacks.
+//! decrypted; modes run on the viewer's own fallbacks where they need them.
 mod iso;
 
 use bevy::prelude::*;
@@ -43,10 +43,10 @@ struct Mode {
     later: bool,
 }
 
-// The command lines the lanes' docs use (docs/handoff-pc-2026-10-11b-moon-anim.md for the
-// Moon). Game modes hide the explorer's panels. The Pod, the Popit and Story run on the
-// game's scripts, which sit in the encrypted patch.edat; they open here once the viewer has
-// its own fallback for them (owned by the Popit and Story lanes).
+// The command lines the lanes' docs use (docs/level-scripts/part-30.md,
+// docs/d403-popit-in-the-pod.md, docs/handoff-pc-2026-10-11b-moon-anim.md). Game modes hide
+// the explorer's panels. The game's scripts sit in the encrypted patch.edat, so the Pod uses
+// the viewer's own camera when none load (D411); Story waits for its own fallback.
 const MODES: &[Mode] = &[
     Mode {
         name: "Rookie Test",
@@ -80,15 +80,40 @@ const MODES: &[Mode] = &[
     },
     Mode {
         name: "The Pod",
-        blurb: "Coming soon: the Pod without the game's encrypted scripts.",
-        args: &[],
-        later: true,
+        blurb: "Sackboy in the Pod (the planets aren't placed yet).",
+        args: &[
+            "--level-guid",
+            "00018fdb",
+            "--pod-camera",
+            "1",
+            "--pod-shell",
+            "000027b9",
+            "--level-scripts",
+            "--window-16-9",
+            "--preview-lighting",
+            "--qa-hide-ui",
+        ],
+        later: false,
     },
     Mode {
         name: "Popit",
-        blurb: "Coming soon, with the Pod.",
-        args: &[],
-        later: true,
+        blurb: "The Pod with the Popit open. Z opens and closes it.",
+        args: &[
+            "--level-guid",
+            "00018fdb",
+            "--pod-camera",
+            "1",
+            "--pod-shell",
+            "000027b9",
+            "--level-scripts",
+            "--window-16-9",
+            "--preview-lighting",
+            "--qa-hide-ui",
+            "--popit-open",
+            "--popit-mode",
+            "play",
+        ],
+        later: false,
     },
     Mode {
         name: "Story screen",
