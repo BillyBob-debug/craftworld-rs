@@ -610,6 +610,55 @@ mod tests {
     }
 
     #[test]
+    fn d367_a_launch_raises_its_warnings_and_waits_for_them() {
+        use crate::pod::{LaunchWarning, PartyPad};
+        let pad = |motion, primary| PartyPad { motion, primary };
+        let mut w = LevelWorld {
+            story_slots: vec![
+                crate::pod::SearchSlot {
+                    id: (1, 42),
+                    ..Default::default()
+                },
+                crate::pod::SearchSlot {
+                    id: (1, 43),
+                    min_players: Some(2),
+                    max_players: Some(4),
+                    move_recommended: true,
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        // One player on a Wireless Controller, a level for 1-4 without Move: none.
+        w.cross_on_level(0);
+        assert!(w.pod.launch_warnings.is_empty());
+        assert_eq!(w.pod.warning_flags, 0);
+        // Move recommended and at least two players: two warnings, both shown in turn.
+        w.cross_on_level(1);
+        assert_eq!(
+            w.pod.launch_warnings,
+            [LaunchWarning::MotionNeeded, LaunchWarning::TooFewPlayers(2)]
+        );
+        assert_eq!(w.pod.warning_flags, 0x11);
+        assert_eq!(w.pod_launch_step(), None);
+        w.answer_launch_warning(true);
+        assert_eq!(w.pod_launch_step(), None);
+        w.answer_launch_warning(true);
+        assert_eq!(w.pod_launch_step().map(|s| s.slot), Some((1, 43)));
+        // Another player without Move gets the party text; five is too many.
+        w.pod.party = vec![pad(true, true), pad(false, false)];
+        w.pod.launch = None;
+        w.cross_on_level(1);
+        assert_eq!(w.pod.launch_warnings, [LaunchWarning::MotionNotAll]);
+        assert_eq!(w.pod.warning_flags, 0);
+        w.answer_launch_warning(false);
+        assert_eq!((w.pod.launch, w.pod_launch_step()), (None, None));
+        w.pod.party = vec![pad(true, true); 5];
+        w.cross_on_level(1);
+        assert_eq!(w.pod.launch_warnings, [LaunchWarning::TooManyPlayers(4)]);
+    }
+
+    #[test]
     fn d363_a_done_launch_hands_the_root_level_to_the_game() {
         use lbp_level::serial::Descriptor;
         let root = Descriptor {

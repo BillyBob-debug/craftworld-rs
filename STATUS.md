@@ -6389,3 +6389,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 109 (`docs/level-scripts/part-109.md`): Cross on a story level
   (`--level-scripts-cross-at`) asks for its launch as the engine does (0x4033b4), in both
   modes; Back waits while a launch is pending, and a group's title follows the script.
+
+## D363 starting a chosen story level (2026-10-18)
+- Part 110 (`docs/level-scripts/part-110.md`): once a launch's request is done the pod
+  hands the slot's root level to the game's level load (FUN_004022fc), in both modes;
+  the viewer prints it and the trace records it, but does not switch levels yet.

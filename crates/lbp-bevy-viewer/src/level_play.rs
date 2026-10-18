@@ -1500,6 +1500,19 @@ fn step(
             p.scripts.ticks,
             p.host.world.pod.launch.is_some()
         );
+        if let Some(slot) = result.and_then(|i| p.host.world.story_slots.get(i)) {
+            let pod = &p.host.world.pod;
+            println!(
+                "Launch warnings: {:?} (flags {:#x}; {} player(s), slot players {}-{}, \
+                 Move recommended {}) (D367)",
+                pod.launch_warnings,
+                pod.warning_flags,
+                lbp_runtime::party_or_default(&pod.party).len(),
+                slot.min_players.unwrap_or(1),
+                slot.max_players.unwrap_or(4),
+                slot.move_recommended
+            );
+        }
     }
     if let Some(trace) = p.trace.as_mut() {
         let shell = p.shell.as_ref().map(|s| &s.host.world);

@@ -119,6 +119,13 @@ pub struct PodState {
     /// D362: the level the pod is in (the current SlotID the classifier compares with,
     /// 0x3fce40); none in the pod itself (INFERRED).
     pub current_level: Option<(i32, i32)>,
+    /// D367: the local players' controllers ([`party_or_default`] when empty).
+    pub party: Vec<PartyPad>,
+    /// D367: the launch warnings still up (the first is shown); the hand-off waits
+    /// until they are answered ([`crate::LevelWorld::answer_launch_warning`]).
+    pub launch_warnings: Vec<LaunchWarning>,
+    /// D367: the world's warning flags (world+0x3b0), set again by each launch.
+    pub warning_flags: u32,
     /// D362: a group's `[completed, completable]` level counts
     /// (`Slot.GetNumCompletedLevelsInGroup`, `GetNumCompletableLevelsInGroup`); nothing
     /// fills it offline, so every group reads 0 as the unbound natives do.
@@ -196,6 +203,100 @@ pub struct SearchSlot {
     pub icon: Option<lbp_level::serial::Descriptor>,
     /// D363: the slot's root level (the descriptor the launch hands to the game's load).
     pub root: Option<lbp_level::serial::Descriptor>,
+    /// D367: the slot's `MinPlayers`, `MaxPlayers` (slot+0xc5, +0xc6) and
+    /// `MoveRecommended` (slot+0xc7), which the launch warnings read.
+    pub min_players: Option<u8>,
+    pub max_players: Option<u8>,
+    pub move_recommended: bool,
+}
+
+/// D367: one local player's controller, as the launch warnings see it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PartyPad {
+    /// A Motion Controller (the player's pad entry, +0x6a0 then +0x150, is set).
+    pub motion: bool,
+    /// The player holds the pad the menus answer to (the primary user's).
+    pub primary: bool,
+}
+
+/// D367 (part 114): a warning popup (type 0x4b, buttons Continue and Cancel) that a
+/// level launch raises (FOUND 0x402b24, mode Play). The bit is the one the launch sets
+/// in the world's warning flags (world+0x3b0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LaunchWarning {
+    /// The level recommends Move and the primary player has no Motion Controller.
+    MotionNeeded,
+    /// The level recommends Move and another player has no Motion Controller.
+    MotionNotAll,
+    /// Fewer players than the level's minimum (text from 0x16e3b0, not ported).
+    TooFewPlayers(u8),
+    /// More players than the level's maximum (text from 0x16de78, not ported).
+    TooManyPlayers(u8),
+}
+
+impl LaunchWarning {
+    /// The LAMS key of the popup's text, for the two fixed texts.
+    pub fn text_key(self) -> Option<u32> {
+        match self {
+            LaunchWarning::MotionNeeded => Some(0x5d46982a),
+            LaunchWarning::MotionNotAll => Some(0xae61784b),
+            _ => None,
+        }
+    }
+
+    /// The bit in the world's warning flags (world+0x3b0); none for `MotionNotAll`.
+    pub fn flag(self) -> u32 {
+        match self {
+            LaunchWarning::MotionNeeded => 1,
+            LaunchWarning::MotionNotAll => 0,
+            LaunchWarning::TooFewPlayers(_) => 0x10,
+            LaunchWarning::TooManyPlayers(_) => 0x20,
+        }
+    }
+}
+
+/// LAMS keys of the warning popups' buttons, Continue and Cancel.
+pub const LAUNCH_WARNING_BUTTONS: [u32; 2] = [0x119fbf3b, 0x5162e2b2];
+
+/// D367: the local players' controllers; with none set, one player on a Wireless
+/// Controller, the viewer's pad.
+pub fn party_or_default(party: &[PartyPad]) -> Vec<PartyPad> {
+    if party.is_empty() {
+        vec![PartyPad {
+            motion: false,
+            primary: true,
+        }]
+    } else {
+        party.to_vec()
+    }
+}
+
+/// D367: the warnings a Play launch of `slot` raises for `party`, in the order the
+/// game shows them. FOUND (01.33, 0x402b24 mode 0): when the slot recommends Move, the
+/// first player without a Motion Controller raises one warning (its text by whether that
+/// player is the primary user); then the player count is checked against the slot's
+/// minimum, or else its maximum. INFERRED: a slot without the fields (older revisions)
+/// allows 1 to 4 players, the slot defaults.
+pub fn launch_warnings(slot: &SearchSlot, party: &[PartyPad]) -> Vec<LaunchWarning> {
+    let mut out = Vec::new();
+    if slot.move_recommended {
+        if let Some(p) = party.iter().find(|p| !p.motion) {
+            out.push(if p.primary {
+                LaunchWarning::MotionNeeded
+            } else {
+                LaunchWarning::MotionNotAll
+            });
+        }
+    }
+    let n = party.len();
+    let min = slot.min_players.unwrap_or(1);
+    let max = slot.max_players.unwrap_or(4);
+    if n < usize::from(min) {
+        out.push(LaunchWarning::TooFewPlayers(min));
+    } else if usize::from(max) < n {
+        out.push(LaunchWarning::TooManyPlayers(max));
+    }
+    out
 }
 
 impl SearchSlot {
@@ -215,6 +316,9 @@ impl SearchSlot {
                 developer_level_type: s.developer_level_type,
                 icon: s.icon,
                 root: s.root,
+                min_players: s.min_players.map(|n| n as u8),
+                max_players: s.max_players.map(|n| n as u8),
+                move_recommended: s.move_recommended.unwrap_or(false),
             })
             .collect()
     }
