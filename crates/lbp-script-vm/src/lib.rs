@@ -18,6 +18,7 @@ use std::sync::Arc;
 pub mod check;
 pub mod natives;
 pub mod signature;
+pub mod trace;
 
 /// Hard limits; every one fails with a [`Fault`], never a panic.
 pub const MAX_CALL_DEPTH: usize = 256;
@@ -217,6 +218,13 @@ pub trait Host {
         None
     }
     fn write(&mut self, _text: &str) {}
+    /// D417: the host keeps a golden trace ([`trace::Trace`]); the VM then reports the
+    /// script code that makes each host call ([`trace::TraceMark::Site`]).
+    fn tracing(&self) -> bool {
+        false
+    }
+    /// D417: what the runtime and the VM tell a tracing host.
+    fn trace(&mut self, _mark: trace::TraceMark<'_>) {}
 }
 
 /// `LCb` constant position: Toolkit's bit 63 (default), any high-word bit (D140: broke
@@ -727,6 +735,15 @@ impl Vm {
         self.run(host, task.stack, budget)
     }
 
+    /// D417: tells a tracing host the script code of the current instruction.
+    fn mark_site(&self, host: &mut dyn Host) {
+        if host.tracing() {
+            if let Some(site) = self.last_site() {
+                host.trace(trace::TraceMark::Site(&site));
+            }
+        }
+    }
+
     /// Where the last executed instruction was; after a [`Fault`] this is the faulting
     /// instruction (the budget fault names the next one).
     pub fn last_site(&self) -> Option<Site> {
@@ -974,6 +991,7 @@ impl Vm {
                         _ => None, // 0xb3 / 0xb4: script object member
                     };
                     if let Some(kind) = kind {
+                        self.mark_site(host);
                         if get {
                             let v = host
                                 .get_member(kind, &base, &owner, &field)
@@ -1164,6 +1182,7 @@ impl Vm {
                     let name = script.name(target.type_name).unwrap_or("").to_owned();
                     let out = match v {
                         Value::Thing(Some(t)) if op == 0xa9 => {
+                            self.mark_site(host);
                             if host.thing_is(t, &name) {
                                 v
                             } else {
@@ -1314,6 +1333,7 @@ impl Vm {
                                 }
                                 Value::Void
                             } else {
+                                self.mark_site(host);
                                 host.call_native(&owner, &function, &values)
                                     .map_err(Fault::Native)?
                             };
