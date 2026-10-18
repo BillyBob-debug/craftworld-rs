@@ -442,6 +442,36 @@ enum Place {
     Right,
 }
 
+/// D413: which way a tooltip pill above or below its tile leans.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Side {
+    Left,
+    Centre,
+    Right,
+}
+
+/// D413: px between a leaning pill and its tile's side, with the fit test's margin.
+const PILL_SIDE_GAP: f32 = 9.;
+
+/// D413, the side rule of the game's tooltip placement (FOUND 0x417b78, gooey space):
+/// a root frame whose centre is left of NDC -0.6 prefers the right, right of +0.6 the
+/// left; a side the pill would not fit inside the safe area (NDC x +-0.88) is never
+/// taken. `card_ndc_x` the card's centre, `tile` its focused tile's x span (px), `need`
+/// the pill's width with its gap (px). INFERRED: the root frame is the card; a centred
+/// card keeps the centred pill (D235).
+fn pill_side(card_ndc_x: f32, tile: [f32; 2], need: f32, screen_w: f32) -> Side {
+    let safe = [screen_w * 0.06, screen_w * 0.94];
+    let left_fits = tile[0] - need >= safe[0];
+    let right_fits = tile[1] + need <= safe[1];
+    match (left_fits, right_fits) {
+        (false, true) => Side::Right,
+        (true, false) => Side::Left,
+        _ if card_ndc_x < -0.6 => Side::Right,
+        _ if card_ndc_x > 0.6 => Side::Left,
+        _ => Side::Centre,
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum Role {
     Card,
@@ -1542,6 +1572,8 @@ fn popit_input(
 
 /// Sackboy turns his back to the camera while the Popit is open (both modes, MEASURED on
 /// RPCS3 frames: back of the head and the cord wound round the body), eased like the card.
+/// D412: not in the Pod, where the RPCS3 frame shows his face (three-quarter view to the
+/// right, eye and front zip visible) with the play card open; he keeps the picker's facing.
 fn popit_turn(
     p: Res<Popit>,
     mut figure: Query<&mut Transform, With<crate::sackboy_play::Figure>>,
@@ -1563,7 +1595,7 @@ fn popit_turn(
         }
     }
     let turn = std::f32::consts::PI * smooth(p.blend) * (1. - pe);
-    if turn <= 0. {
+    if turn <= 0. || crate::sackboy_play::in_pod() {
         return;
     }
     for mut t in &mut figure {
@@ -1712,8 +1744,41 @@ fn popit_layout(
         .find(|i| i.id == p.focus)
         .map_or(10, |i| i.label.chars().count());
     let (pw, ph) = ((chars as f32 * PILL_CHAR_W - 2.) * scale, PILL_H * scale);
-    let (pill, tail_at) = match place {
-        Place::Above => {
+    // D413: above or below, the pill leans to one side when the card is near a screen
+    // edge or a centred pill would not fit the safe area (the game's rule, FOUND 0x417b78).
+    let side = pill_side(
+        (left + w / 2.) / window.width() * 2. - 1.,
+        [tile_c.x - tile_half, tile_c.x + tile_half],
+        pw + PILL_SIDE_GAP * scale,
+        window.width(),
+    );
+    // (pill, tip, x where the tail leaves the pill)
+    let (pill, tail_at, tail_base) = match (place, side) {
+        (Place::Above | Place::Below, Side::Right | Side::Left) => {
+            // MEASURED, Pod play frame: pill's near end 9 px past the tile's side, its
+            // bottom 26 px above the tile's top; the tail runs from the pill's near end to
+            // the tile's corner (tip 1 px out, 3 px off the tile).
+            let (above, right) = (place == Place::Above, side == Side::Right);
+            let sx = if right { 1. } else { -1. };
+            let edge = tile_c.x + sx * tile_half;
+            let near = edge + sx * 9. * scale;
+            let px0 = if right { near } else { near - pw };
+            let (py0, tip_y) = if above {
+                let bottom = tile_c.y - tile_half - 26. * scale;
+                (bottom - ph, tile_c.y - tile_half - 3. * scale)
+            } else {
+                (
+                    tile_c.y + tile_half + 26. * scale,
+                    tile_c.y + tile_half + 3. * scale,
+                )
+            };
+            (
+                (px0, py0, pw, ph),
+                Vec2::new(edge + sx * scale, tip_y),
+                near + sx * 14. * scale,
+            )
+        }
+        (Place::Above, _) => {
             let tip = Vec2::new(tile_c.x + 3. * scale, tile_c.y - tile_half - 19. * scale);
             (
                 (
@@ -1723,9 +1788,10 @@ fn popit_layout(
                     ph,
                 ),
                 tip,
+                tip.x,
             )
         }
-        Place::Below => {
+        (Place::Below, _) => {
             let tip = Vec2::new(tile_c.x + 3. * scale, tile_c.y + tile_half + 19. * scale);
             (
                 (
@@ -1735,11 +1801,16 @@ fn popit_layout(
                     ph,
                 ),
                 tip,
+                tip.x,
             )
         }
-        Place::Right => {
+        (Place::Right, _) => {
             let tip = Vec2::new(tile_c.x + tile_half + 8. * scale, tile_c.y + 4. * scale);
-            ((tip.x + TAIL_LEN_H * scale, tip.y - ph / 2., pw, ph), tip)
+            (
+                (tip.x + TAIL_LEN_H * scale, tip.y - ph / 2., pw, ph),
+                tip,
+                tip.x,
+            )
         }
     };
     for (part, mut node, mut vis) in &mut parts {
@@ -1796,23 +1867,31 @@ fn popit_layout(
                 // Stacked bars narrowing to the tip; pointing at the focused tile.
                 let k = i as f32;
                 let n = TAIL_STEPS as f32;
-                let width = (11. - k * 2.) * scale;
-                let (len, tip_len) = match place {
-                    Place::Right => (TAIL_LEN_H * scale / n, TAIL_LEN_H * scale),
-                    _ => (TAIL_LEN_V * scale / n, TAIL_LEN_V * scale),
+                // D413: a leaning pill's tail is a wedge about 30 px wide at the pill
+                // (MEASURED, Pod play frame).
+                let width = if side == Side::Centre || place == Place::Right {
+                    11. - k * 2.
+                } else {
+                    30. - k * 6.5
+                } * scale;
+                let len = match place {
+                    Place::Right => TAIL_LEN_H * scale / n,
+                    Place::Above => (tail_at.y - (pill.1 + pill.3)) / n,
+                    Place::Below => (pill.1 - tail_at.y) / n,
                 };
-                let _ = tip_len;
+                // D413: a leaning pill's tail slants from its near end to the tile corner.
+                let x = tail_base + (tail_at.x - tail_base) * (k + 0.5) / n;
                 match place {
                     Place::Above => set(
                         &mut node,
-                        tail_at.x - width / 2.,
+                        x - width / 2.,
                         pill.1 + pill.3 - 1. * scale + k * len,
                         width,
                         len + 1.,
                     ),
                     Place::Below => set(
                         &mut node,
-                        tail_at.x - width / 2.,
+                        x - width / 2.,
                         pill.1 + 1. * scale - (k + 1.) * len,
                         width,
                         len + 1.,
@@ -2686,5 +2765,21 @@ fn spawn_nodes(
             GlobalZIndex(39),
             Visibility::Hidden,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// D413: the Pod card near the left edge leans its pill right; a centred card keeps
+    /// it centred; a card near the right edge leans left.
+    #[test]
+    fn d413_pill_side() {
+        // Pod play frame: card centre x ~ 320 of 1280, focus tile 262..326, pill ~250 px.
+        assert_eq!(pill_side(-0.5, [262., 326.], 259., 1280.), Side::Right);
+        assert_eq!(pill_side(0., [600., 668.], 200., 1280.), Side::Centre);
+        assert_eq!(pill_side(0.7, [1000., 1068.], 100., 1280.), Side::Left);
+        assert_eq!(pill_side(-0.7, [600., 668.], 100., 1280.), Side::Right);
     }
 }
