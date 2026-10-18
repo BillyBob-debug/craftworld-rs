@@ -1,18 +1,18 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-108.md` (part 107 for the group zoom, part 106 for choosing a
-   group, part 105 for Back, part 104 for the pod computer's stack and main menu)
+1. `docs/level-scripts/part-109.md` (108 for the cursor, 107 for the group zoom, 106 for
+   choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 163 (D360) merged. PR for D361 (branch `pod-story-cursor`,
-  worktree `E:\Projects\wt-d324`): the stick moves the planet's cursor between results
-  (`--level-scripts-move-at`); handed to the coordinator for merge once rust and python
-  are green.
+- PRs 153 (D353) through 164 (D361) merged. PR for D362 (branch `pod-story-level`,
+  worktree `E:\Projects\wt-d324`): Cross on a story level asks for its launch
+  (`--level-scripts-cross-at`), Back waits while one is pending, the group title's gate;
+  handed to the coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D362.
+  Decision numbers: D348-D399, next free D363.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -27,10 +27,11 @@
   --level-scripts-trace PATH --qa-capture PNG` (each capture needs a new name).
   Disc + update only: `--snapshot local-analysis/d79-inventory-0133.json --game-dir
   "game-data/a1-disc;game-data/a1-update-0133"`. A run takes several minutes.
-- D361 runs: `local-analysis/d361/` (run 1: group at 680, right 700 and 720, left 740;
-  trace-vm-1/trace-nat-1 identical 680-760; cursor notes in cursor-notes.md). The native
-  menus are drawn at rest while the scripted ones slide in (Story 640-659, the group
-  680-695, Story again from 721); not ported yet.
+- D362 runs: `local-analysis/d362/` (run 2: group at 680, right 700 and 720, left 740,
+  Cross 760, Back 775: both launch slot (0, 127795) and stay on the group; run 3 without
+  Cross: both pop; notes in story-level-notes.md). D361 runs in `local-analysis/d361/`.
+  The native menus are drawn at rest while the scripted ones slide in (Story 640-659, the
+  group 680-695, Story again from 721); not ported yet.
 - Group chain (FOUND): Cross runs `TriggerOnPlanetSearchResultSelected` 0x615664, then the
   script's `OnPlanetSearchResultSelected` via 0x4037bc; when false, jump table 0x4038ac
   (0x3fa448, 0x6589f8) calls `OnPlanetGroupSelected(SlotID,true,true)`. Left/Right between
@@ -39,7 +40,9 @@
   else 6. Group extra zoom 500 for types 4 and 9.
 - Result kinds (vtable+0x50, 0xd83ea0 -> 0x452324): group types 3 and 4 are kind 1
   (`OnPlanetGroupSelected`); 8 and 9 go to `OnTweak`; a story level (type 0) is kind 0 if
-  it is the pod's current slot, else kind 4 (UI event, 0x4033b4). `OnTweak` pushes
+  it is the pod's pending or current slot (0x3fce40), else kind 4:
+  `TriggerOnLevelLaunch(slot, 0)` (0x4033b4), which stores the pending slot at pod+0x954
+  and sets pod+0x9c4 to 1; `OnPlanetCancel` returns while it is pending. `OnTweak` pushes
   `PodStateTweakLevel`, whose Play calls `TriggerOnLevelLaunch(slot,1)`.
 - Back in the scripts: `PopState` calls `OnLoseFocus`/`OnDeactivate(false)` on the popped
   state and keeps it drawing in `OldStates` until `HasTransitionedOut`; the state below
@@ -55,9 +58,8 @@
   data file is on the disc or update.
 
 ## Next
-1. Story browsing: Cross on a story level (kind 4; who pushes `PodStateTweakLevel` is
-   unknown) and the group's title; then the cursor's flight and sound, and the other
-   searches.
+1. The story level's load and start (whatever reads pod+0x9c4; warnings 0x402b24), the
+   select sound; then the cursor's flight and sound, and the other searches.
 2. The default result before the search opens (scripts 23 from tick 600, native none),
    the menus' slide-in for the native ports, and pruning `OldStates` frames.
 3. The main menu's move in and the other entries' states as they unlock.

@@ -225,7 +225,7 @@ impl PodStateSearch {
         let key = self.details.frame_key();
         let (menu, matrix) = match self.details {
             SearchDetails::StoryLevels => (story_frame(), STORY_FRAME_MATRIX),
-            SearchDetails::Group(_) => (group_frame(""), GROUP_FRAME_MATRIX),
+            SearchDetails::Group(g) => (group_frame(&world.group_title(g)), GROUP_FRAME_MATRIX),
         };
         let g = &mut world.gooey;
         g.first_built.entry(key).or_insert(frame);
@@ -258,7 +258,7 @@ pub const GROUP_FRAME_MATRIX: [f32; 16] = [
 
 /// D359: the group search's frame (MEASURED, tick 681): a 2400 x 1250 frame holding a
 /// style 9 panel at most 700 wide with the group's title (`SearchDetailsGroup.DoTitle`;
-/// empty for the default Story group offline, MEASURED).
+/// empty for the default Story group offline, MEASURED; D362: [`LevelWorld::group_title`]).
 pub fn group_frame(title: &str) -> GooeyFrame {
     let bits = GROUP_FRAME_KEY.0;
     let other = |pairs: &[(&str, f32)]| -> BTreeMap<String, Vec<f32>> {
@@ -581,6 +581,32 @@ mod tests {
         assert_eq!(w.move_result_cursor([-1., 0.]), Some(0));
         assert_eq!(w.move_result_cursor([-1., 0.]), Some(2));
         assert_eq!(w.move_result_cursor([0., 1.]), None);
+    }
+
+    #[test]
+    fn d362_cross_on_a_story_level_asks_for_its_launch() {
+        use crate::LevelCross;
+        let slot = |id| crate::pod::SearchSlot {
+            id,
+            ..Default::default()
+        };
+        let mut w = LevelWorld {
+            story_slots: vec![slot((1, 42)), slot((1, 43)), slot((4, 27))],
+            ..Default::default()
+        };
+        assert_eq!(w.cross_on_level(2), LevelCross::NotLevel);
+        assert_eq!(w.cross_on_level(0), LevelCross::Launch((1, 42)));
+        assert_eq!(w.pod.launch, Some((1, 42)));
+        // The pending level again: kind 0, nothing new.
+        assert_eq!(w.cross_on_level(0), LevelCross::Current((1, 42)));
+        // Another level replaces the pending launch.
+        assert_eq!(w.cross_on_level(1), LevelCross::Launch((1, 43)));
+        assert_eq!(w.pod.launch, Some((1, 43)));
+        // The group's title only with completable levels (none known offline).
+        w.story_slots[2].name = "Da Vinci's Hideout".into();
+        assert_eq!(w.group_title((4, 27)), "");
+        w.pod.group_levels.insert((4, 27), [1, 7]);
+        assert_eq!(w.group_title((4, 27)), "Da Vinci's Hideout");
     }
 
     #[test]

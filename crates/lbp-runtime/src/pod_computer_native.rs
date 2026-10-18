@@ -144,7 +144,13 @@ impl NativePodComputer {
             }
             return None;
         };
+        // D362: `PodComputer.OnPlanetCancel` returns without popping while a level launch
+        // is pending (`IsLaunchingLevel`, pc 0019-0021, listing 16e6e8c9; MEASURED: the
+        // scripted run keeps the group search on top after Back at tick 775).
         if input.back {
+            if host.world.pod.launch.is_some() {
+                return None;
+            }
             return Some(self.pop(host));
         }
         match top {
@@ -519,6 +525,26 @@ mod tests {
         let menu = h.world.gooey.drawn_menu().unwrap();
         assert_eq!(menu.matrix, crate::STORY_FRAME_MATRIX);
         assert_eq!(menu.first_built, Some(219_870), "Story's first build kept");
+    }
+
+    /// D362: Back does nothing while a level launch is pending (MEASURED, tick 775 of the
+    /// scripted run: the group search stays on top, want 3 and badge 2).
+    #[test]
+    fn d362_back_waits_for_a_pending_launch() {
+        let mut h = host();
+        h.world.pod_computer_in_use = true;
+        let mut puter = NativePodComputer::default();
+        tick(&mut puter, &mut h, NONE);
+        tick(&mut puter, &mut h, CHOOSE);
+        tick(&mut puter, &mut h, NONE);
+        puter.choose_group(&mut h, (4, 27));
+        tick(&mut puter, &mut h, NONE);
+        h.world.pod.launch = Some((0, 127_795));
+        assert_eq!(tick(&mut puter, &mut h, BACK), None);
+        let s = &h.world.pod.search;
+        assert_eq!((s.want_search_details_calls, s.cursor_mode), (3, Some(4)));
+        assert_eq!(s.publish_cursor_badge_calls, 2);
+        assert!(h.world.gooey.frames.contains_key(&GROUP_FRAME_KEY));
     }
 
     /// `--story`: the search over the main menu at once.

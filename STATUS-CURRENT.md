@@ -11,7 +11,12 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D361 moving between results on the planet (2026-10-18)
+## Latest: D362 choosing a story level (2026-10-18)
+- Part 109 (`docs/level-scripts/part-109.md`): Cross on a story level
+  (`--level-scripts-cross-at`) asks for its launch as the engine does (0x4033b4), in both
+  modes; Back waits while a launch is pending, and a group's title follows the script.
+
+## D361 moving between results on the planet (2026-10-18)
 - Part 108 (`docs/level-scripts/part-108.md`): the stick moves the planet's cursor to the
   result that way, scored on Earth's surface as the engine does (0x42d584); the QA option
   `--level-scripts-move-at N:DIR` gives the same picks and an identical frame with and
@@ -26,12 +31,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Part 106 (`docs/level-scripts/part-106.md`): with no scripts, choosing a Story group
   (`--level-scripts-group-at`) pushes the group's search state over Story and Back brings
   Story back on top, with the scripted search state on every tick 640-760.
-
-## D358 the Pod search state as a native port (2026-10-18)
-- Part 105 (`docs/level-scripts/part-105.md`): `PodStateSearch` replaces the Story
-  stand-in; with no scripts Back from Story (`--level-scripts-back-at`) returns to the main
-  menu with the scripted search state on every tick 640-780, and the scripted run's
-  main menu now draws after Back too (a draw tie went to the popped Story frame).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
