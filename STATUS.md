@@ -6455,3 +6455,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D377 the start checkpoint (2026-10-18)
 - Part 124 (`docs/level-scripts/part-124.md`): Sackboy starts at the checkpoint the
   game scores highest (entrance gate, active, infinite or double), not the first.
+
+## D378 the launch warning popup (2026-10-18)
+- Part 125 (`docs/level-scripts/part-125.md`): a launch warning shows in a built-in
+  box; Cross carries on, Circle cancels the launch (handler 0x3c).

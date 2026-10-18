@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D381 finishing a story level (2026-10-18)
+## Latest: D382 back to the Pod after a finish (2026-10-18)
+- Part 129 (`docs/level-scripts/part-129.md`): a finished story level returns to the
+  Pod with Sackboy, and the Pod's state 2 clears its link and unlocks the next level.
+
+## D381 finishing a story level (2026-10-18)
 - Part 128 (`docs/level-scripts/part-128.md`): a finished story level leaves a pending
   link to the next one and the Pod's state 2 clears it; the return to the Pod is next.
 
@@ -22,10 +26,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D379 the pod introduction (2026-10-18)
 - Part 126 (`docs/level-scripts/part-126.md`): a fresh profile's Pod zooms in from
   below the planets over 451 ticks without the scripts; the level load needs no change.
-
-## D378 the launch warning popup (2026-10-18)
-- Part 125 (`docs/level-scripts/part-125.md`): a launch warning shows in a built-in
-  box; Cross carries on, Circle cancels the launch (handler 0x3c).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

@@ -259,6 +259,29 @@ impl LevelMode {
         self.lines.clear();
         self.home = None;
     }
+    /// D382: the Pod framing [`Self::switch_to`] drops, kept at a launch for the return.
+    fn pod_target(&self) -> PodTarget {
+        PodTarget {
+            guid: self.guid,
+            path: self.path.clone(),
+            focus: self.focus,
+            pod: self.pod,
+            shell: self.shell,
+            t0: self.t0,
+            shell_camera: self.shell_camera,
+            game_camera: self.game_camera,
+        }
+    }
+    /// D382: back to the target [`Self::pod_target`] kept; the load builds the Pod again.
+    fn return_to(&mut self, t: PodTarget) {
+        self.switch_to(t.guid, t.path);
+        self.focus = t.focus;
+        self.pod = t.pod;
+        self.shell = t.shell;
+        self.t0 = t.t0;
+        self.shell_camera = t.shell_camera;
+        self.game_camera = t.game_camera;
+    }
     fn label(&self) -> String {
         match (&self.path, self.guid) {
             (Some(p), _) => p.clone(),
@@ -266,6 +289,17 @@ impl LevelMode {
             (None, None) => String::new(),
         }
     }
+}
+/// D382: a [`LevelMode`]'s Pod framing ([`LevelMode::pod_target`]).
+struct PodTarget {
+    guid: Option<u32>,
+    path: Option<String>,
+    focus: Option<usize>,
+    pod: Option<usize>,
+    shell: Option<u32>,
+    t0: Option<f32>,
+    shell_camera: Option<[f32; 6]>,
+    game_camera: bool,
 }
 struct Job {
     started: std::time::Instant,
