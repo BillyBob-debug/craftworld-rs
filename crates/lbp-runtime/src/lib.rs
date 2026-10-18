@@ -348,6 +348,9 @@ pub struct LevelWorld {
     /// argument is set. 0 = a fresh profile, on which the planets level's world script
     /// starts its intro thread; the thread sets the mask 3 when it ends.
     pub progression_flags: u32,
+    /// D381: the profile's story progress: finished levels, unlocked slots and pending
+    /// links ([`LevelWorld::finish_story_level`]).
+    pub story_progress: StoryProgress,
     /// The video and voice-over requests of the scripts ([`MediaState`]). Nothing plays.
     pub media: MediaState,
     /// `PodComputer.GetPodComputerInUse__`: a player is at the pod computer ("PuterInUse").
@@ -2346,8 +2349,12 @@ impl World for LevelWorld {
             | "Audio.UserMusicIsPaused__"
             | "Input.IsInAttractionLoop__i" => Value::Bool(false),
             "Audio.UserMusicIsStopped__" | "Audio.IsInteractiveMusicAudible__" => Value::Bool(true),
-            "Game.GetNumPendingLinks__"
-            | "Game.GetNumAvatars__"
+            // D381: the profile's pending links (FOUND, 0x5fab40 -> 0x5e8a30: the
+            // count at profile+0x2b4).
+            "Game.GetNumPendingLinks__" => {
+                Value::Int(self.story_progress.pending_links.len() as i32)
+            }
+            "Game.GetNumAvatars__"
             | "Game.GetLocalLeadersPlayerNumber__"
             | "Audio.GetCurrMusicGuid__" => Value::Int(0),
             _ => return Err(format!("world does not provide {native}")),
@@ -2367,6 +2374,19 @@ impl World for LevelWorld {
     /// profile as changed; nothing is saved here.
     fn set_progression_flags(&mut self, mask: u32) -> Result<(), String> {
         self.progression_flags |= mask;
+        Ok(())
+    }
+    /// D381: `Game.ClearPendingLinks__` (FOUND, 0x5f4e80 -> 0x19ac2c) empties the list.
+    /// PLACEHOLDER: `LevelUnlockingThread` (not ported, D380) unlocks each link's badge
+    /// (`UnlockBadge`) before it clears; that is folded in here, so the targets are
+    /// marked unlocked.
+    fn clear_pending_links(&mut self) -> Result<(), String> {
+        let progress = &mut self.story_progress;
+        for link in std::mem::take(&mut progress.pending_links) {
+            if !progress.unlocked.contains(&link.to) {
+                progress.unlocked.push(link.to);
+            }
+        }
         Ok(())
     }
     /// [`LevelWorld::pod_computer_in_use`].

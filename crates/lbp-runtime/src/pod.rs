@@ -311,7 +311,37 @@ pub struct SearchSlot {
     pub min_players: Option<u8>,
     pub max_players: Option<u8>,
     pub move_recommended: bool,
+    /// D381: the slot's `PrimaryLinkLevel` when not (0, 0): the next story level, the
+    /// one a finish of this one unlocks (MEASURED on the disc's story list: level N's
+    /// link is level N+1), and its `InitiallyLocked`.
+    pub link: Option<(i32, i32)>,
+    pub initially_locked: bool,
 }
+
+/// D381: a pending link of the profile (FOUND, 01.33: a 16-byte element of the vector
+/// at profile+0x2b0, count +0x2b4): the finished level's SlotID and the SlotID it
+/// unlocks. The Pod's `LevelUnlockingThread` plays them out and clears them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PendingLink {
+    pub from: (i32, i32),
+    pub to: (i32, i32),
+}
+
+/// D381: the story state of the session's profile: the levels finished, the slots
+/// unlocked since the start (beyond those not `InitiallyLocked`) and the pending links.
+/// Like the progression flags it is the profile's, not a level's
+/// ([`LevelWorld::hand_session_to`]). Nothing is saved.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct StoryProgress {
+    pub completed: Vec<(i32, i32)>,
+    pub unlocked: Vec<(i32, i32)>,
+    pub pending_links: Vec<PendingLink>,
+}
+
+/// D381: the slot numbers from which the level-complete path links a slot (FOUND,
+/// 0x1aa43c: below 0x506ca; the other branch, numbers from 0x506cc but not 0x54747,
+/// is not ported: no story slot is there).
+const LINKED_SLOT_NUMBERS: i32 = 0x506ca;
 
 /// D367: one local player's controller, as the launch warnings see it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -487,6 +517,8 @@ impl SearchSlot {
                 min_players: s.min_players.map(|n| n as u8),
                 max_players: s.max_players.map(|n| n as u8),
                 move_recommended: s.move_recommended.unwrap_or(false),
+                link: Some(id(s.primary_link_level)).filter(|l| *l != (0, 0)),
+                initially_locked: s.initially_locked,
             })
             .collect()
     }
@@ -705,6 +737,7 @@ impl LevelWorld {
     /// level's own and is not copied.
     pub fn hand_session_to(&self, other: &mut LevelWorld) {
         other.progression_flags = self.progression_flags;
+        other.story_progress.clone_from(&self.story_progress);
         other.our_pod = self.our_pod;
         other.pod_computer_in_use = self.pod_computer_in_use;
         other.pod.host_use_pod_pending = self.pod.host_use_pod_pending;
@@ -721,6 +754,47 @@ impl LevelWorld {
                 b.use_up(a.held_off);
             }
         }
+    }
+}
+
+impl LevelWorld {
+    /// D381: the level-complete path for the level at `slot` (FOUND, 01.33: 0x1ad654,
+    /// which returns at once for slot types 5, 6 and 7, then 0x1aa43c and the add
+    /// 0x1a8764). The slot is marked finished; then, when it is a story slot with a link
+    /// whose target is still locked, the link {slot, target} is added unless the list
+    /// holds it already. The added link, if any.
+    ///
+    /// Not ported: the add's special case for a target numbered 570 (no story slot is),
+    /// and 0x1a88f4's tables of the level's own unlocks (their loader was not found).
+    /// INFERRED: the add's lock test (0x1a7efc, group-aware) is [`Self::slot_unlocked`].
+    pub fn finish_story_level(&mut self, slot: (i32, i32)) -> Option<PendingLink> {
+        if matches!(slot.0, 5..=7) {
+            return None;
+        }
+        let progress = &mut self.story_progress;
+        if !progress.completed.contains(&slot) {
+            progress.completed.push(slot);
+        }
+        if slot.1 >= LINKED_SLOT_NUMBERS {
+            return None;
+        }
+        let to = self.story_slots.iter().find(|s| s.id == slot)?.link?;
+        if self.slot_unlocked(to) {
+            return None;
+        }
+        let link = PendingLink { from: slot, to };
+        let pending = &mut self.story_progress.pending_links;
+        if !pending.contains(&link) {
+            pending.push(link);
+        }
+        Some(link)
+    }
+
+    /// D381: the slot is open to play: unlocked this session, or a story slot that is
+    /// not `InitiallyLocked`. A slot not in the story list counts as unlocked.
+    pub fn slot_unlocked(&self, id: (i32, i32)) -> bool {
+        let slot = self.story_slots.iter().find(|s| s.id == id);
+        self.story_progress.unlocked.contains(&id) || slot.is_none_or(|s| !s.initially_locked)
     }
 }
 

@@ -190,3 +190,43 @@ fn d356_planets_views() {
     let half = PlanetsView::between(&start, &moon, 0.5);
     assert_eq!((half.kind, half.focus_planet), (46, 0));
 }
+
+/// D381: finishing story level 1 adds the link to level 2 (once, and not for a level
+/// whose next one is open); the Pod's world then goes to its unlock state, clears the
+/// list and level 2 is unlocked, so a second finish adds nothing.
+#[test]
+fn d381_a_finished_level_links_to_the_next_and_the_pod_unlocks_it() {
+    use lbp_runtime::{PendingLink, SearchSlot};
+    let mut h = host();
+    h.world.progression_flags = 3;
+    let slot = |n, link, locked| SearchSlot {
+        id: (0, n),
+        link,
+        initially_locked: locked,
+        ..Default::default()
+    };
+    h.world.story_slots = vec![
+        slot(124806, Some((0, 124819)), false),
+        slot(124819, Some((0, 124808)), true),
+        slot(124808, None, true),
+    ];
+    let link = PendingLink {
+        from: (0, 124806),
+        to: (0, 124819),
+    };
+    assert_eq!(h.world.finish_story_level((0, 124806)), Some(link));
+    assert_eq!(h.world.finish_story_level((0, 124806)), Some(link));
+    assert_eq!(h.world.story_progress.pending_links, vec![link]);
+    assert_eq!(h.world.story_progress.completed, vec![(0, 124806)]);
+    assert_eq!(h.world.finish_story_level((6, 124806)), None);
+    assert!(!h.world.slot_unlocked((0, 124819)));
+
+    assert_eq!(run(&mut h, "OnCreate__", &[]), Value::Void);
+    frame(&mut h, true);
+    assert_eq!(member(&mut h, "State"), Value::Int(2));
+    frame(&mut h, false);
+    assert_eq!(member(&mut h, "State"), Value::Int(0));
+    assert!(h.world.story_progress.pending_links.is_empty());
+    assert!(h.world.slot_unlocked((0, 124819)));
+    assert_eq!(h.world.finish_story_level((0, 124806)), None);
+}

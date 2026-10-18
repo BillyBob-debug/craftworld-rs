@@ -535,6 +535,10 @@ pub trait World {
     fn set_progression_flags(&mut self, _mask: u32) -> Result<(), String> {
         Err(not_available("the profile"))
     }
+    /// `Game.ClearPendingLinks__`: empties the profile's list of pending links.
+    fn clear_pending_links(&mut self) -> Result<(), String> {
+        Err(not_available("the profile"))
+    }
     /// `Native.GetIsInPadZone__Q5Thing` for a Thing that is not null: the level is our
     /// Pod, the Thing is the primary player's Sackboy, a pod-computer trigger holds him
     /// and his world z is at least [`PAD_ZONE_MIN_Z`].
@@ -1885,6 +1889,12 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     }),
     ("Game", "GetNumPendingLinks__", |w, _| {
         w.state_query("Game.GetNumPendingLinks__")
+    }),
+    // FOUND (01.33, 0x5f4e80 -> 0x19ac2c). Declared static `void ClearPendingLinks()`
+    // on Game: empties the profile's vector of pending links (profile+0x2b0).
+    ("Game", "ClearPendingLinks__", |w, _| {
+        w.clear_pending_links()?;
+        Ok(Value::Void)
     }),
     ("Game", "GetNumAvatars__", |w, _| {
         w.state_query("Game.GetNumAvatars__")
@@ -4062,8 +4072,8 @@ mod tests {
         assert_eq!(pressed, Ok(Value::Bool(false)));
         assert_eq!(w.0[7].pad.unwrap().now, START_BUTTON);
         // The table: 249 natives before these six; D274 added two, D295 four, D319 one, D360 one
-        // (host-only).
-        assert_eq!(bound().count(), 264);
+        // (host-only), D381 one.
+        assert_eq!(bound().count(), 265);
     }
 
     #[test]
@@ -4122,8 +4132,8 @@ mod tests {
         assert!((wrap(-2. * TAU - 0.5) + 0.5).abs() < 1e-4);
         assert!(call("Math", "ModAngleToWithinPI__f", &[Value::Int(1)]).is_err());
         assert_eq!(mod_angle_to_within_pi(0.25), wrap(0.25));
-        // The table: 255 natives before these two; D295 added four, D319 one, D360 one.
-        assert_eq!(bound().count(), 264);
+        // The table: 255 natives before these two; D295 added four, D319 one, D360 one, D381 one.
+        assert_eq!(bound().count(), 265);
     }
 
     #[test]
@@ -4249,8 +4259,8 @@ mod tests {
         );
         assert_eq!(w.0, 3);
         // The table: 238 natives before these eleven; D273 added six, D274 two, D295 four, D319
-        // one, D360 one.
-        assert_eq!(bound().count(), 264);
+        // one, D360 one, D381 one.
+        assert_eq!(bound().count(), 265);
     }
 
     #[test]

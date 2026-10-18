@@ -894,6 +894,11 @@ impl PlanetsWorldScript {
         let _ = call(host, "PodComputer", "GetPodComputer__", &[]);
         let state = int(host, this, "State");
         let running = state == 1 && Self::intro_tick(host, this)?;
+        if state == 2 {
+            // D381: `LevelUnlockingThread` is not ported (D380); its end, the
+            // `OnFinish__` clear, is (the badges unlock there, PLACEHOLDER).
+            call(host, "Game", "ClearPendingLinks__", &[])?;
+        }
         if (state == 1 && !running) || state == 2 {
             Self::set_state(host, this, 0)?;
         }
