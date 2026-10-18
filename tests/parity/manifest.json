@@ -1,0 +1,19 @@
+{
+  "about": "Image parity checks run by scripts/run_parity.py. References, masks and renders live under the ignored local-analysis/ folder; a check whose files are missing is skipped. max_mean_abs is in levels of 255 over the region's pixels and RGB channels. Thresholds are the last measured value plus a small margin; lower them when a milestone improves a check.",
+  "presets": {
+    "pod-scripted-menu": [
+      "--snapshot", "local-analysis/d133-inventory-0133-edat.json",
+      "--game-dir", "game-data/a1-disc;game-data/a1-update-0133;local-analysis/d133-edat-overlay;local-analysis/d321-disc-fonts",
+      "--level-guid", "00018fdb", "--pod-camera", "1", "--pod-shell", "000027b9",
+      "--window-16-9", "--qa-hide-ui",
+      "--level-scripts", "--level-scripts-in-use-at", "600"
+    ]
+  },
+  "checks": [
+    {"id": "d324-pod-menu-606", "milestone": "D324", "preset": "pod-scripted-menu", "args": ["--level-scripts-hold-at", "606"], "reference": "local-analysis/d324-motion/game_final_7295.png", "region": "viewport", "max_mean_abs": 7.5},
+    {"id": "d324-pod-menu-609", "milestone": "D324", "preset": "pod-scripted-menu", "args": ["--level-scripts-hold-at", "609"], "reference": "local-analysis/d324-motion/game_final_7927.png", "region": "viewport", "max_mean_abs": 5.8},
+    {"id": "d324-pod-menu-611", "milestone": "D324", "preset": "pod-scripted-menu", "args": ["--level-scripts-hold-at", "611"], "reference": "local-analysis/d324-motion/game_final_8348.png", "region": "viewport", "max_mean_abs": 5.3},
+    {"id": "d324-pod-menu-616", "milestone": "D324", "preset": "pod-scripted-menu", "args": ["--level-scripts-hold-at", "616"], "reference": "local-analysis/d322-blend/game_final_8980.png", "region": "viewport", "max_mean_abs": 6.3},
+    {"id": "d324-pod-menu-619", "milestone": "D324", "preset": "pod-scripted-menu", "args": ["--level-scripts-hold-at", "619"], "reference": "local-analysis/d322-blend/game_final_9601.png", "region": "viewport", "max_mean_abs": 4.8}
+  ]
+}
