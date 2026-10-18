@@ -74,8 +74,13 @@ pub trait NativeScript: Sync {
 }
 
 /// Every native port.
-pub const NATIVE_SCRIPTS: &[&dyn NativeScript] =
-    &[&PodScript, &TriggerPodScript, &EARTH, &ORBITING_MOON];
+pub const NATIVE_SCRIPTS: &[&dyn NativeScript] = &[
+    &PodScript,
+    &TriggerPodScript,
+    &EARTH,
+    &ORBITING_MOON,
+    &crate::native_bubble::TriggerSpeechBubbleScript,
+];
 
 /// The native port of the script with this GUID.
 pub fn native_script(guid: u32) -> Option<&'static dyn NativeScript> {
