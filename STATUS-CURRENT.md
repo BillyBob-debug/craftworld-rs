@@ -33,19 +33,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
   with no scripts loaded; the friends exe's Story button is on. Mean abs 0.36 levels
   against the scripted frame.
 
-## D352 the Story card opens at full size and shrinks out (2026-10-17)
-- Part 99 (`docs/level-scripts/part-99.md`): the card's own scale is the slot spring
-  (0.7, 0.25; FOUND 0x42b4c8); a new card is made at its target (FOUND 0x6fc414), so
-  opening shows it at once. On closing it shrinks 0.75, 0.3875, 0.0369 and is erased
-  (`CardScale`, INFERRED target 0), the overlays with it.
-
-## D351 a left overlay shrinks out; the cards go when Story closes (2026-10-17)
-- Part 98 (`docs/level-scripts/part-98.md`): a slot no longer wanted springs to scale 0 and
-  is freed once its scale is 0 or below (FOUND 0x6fcc68, 0x6fec94), drawn until then
-  (`OverlayGrow::leave`). A card is erased with all its slots once its scale is 0 (FOUND
-  0x42b3e0); the rebuild runs on `SetDecorations` or a new planet resource, not on each
-  opening, so a reopened search is a first fill by new cards (INFERRED).
-
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
   default, 0 Complete. Files `local-analysis/b177-{default,legacy}.json`.
