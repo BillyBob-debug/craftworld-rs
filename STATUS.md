@@ -6357,3 +6357,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 103 (`docs/level-scripts/part-103.md`): `PlanetsWorld`/`PlanetsView` run natively;
   with no scripts the Story camera dolly, the level's view blend, Earth and the Moon match
   the scripted run exactly, and the plain Pod shows its planets. No measured stand-ins left.
+
+## D357 the pod computer's menu states as native ports (2026-10-18)
+- Part 104 (`docs/level-scripts/part-104.md`): with no scripts, engaging the pod computer
+  gives the main menu (the scripted frame exactly, tick 601), Story is chosen from it
+  (tick 640) and Back pops each state; `--story` is no longer needed to reach Story.

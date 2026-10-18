@@ -11,7 +11,13 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D360 a Story group zooms in on its planet (2026-10-18)
+## Latest: D361 moving between results on the planet (2026-10-18)
+- Part 108 (`docs/level-scripts/part-108.md`): the stick moves the planet's cursor to the
+  result that way, scored on Earth's surface as the engine does (0x42d584); the QA option
+  `--level-scripts-move-at N:DIR` gives the same picks and an identical frame with and
+  without the scripts.
+
+## D360 a Story group zooms in on its planet (2026-10-18)
 - Part 107 (`docs/level-scripts/part-107.md`): with no scripts, a chosen Story group
   selects its default level, wants the zoom view (7) and the 500 extra planet zoom, so the
   planets zoom in as the scripted run does (planets level identical on every tick 680-760).
@@ -26,11 +32,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
   stand-in; with no scripts Back from Story (`--level-scripts-back-at`) returns to the main
   menu with the scripted search state on every tick 640-780, and the scripted run's
   main menu now draws after Back too (a draw tie went to the popped Story frame).
-
-## D357 the pod computer's menu states as native ports (2026-10-18)
-- Part 104 (`docs/level-scripts/part-104.md`): with no scripts, engaging the pod computer
-  gives the main menu (the scripted frame exactly, tick 601), Story is chosen from it
-  (tick 640) and Back pops each state; `--story` is no longer needed to reach Story.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

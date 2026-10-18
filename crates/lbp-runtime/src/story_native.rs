@@ -553,6 +553,37 @@ mod tests {
     }
 
     #[test]
+    fn d361_cursor_moves_to_the_nearest_result_that_way() {
+        let g = (4, 27);
+        let slot = |id, group, location| crate::pod::SearchSlot {
+            id,
+            group,
+            location,
+            ..Default::default()
+        };
+        let mut w = LevelWorld {
+            story_slots: vec![
+                slot((0, 1), Some(g), [0., 0., 1., 0.]),
+                slot((0, 2), Some(g), [0.3, 0., 0.95, 0.]),
+                slot((0, 3), Some(g), [-0.6, 0., 0.8, 0.]),
+                slot((4, 5), Some(g), [0.6, 0., 0.8, 0.]),
+                slot((0, 6), None, [0.8, 0., 0.6, 0.]),
+            ],
+            ..Default::default()
+        };
+        w.pod.search.group = Some(g);
+        w.pod.search.cur_result = Some(0);
+        assert_eq!(w.move_result_cursor([1., 0.]), Some(1));
+        // No wrap, and neither a group nor a slot of no group counts in a group search.
+        assert_eq!(w.move_result_cursor([1., 0.]), None);
+        assert_eq!(w.selected_result(), Some(1));
+        // Left: the nearer of the two that way.
+        assert_eq!(w.move_result_cursor([-1., 0.]), Some(0));
+        assert_eq!(w.move_result_cursor([-1., 0.]), Some(2));
+        assert_eq!(w.move_result_cursor([0., 1.]), None);
+    }
+
+    #[test]
     fn d359_group_default_browse_mode_by_slot_type() {
         assert_eq!(SearchDetails::Group((4, 27)).default_browse_mode(), 1);
         assert_eq!(SearchDetails::Group((9, 1)).default_browse_mode(), 1);

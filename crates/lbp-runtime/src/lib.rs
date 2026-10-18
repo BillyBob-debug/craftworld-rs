@@ -2795,12 +2795,87 @@ impl LevelWorld {
 
     /// D360: the result the Story view is about: a group search's cursor result (its
     /// default level, [`Self::group_default_result`]), else the search's default result.
+    /// D361: the planet's cursor result in any search (`GetCurResult`), once
+    /// [`Self::move_result_cursor`] has moved it.
     pub fn selected_result(&self) -> Option<usize> {
         let search = &self.pod.search;
-        match search.group {
-            Some(_) => search.cur_result.or(search.default_result),
-            None => search.default_result,
+        search.cur_result.or(search.default_result)
+    }
+
+    /// D361 (part 108): the stick or d-pad pushed in `dir` (x right, y up) on the Earth
+    /// planet's search: the cursor flies to the result that direction, which is returned.
+    /// FOUND (01.33, 0x42df50 from the planet update 0x42f43c; the pick 0x42d584, applied by
+    /// `MoveCursorToResult` 0x429554): each candidate scores `df * (cos + 1)`, `cos` the
+    /// angle between the push and the direction to the candidate (0x4245cc), which must
+    /// be above 0 (above 0.866 with no current result), `df = 1 - dist / pi`; the highest
+    /// wins, a tie the later entry; there is no wrap. In a group search only that group's
+    /// results count (and in either search a locked one, entry+0x228 0, does not).
+    /// INFERRED: the direction and distance are taken on Earth's surface, the push in the
+    /// tangent plane at the current result (east from the world up, north from there) and
+    /// the distance the angle between the slots' `location`s; no lock state is read
+    /// offline, so the group search leaves out only groups (type 4, as its default pick)
+    /// and the Story search takes the slots in no group. Left out: results joined by a
+    /// link, the cursor's flight (no next move until it lands) and the move sound
+    /// `pod/pod_cursor_move`.
+    pub fn move_result_cursor(&mut self, dir: [f32; 2]) -> Option<usize> {
+        let search = &self.pod.search;
+        let group = search.group;
+        let unit = |l: [f32; 4]| {
+            let n = (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]).sqrt();
+            (n > 0.).then(|| [l[0] / n, l[1] / n, l[2] / n])
+        };
+        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+        let cross = |a: [f32; 3], b: [f32; 3]| {
+            [
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            ]
+        };
+        let len = (dir[0] * dir[0] + dir[1] * dir[1]).sqrt();
+        if len == 0. {
+            return None;
         }
+        let push = [dir[0] / len, dir[1] / len];
+        let cur = self.selected_result();
+        let here = cur.and_then(|i| unit(self.story_slots.get(i)?.location));
+        let min_cos = if here.is_some() { 0. } else { 0.866 };
+        let p = here.unwrap_or([0., 0., 1.]);
+        let east = unit({
+            let e = cross([0., 1., 0.], p);
+            [e[0], e[1], e[2], 0.]
+        })
+        .unwrap_or([1., 0., 0.]);
+        let north = cross(p, east);
+        let mut best: Option<(f32, usize)> = None;
+        for (i, s) in self.story_slots.iter().enumerate() {
+            let candidate = match group {
+                Some(g) => s.group == Some(g) && s.id.0 != 4,
+                None => s.group.is_none(),
+            };
+            if !candidate || Some(i) == cur {
+                continue;
+            }
+            let Some(c) = unit(s.location) else { continue };
+            let d = [c[0] - p[0], c[1] - p[1], c[2] - p[2]];
+            let (x, y) = (dot(d, east), dot(d, north));
+            let n = (x * x + y * y).sqrt();
+            if n == 0. {
+                continue;
+            }
+            let cos = (x * push[0] + y * push[1]) / n;
+            if cos <= min_cos {
+                continue;
+            }
+            let dist = dot(p, c).clamp(-1., 1.).acos();
+            let score = (1. - dist / std::f32::consts::PI) * (cos + 1.);
+            if best.is_none_or(|(b, _)| score >= b) {
+                best = Some((score, i));
+            }
+        }
+        let (_, i) = best?;
+        self.pod.search.cur_result = Some(i);
+        Some(i)
     }
 
     /// D360 (part 107): the result a group search selects when it opens with
