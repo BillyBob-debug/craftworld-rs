@@ -126,3 +126,38 @@ While he is pushed into a wall the code-driven Sackboy turns to the camera and p
 Not yet: the route after x -385 (no game reference for this part; the RPCS3 frames of
 Part 3 stop at line 2); whether line 3 needs the Close press in the game; the camera at
 x -938 (a viewer frame at tick 1600 looks through a front wall).
+
+## Part 5: the speech bubble in native Rust, no decrypted files (D504, 2026-10-18)
+
+Before: every game script is only in the encrypted patch.edat, so without the decrypted
+overlay Rookie Test loaded no scripts (`scripts loaded 0`) and no line ever opened.
+
+After: `Trigger_Speech_Bubble` (g000047f4) is a port in the D417 native script registry
+(`crates/lbp-runtime/src/native_bubble.rs`), run when its script is not loaded, or always
+with `--native-scripts`. The switch pass now also asks a native port for
+`SwitchGetNewActivation__i`, so the bubble's output pulse reaches the next line. The port
+is written from the script's 01.33 listing: `OnCreate__` and its forever loop (`Update__` while `HasUpdateWorkToDo`, one yield a
+tick), the switch reaction, Enter/Leave, Circle's remote stop, the output pulse, the mouth
+and audio exports. Left out: the create-mode tweak menus and editor drawing.
+
+Rookie Test's 221 scripted Things use 9 classes: PostItNote 165, Trigger_Speech_Bubble 21,
+Launcher 19, TriggerMusic 9, TutorialMonitor 3, PostItNoteUnlockStickers 1,
+PostItNoteUnlockSuicide 1, Score_Board 1, WorldMooCamera 1. Two script functions the bubble
+calls are in other classes and are inlined: `Thing.GetDescendentWithPTrigger__Q5Thing` (the
+Thing itself or its first direct child with a PTrigger) and `World.GetCurrentChallenge__`
+(the world's `CurrentChallenge` member).
+
+The oracle: a per-tick record of every native call (arguments and result, strings as
+length and hash) and member write of the 21 bubbles, made on the Part 4 route with the VM
+and with the port (a throwaway recorder on this branch before it moved onto the D417
+registry). The VM's trace (5,951 events) and the port's agree call for call, apart from 21
+writes of `HasUpdateWorkToDo` in `OnCreate__`: the native class starts that field at its
+`.init__` value (true), while the VM starts a Thing's fields at their type defaults (it does
+not run `.init__` for Thing scripts), so the VM skips the first loop turn's `Update__`. The
+other difference is the part handles' numbers. Without the overlay (`d68` snapshot, disc and
+update only, `scripts loaded 0`) the three lines open on ticks 63, 419 and 882 and close on
+120, 600 and 1150, as with the decrypted scripts. Test:
+`native_bubble::d504_the_native_bubble_opens_closes_and_pulses_without_the_script`.
+
+Not yet: the other eight classes (the post-it notes, launchers, music and score board have
+no native class, so they do nothing without the overlay); the route past x -385.
