@@ -113,6 +113,9 @@ pub struct PodState {
     /// SlotID, pod+0x954, FOUND 0x4033b4); `PodComputer.IsLaunchingLevel__` is true
     /// while it is set. Nothing loads the level yet: the load's end was not traced.
     pub launch: Option<(i32, i32)>,
+    /// D363: the level the pod handed to the game's level load (FUN_004022fc), once the
+    /// launch's request is done; the launch stays pending until the level takes over.
+    pub level_start: Option<LevelStart>,
     /// D362: the level the pod is in (the current SlotID the classifier compares with,
     /// 0x3fce40); none in the pod itself (INFERRED).
     pub current_level: Option<(i32, i32)>,
@@ -161,6 +164,17 @@ pub struct PlanetsSearch {
     pub info_bubble_since: Option<i32>,
 }
 
+/// D363: what the pod hands to the game when a launch's request is done (FUN_004022fc ->
+/// FUN_002467b8): the slot's root level (game+0x2f0), its SlotID (game+0x328/+0x32c) and
+/// the launch mode (game+0x120; 0 Play), after which the game enters its level load
+/// (state 7, or 6 or 8 by its flags; FUN_002258bc).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct LevelStart {
+    pub slot: (i32, i32),
+    pub root: Option<lbp_level::serial::Descriptor>,
+    pub mode: u32,
+}
+
 /// D328: one slot of the Story search, as the engine keeps it for a result.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct SearchSlot {
@@ -180,6 +194,8 @@ pub struct SearchSlot {
     pub developer_level_type: Option<u32>,
     /// D342: the slot's icon (the picture on its badge card).
     pub icon: Option<lbp_level::serial::Descriptor>,
+    /// D363: the slot's root level (the descriptor the launch hands to the game's load).
+    pub root: Option<lbp_level::serial::Descriptor>,
 }
 
 impl SearchSlot {
@@ -198,6 +214,7 @@ impl SearchSlot {
                 is_sub_level: s.is_sub_level.unwrap_or(false),
                 developer_level_type: s.developer_level_type,
                 icon: s.icon,
+                root: s.root,
             })
             .collect()
     }

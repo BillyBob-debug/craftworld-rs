@@ -1326,6 +1326,17 @@ fn step(
             p.scripts.ticks
         );
     }
+    // D363: the pod's launch step (its update, before this tick's input): a pending
+    // launch's request is done, so the slot goes to the game's level load.
+    if let Some(start) = p.host.world.pod_launch_step() {
+        let root = start
+            .root
+            .map(|d| (d.guid.map(|g| format!("{g:08x}")), d.sha1.is_some()));
+        println!(
+            "Level start after tick {}: slot {:?}, root level {root:?} (guid, has sha1), mode {} (D363)",
+            p.scripts.ticks, start.slot, start.mode
+        );
+    }
     // D362: Cross on a story level, after the tick as the engine's dispatcher (the same
     // in both modes: the script declines and the engine asks for the launch).
     if p.cross_at == Some(p.scripts.ticks) {

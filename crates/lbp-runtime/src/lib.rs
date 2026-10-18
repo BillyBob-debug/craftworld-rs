@@ -2819,8 +2819,9 @@ impl LevelWorld {
     /// that is the pod's pending or current level is kind 0 and does nothing; any other is
     /// kind 4, `TriggerOnLevelLaunch(slot, Play)` (0x4033b4 mode 0), which cancels an
     /// older pending launch and keeps this one as the pod's pending SlotID, so
-    /// `IsLaunchingLevel` is true from then on. No pod state is pushed. Left out: the
-    /// level's load and start, the launch warnings (0x402b24) and the select sound.
+    /// `IsLaunchingLevel` is true from then on. No pod state is pushed; the hand-off to the
+    /// game is [`Self::pod_launch_step`]. Left out: the launch warnings (0x402b24) and the
+    /// select sound.
     pub fn cross_on_level(&mut self, result: usize) -> LevelCross {
         let Some(slot) = self.story_slots.get(result).map(|s| s.id) else {
             return LevelCross::NotLevel;
@@ -2833,7 +2834,38 @@ impl LevelWorld {
             return LevelCross::Current(slot);
         }
         pod.launch = Some(slot);
+        pod.level_start = None;
         LevelCross::Launch(slot)
+    }
+
+    /// D363 (part 110): the pod's launch step, every frame from the pod's update
+    /// (FUN_00402560 from 0x40663c). FOUND (01.33): the launch waits on its level request
+    /// (pod+0x9c4 = 1, request id pod+0x9c8); when the request is done (state 3) and no
+    /// launch warning (popup 0x4b) is up, the pod hands the pending slot to the game
+    /// (FUN_004022fc: its root level, SlotID and mode Play, then the game's level load)
+    /// and clears its wait. A failed request (4 or 5) shows error popup 0x13 and drops the
+    /// launch instead. INFERRED: a story level on the disc has nothing to fetch, so its
+    /// request is done on the first step after the Cross; the online fetch, the warnings
+    /// and the error path are left out. `IsLaunchingLevel` stays true: the pending slot is
+    /// kept until the level takes over. Returns the hand-off on the step that makes it.
+    pub fn pod_launch_step(&mut self) -> Option<LevelStart> {
+        let pod = &self.pod;
+        let slot = pod.launch?;
+        if pod.level_start.is_some() {
+            return None;
+        }
+        let root = self
+            .story_slots
+            .iter()
+            .find(|s| s.id == slot)
+            .and_then(|s| s.root);
+        let start = LevelStart {
+            slot,
+            root,
+            mode: 0,
+        };
+        self.pod.level_start = Some(start);
+        Some(start)
     }
 
     /// D361 (part 108): the stick or d-pad pushed in `dir` (x right, y up) on the Earth

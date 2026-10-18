@@ -11,7 +11,12 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D362 choosing a story level (2026-10-18)
+## Latest: D363 starting a chosen story level (2026-10-18)
+- Part 110 (`docs/level-scripts/part-110.md`): once a launch's request is done the pod
+  hands the slot's root level to the game's level load (FUN_004022fc), in both modes;
+  the viewer prints it and the trace records it, but does not switch levels yet.
+
+## D362 choosing a story level (2026-10-18)
 - Part 109 (`docs/level-scripts/part-109.md`): Cross on a story level
   (`--level-scripts-cross-at`) asks for its launch as the engine does (0x4033b4), in both
   modes; Back waits while a launch is pending, and a group's title follows the script.
@@ -26,11 +31,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Part 107 (`docs/level-scripts/part-107.md`): with no scripts, a chosen Story group
   selects its default level, wants the zoom view (7) and the 500 extra planet zoom, so the
   planets zoom in as the scripted run does (planets level identical on every tick 680-760).
-
-## D359 choosing a Story group, and Back to Story (2026-10-18)
-- Part 106 (`docs/level-scripts/part-106.md`): with no scripts, choosing a Story group
-  (`--level-scripts-group-at`) pushes the group's search state over Story and Back brings
-  Story back on top, with the scripted search state on every tick 640-760.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

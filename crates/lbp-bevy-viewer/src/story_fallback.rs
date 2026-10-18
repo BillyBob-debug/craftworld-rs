@@ -58,6 +58,13 @@ impl Trace {
         line += &format!(",\"story_open\":{}", level.story_open());
         line += &format!(",\"search\":{}", search_json(&level.pod.search));
         line += &format!(",\"camera\":{}", camera_json(level));
+        // D362/D363: the pending launch and the slot handed to the game's level load.
+        let slot = |s: Option<(i32, i32)>| opt(s.map(|(t, n)| format!("[{t},{n}]")));
+        line += &format!(",\"launch\":{}", slot(level.pod.launch));
+        line += &format!(
+            ",\"level_start\":{}",
+            slot(level.pod.level_start.map(|s| s.slot))
+        );
         let point = level.story_planet_point();
         line += &format!(
             ",\"story_point\":{}",

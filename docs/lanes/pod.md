@@ -1,18 +1,19 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-109.md` (108 for the cursor, 107 for the group zoom, 106 for
-   choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
+1. `docs/level-scripts/part-110.md` (109 for Cross on a level, 108 for the cursor, 107
+   for the group zoom, 106 for choosing a group, 105 for Back, 104 for the pod
+   computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 164 (D361) merged. PR for D362 (branch `pod-story-level`,
-  worktree `E:\Projects\wt-d324`): Cross on a story level asks for its launch
-  (`--level-scripts-cross-at`), Back waits while one is pending, the group title's gate;
-  handed to the coordinator for merge once rust and python are green.
+- PRs 153 (D353) through 165 (D362) merged. PR for D363 (branch `pod-level-start`,
+  worktree `E:\Projects\wt-d324`): a done launch hands the slot's root level to the
+  game (`pod_launch_step`, trace `launch`/`level_start`); handed to the coordinator for
+  merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D363.
+  Decision numbers: D348-D399, next free D364.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -27,6 +28,11 @@
   --level-scripts-trace PATH --qa-capture PNG` (each capture needs a new name).
   Disc + update only: `--snapshot local-analysis/d79-inventory-0133.json --game-dir
   "game-data/a1-disc;game-data/a1-update-0133"`. A run takes several minutes.
+- D363 runs: `local-analysis/d362/*-d363a*` (as run 2): both hand slot (0, 127795) to
+  the game after tick 761, root GUID 0001f333, which loads alone with `--level-guid
+  0001f333`. Notes `local-analysis/d363/level-start-notes.md`. The viewer has no runtime
+  level switch: `level_play::install` builds `Play` once; `load()` in main.rs clears and
+  respawns only the display entities.
 - D362 runs: `local-analysis/d362/` (run 2: group at 680, right 700 and 720, left 740,
   Cross 760, Back 775: both launch slot (0, 127795) and stay on the group; run 3 without
   Cross: both pop; notes in story-level-notes.md). D361 runs in `local-analysis/d361/`.
@@ -58,8 +64,9 @@
   data file is on the disc or update.
 
 ## Next
-1. The story level's load and start (whatever reads pod+0x9c4; warnings 0x402b24), the
-   select sound; then the cursor's flight and sound, and the other searches.
+1. Switch the running viewer to the handed-off level (rebuild `Play`, the display and
+   the story data), the warnings (0x402b24) and the select sound; then the cursor's
+   flight and sound, and the other searches.
 2. The default result before the search opens (scripts 23 from tick 600, native none),
    the menus' slide-in for the native ports, and pruning `OldStates` frames.
 3. The main menu's move in and the other entries' states as they unlock.
