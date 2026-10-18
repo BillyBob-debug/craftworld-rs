@@ -79,7 +79,8 @@ latest exact commands are in the latest STATUS entry.
 
 ## Reminders
 
-- Commit at each milestone (user asked for git); no push/publish unless asked.
+- Commit at each milestone and open a PR (AGENTS.md, Repository hygiene); releases and
+  publishing outside the private pages need the owner's go.
 - Output filenames under `local-analysis/` must be new; tools refuse to overwrite.
 - Write docs as UTF-8 explicitly (a cp1252 default broke a write before).
 - Never rewrite source/docs with PowerShell Get-Content/Set-Content/Out-File: Windows
