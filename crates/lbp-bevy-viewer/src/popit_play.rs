@@ -439,7 +439,7 @@ struct Part(Role);
 enum Place {
     Above,
     Below,
-    Right,
+    Beside,
 }
 
 /// D413: which way a tooltip pill above or below its tile leans.
@@ -450,25 +450,50 @@ enum Side {
     Right,
 }
 
-/// D413: px between a leaning pill and its tile's side, with the fit test's margin.
-const PILL_SIDE_GAP: f32 = 9.;
+/// D414: the tooltip's offset past its node, x (gooey units, FOUND 0x417b78: half the
+/// tooltip plus 80 x 110; 130 x 180 once a tooltip with body text has shown 60 frames,
+/// which the Popit's one-line labels never have).
+const TIP_OFF_X: f32 = 80.;
 
-/// D413, the side rule of the game's tooltip placement (FOUND 0x417b78, gooey space):
-/// a root frame whose centre is left of NDC -0.6 prefers the right, right of +0.6 the
-/// left; a side the pill would not fit inside the safe area (NDC x +-0.88) is never
-/// taken. `card_ndc_x` the card's centre, `tile` its focused tile's x span (px), `need`
-/// the pill's width with its gap (px). INFERRED: the root frame is the card; a centred
-/// card keeps the centred pill (D235).
-fn pill_side(card_ndc_x: f32, tile: [f32; 2], need: f32, screen_w: f32) -> Side {
+/// D413 / D414, the x side of the game's tooltip placement (FOUND 0x417b78, root space).
+/// Two candidate centres sit past the node's sides (`lo` / `hi` = side -+ (half + off));
+/// `t` is the node centre's place in the root over 0.95 of its width and `p` the lerp of
+/// the candidates by `t`. In order: a side the tooltip would not fit inside the safe
+/// area (NDC x +-0.88) is never taken; a root centred right of NDC +0.6 takes the left,
+/// left of -0.6 the right; else, when `p` falls outside the root or the node is in
+/// neither the top nor the bottom row (`beside`), the outward side (`t` >= 0.499 right);
+/// else the lerp, which the port draws as the centred pill. All px here: `card` the
+/// root's x span (FOUND: Poppet.UpdateUI's frame 1, the bubble round the card), `node`
+/// the focused button's span, `pw` the pill's width, `unit` px per gooey unit.
+/// The game's candidate distance and its 0.9 corner pull are not used for drawing: the
+/// leaning pill keeps its MEASURED place (D413).
+fn pill_side(
+    card: [f32; 2],
+    node: [f32; 2],
+    pw: f32,
+    unit: f32,
+    beside: bool,
+    screen_w: f32,
+) -> Side {
     let safe = [screen_w * 0.06, screen_w * 0.94];
-    let left_fits = tile[0] - need >= safe[0];
-    let right_fits = tile[1] + need <= safe[1];
-    match (left_fits, right_fits) {
-        (false, true) => Side::Right,
-        (true, false) => Side::Left,
-        _ if card_ndc_x < -0.6 => Side::Right,
-        _ if card_ndc_x > 0.6 => Side::Left,
-        _ => Side::Centre,
+    let off = pw / 2. + TIP_OFF_X * unit;
+    let (lo, hi) = (node[0] - off, node[1] + off);
+    let t = ((node[0] + node[1]) / 2. - card[0]) / (0.95 * (card[1] - card[0]));
+    let p = lo + (hi - lo) * t;
+    let card_ndc_x = (card[0] + card[1]) / screen_w - 1.;
+    let outward = if t >= 0.499 { Side::Right } else { Side::Left };
+    if lo - pw / 2. < safe[0] {
+        Side::Right
+    } else if hi + pw / 2. > safe[1] {
+        Side::Left
+    } else if card_ndc_x > 0.6 {
+        Side::Left
+    } else if card_ndc_x < -0.6 {
+        Side::Right
+    } else if beside || p < card[0] || p > card[1] {
+        outward
+    } else {
+        Side::Centre
     }
 }
 
@@ -1736,7 +1761,7 @@ fn popit_layout(
     } else if focus_pos.0 + 1 == p.card().0.len() {
         Place::Below
     } else {
-        Place::Right
+        Place::Beside
     };
     let chars = assets
         .items
@@ -1744,12 +1769,15 @@ fn popit_layout(
         .find(|i| i.id == p.focus)
         .map_or(10, |i| i.label.chars().count());
     let (pw, ph) = ((chars as f32 * PILL_CHAR_W - 2.) * scale, PILL_H * scale);
-    // D413: above or below, the pill leans to one side when the card is near a screen
-    // edge or a centred pill would not fit the safe area (the game's rule, FOUND 0x417b78).
+    // D413 / D414: the game's side rule (FOUND 0x417b78) on the button's own rect, the
+    // 128-unit icon cell rather than the larger focus tile.
+    let unit = UNIT_PX * scale * grow;
     let side = pill_side(
-        (left + w / 2.) / window.width() * 2. - 1.,
-        [tile_c.x - tile_half, tile_c.x + tile_half],
-        pw + PILL_SIDE_GAP * scale,
+        [left, left + w],
+        [tile_c.x - 64. * unit, tile_c.x + 64. * unit],
+        pw,
+        unit,
+        place == Place::Beside,
         window.width(),
     );
     // (pill, tip, x where the tail leaves the pill)
@@ -1804,7 +1832,16 @@ fn popit_layout(
                 tip.x,
             )
         }
-        (Place::Right, _) => {
+        // D414: a left-hand button of a middle row mirrors the MEASURED right-hand place.
+        (Place::Beside, Side::Left) => {
+            let tip = Vec2::new(tile_c.x - tile_half - 8. * scale, tile_c.y + 4. * scale);
+            (
+                (tip.x - TAIL_LEN_H * scale - pw, tip.y - ph / 2., pw, ph),
+                tip,
+                tip.x,
+            )
+        }
+        (Place::Beside, _) => {
             let tip = Vec2::new(tile_c.x + tile_half + 8. * scale, tile_c.y + 4. * scale);
             (
                 (tip.x + TAIL_LEN_H * scale, tip.y - ph / 2., pw, ph),
@@ -1869,13 +1906,13 @@ fn popit_layout(
                 let n = TAIL_STEPS as f32;
                 // D413: a leaning pill's tail is a wedge about 30 px wide at the pill
                 // (MEASURED, Pod play frame).
-                let width = if side == Side::Centre || place == Place::Right {
+                let width = if side == Side::Centre || place == Place::Beside {
                     11. - k * 2.
                 } else {
                     30. - k * 6.5
                 } * scale;
                 let len = match place {
-                    Place::Right => TAIL_LEN_H * scale / n,
+                    Place::Beside => TAIL_LEN_H * scale / n,
                     Place::Above => (tail_at.y - (pill.1 + pill.3)) / n,
                     Place::Below => (pill.1 - tail_at.y) / n,
                 };
@@ -1896,7 +1933,14 @@ fn popit_layout(
                         width,
                         len + 1.,
                     ),
-                    Place::Right => set(
+                    Place::Beside if side == Side::Left => set(
+                        &mut node,
+                        pill.0 + pill.2 - 1. * scale + k * len,
+                        tail_at.y - width / 2.,
+                        len + 1.,
+                        width,
+                    ),
+                    Place::Beside => set(
                         &mut node,
                         pill.0 + 1. * scale - (k + 1.) * len,
                         tail_at.y - width / 2.,
@@ -2776,10 +2820,48 @@ mod tests {
     /// it centred; a card near the right edge leans left.
     #[test]
     fn d413_pill_side() {
-        // Pod play frame: card centre x ~ 320 of 1280, focus tile 262..326, pill ~250 px.
-        assert_eq!(pill_side(-0.5, [262., 326.], 259., 1280.), Side::Right);
-        assert_eq!(pill_side(0., [600., 668.], 200., 1280.), Side::Centre);
-        assert_eq!(pill_side(0.7, [1000., 1068.], 100., 1280.), Side::Left);
-        assert_eq!(pill_side(-0.7, [600., 668.], 100., 1280.), Side::Right);
+        let u = UNIT_PX;
+        // Pod play frame: card ~ 240..400 of 1280, focus button ~ 273..315, pill ~250 px.
+        assert_eq!(
+            pill_side([240., 400.], [273., 315.], 250., u, false, 1280.),
+            Side::Right
+        );
+        // Centred create card 555..725: the middle top button keeps the centred pill.
+        assert_eq!(
+            pill_side([555., 725.], [619., 661.], 120., u, false, 1280.),
+            Side::Centre
+        );
+        assert_eq!(
+            pill_side([1050., 1200.], [1080., 1120.], 60., u, false, 1280.),
+            Side::Left
+        );
+        assert_eq!(
+            pill_side([100., 260.], [160., 200.], 60., u, false, 1280.),
+            Side::Right
+        );
+    }
+
+    /// D414: on a centred card the outer buttons lean outward (the lerped centre leaves the
+    /// card: the Moon create frame's top-right focus with its pill to the right), and a
+    /// middle row's buttons take the outward side.
+    #[test]
+    fn d414_pill_side_outward() {
+        let (u, card) = (UNIT_PX, [555., 725.]);
+        assert_eq!(
+            pill_side(card, [662., 704.], 120., u, false, 1280.),
+            Side::Right
+        );
+        assert_eq!(
+            pill_side(card, [576., 618.], 120., u, false, 1280.),
+            Side::Left
+        );
+        assert_eq!(
+            pill_side(card, [576., 618.], 120., u, true, 1280.),
+            Side::Left
+        );
+        assert_eq!(
+            pill_side(card, [619., 661.], 120., u, true, 1280.),
+            Side::Right
+        );
     }
 }
