@@ -1576,6 +1576,10 @@ impl World for LevelWorld {
     fn native_object_class(&mut self, class: &str, mangled: &str) -> Option<&'static str> {
         match (class, mangled) {
             ("SearchDetails", "CreateStoryLevels__") => Some("SearchDetailsStoryLevels"),
+            // D359 FOUND (the 01.33 listings): `CreateGroup__Q6SlotIDb` is declared to
+            // return the script class `SearchDetailsGroup` (its `DoTitle`, `GetScale`,
+            // `GetDefaultBrowseMode` and `GetExtraPlanetZoom` are script overrides).
+            ("SearchDetails", "CreateGroup__Q6SlotIDb") => Some("SearchDetailsGroup"),
             // INFERRED: no result is under the cursor yet, so the planet's current result
             // is an empty handle (`SearchResultHandle..ctor__` sets `_Type` 0), which the
             // search state reads with `GetType__` every frame.
@@ -4057,6 +4061,39 @@ impl LevelScripts {
     /// `TriggerOnPlanetCancel__` was called on the tick before (the search state's Back),
     /// so the state is popped back to the main menu. INFERRED: the game calls it from
     /// the native at once; here it runs right after the tick that asked for it.
+    /// D359: Cross on a group result of the Earth planet. FOUND (01.33, 0x4037bc): when
+    /// the script's `OnPlanetSearchResultSelected` declines, the engine calls the pod
+    /// computer's export `OnPlanetGroupSelected(SlotID, true, true)` for a group (via
+    /// 0x3fa448 -> 0x6589f8), which pushes a search of that group. `result` indexes
+    /// [`LevelWorld::story_results`]; None when there is no pod computer or result.
+    pub fn planet_group_selected(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut Bindings<LevelWorld>,
+        result: usize,
+        budget: u64,
+    ) -> Option<Result<Step, lbp_script_vm::Fault>> {
+        let puter = host.world.pod.puter?;
+        let slot = host.world.story_results.get(result)?.slot_id;
+        let class = vm.class_of(puter)?;
+        host.world.pod.group_slot = Some(slot);
+        let mut b = budget;
+        // FOUND (the listing): the receiver in register 0, the SlotID in 4, the two
+        // flags in 8 and 9.
+        Some(vm.start_registers(
+            host,
+            class,
+            "OnPlanetGroupSelected__Q6SlotIDbb",
+            &[
+                (0, Value::Object(Some(puter))),
+                (4, Value::Object(Some(slot))),
+                (8, Value::Bool(true)),
+                (9, Value::Bool(true)),
+            ],
+            &mut b,
+        ))
+    }
+
     pub fn planet_cancel(
         &mut self,
         vm: &mut Vm,

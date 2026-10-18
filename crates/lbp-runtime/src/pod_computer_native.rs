@@ -27,7 +27,7 @@ use lbp_script_vm::Value;
 
 use crate::{
     start_native, GooeyButton, GooeyFrame, GooeyItem, LevelWorld, PodStateSearch, SearchDetails,
-    PLANETS_WORLD_PORT, STORY_FRAME_KEY,
+    GROUP_FRAME_KEY, PLANETS_WORLD_PORT, STORY_FRAME_KEY,
 };
 
 /// The main menu frame's key (MEASURED: named frame 1 under high bits 1, the state's own).
@@ -70,13 +70,18 @@ pub const MAIN_MENU_FRAME_MATRIX: [f32; 16] = [
 pub enum PuterState {
     MainMenu,
     StorySearch,
+    /// D359: a group of the Story search chosen (Cross on a group's planet).
+    GroupSearch,
 }
 
 impl PuterState {
-    fn planets_view(self) -> i32 {
+    pub fn planets_view(self) -> i32 {
         match self {
             Self::MainMenu => MAIN_MENU_PLANETS_VIEW,
-            Self::StorySearch => STORY_PLANETS_VIEW,
+            // D359: the group's view is the Story search's while the group's results do
+            // not ask for a zoom (`GetPlanetsViewType`: 7 with `GetWantZoom`, offline
+            // false as in the scripted run).
+            Self::StorySearch | Self::GroupSearch => STORY_PLANETS_VIEW,
         }
     }
 }
@@ -97,6 +102,8 @@ pub enum PodComputerEvent {
 pub struct NativePodComputer {
     stack: Vec<PuterState>,
     search: PodStateSearch,
+    /// D359: the group search pushed over Story.
+    group: PodStateSearch,
     /// The last state was popped and the host asked to stop using the pod computer: no
     /// new main menu until the answer has come (the pod computer seen not in use).
     released: bool,
@@ -148,8 +155,26 @@ impl NativePodComputer {
                 self.main_menu_ui(&mut host.world);
             }
             PuterState::StorySearch => self.search.update(&mut host.world),
+            PuterState::GroupSearch => self.group.update(&mut host.world),
         }
         None
+    }
+
+    /// D359, `PodComputer.OnPlanetGroupSelected(slot, true, true)`: Cross on a group's
+    /// planet with the Story search on top (after the tick, as the engine's cursor
+    /// answers). FOUND: a new search state for `SearchDetails.CreateGroup(slot, true)`
+    /// pushed over it, the cursor mode carried over.
+    pub fn choose_group(
+        &mut self,
+        host: &mut Bindings<LevelWorld>,
+        slot: (i32, i32),
+    ) -> Option<PodComputerEvent> {
+        if self.top() != Some(PuterState::StorySearch) {
+            return None;
+        }
+        self.group = PodStateSearch::new(SearchDetails::Group(slot));
+        self.push(host, PuterState::GroupSearch);
+        Some(PodComputerEvent::Pushed(PuterState::GroupSearch))
     }
 
     fn set_view(host: &mut Bindings<LevelWorld>, view: i32) {
@@ -164,7 +189,7 @@ impl NativePodComputer {
     /// deactivates the ones under it), the new one activated with its planets view.
     fn push(&mut self, host: &mut Bindings<LevelWorld>, state: PuterState) {
         if let Some(under) = self.top() {
-            self.deactivate(&mut host.world, under);
+            self.deactivate(&mut host.world, under, true);
         }
         self.stack.push(state);
         Self::set_view(host, state.planets_view());
@@ -173,18 +198,23 @@ impl NativePodComputer {
             self.search = PodStateSearch::new(SearchDetails::StoryLevels);
             self.search.open(&mut host.world);
         }
+        if state == PuterState::GroupSearch {
+            self.group.open(&mut host.world);
+        }
     }
 
     /// `PodComputer.PopState`.
     fn pop(&mut self, host: &mut Bindings<LevelWorld>) -> PodComputerEvent {
         if let Some(state) = self.stack.pop() {
-            self.deactivate(&mut host.world, state);
+            self.deactivate(&mut host.world, state, false);
         }
         match self.top() {
             Some(top) => {
                 Self::set_view(host, top.planets_view());
-                if top == PuterState::MainMenu {
-                    self.main_menu_ui(&mut host.world);
+                match top {
+                    PuterState::MainMenu => self.main_menu_ui(&mut host.world),
+                    PuterState::StorySearch => self.search.resume(&mut host.world),
+                    PuterState::GroupSearch => {}
                 }
                 PodComputerEvent::Popped(top)
             }
@@ -196,18 +226,31 @@ impl NativePodComputer {
         }
     }
 
-    /// `OnDeactivate`: the state's frame invalidated (it fades in again when rebuilt).
-    fn deactivate(&mut self, world: &mut LevelWorld, state: PuterState) {
+    /// `OnDeactivate(pushed)`: the state's frame no longer drawn; a popped state's frame
+    /// is invalidated (it fades in again when rebuilt), while one a state was pushed over
+    /// keeps its first build (MEASURED, D359: Story's frame back on tick 721 with the
+    /// build of 219906).
+    fn deactivate(&mut self, world: &mut LevelWorld, state: PuterState, pushed: bool) {
         let key = match state {
             PuterState::MainMenu => MAIN_MENU_FRAME_KEY,
+            PuterState::StorySearch if pushed => {
+                self.search.suspend(world);
+                STORY_FRAME_KEY
+            }
             PuterState::StorySearch => {
                 self.search.close(world);
                 STORY_FRAME_KEY
             }
+            PuterState::GroupSearch => {
+                self.group.close(world);
+                GROUP_FRAME_KEY
+            }
         };
         let g = &mut world.gooey;
         g.frames.remove(&key);
-        g.first_built.remove(&key);
+        if !pushed || state == PuterState::MainMenu {
+            g.first_built.remove(&key);
+        }
         g.item_matrices.remove(&key);
         g.item_matrix_frames.remove(&key);
         if g.focus.is_some_and(|f| f.0 == key.0) {
@@ -433,6 +476,47 @@ mod tests {
             tick(&mut puter, &mut h, NONE),
             Some(PodComputerEvent::Pushed(PuterState::MainMenu))
         );
+    }
+
+    /// D359: a group chosen over Story pushes the group search (Story suspended, its
+    /// default result kept); Back pops it and Story comes back on top (MEASURED, ticks
+    /// 720 and 721 of the scripted run: want 5, cursor 1 then 4, badge 3).
+    #[test]
+    fn d359_group_and_back_to_story() {
+        let mut h = host();
+        h.world.pod_computer_in_use = true;
+        let mut puter = NativePodComputer::default();
+        tick(&mut puter, &mut h, NONE);
+        assert_eq!(puter.choose_group(&mut h, (4, 27)), None, "not over Story");
+        tick(&mut puter, &mut h, CHOOSE);
+        tick(&mut puter, &mut h, NONE);
+        assert_eq!(
+            puter.choose_group(&mut h, (4, 27)),
+            Some(PodComputerEvent::Pushed(PuterState::GroupSearch))
+        );
+        assert!(!h.world.gooey.frames.contains_key(&STORY_FRAME_KEY));
+        tick(&mut puter, &mut h, NONE);
+        let s = &h.world.pod.search;
+        assert_eq!((s.want_search_details_calls, s.cursor_mode), (3, Some(4)));
+        assert_eq!(s.publish_cursor_badge_calls, 2);
+        let menu = h.world.gooey.drawn_menu().unwrap();
+        assert_eq!(menu.matrix, crate::GROUP_FRAME_MATRIX);
+
+        assert_eq!(
+            tick(&mut puter, &mut h, BACK),
+            Some(PodComputerEvent::Popped(PuterState::StorySearch))
+        );
+        let s = &h.world.pod.search;
+        assert_eq!((s.want_search_details_calls, s.cursor_mode), (5, Some(1)));
+        assert_eq!(s.selected_planet, Some(1));
+        assert!(!h.world.gooey.frames.contains_key(&GROUP_FRAME_KEY));
+        tick(&mut puter, &mut h, NONE);
+        let s = &h.world.pod.search;
+        assert_eq!((s.cursor_mode, s.browse_mode), (Some(4), Some(1)));
+        assert_eq!(s.publish_cursor_badge_calls, 3);
+        let menu = h.world.gooey.drawn_menu().unwrap();
+        assert_eq!(menu.matrix, crate::STORY_FRAME_MATRIX);
+        assert_eq!(menu.first_built, Some(219_870), "Story's first build kept");
     }
 
     /// `--story`: the search over the main menu at once.
