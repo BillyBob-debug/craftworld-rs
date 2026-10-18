@@ -1,20 +1,20 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-117.md` (116 for the slide-in, 115 for the cursor's
-   flight, 114 for the launch warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the
-   switch, 110 for the hand-off,
+1. `docs/level-scripts/part-118.md` (117 for closed menus, 116 for the slide-in, 115
+   for the cursor's flight, 114 for the launch warnings, 113 for Sackboy, 112 for the
+   entrance camera, 111 for the switch, 110 for the hand-off,
    109 for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for
    choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 172 (D369) merged. PR for D370 (branch `pod-frame-prune`,
-  worktree `E:\Projects\wt-d324`): closed menus go (`prune_transitioned_out`);
-  handed to the coordinator for merge once rust and python are green.
+- PRs 153 (D353) through 173 (D370) merged. PR for D371 (branch `pod-story-back`,
+  worktree `E:\Projects\wt-d324`): menus follow the world Thing every tick; handed to
+  the coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D371.
+  Decision numbers: D348-D399, next free D372.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -29,6 +29,8 @@
   --level-scripts-trace PATH --qa-capture PNG` (each capture needs a new name).
   Disc + update only: `--snapshot local-analysis/d79-inventory-0133.json --game-dir
   "game-data/a1-disc;game-data/a1-update-0133"`. A run takes several minutes.
+- D371 runs: `local-analysis/d370/*-c2*` (`run370b.ps1`): native Story slides back
+  exactly as scripted; menus differ only at 601-620, 640-659 (lag) and 740.
 - D370 runs: `local-analysis/d370/*-b2*` (`run370b.ps1`, group at 680, Back at 700
   and 740): scripted frames go 15 ticks after native's; the drawn menu is unchanged.
 - D369 runs: `local-analysis/d369/*-a1*` (`run369.ps1`): native menus follow the
@@ -54,8 +56,8 @@
 - D362 runs: `local-analysis/d362/` (run 2: group at 680, right 700 and 720, left 740,
   Cross 760, Back 775: both launch slot (0, 127795) and stay on the group; run 3 without
   Cross: both pop; notes in story-level-notes.md). D361 runs in `local-analysis/d361/`.
-  The native menus slide in with the world Thing (D369); Story again from 721, where the
-  view moves, is still drawn at rest.
+  The native menus follow the world Thing every tick (D369, D371), Story back from a
+  group included.
 - Other searches (D369): offline only Story is open; Community, Recent Activity, Store
   and Me are locked (state 6), the rest need the network, My Levels sits under Me.
 - Group chain (FOUND): Cross runs `TriggerOnPlanetSearchResultSelected` 0x615664, then the
@@ -85,8 +87,8 @@
   data file is on the disc or update.
 
 ## Next
-1. Story's slide back from a group (721-730, the view moves) and the native world
-   Thing's tick of lag. (The default result 23 before tick 640 is scripted mode's own
+1. The native world Thing's tick of lag (menus a tick late at 601-620, 640-659) and the
+   main menu a tick early on Back at 740. (The default result 23 before tick 640 is scripted mode's own
    seeding at load; native's none is kept, D369.)
 2. Open: the cursor's height and drawing, the player-count texts
    (0x16e3b0, 0x16de78), the warning popup's drawing, the game's entrance animation

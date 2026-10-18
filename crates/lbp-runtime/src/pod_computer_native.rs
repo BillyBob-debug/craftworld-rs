@@ -297,13 +297,9 @@ impl NativePodComputer {
             g.focus_since = Some(frame);
         }
         g.high_bits = MAIN_MENU_FRAME_KEY.0;
-        let since = *g.first_built.entry(MAIN_MENU_FRAME_KEY).or_insert(frame);
-        let matrix = crate::sliding_frame_matrix(
-            world,
-            frame - since,
-            MAIN_MENU_FRAME_MATRIX,
-            MAIN_MENU_WORLD_REST,
-        );
+        g.first_built.entry(MAIN_MENU_FRAME_KEY).or_insert(frame);
+        let matrix =
+            crate::sliding_frame_matrix(world, MAIN_MENU_FRAME_MATRIX, MAIN_MENU_WORLD_REST);
         let g = &mut world.gooey;
         g.frames.insert(MAIN_MENU_FRAME_KEY, main_menu_frame());
         g.item_matrices.insert(MAIN_MENU_FRAME_KEY, matrix);
