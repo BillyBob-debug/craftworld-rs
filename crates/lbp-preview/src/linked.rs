@@ -1508,7 +1508,7 @@ pub(crate) fn load_material(
             if let Ok(MaterialAsset::Texture(alpha)) = load_diffuse_material(
                 source,
                 catalog,
-                overlay_key,
+                overlay_key.clone(),
                 vertices,
                 uv_input,
                 control,
@@ -1516,6 +1516,31 @@ pub(crate) fn load_material(
                 ALPHA_PORT,
             ) {
                 asset = MaterialAsset::Texture(alpha_overlay(alpha, color.values()));
+            }
+        }
+    }
+    // D700: a single texture wired to both the colour and the alpha port is a cut-out
+    // overlay blended by the texture's own alpha (Sackboy's stitches and zip).
+    if let MaterialAsset::Texture(texture) = &mut asset {
+        let single = texture.dual.is_none()
+            && texture.product.is_none()
+            && texture.third.is_none()
+            && texture.fourth.is_none()
+            && texture.fragment.is_none()
+            && texture.selection.second_sample.is_none();
+        if single
+            && !texture.overlay_alpha
+            && texture
+                .texture
+                .rgba
+                .iter()
+                .skip(3)
+                .step_by(4)
+                .any(|&a| a < 255)
+        {
+            let (graph, _) = read_material_graph(source, &overlay_key, control)?;
+            if alpha_from_colour_sampler(&graph.graph) {
+                texture.overlay_alpha = true;
             }
         }
     }
@@ -1583,6 +1608,38 @@ pub(crate) fn load_material(
 }
 /// D338: the material output's alpha port.
 const ALPHA_PORT: u8 = 1;
+/// D700: the output's colour (port 0) and alpha (port 1) are each one unswizzled wire
+/// from the same port of the same texture box. The stitch material's compiled program
+/// fetches that texture once more for `.w` alone (TEX mask w), so the alpha is the
+/// texture's own alpha (FOUND for `00001d92`; the zip `00001d94` has the same wiring).
+fn alpha_from_colour_sampler(graph: &GraphMetadata) -> bool {
+    let outputs: Vec<usize> = (0..graph.boxes.len())
+        .filter(|&i| graph.boxes[i].type_raw == 0)
+        .collect();
+    let [output] = outputs[..] else {
+        return false;
+    };
+    let into = |port: u8| -> Vec<_> {
+        graph
+            .wires
+            .iter()
+            .filter(|w| w.box_to == output as i32 && w.port_to_raw == port)
+            .collect()
+    };
+    let (colour, alpha) = (into(0), into(ALPHA_PORT));
+    let ([c], [a]) = (&colour[..], &alpha[..]) else {
+        return false;
+    };
+    let texture_box = usize::try_from(c.box_from)
+        .ok()
+        .and_then(|i| graph.boxes.get(i))
+        .is_some_and(|b| b.type_raw == 1 && b.texture_slot_raw.is_some());
+    texture_box
+        && c.box_from == a.box_from
+        && c.port_from_raw == a.port_from_raw
+        && c.swizzle_raw == [0; 5]
+        && a.swizzle_raw == [0; 5]
+}
 /// D338 (part 85): the AO overlays (`cloth_earth_land_ao`, `cloth_earth_sea_ao`) are COLOR
 /// black on port 0 and texture x 0.8 on port 1; their program writes the alpha as the
 /// port's x times the tint's alpha (FOUND, `MUL H0.w, H1.xxxx, tintcol`). `alpha` is port 1
@@ -2064,6 +2121,54 @@ mod tests {
             overlay_pixels(&alpha[..4], [1., 0.214, 0., 1.]),
             vec![255, 127, 0, 204]
         );
+    }
+    /// D700: the stitch shape (`00001d92`): texture box 1 into ports 0 and 1, texture box 2
+    /// into the bump port. Another box, another port or a swizzle on the alpha wire is not it.
+    #[test]
+    fn d700_alpha_from_the_colour_sampler() {
+        use lbp_resource::material::{AnimationMetadata, BoxMetadata, WireMetadata};
+        let node = |kind, slot| BoxMetadata {
+            type_raw: kind,
+            declared_parameter_count: 8,
+            parameters_raw: [0; 8],
+            position_bits: [0; 4],
+            subtype_raw: 0,
+            animations: std::array::from_fn(|_| AnimationMetadata {
+                base_value_bits: [0; 4],
+                component_value_count: 0,
+                component_bytes_sha256: String::new(),
+                name_hex: "000000".into(),
+                components_raw: 0,
+                derived_key_count: 0,
+            }),
+            texture_slot_raw: slot,
+            texture_slot_in_range: None,
+        };
+        let wire = |from, to_port| WireMetadata {
+            box_from: from,
+            box_to: 0,
+            port_from_raw: 0,
+            port_to_raw: to_port,
+            swizzle_raw: [0; 5],
+            from_in_range: true,
+            to_in_range: true,
+        };
+        let mut graph = GraphMetadata {
+            box_count: 3,
+            wire_count: 3,
+            boxes: vec![node(0, None), node(1, Some(0)), node(1, Some(1))],
+            wires: vec![wire(1, 0), wire(1, 1), wire(2, 3)],
+            graph_start: 0,
+            parsed_graph_bytes: 0,
+            unparsed_bytes: 0,
+        };
+        assert!(alpha_from_colour_sampler(&graph));
+        graph.wires[1].swizzle_raw = [b'x', 0, 0, 0, 0];
+        assert!(!alpha_from_colour_sampler(&graph));
+        graph.wires[1] = wire(2, 1);
+        assert!(!alpha_from_colour_sampler(&graph));
+        graph.wires.remove(1);
+        assert!(!alpha_from_colour_sampler(&graph));
     }
     #[test]
     fn diffuse_projection_requires_bounded_static_routes_and_labels_ignored_branches() {
