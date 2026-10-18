@@ -6459,3 +6459,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D378 the launch warning popup (2026-10-18)
 - Part 125 (`docs/level-scripts/part-125.md`): a launch warning shows in a built-in
   box; Cross carries on, Circle cancels the launch (handler 0x3c).
+
+## D379 the pod introduction (2026-10-18)
+- Part 126 (`docs/level-scripts/part-126.md`): a fresh profile's Pod zooms in from
+  below the planets over 451 ticks without the scripts; the level load needs no change.

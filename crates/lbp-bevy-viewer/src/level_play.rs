@@ -1581,6 +1581,10 @@ fn step(
             p.scripts.ticks
         );
     }
+    // D383: what the Pod's `LevelUnlockingThread` did this tick.
+    for e in std::mem::take(&mut p.host.world.unlock_events) {
+        println!("Level unlocking at tick {}: {e} (D383)", p.scripts.ticks);
+    }
     // D368: the cursor's flight, last in the planet update.
     if let Some(at) = p.host.world.cursor_flight_step() {
         println!(
@@ -1782,10 +1786,19 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
     // native stand-in (not at the Story screen).
     p.fallback_camera = (loaded == 0 && shell_present).then_some(POD_REST_CAMERA);
     p.story = (loaded == 0 && shell_present).then(crate::story_fallback::Fallback::default);
-    // The Pod's QA presses.
-    p.in_use_at = None;
+    // D383: back with pending links, the pod computer is up at the Story search, where
+    // `LevelUnlockingThread` plays them (INFERRED: the game returns to the search).
+    let unlock = to == SwitchTo::Pod && !p.host.world.story_progress.pending_links.is_empty();
+    if let Some(story) = p.story.as_mut().filter(|_| unlock) {
+        story.story_at_start = true;
+    }
+    p.host.world.story_search_requested = unlock;
+    // The Pod's QA presses. D383: with the scripts, the return opens the Story search as
+    // the start's QA presses do (in use, then Story chosen), for the unlock to play.
+    let scripted = unlock && p.story.is_none();
+    p.in_use_at = scripted.then_some(1);
     p.press_at = None;
-    p.choose_at = None;
+    p.choose_at = scripted.then_some(41);
     p.back_at.clear();
     p.group_at = None;
     p.move_at.clear();

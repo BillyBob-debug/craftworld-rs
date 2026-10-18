@@ -133,6 +133,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 127: the level unlocking sequence (2026-10-18, D380)](level-scripts/part-127.md)
 - [Part 128: finishing a story level (2026-10-18, D381)](level-scripts/part-128.md)
 - [Part 129: back to the Pod after a finish (2026-10-18, D382)](level-scripts/part-129.md)
+- [Part 130: the level unlocking sequence (2026-10-18, D383)](level-scripts/part-130.md)
 
 ## Next
 

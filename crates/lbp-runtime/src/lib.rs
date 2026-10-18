@@ -30,6 +30,7 @@ mod camera;
 mod display;
 mod global_settings;
 mod gooey;
+mod level_unlocking;
 mod media;
 mod message_view;
 mod messages;
@@ -46,6 +47,7 @@ pub use camera::*;
 pub use display::*;
 pub use global_settings::*;
 pub use gooey::*;
+pub use level_unlocking::*;
 pub use media::*;
 pub use message_view::*;
 pub use messages::*;
@@ -351,6 +353,13 @@ pub struct LevelWorld {
     /// D381: the profile's story progress: finished levels, unlocked slots and pending
     /// links ([`LevelWorld::finish_story_level`]).
     pub story_progress: StoryProgress,
+    /// D383: the Pod's `LevelUnlockingThread` between its ticks
+    /// ([`LevelWorld::level_unlocking_tick`]), what it did (drained by the viewer), and
+    /// the return's ask for the Story search the thread waits for (INFERRED: the game
+    /// is back at its search when the Pod loads after a finish).
+    pub level_unlocking: Option<LevelUnlocking>,
+    pub unlock_events: Vec<String>,
+    pub story_search_requested: bool,
     /// The video and voice-over requests of the scripts ([`MediaState`]). Nothing plays.
     pub media: MediaState,
     /// `PodComputer.GetPodComputerInUse__`: a player is at the pod computer ("PuterInUse").
@@ -2377,17 +2386,22 @@ impl World for LevelWorld {
         Ok(())
     }
     /// D381: `Game.ClearPendingLinks__` (FOUND, 0x5f4e80 -> 0x19ac2c) empties the list.
-    /// PLACEHOLDER: `LevelUnlockingThread` (not ported, D380) unlocks each link's badge
-    /// (`UnlockBadge`) before it clears; that is folded in here, so the targets are
-    /// marked unlocked.
+    /// PLACEHOLDER: `LevelUnlockingThread` (D383) unlocks each link's badge
+    /// (`UnlockBadge`) before it clears; for links it did not play (no search up) that
+    /// is folded in here, so the targets are marked unlocked.
     fn clear_pending_links(&mut self) -> Result<(), String> {
         let progress = &mut self.story_progress;
+        progress.unlocking.clear();
         for link in std::mem::take(&mut progress.pending_links) {
             if !progress.unlocked.contains(&link.to) {
                 progress.unlocked.push(link.to);
             }
         }
         Ok(())
+    }
+    /// D383: [`LevelWorld::level_unlocking_tick`].
+    fn level_unlocking_tick(&mut self) -> Result<bool, String> {
+        Ok(LevelWorld::level_unlocking_tick(self))
     }
     /// [`LevelWorld::pod_computer_in_use`].
     fn pod_computer_in_use(&mut self) -> Result<bool, String> {

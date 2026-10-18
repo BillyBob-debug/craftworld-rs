@@ -336,6 +336,8 @@ pub struct StoryProgress {
     pub completed: Vec<(i32, i32)>,
     pub unlocked: Vec<(i32, i32)>,
     pub pending_links: Vec<PendingLink>,
+    /// D383: the badges `LevelUnlockingThread` marks unlocking until they unlock.
+    pub unlocking: Vec<(i32, i32)>,
 }
 
 /// D381: the slot numbers from which the level-complete path links a slot (FOUND,

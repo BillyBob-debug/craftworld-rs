@@ -892,8 +892,8 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
             // Read by popit_play.rs.
             continue;
         }
-        if flag == "--level-scripts-none" || flag == "--story" {
-            // Read by level_play.rs (D353).
+        if flag == "--level-scripts-none" || flag == "--story" || flag == "--native-scripts" {
+            // Read by level_play.rs (D353; D417, D383 for `--native-scripts`).
             continue;
         }
         if flag == "--level-scripts" {

@@ -886,20 +886,24 @@ impl PlanetsWorldScript {
     }
 
     /// `UpdateState__`: a cutscene state ends once its thread has finished. The pod
-    /// introduction is the port's own (`IntroRunning`); the level unlocking thread is
-    /// null, so state 2 ends on the next frame.
+    /// introduction is the port's own (`IntroRunning`); D383: so is the level unlocking
+    /// thread (`Host::level_unlocking_tick`).
     fn update_state(host: &mut dyn Host, this: u32) -> Result<(), String> {
         site(host, PLANETS_WORLD, "UpdateState__");
         // The pod computer object is fetched and not used (none without the scripts).
         let _ = call(host, "PodComputer", "GetPodComputer__", &[]);
         let state = int(host, this, "State");
-        let running = state == 1 && Self::intro_tick(host, this)?;
-        if state == 2 {
-            // D381: `LevelUnlockingThread` is not ported (D380); its end, the
-            // `OnFinish__` clear, is (the badges unlock there, PLACEHOLDER).
+        let running = match state {
+            1 => Self::intro_tick(host, this)?,
+            2 => host.level_unlocking_tick()?,
+            _ => false,
+        };
+        if state == 2 && !running {
+            // The thread's `OnFinish__` (D381; links it did not play unlock there,
+            // PLACEHOLDER).
             call(host, "Game", "ClearPendingLinks__", &[])?;
         }
-        if (state == 1 && !running) || state == 2 {
+        if matches!(state, 1 | 2) && !running {
             Self::set_state(host, this, 0)?;
         }
         if int(host, this, "State") != 0 {
