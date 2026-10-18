@@ -179,6 +179,35 @@ fn lerp_morphs(dst: &mut Vec<f32>, src: &[f32], w: f32) {
     }
 }
 
+/// One bone of [`BlendPose::add`]: `w` times `p` minus `r` onto `b`.
+fn add_bone(b: &mut Trs, p: &Trs, r: &Trs, w: f32) {
+    for c in 0..3 {
+        b.t[c] += w * (p.t[c] - r.t[c]);
+        if r.s[c].abs() > 1e-6 {
+            b.s[c] *= 1. + w * (p.s[c] / r.s[c] - 1.);
+        }
+    }
+    let [x, y, z, qw] = r.r;
+    let delta = q_mul([-x, -y, -z, qw], p.r);
+    b.r = normalize(q_mul(b.r, nlerp([0., 0., 0., 1.], delta, w)));
+}
+
+/// Per-bone lerp of two transform lists (translation and scale lerp, rotation nlerp); a
+/// bone only one side drives keeps that side's transform.
+pub fn lerp_trs_list(a: &[Option<Trs>], b: &[Option<Trs>], w: f32) -> Vec<Option<Trs>> {
+    a.iter()
+        .zip(b)
+        .map(|(a, b)| match (a, b) {
+            (Some(a), Some(b)) => Some(Trs {
+                t: lerp3(a.t, b.t, w),
+                r: nlerp(a.r, b.r, w),
+                s: lerp3(a.s, b.s, w),
+            }),
+            (a, b) => a.or(*b),
+        })
+        .collect()
+}
+
 /// The pose a blend of several clips writes into: one local [`Trs`] per mesh bone plus
 /// morph weights. Starts at the bind pose, so a bone no layer drives stays at bind.
 #[derive(Debug, Clone, PartialEq)]
@@ -261,15 +290,7 @@ impl BlendPose {
             let (Some(p), Some(r)) = (rig.pose_trs(pose, i), rig.pose_trs(reference, i)) else {
                 continue;
             };
-            for c in 0..3 {
-                b.t[c] += w * (p.t[c] - r.t[c]);
-                if r.s[c].abs() > 1e-6 {
-                    b.s[c] *= 1. + w * (p.s[c] / r.s[c] - 1.);
-                }
-            }
-            let [x, y, z, qw] = r.r;
-            let delta = q_mul([-x, -y, -z, qw], p.r);
-            b.r = normalize(q_mul(b.r, nlerp([0., 0., 0., 1.], delta, w)));
+            add_bone(b, &p, &r, w);
         }
         let n = pose.morphs.len().max(reference.morphs.len());
         if self.morphs.len() < n {
@@ -279,6 +300,21 @@ impl BlendPose {
             let a = pose.morphs.get(i).copied().unwrap_or(0.);
             let b = reference.morphs.get(i).copied().unwrap_or(0.);
             *m += w * (a - b);
+        }
+    }
+
+    /// [`BlendPose::add`] on per-mesh-bone transforms (one entry per bone, None where the
+    /// clip does not drive it), so the pose and the reference may come from different
+    /// clips or be mirrored ([`Rig::mirrored_trs`], [`Rig::pose_trs_all`]). Morph weights
+    /// are left alone.
+    pub fn add_trs(&mut self, pose: &[Option<Trs>], reference: &[Option<Trs>], w: f32) {
+        if w <= 0. || !w.is_finite() {
+            return;
+        }
+        for ((b, p), r) in self.bones.iter_mut().zip(pose).zip(reference) {
+            if let (Some(p), Some(r)) = (p, r) {
+                add_bone(b, p, r, w);
+            }
         }
     }
 
@@ -925,6 +961,13 @@ impl Rig {
             r: *pose.rotations.get(a)?,
             s: *pose.scales.get(a)?,
         })
+    }
+
+    /// [`Rig::pose_trs`] for every mesh bone (None where the animation does not drive it).
+    pub fn pose_trs_all(&self, pose: &Pose) -> Vec<Option<Trs>> {
+        (0..self.bones.len())
+            .map(|i| self.pose_trs(pose, i))
+            .collect()
     }
 
     /// The mesh bone whose animation hash is that of `name` (`Bip01 L Thigh`).

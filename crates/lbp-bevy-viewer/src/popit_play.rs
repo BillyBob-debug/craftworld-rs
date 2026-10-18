@@ -1286,7 +1286,8 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
                 .chain()
                 .after(crate::sackboy_play::show_sackboy),
         )
-        .init_resource::<crate::sackboy_play::LookTarget>();
+        .init_resource::<crate::sackboy_play::LookTarget>()
+        .init_resource::<crate::sackboy_play::ArmSticks>();
 }
 
 /// D415: his head's height over his feet in the figure's own space (level units; INFERRED
@@ -1435,6 +1436,32 @@ fn smooth(t: f32) -> f32 {
     t * t * (3. - 2. * t)
 }
 
+/// D416 (QA): `--popit-arm-sticks LX,LY,RX,RY` (x right, y up) stands in for the pad's
+/// sticks while the cursor is shown, so a capture can pose the arms.
+fn arm_sticks_flag() -> Option<[[f32; 2]; 2]> {
+    static FLAG: std::sync::OnceLock<Option<[[f32; 2]; 2]>> = std::sync::OnceLock::new();
+    *FLAG.get_or_init(|| {
+        let args: Vec<String> = std::env::args().collect();
+        let value = args
+            .windows(2)
+            .find(|w| w[0] == "--popit-arm-sticks")
+            .map(|w| w[1].clone())?;
+        parse_arm_sticks(&value)
+    })
+}
+
+fn parse_arm_sticks(value: &str) -> Option<[[f32; 2]; 2]> {
+    let v: Vec<f32> = value
+        .split(',')
+        .map(|s| s.trim().parse().ok())
+        .collect::<Option<_>>()?;
+    match v[..] {
+        [lx, ly, rx, ry] => Some([[lx, ly], [rx, ry]]),
+        _ => None,
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 fn popit_input(
     keys: Res<ButtonInput<KeyCode>>,
     pads: Query<&Gamepad>,
@@ -1443,12 +1470,37 @@ fn popit_input(
     mut sackboy: Query<&mut lbp_sim::character::SackboyBody>,
     assets: Res<PopitAssets>,
     mut pod: Option<ResMut<crate::sackboy_play::PodSackboy>>,
+    mut arms: ResMut<crate::sackboy_play::ArmSticks>,
 ) {
     let pad = pads.iter().next();
     // D410: an input script's `e` click in the Pod is Square for the Popit too.
     let scripted = pod
         .as_mut()
         .is_some_and(|s| std::mem::take(&mut s.popit_square));
+    // D416: while the cursor is shown both arms follow the raw sticks (x right, y up): the
+    // left one with WASD, as for the ring, and the right one. Whether the game's pad read
+    // still feeds them while the Popit owns the pad is OPEN (docs/d416).
+    let sticks = p.cursor.map(|_| {
+        if let Some(fixed) = arm_sticks_flag() {
+            return fixed;
+        }
+        let key = |neg: KeyCode, pos: KeyCode| {
+            f32::from(keys.pressed(pos)) - f32::from(keys.pressed(neg))
+        };
+        let get = |a: GamepadAxis| pad.and_then(|g| g.get(a)).unwrap_or(0.);
+        let left = Vec2::new(
+            key(KeyCode::KeyA, KeyCode::KeyD) + get(GamepadAxis::LeftStickX),
+            key(KeyCode::KeyS, KeyCode::KeyW) + get(GamepadAxis::LeftStickY),
+        )
+        .clamp_length_max(1.);
+        [
+            left.to_array(),
+            [get(GamepadAxis::RightStickX), get(GamepadAxis::RightStickY)],
+        ]
+    });
+    if arms.0 != sticks {
+        arms.0 = sticks;
+    }
     if let Some(at) = p.cursor {
         // Cursor mode: the left stick (WASD) moves the ring, Circle/Square leave it (Square
         // brings the Popit back); Sackboy stands still.
@@ -2844,6 +2896,17 @@ fn spawn_nodes(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// D416: `--popit-arm-sticks` takes exactly four floats.
+    #[test]
+    fn d416_arm_sticks_flag_parses() {
+        assert_eq!(
+            parse_arm_sticks("1,0, -0.5,1"),
+            Some([[1., 0.], [-0.5, 1.]])
+        );
+        assert_eq!(parse_arm_sticks("1,0,1"), None);
+        assert_eq!(parse_arm_sticks("1,x,0,0"), None);
+    }
 
     /// D413: the Pod card near the left edge leans its pill right; a centred card keeps
     /// it centred; a card near the right edge leans left.

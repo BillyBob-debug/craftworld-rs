@@ -33,7 +33,9 @@
 use bevy::prelude::*;
 use lbp_catalog::{attachment::AttachedSource, LoadControl};
 use lbp_preview::level_scene;
-use lbp_preview::skinned::{sample_pose, BlendPose, BoundAnimation, ScaleRule, SkinnedClip};
+use lbp_preview::skinned::{
+    lerp_trs_list, sample_pose, BlendPose, BoundAnimation, ScaleRule, SkinnedClip,
+};
 use lbp_sim::avian2d::prelude::*;
 use lbp_sim::character::{
     spawn_sackboy, SackboyBody, SackboyPlugin, CENTRE_ABOVE, FLOOR_REST, HALF_SEGMENT, HEIGHT,
@@ -497,14 +499,29 @@ fn blend_frame(
             .rig
             .subtree_mask(spine1, stand.rig.bone_named("Bip01 Head"))
     });
-    for l in &frame.layers {
-        let (rig, animation) = if l.clip == ClipId::Stand {
-            (&stand.rig, &stand.animation)
+    let bound = |clip: ClipId| {
+        if clip == ClipId::Stand {
+            Some((&stand.rig, &stand.animation))
         } else {
-            match bank.get(l.clip.index()) {
-                Some(Some(b)) => (&b.rig, &b.animation),
-                _ => continue,
+            match bank.get(clip.index()) {
+                Some(Some(b)) => Some((&b.rig, &b.animation)),
+                _ => None,
             }
+        }
+    };
+    // D416: a clip at a frame as one transform per mesh bone, mirrored when asked.
+    let bone_trs = |clip: ClipId, f: f32, mirror: bool| {
+        let (rig, animation) = bound(clip)?;
+        let p = sample_pose(animation, f)?;
+        Some(if mirror {
+            rig.mirrored_trs(&p)
+        } else {
+            rig.pose_trs_all(&p)
+        })
+    };
+    for l in &frame.layers {
+        let Some((rig, animation)) = bound(l.clip) else {
+            continue;
         };
         let Some(p) = sample_pose(animation, l.frame) else {
             continue;
@@ -525,6 +542,22 @@ fn blend_frame(
             Blend::UpperBody => {
                 if let Some(mask) = &upper {
                     pose.lerp_masked(rig, &p, l.weight, mask);
+                }
+            }
+            // D416: lerp(small, big, mix) minus the base frame, both mirrored for arm 1;
+            // nothing when a clip is not in the bank.
+            Blend::MixAdditive {
+                big,
+                mix,
+                base,
+                base_frame,
+            } => {
+                if let (Some(small), Some(big), Some(r)) = (
+                    bone_trs(l.clip, l.frame, l.mirror),
+                    bone_trs(big, l.frame, l.mirror),
+                    bone_trs(base, base_frame, l.mirror),
+                ) {
+                    pose.add_trs(&lerp_trs_list(&small, &big, mix), &r, l.weight);
                 }
             }
         }
@@ -1267,11 +1300,17 @@ fn pod_report(
 #[derive(Resource, Default)]
 pub(crate) struct LookTarget(pub(crate) Option<[f32; 2]>);
 
+/// D416: the raw (left, right) sticks (x right, y up) while the Popit cursor is shown;
+/// `popit_play` writes it, the picker poses his arms from it.
+#[derive(Resource, Default)]
+pub(crate) struct ArmSticks(pub(crate) Option<[[f32; 2]; 2]>);
+
 fn tick_anim(
     sackboy: Query<&SackboyBody>,
     mut figure: Query<&mut Figure>,
     mut pod: Option<ResMut<PodSackboy>>,
     look: Option<Res<LookTarget>>,
+    arms: Option<Res<ArmSticks>>,
 ) {
     // D320: the pod computer clips' own frame counts, once his figure has them.
     if let (Some(pod), Ok(f)) = (pod.as_mut(), figure.single()) {
@@ -1307,6 +1346,7 @@ fn tick_anim(
         }
     }
     f.picker.set_look_target(look.and_then(|l| l.0));
+    f.picker.set_arm_sticks(arms.and_then(|a| a.0));
     let a = f.picker.tick(&body.controller, body.grounded);
     // D282: at the pod computer he turns to face into the screen.
     let in_use = pod.as_ref().is_some_and(|p| p.in_use);
@@ -1334,6 +1374,13 @@ fn layer_summary(a: &AnimFrame) -> String {
             Blend::UpperBody if l.weight > 0.01 => {
                 Some(format!("^{}@{:.1}*{:.2}", l.clip.name(), l.frame, l.weight))
             }
+            // D416: an arm, `~` its small-to-big mix, `m` when mirrored (arm 1).
+            Blend::MixAdditive { mix, .. } if l.weight > 0.01 => Some(format!(
+                "+{}@{:.1}~{mix:.2}{}",
+                l.clip.name(),
+                l.frame,
+                if l.mirror { "m" } else { "" }
+            )),
             _ => None,
         })
         .collect::<Vec<_>>()
