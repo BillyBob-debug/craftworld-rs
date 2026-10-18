@@ -6447,3 +6447,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D375 the player-count texts (2026-10-18)
 - Part 122 (`docs/level-scripts/part-122.md`): the native launch warnings carry the
   slot's player bounds and give the popup text from the disc's LAMS tables.
+
+## D376 the checkpoint's spawn hold (2026-10-18)
+- Part 123 (`docs/level-scripts/part-123.md`): Sackboy is held still for the game's 11
+  frames when the launched level spawns him at its checkpoint.
