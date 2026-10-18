@@ -108,9 +108,10 @@ struct Play {
     /// chosen on tick N (as `level_scripts --menu=N:choose`); none once that is done.
     choose_at: Option<u64>,
     /// Level1 part 3: the player's close button (C or Circle) on the open speech bubble,
-    /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N.
+    /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N. Part 4:
+    /// the option takes a comma list (`120,600`), one press per tick, in order.
     close: bool,
-    close_at: Option<u64>,
+    close_at: Vec<u64>,
     /// D411: the planets level's camera when its scripts are not there (no decrypted
     /// patch.edat): the Pod's shell layer with no script loaded draws with
     /// [`POD_REST_CAMERA`] instead of the camera the script would write.
@@ -196,6 +197,35 @@ fn tick_option(all: &[String], flag: &str) -> Result<Option<u64>, String> {
                 .map_err(|_| format!("{flag} takes a tick count"))
         })
         .transpose()
+}
+
+/// A QA option of comma-separated tick counts (level1 part 4), sorted.
+fn tick_list(all: &[String], flag: &str) -> Result<Vec<u64>, String> {
+    let mut ticks = value(all, flag)
+        .map(|v| {
+            v.split(',')
+                .map(|t| {
+                    t.trim()
+                        .parse::<u64>()
+                        .map_err(|_| format!("{flag} takes tick counts, comma-separated"))
+                })
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    ticks.sort_unstable();
+    Ok(ticks)
+}
+
+/// Whether the earliest press of a tick list falls on `next` or before: it is taken
+/// from the list, so one press is made per tick.
+fn press_next(at: &mut Vec<u64>, next: u64) -> bool {
+    if at.first().is_some_and(|n| next >= *n) {
+        at.remove(0);
+        true
+    } else {
+        false
+    }
 }
 
 /// `--level-scripts-in-use-at N` (QA, part 27): whether to set "pod computer in use"
@@ -417,7 +447,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let in_use_at = tick_option(&all, "--level-scripts-in-use-at")?;
     let press_at = tick_option(&all, "--level-scripts-press-at")?;
     let choose_at = tick_option(&all, "--level-scripts-choose-at")?;
-    let close_at = tick_option(&all, "--level-scripts-close-at")?;
+    let close_at = tick_list(&all, "--level-scripts-close-at")?;
     if press_at.is_some() && shell_guid.is_none() {
         println!(
             "--level-scripts-press-at is not used without the Pod's shell layer (--pod-camera N --pod-shell HEX): the engage press is read by the shell level's script"
@@ -942,7 +972,7 @@ fn step(
     }
     // Level1 part 3: the close button, before the tick (the game's net message is
     // handled before the switch pass that carries the bubble's output).
-    let close_now = press_now(&mut p.close_at, p.scripts.ticks + 1);
+    let close_now = press_next(&mut p.close_at, p.scripts.ticks + 1);
     if std::mem::take(&mut p.close) || close_now {
         let o = p
             .scripts
@@ -3439,6 +3469,37 @@ mod tests {
             })
             .collect();
         assert_eq!(words, [0, 0, 0x80, 0, 0]);
+    }
+
+    /// D503. `--level-scripts-close-at` takes a comma list of ticks (sorted); each press
+    /// is made once, on the first tick about to run that is its tick or a later one, and
+    /// two that fall due together go out on consecutive ticks.
+    #[test]
+    fn d503_the_close_option_is_a_list_of_ticks_pressed_in_order() {
+        let args = |list: &[&str]| -> Vec<String> { list.iter().map(|a| a.to_string()).collect() };
+        let flag = "--level-scripts-close-at";
+        assert_eq!(tick_list(&args(&["--level-scripts"]), flag), Ok(vec![]));
+        assert_eq!(tick_list(&args(&[flag, "120"]), flag), Ok(vec![120]));
+        assert_eq!(
+            tick_list(&args(&[flag, "600, 120"]), flag),
+            Ok(vec![120, 600])
+        );
+        for bad in ["120,", "soon", "1,-2"] {
+            let e = tick_list(&args(&[flag, bad]), flag).unwrap_err();
+            assert_eq!(
+                e,
+                "--level-scripts-close-at takes tick counts, comma-separated"
+            );
+        }
+        let mut at = vec![120, 600];
+        let pressed: Vec<u64> = (1..=700)
+            .filter(|&next| press_next(&mut at, next))
+            .collect();
+        assert_eq!(pressed, [120, 600]);
+        assert!(at.is_empty());
+        let mut at = vec![3, 3];
+        let pressed: Vec<u64> = (1..=6).filter(|&next| press_next(&mut at, next)).collect();
+        assert_eq!(pressed, [3, 4]);
     }
 
     /// D279. The path from the press to "in use" over a session of two worlds, with the

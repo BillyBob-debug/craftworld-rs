@@ -98,3 +98,31 @@ tick 419 (299 ticks of timer 1053 after the pulse), at Da Vinci. Test:
 
 Not yet: the second line's close and what follows it; the cutscene camera while line 1 is
 open; the "Close" prompt on the no-prompt bubble type (the game draws it here).
+
+## Part 4: line 2 closes, the walk right reaches line 3 (D503, 2026-10-17)
+
+`--level-scripts-close-at` takes a comma list of ticks now (`120,600`), one press per tick
+in order. Test: `level_play::tests::d503_the_close_option_is_a_list_of_ticks_pressed_in_order`.
+
+OBSERVED (viewer, `--level-scripts --play-sackboy --level-scripts-close-at 120,600,1150
+--play-sackboy-input "-:620,r:160,rj:20,r:330,f:15,-:5,r:400,rj:20,r:400"`): line 1 opens
+on tick 63 and closes on 120, line 2 opens on 419 and closes on 600, at Da Vinci (Thing
+1029). Nothing else opens while Sackboy stands at the spawn (watched to tick 1500): line 2's
+bubble 1054 has no SWITCH part, so its end pulse feeds nothing, which fits the game going
+on to the right after it. Walking right:
+- x -8431 (tick 792): a book on the floor stops him; a jump clears it.
+- tick 882 (about x -5700): line 3 opens at bubble 1485 (-262, 7377, 120), "You can use
+  up and down on [lstick] to move in and out of the screen". The Close press on 1150
+  closes it.
+- about x -2400 he drops about 1650 units to y 3555, then stops at x -938 (y 3512). A
+  move back (`b`) takes him to z -200 and he is still stopped there; a jump from z 0
+  clears it and he lands at x -385 (y 3406), stopped again.
+- with no input after tick 1965 he falls from x -385 (y 2072 on tick 1999): INFERRED, he
+  was held on an edge while pushing right.
+
+While he is pushed into a wall the code-driven Sackboy turns to the camera and plays
+`stand` (vx 0), not a push.
+
+Not yet: the route after x -385 (no game reference for this part; the RPCS3 frames of
+Part 3 stop at line 2); whether line 3 needs the Close press in the game; the camera at
+x -938 (a viewer frame at tick 1600 looks through a front wall).
