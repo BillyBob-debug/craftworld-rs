@@ -131,6 +131,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 125: the launch warning popup (2026-10-18, D378)](level-scripts/part-125.md)
 - [Part 126: the level load and the pod introduction (2026-10-18, D379)](level-scripts/part-126.md)
 - [Part 127: the level unlocking sequence (2026-10-18, D380)](level-scripts/part-127.md)
+- [Part 128: finishing a story level (2026-10-18, D381)](level-scripts/part-128.md)
 
 ## Next
 

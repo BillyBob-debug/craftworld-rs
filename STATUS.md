@@ -6451,3 +6451,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D376 the checkpoint's spawn hold (2026-10-18)
 - Part 123 (`docs/level-scripts/part-123.md`): Sackboy is held still for the game's 11
   frames when the launched level spawns him at its checkpoint.
+
+## D377 the start checkpoint (2026-10-18)
+- Part 124 (`docs/level-scripts/part-124.md`): Sackboy starts at the checkpoint the
+  game scores highest (entrance gate, active, infinite or double), not the first.

@@ -1,22 +1,23 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-127.md` (126 for the pod introduction, 125 for the warning
-   popup, 124 for the start checkpoint, 123 for the spawn hold, 122 for the player texts,
-   121 for the cursor, 120 for Back, 119 for the pushes, 118 for Story back, 117 for
-   closed menus, 116 for the slide-in, 115 for the cursor's flight, 114 for the launch
-   warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the switch, 110 for the
-   hand-off, 109 for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for
-   choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
+1. `docs/level-scripts/part-128.md` (127 for the unlock sequence, 126 for the pod
+   introduction, 125 for the warning popup, 124 for the start checkpoint, 123 for the
+   spawn hold, 122 for the player texts, 121 for the cursor, 120 for Back, 119 for the
+   pushes, 118 for Story back, 117 for closed menus, 116 for the slide-in, 115 for the
+   cursor's flight, 114 for the launch warnings, 113 for Sackboy, 112 for the entrance
+   camera, 111 for the switch, 110 for the hand-off, 109 for Cross on a level, 108 for the
+   cursor, 107 for the group zoom, 106 for choosing a group, 105 for Back, 104 for the pod
+   computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 183 (D379) merged. PR for D380 (branch `pod-next`,
-  worktree `E:\Projects\wt-d324`): the level unlocking sequence read;
+- PRs 153 (D353) through 184 (D380) merged. PR for D381 (branch `pod-next`,
+  worktree `E:\Projects\wt-d324`): finishing a story level;
   handed to the coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D381.
+  Decision numbers: D348-D399, next free D382.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -99,6 +100,6 @@
    before tick 640 is scripted mode's own seeding at load, native's none is kept, D369.
    The cursor's height and blend have no reader and its drawing is script-side, D374.)
 2. The other entries' states as they unlock (the other searches need the network).
-3. `LevelUnlockingThread` is read (D380) but waits on a level finish that creates
-   pending links; it, the intro and `OnEnterPod__` also wait on audio (none
-   plays yet). The interactive music needs the .fev too.
+3. A finished level leaves its pending link (D381); next, back to the Pod after it,
+   then `LevelUnlockingThread` (read, D380). It, the intro and `OnEnterPod__`
+   also wait on audio (none plays yet). The interactive music needs the .fev.

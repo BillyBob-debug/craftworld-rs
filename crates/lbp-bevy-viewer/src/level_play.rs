@@ -141,6 +141,10 @@ struct Play {
     from: WorldSource,
     switch: Option<Switch>,
     tick_base: u64,
+    /// D381: the SlotID of the level the Pod launched, once it plays, and
+    /// `--level-scripts-finish-at N` (QA): the level's end after its tick N.
+    launched: Option<(i32, i32)>,
+    finish_at: Option<u64>,
 }
 
 /// D411: the camera the Pod's planets script writes once it comes to rest (MEASURED from
@@ -350,10 +354,11 @@ fn read_world(
 /// read on a worker thread with the level reader's stack while the viewer runs.
 struct Switch {
     guid: u32,
+    slot: (i32, i32),
     receiver: std::sync::mpsc::Receiver<Result<LevelRead, String>>,
 }
 
-fn start_switch(from: &WorldSource, guid: u32) -> Result<Switch, String> {
+fn start_switch(from: &WorldSource, guid: u32, slot: (i32, i32)) -> Result<Switch, String> {
     let (send, receiver) = std::sync::mpsc::channel();
     let from = from.clone();
     std::thread::Builder::new()
@@ -367,7 +372,11 @@ fn start_switch(from: &WorldSource, guid: u32) -> Result<Switch, String> {
             let _ = send.send(read);
         })
         .map_err(|e| format!("level switch thread: {e}"))?;
-    Ok(Switch { guid, receiver })
+    Ok(Switch {
+        guid,
+        slot,
+        receiver,
+    })
 }
 
 /// What the camera a script writes itself did since the tick before.
@@ -689,6 +698,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let group_at = tick_option(&all, "--level-scripts-group-at")?;
     let move_at = move_list(&all)?;
     let cross_at = tick_option(&all, "--level-scripts-cross-at")?;
+    let finish_at = tick_option(&all, "--level-scripts-finish-at")?;
     let trace = value(&all, "--level-scripts-trace")
         .map(|path| crate::story_fallback::Trace::create(&path))
         .transpose()?;
@@ -878,6 +888,8 @@ pub fn install(app: &mut App) -> Result<(), String> {
         from,
         switch: None,
         tick_base: 0,
+        launched: None,
+        finish_at,
     })
     .insert_resource(crate::CaptureHold(hold_at.is_some()))
     .insert_resource(menu_assets.unwrap_or_default())
@@ -1531,7 +1543,7 @@ fn step(
         // D364: the game's level load: the root level is read in the background, and
         // the Pod's ticks wait for it ([`step`]; INFERRED: the game's loading screen).
         if let Some(guid) = start.root.and_then(|d| d.guid) {
-            match start_switch(&p.from, guid) {
+            match start_switch(&p.from, guid, start.slot) {
                 Ok(switch) => {
                     p.switch = Some(switch);
                     println!(
@@ -1572,6 +1584,25 @@ fn step(
             }
         }
     }
+    // D381: the end of a level the Pod launched: the level's `Game.GotoScoreboard__b`,
+    // or the QA tick. The game's level-complete path runs (the scoreboard itself is not
+    // shown); the return to the Pod is not made yet.
+    let finish = p.finish_at == Some(p.scripts.ticks);
+    let asked = std::mem::take(&mut p.host.world.scoreboard_requests);
+    if let Some(slot) = p.launched.filter(|_| finish || !asked.is_empty()) {
+        p.finish_at = p.finish_at.filter(|_| !finish);
+        let by = if finish {
+            "--level-scripts-finish-at"
+        } else {
+            "Game.GotoScoreboard__b"
+        };
+        let link = p.host.world.finish_story_level(slot);
+        println!(
+            "Level finished after tick {} ({by}): slot {slot:?}, pending link {link:?}, links pending {} (D381)",
+            p.scripts.ticks,
+            p.host.world.story_progress.pending_links.len()
+        );
+    }
     if let Some(trace) = p.trace.as_mut() {
         let shell = p.shell.as_ref().map(|s| &s.host.world);
         trace.tick(p.scripts.ticks, &p.host.world, shell);
@@ -1609,7 +1640,7 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
         Err(TryRecvError::Empty) => return,
         Err(TryRecvError::Disconnected) => Err("the reading thread ended".into()),
     };
-    let guid = switch.guid;
+    let (guid, slot) = (switch.guid, switch.slot);
     p.switch = None;
     let read = match read {
         Ok(read) => read,
@@ -1619,7 +1650,11 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
         }
     };
     let identity = read.identity.clone();
-    let (vm, host, scripts, faults, header) = p.from.start(read);
+    let (vm, mut host, scripts, faults, header) = p.from.start(read);
+    // D381: the profile's state goes with the session (the game keeps one profile).
+    host.world.progression_flags = p.host.world.progression_flags;
+    host.world.story_progress = std::mem::take(&mut p.host.world.story_progress);
+    p.launched = Some(slot);
     p.tick_base += p.scripts.ticks;
     p.vm = vm;
     p.host = host;
