@@ -806,6 +806,12 @@ pub struct SackboyAnim {
     mood_held: Option<Mood>,
     /// Head-look attention weight 0x884.
     attention: f32,
+    /// D415: the direction (x right, y up, any length) from his head to what he looks at,
+    /// the Popit cursor while it is shown ([`SackboyAnim::set_look_target`]).
+    look_target: Option<[f32; 2]>,
+    /// D415: the target look 0x874 / 0x878 (up-down, left-right) and its weight 0x880.
+    target_look: [f32; 2],
+    target_weight: f32,
 }
 
 impl Default for SackboyAnim {
@@ -850,7 +856,21 @@ impl SackboyAnim {
             mood_stand: None,
             mood_held: None,
             attention: 0.,
+            look_target: None,
+            target_look: [0.; 2],
+            target_weight: 0.,
         }
+    }
+
+    /// D415: what his head turns toward from the next tick on: the direction (x right, y
+    /// up) from his head to the Popit cursor, `None` when nothing is targeted.
+    pub fn set_look_target(&mut self, dir: Option<[f32; 2]>) {
+        self.look_target = dir;
+    }
+
+    /// D415: the target look (up-down, left-right) and its weight.
+    pub fn target_look(&self) -> ([f32; 2], f32) {
+        (self.target_look, self.target_weight)
     }
 
     /// Sets the deepest contact's depth (level units) that the next tick's crouch spring
@@ -1364,8 +1384,27 @@ impl SackboyAnim {
         self.attention += LOOK_EASE * ((1. - r) - self.attention);
         self.attention *= (1. - r).clamp(0., 1.);
         let sgn = if vx < 0. { -1. } else { 1. };
+        // D415, the target look (FOUND, 0x20e28c): toward the Popit cursor the direction
+        // from the head, x and y only, normalised and scaled by 0.8; each value eases 0.1
+        // a tick toward 0.8 dx (left-right) and -0.8 dy (up-down, v < 0 up INFERRED) while
+        // the weight rises 0.1 a tick to 1, and falls 0.1 a tick when nothing is targeted.
+        // The look is lerp(stick look, target look, weight); the stick look is 0 here.
+        match self.look_target {
+            Some([dx, dy]) if dx.hypot(dy) > 1e-6 => {
+                let n = 0.8 / dx.hypot(dy);
+                // Left-right sign MEASURED in the viewer: + turns his face toward screen
+                // left with the look clip, so a cursor to the right takes -dx.
+                let want = [-dy * n, -dx * n];
+                for (v, w) in self.target_look.iter_mut().zip(want) {
+                    *v += LOOK_EASE * (w - *v);
+                }
+                self.target_weight = (self.target_weight + LOOK_EASE).min(1.);
+            }
+            _ => self.target_weight = (self.target_weight - LOOK_EASE).max(0.),
+        }
+        let [ud, lr] = self.target_look.map(|v| v * self.target_weight);
         let look = look_axes(
-            [0.; 3],
+            [ud, lr, 0.],
             0.,
             self.attention,
             0.2 * w_slow + 0.8 * w_fast,
@@ -1433,6 +1472,27 @@ mod tests {
 
     fn close(a: f32, b: f32) -> bool {
         (a - b).abs() < 1e-4
+    }
+
+    /// D415: a cursor straight above eases the up-down look toward -0.8 at full weight,
+    /// and the weight falls away once the cursor is gone.
+    #[test]
+    fn d415_look_at_cursor() {
+        let mut a = SackboyAnim::new();
+        a.set_look_target(Some([0., 50.]));
+        for _ in 0..200 {
+            a.tick(&moving(0.), true);
+        }
+        let ([ud, lr], w) = a.target_look();
+        assert!(
+            (ud + 0.8).abs() < 1e-3 && lr.abs() < 1e-6 && w == 1.,
+            "{ud} {lr} {w}"
+        );
+        a.set_look_target(None);
+        for _ in 0..10 {
+            a.tick(&moving(0.), true);
+        }
+        assert!(a.target_look().1 < 1e-6);
     }
 
     fn moving(vx: f32) -> Sackboy {

@@ -73,6 +73,9 @@ pub(crate) struct PodSackboy {
     /// The engage button of the input script is down on this tick; taken by
     /// `level_play::tick`.
     pub engage: bool,
+    /// D410: the same click as Square for the Popit; taken by `popit_play::popit_input`,
+    /// which ignores it where Square is the pod computer's ([`PodSackboy::at_computer`]).
+    pub popit_square: bool,
     /// `--level-scripts-hold-at`: the script ticks are held (written by
     /// `level_play::tick`). His input and his pose are held with them.
     pub held: bool,
@@ -930,6 +933,16 @@ pub fn install(app: &mut App) -> Result<(), String> {
             "--play-sackboy-input: `e` (the engage button) is only read in the Pod (--level-scripts --pod-camera N --pod-shell HEX)"
         );
     }
+    // D409: the Popit's Player Color page ticks the profile's first colour.
+    let worn = value(&all, "--profile-records")
+        .map(|p| {
+            let text =
+                std::fs::read_to_string(&p).map_err(|e| format!("--profile-records {p}: {e}"))?;
+            lbp_runtime::parse_profile_records(&text).map_err(|e| format!("--profile-records: {e}"))
+        })
+        .transpose()?
+        .and_then(|r| r.colours)
+        .map_or(lbp_script_vm::natives::DEFAULT_PLAYER_COLOUR, |c| c[0]);
     // The level reader recurses deeply: same worker stack as the level scene.
     let (scene, checkpoints, header, popit, controller) = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
@@ -963,7 +976,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             );
             // D403: the Popit in the Pod too; Square is the pod computer's engage button
             // only where the pod's script asks for it (`PodSackboy::at_computer`).
-            let popit = Some(crate::popit_play::load_assets(&source, &catalog, &control)?);
+            let popit = Some(crate::popit_play::load_assets(&source, &catalog, &control, worn)?);
             // D282: the pod computer's engage target takes its x from this Thing.
             let controller = report.things.iter().enumerate().find_map(|(i, t)| {
                 let named = t.data.script_name.as_ref()?.name.as_slice() == b"pod_controller";
@@ -1226,6 +1239,7 @@ fn script_input(
     if let Some(pod) = pod.as_mut() {
         if !held && !sackboy.is_empty() && play.engage.contains(&play.tick) {
             pod.engage = true;
+            pod.popit_square = true;
         }
     }
     // D282: at the pod computer his movement input is not applied.
@@ -1248,10 +1262,16 @@ fn pod_report(
 }
 
 /// The picker's layers and facing for this tick, after the controller step.
+/// D415: the direction (x right, y up, screen px) from his head to the Popit cursor while
+/// it is shown; `popit_play` writes it, the picker turns his head toward it.
+#[derive(Resource, Default)]
+pub(crate) struct LookTarget(pub(crate) Option<[f32; 2]>);
+
 fn tick_anim(
     sackboy: Query<&SackboyBody>,
     mut figure: Query<&mut Figure>,
     mut pod: Option<ResMut<PodSackboy>>,
+    look: Option<Res<LookTarget>>,
 ) {
     // D320: the pod computer clips' own frame counts, once his figure has them.
     if let (Some(pod), Ok(f)) = (pod.as_mut(), figure.single()) {
@@ -1286,6 +1306,7 @@ fn tick_anim(
             f.picked += 1;
         }
     }
+    f.picker.set_look_target(look.and_then(|l| l.0));
     let a = f.picker.tick(&body.controller, body.grounded);
     // D282: at the pod computer he turns to face into the screen.
     let in_use = pod.as_ref().is_some_and(|p| p.in_use);

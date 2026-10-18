@@ -111,7 +111,27 @@ struct Play {
     /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N.
     close: bool,
     close_at: Option<u64>,
+    /// D411: the planets level's camera when its scripts are not there (no decrypted
+    /// patch.edat): the Pod's shell layer with no script loaded draws with
+    /// [`POD_REST_CAMERA`] instead of the camera the script would write.
+    fallback_camera: Option<DisplayCamera>,
 }
+
+/// D411: the camera the Pod's planets script writes once it comes to rest (MEASURED from
+/// tick 452 with the decrypted scripts: eye, direction, up, 1 rad, near 10, far 100,000,
+/// level units). The scripts are only in the encrypted patch.edat, so the Pod without
+/// them draws with this from the first tick (the script's dolly in is not played).
+const POD_REST_CAMERA: DisplayCamera = DisplayCamera {
+    source: CameraSource::Script,
+    pose: CameraPose {
+        eye: [0., -250., 1130.],
+        direction: [0., 0.132, -0.991],
+    },
+    up: [0., 1., 0.],
+    fov_y_deg: Some(57.29578),
+    near: 10.,
+    far: 100_000.,
+};
 
 /// The script world of the Pod's shell layer (part 28): the second level of the
 /// session, with a VM of its own (a Thing handle is an index into one level world).
@@ -430,11 +450,12 @@ pub fn install(app: &mut App) -> Result<(), String> {
         Vm,
         LevelWorld,
         String,
+        usize,
         Option<(Vm, LevelWorld, String)>,
         Option<(crate::pod_menu::MenuAssets, String)>,
         Result<[crate::colour_grade::Record; 8], String>,
     );
-    let (mut vm, mut world, header, shell, menu_assets, cc_presets) = std::thread::Builder::new()
+    let (mut vm, mut world, header, loaded, shell, menu_assets, cc_presets) = std::thread::Builder::new()
         .stack_size(level_scene::LEVEL_STACK_BYTES)
         .spawn(move || -> Result<Loaded, String> {
             let control = LoadControl::default();
@@ -499,7 +520,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             });
             // D331: the colour correction's presets.
             let cc_presets = crate::colour_grade::load_presets(&source, &catalog, &control);
-            Ok((vm, world, header, shell, menu_assets, cc_presets))
+            Ok((vm, world, header, loaded, shell, menu_assets, cc_presets))
         })
         .map_err(|e| format!("level scripts thread: {e}"))?
         .join()
@@ -522,6 +543,10 @@ pub fn install(app: &mut App) -> Result<(), String> {
         println!("{line}");
         assets
     });
+    let shell_present = shell.is_some();
+    if loaded == 0 && shell_present {
+        println!("Level scripts: none loaded (patch.edat not decrypted); the Pod draws with the planets script's resting camera (D411 fallback)");
+    }
     // Part 28: the shell level's world, set up the same way, and the session's start.
     let shell = shell.map(|(mut shell_vm, mut shell_world, identity)| {
         let built = shell_world.bind_objects(&mut shell_vm);
@@ -595,6 +620,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         choose_at,
         close: false,
         close_at,
+        fallback_camera: (loaded == 0 && shell_present).then_some(POD_REST_CAMERA),
     })
     .insert_resource(crate::CaptureHold(hold_at.is_some()))
     .insert_resource(menu_assets.unwrap_or_default())
@@ -1889,7 +1915,9 @@ fn script_camera(
     let follow_eye = to_level.transform_point3(transform.translation);
     let follow_dir = transform.forward().as_vec3();
     let world = &mut p.host.world;
-    let shown = world.display_camera(follow_eye.to_array(), follow_dir.to_array());
+    let shown = world
+        .display_camera(follow_eye.to_array(), follow_dir.to_array())
+        .or(p.fallback_camera);
     // The third float of the call that wrote the camera (FOUND: the ortho factor).
     let ortho = world.script_camera().map_or(0., |c| c.lens_value);
     let scale = display.0.x_axis.x;

@@ -366,6 +366,11 @@ pub fn enable_spec_map(material: &mut ViewerMaterial, image: Handle<Image>, uv_m
     material.extension.graph_image5 = Some(image);
     material.extension.graph_info.y = uv_mode;
 }
+/// D701: the gloss colour is the surface's own diffuse colour (`graph_info.y` 3; static gloss
+/// white). The game's program multiplies the same samples for both ports.
+pub fn enable_diffuse_gloss(material: &mut ViewerMaterial) {
+    material.extension.graph_info.y = 3;
+}
 /// P3a: alpha cut-out: fragments whose colour alpha is below `level` are discarded (LBP
 /// mode materials with a stored AlphaTestLevel, docs/p3a-alpha-test.md).
 pub fn enable_alpha_test(material: &mut ViewerMaterial, level: f32) {
@@ -1204,6 +1209,9 @@ fn fragment(in: VertexOutput, @builtin(front_facing) front: bool)
         let factor = preview_light(n, pbr.V, shadow, ao, baked);
         // P3d: gloss colour map (port 2 sampler) on graph slot 5, unused without a graph.
         var spec_tint = vec3<f32>(1.0);
+        if graph_info.y == 3u {
+            spec_tint = color.rgb;
+        }
 #ifdef VERTEX_UVS_A
         if graph_info.y == 1u {
             spec_tint = textureSample(graph_image5, graph_sampler5, in.uv).rgb;

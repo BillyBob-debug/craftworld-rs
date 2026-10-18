@@ -75,6 +75,8 @@ pub struct Surface {
     pub specular: Option<[f32; 3]>,
     /// P3d: gloss colour map on port 2 (same layout as `BumpMap`; rgb is the gloss colour).
     pub spec_map: Option<Box<BumpMap>>,
+    /// D701: port 2 evaluates the same graph as port 0, so the gloss colour is the diffuse.
+    pub specular_diffuse: bool,
     /// GfxMaterial CosinePower (finite, clamped to 1..=4096).
     pub cosine_power: f32,
     pub alpha_mode_raw: u8,
@@ -146,6 +148,9 @@ impl Surface {
             )),
             None => {}
         }
+        if self.specular_diffuse {
+            parts.push(format!("gloss = diffuse ^ {:.0}", self.cosine_power));
+        }
         if let Some(s) = self.specular {
             parts.push(format!(
                 "gloss {:.2}/{:.2}/{:.2} ^ {:.0}",
@@ -168,7 +173,36 @@ pub struct SurfaceRoutes {
     pub specular: Option<[f32; 3]>,
     /// P3d: port 2 wired straight from one sampler (a gloss colour map).
     pub spec_map: Option<crate::linked::SamplerSelection>,
+    /// D701: port 2 is wired from the same source as port 0 (or an equal static multiply).
+    pub specular_diffuse: bool,
     pub skipped: Vec<String>,
+}
+/// D701: whether boxes `a` and `b` evaluate the same value: the same box, or two static
+/// multiplies (type 10) with equal parameters whose input wires are the same (source box,
+/// ports, swizzle). Only one level deep; the inputs themselves must be the same boxes.
+fn same_value(graph: &GraphMetadata, a: usize, b: usize) -> bool {
+    if a == b {
+        return true;
+    }
+    let (x, y) = (&graph.boxes[a], &graph.boxes[b]);
+    if x.type_raw != 10 || y.type_raw != 10 || !is_static(x) || !is_static(y) {
+        return false;
+    }
+    if x.parameters_raw != y.parameters_raw {
+        return false;
+    }
+    let inputs = |i: usize| {
+        let mut v: Vec<_> = graph
+            .wires
+            .iter()
+            .filter(|w| w.box_to == i as i32)
+            .map(|w| (w.box_from, w.port_from_raw, w.port_to_raw, w.swizzle_raw))
+            .collect();
+        v.sort();
+        v
+    };
+    let (ia, ib) = (inputs(a), inputs(b));
+    !ia.is_empty() && ia == ib
 }
 /// P3h: a copy of `graph` whose output node reads `port` as its port 0, so the diffuse route
 /// can evaluate the glow graph. `Ok(None)` when `port` is unwired; one wire only.
@@ -313,6 +347,18 @@ pub fn select_routes(graph: &GraphMetadata) -> Result<SurfaceRoutes, String> {
                 }
             }
             None => match endpoint(w).filter(|&i| boxes[i].type_raw == 1) {
+                // D701: the metal zip pull `00000439` wires port 2 from a second multiply of
+                // the same two samplers as its diffuse (FOUND, material_graph_dump).
+                _ if match (endpoint(w), &port(0)[..]) {
+                    // A lone sampler keeps the P3d gloss map route.
+                    (Some(s), [d]) if boxes[s].type_raw == 10 => {
+                        endpoint(d).is_some_and(|d| same_value(graph, s, d))
+                    }
+                    _ => false,
+                } =>
+                {
+                    routes.specular_diffuse = true
+                }
                 Some(i) => match crate::linked::sampler(graph, i) {
                     Ok(s) => routes.spec_map = Some(s),
                     Err(e) => routes.skipped.push(format!("gloss map not drawn ({e})")),
@@ -375,6 +421,7 @@ pub(crate) fn load(
         alpha_test: scalar(scalars.alpha_test_bits, 0., 1., 0.),
         specular: routes.specular,
         spec_map: None,
+        specular_diffuse: routes.specular_diffuse,
         glow: None,
         glow_alpha: Default::default(),
         reflection: None,
@@ -724,6 +771,29 @@ mod tests {
         let negative = routes_for([-0.1, 0.5, 0.5]);
         assert_eq!(negative.specular, None);
         assert_eq!(negative.skipped.len(), 1);
+    }
+    /// D701: the zip pull's shape (`00000439`): two multiplies of the same two samplers, one
+    /// into the colour port and one into the gloss port, so the gloss is the diffuse.
+    #[test]
+    fn d701_a_gloss_multiply_equal_to_the_diffuse_is_the_diffuse() {
+        let boxes = vec![
+            node(0, [0; 8]),
+            node(1, sampler_params(0)),
+            node(1, sampler_params(1)),
+            node(10, [0; 8]),
+            node(10, [0; 8]),
+        ];
+        let mut wires = vec![wire(1, 3, 0), wire(2, 3, 1), wire(3, 0, 0)];
+        wires.extend([wire(1, 4, 0), wire(2, 4, 1), wire(4, 0, SPECULAR_PORT)]);
+        let zip = graph(boxes.clone(), wires.clone());
+        let routes = select_routes(&zip).unwrap();
+        assert!(routes.specular_diffuse && routes.spec_map.is_none());
+        assert!(routes.skipped.is_empty());
+
+        // Different inputs (the gloss multiply squares one sampler): not the diffuse.
+        wires[4] = wire(1, 4, 1);
+        let other = select_routes(&graph(boxes, wires)).unwrap();
+        assert!(!other.specular_diffuse && other.skipped.len() == 1);
     }
     #[test]
     fn p2q_routes_take_one_bump_sampler_and_one_static_gloss_color() {

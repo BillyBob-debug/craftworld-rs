@@ -439,7 +439,60 @@ struct Part(Role);
 enum Place {
     Above,
     Below,
+    Beside,
+}
+
+/// D413: which way a tooltip pill above or below its tile leans.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Side {
+    Left,
+    Centre,
     Right,
+}
+
+/// D414: the tooltip's offset past its node, x (gooey units, FOUND 0x417b78: half the
+/// tooltip plus 80 x 110; 130 x 180 once a tooltip with body text has shown 60 frames,
+/// which the Popit's one-line labels never have).
+const TIP_OFF_X: f32 = 80.;
+
+/// D413 / D414, the x side of the game's tooltip placement (FOUND 0x417b78, root space).
+/// Two candidate centres sit past the node's sides (`lo` / `hi` = side -+ (half + off));
+/// `t` is the node centre's place in the root over 0.95 of its width and `p` the lerp of
+/// the candidates by `t`. In order: a side the tooltip would not fit inside the safe
+/// area (NDC x +-0.88) is never taken; a root centred right of NDC +0.6 takes the left,
+/// left of -0.6 the right; else, when `p` falls outside the root or the node is in
+/// neither the top nor the bottom row (`beside`), the outward side (`t` >= 0.499 right);
+/// else the lerp, which the port draws as the centred pill. All px here: `card` the
+/// root's x span (FOUND: Poppet.UpdateUI's frame 1, the bubble round the card), `node`
+/// the focused button's span, `pw` the pill's width, `unit` px per gooey unit.
+/// The game's candidate distance and its 0.9 corner pull are not used for drawing: the
+/// leaning pill keeps its MEASURED place (D413).
+fn pill_side(
+    card: [f32; 2],
+    node: [f32; 2],
+    pw: f32,
+    unit: f32,
+    beside: bool,
+    screen_w: f32,
+) -> Side {
+    let safe = [screen_w * 0.06, screen_w * 0.94];
+    let off = pw / 2. + TIP_OFF_X * unit;
+    let (lo, hi) = (node[0] - off, node[1] + off);
+    let t = ((node[0] + node[1]) / 2. - card[0]) / (0.95 * (card[1] - card[0]));
+    let p = lo + (hi - lo) * t;
+    let card_ndc_x = (card[0] + card[1]) / screen_w - 1.;
+    let outward = if t >= 0.499 { Side::Right } else { Side::Left };
+    if lo - pw / 2. < safe[0] {
+        Side::Right
+    } else if hi + pw / 2. > safe[1] || card_ndc_x > 0.6 {
+        Side::Left
+    } else if card_ndc_x < -0.6 {
+        Side::Right
+    } else if beside || p < card[0] || p > card[1] {
+        outward
+    } else {
+        Side::Centre
+    }
 }
 
 #[derive(Clone, Copy, PartialEq)]
@@ -701,11 +754,13 @@ fn ramp(t: f32) -> [u8; 3] {
     [0, 1, 2].map(|k| (f32::from(c0[k]) + (f32::from(c1[k]) - f32::from(c0[k])) * f) as u8)
 }
 
-/// Reads every atlas, the tooltips and the Square glyph (load worker).
+/// Reads every atlas, the tooltips and the Square glyph (load worker). `worn` is the
+/// player's colour (packed ARGB, the profile's first colour) for the Player Color page.
 pub(crate) fn load_assets(
     source: &AttachedSource,
     catalog: &lbp_catalog::Catalog,
     control: &LoadControl,
+    worn: u32,
 ) -> Result<PopitAssets, String> {
     let (strings, _) = load_strings(source, catalog, control);
     let (cards, mut card_source, icons, opens) = match script_cards(source, catalog, control) {
@@ -922,7 +977,7 @@ pub(crate) fn load_assets(
                     return Vec::new();
                 }
                 if PlanStyle::of(types) == PlanStyle::Swatch {
-                    return swatch_sections(source, catalog, control, &popit);
+                    return swatch_sections(source, catalog, control, &popit, worn);
                 }
                 if PlanStyle::of(types) == PlanStyle::Wide {
                     let keep = owned_backgrounds(&popit);
@@ -1016,6 +1071,7 @@ fn swatch_sections(
     catalog: &lbp_catalog::Catalog,
     control: &LoadControl,
     popit: &lbp_preview::popit::Popit,
+    worn: u32,
 ) -> Sections {
     let Ok(sheet) = decode_icon(source, catalog, ResourceKey::Guid(0x19149), control) else {
         return Vec::new();
@@ -1033,8 +1089,8 @@ fn swatch_sections(
         .into_iter()
         .map(|(ix, it)| {
             let (primary, _) = PLAYER_COLOURS[ix];
-            let worn = primary == lbp_script_vm::natives::DEFAULT_PLAYER_COLOUR & 0xff_ffff;
-            (it.title.clone(), swatch(&fig, PLAYER_COLOURS[ix], worn))
+            let ticked = primary == worn & 0xff_ffff;
+            (it.title.clone(), swatch(&fig, PLAYER_COLOURS[ix], ticked))
         })
         .collect();
     vec![(String::new(), items)]
@@ -1072,7 +1128,8 @@ fn owned_backgrounds(popit: &lbp_preview::popit::Popit) -> std::collections::Has
 /// the figure filled with the primary colour (MEASURED placement, game frame 2026-10-17).
 /// D407: the colour Sackboy wears gets a white check mark over its square (MEASURED: the
 /// tick runs from the square's left middle down to its lower centre and out past its top
-/// right corner). Without a profile that is palette entry 0, the default colour.
+/// right corner). D409: the worn colour is `--profile-records`' first colour; without a
+/// profile that is palette entry 0, the default colour.
 fn swatch(fig: &[f32], (primary, secondary): (u32, u32), worn: bool) -> Image {
     let rgb = |c: u32| [(c >> 16) as u8, (c >> 8) as u8, c as u8];
     let (p, q) = (rgb(primary), rgb(secondary));
@@ -1222,12 +1279,43 @@ pub(crate) fn install(app: &mut App, assets: PopitAssets) {
                 popit_input,
                 popit_turn,
                 popit_layout,
+                popit_look,
                 popit_page_ui,
                 popit_slide,
             )
                 .chain()
                 .after(crate::sackboy_play::show_sackboy),
-        );
+        )
+        .init_resource::<crate::sackboy_play::LookTarget>();
+}
+
+/// D415: his head's height over his feet in the figure's own space (level units; INFERRED
+/// from the ~205-unit standing mesh, D242: the head's middle at about 0.8 of it).
+const HEAD_Y: f32 = 165.;
+
+/// D415: while the Popit cursor is shown, the direction from his head to it on screen
+/// (x right, y up) for the picker's target look (FOUND rule 0x20e28c: the cursor's world
+/// place minus the head's, x and y only; the screen direction stands in for it, INFERRED
+/// close enough with the camera looking down the level's z).
+fn popit_look(
+    p: Res<Popit>,
+    windows: Query<&Window>,
+    cameras: Query<(&Camera, &GlobalTransform), With<Camera3d>>,
+    figure: Query<&GlobalTransform, With<crate::sackboy_play::Figure>>,
+    mut look: ResMut<crate::sackboy_play::LookTarget>,
+) {
+    let dir = (|| {
+        let c = p.cursor?;
+        let scale = windows.single().ok()?.height() / FRAME_H;
+        let (cam, cam_t) = cameras.iter().find(|(c, _)| c.is_active)?;
+        let head = figure.single().ok()?.transform_point(Vec3::Y * HEAD_Y);
+        let at = cam.world_to_viewport(cam_t, head).ok()?;
+        let d = c * scale - at;
+        Some([d.x, -d.y])
+    })();
+    if look.0 != dir {
+        look.0 = dir;
+    }
 }
 
 impl Popit {
@@ -1354,9 +1442,13 @@ fn popit_input(
     mut p: ResMut<Popit>,
     mut sackboy: Query<&mut lbp_sim::character::SackboyBody>,
     assets: Res<PopitAssets>,
-    pod: Option<Res<crate::sackboy_play::PodSackboy>>,
+    mut pod: Option<ResMut<crate::sackboy_play::PodSackboy>>,
 ) {
     let pad = pads.iter().next();
+    // D410: an input script's `e` click in the Pod is Square for the Popit too.
+    let scripted = pod
+        .as_mut()
+        .is_some_and(|s| std::mem::take(&mut s.popit_square));
     if let Some(at) = p.cursor {
         // Cursor mode: the left stick (WASD) moves the ring, Circle/Square leave it (Square
         // brings the Popit back); Sackboy stands still.
@@ -1391,7 +1483,8 @@ fn popit_input(
     // D403: in the Pod's pad zone (or at the pod computer) Square is the pod computer's.
     let at_computer = !p.open && pod.is_some_and(|s| s.at_computer);
     if !at_computer
-        && (keys.just_pressed(KeyCode::KeyZ)
+        && (scripted
+            || keys.just_pressed(KeyCode::KeyZ)
             || pad.is_some_and(|g| g.just_pressed(GamepadButton::West)))
     {
         p.open = !p.open;
@@ -1533,6 +1626,8 @@ fn popit_input(
 
 /// Sackboy turns his back to the camera while the Popit is open (both modes, MEASURED on
 /// RPCS3 frames: back of the head and the cord wound round the body), eased like the card.
+/// D412: not in the Pod, where the RPCS3 frame shows his face (three-quarter view to the
+/// right, eye and front zip visible) with the play card open; he keeps the picker's facing.
 fn popit_turn(
     p: Res<Popit>,
     mut figure: Query<&mut Transform, With<crate::sackboy_play::Figure>>,
@@ -1554,7 +1649,7 @@ fn popit_turn(
         }
     }
     let turn = std::f32::consts::PI * smooth(p.blend) * (1. - pe);
-    if turn <= 0. {
+    if turn <= 0. || crate::sackboy_play::in_pod() {
         return;
     }
     for mut t in &mut figure {
@@ -1695,7 +1790,7 @@ fn popit_layout(
     } else if focus_pos.0 + 1 == p.card().0.len() {
         Place::Below
     } else {
-        Place::Right
+        Place::Beside
     };
     let chars = assets
         .items
@@ -1703,8 +1798,44 @@ fn popit_layout(
         .find(|i| i.id == p.focus)
         .map_or(10, |i| i.label.chars().count());
     let (pw, ph) = ((chars as f32 * PILL_CHAR_W - 2.) * scale, PILL_H * scale);
-    let (pill, tail_at) = match place {
-        Place::Above => {
+    // D413 / D414: the game's side rule (FOUND 0x417b78) on the button's own rect, the
+    // 128-unit icon cell rather than the larger focus tile.
+    let unit = UNIT_PX * scale * grow;
+    let side = pill_side(
+        [left, left + w],
+        [tile_c.x - 64. * unit, tile_c.x + 64. * unit],
+        pw,
+        unit,
+        place == Place::Beside,
+        window.width(),
+    );
+    // (pill, tip, x where the tail leaves the pill)
+    let (pill, tail_at, tail_base) = match (place, side) {
+        (Place::Above | Place::Below, Side::Right | Side::Left) => {
+            // MEASURED, Pod play frame: pill's near end 9 px past the tile's side, its
+            // bottom 26 px above the tile's top; the tail runs from the pill's near end to
+            // the tile's corner (tip 1 px out, 3 px off the tile).
+            let (above, right) = (place == Place::Above, side == Side::Right);
+            let sx = if right { 1. } else { -1. };
+            let edge = tile_c.x + sx * tile_half;
+            let near = edge + sx * 9. * scale;
+            let px0 = if right { near } else { near - pw };
+            let (py0, tip_y) = if above {
+                let bottom = tile_c.y - tile_half - 26. * scale;
+                (bottom - ph, tile_c.y - tile_half - 3. * scale)
+            } else {
+                (
+                    tile_c.y + tile_half + 26. * scale,
+                    tile_c.y + tile_half + 3. * scale,
+                )
+            };
+            (
+                (px0, py0, pw, ph),
+                Vec2::new(edge + sx * scale, tip_y),
+                near + sx * 14. * scale,
+            )
+        }
+        (Place::Above, _) => {
             let tip = Vec2::new(tile_c.x + 3. * scale, tile_c.y - tile_half - 19. * scale);
             (
                 (
@@ -1714,9 +1845,10 @@ fn popit_layout(
                     ph,
                 ),
                 tip,
+                tip.x,
             )
         }
-        Place::Below => {
+        (Place::Below, _) => {
             let tip = Vec2::new(tile_c.x + 3. * scale, tile_c.y + tile_half + 19. * scale);
             (
                 (
@@ -1726,11 +1858,25 @@ fn popit_layout(
                     ph,
                 ),
                 tip,
+                tip.x,
             )
         }
-        Place::Right => {
+        // D414: a left-hand button of a middle row mirrors the MEASURED right-hand place.
+        (Place::Beside, Side::Left) => {
+            let tip = Vec2::new(tile_c.x - tile_half - 8. * scale, tile_c.y + 4. * scale);
+            (
+                (tip.x - TAIL_LEN_H * scale - pw, tip.y - ph / 2., pw, ph),
+                tip,
+                tip.x,
+            )
+        }
+        (Place::Beside, _) => {
             let tip = Vec2::new(tile_c.x + tile_half + 8. * scale, tile_c.y + 4. * scale);
-            ((tip.x + TAIL_LEN_H * scale, tip.y - ph / 2., pw, ph), tip)
+            (
+                (tip.x + TAIL_LEN_H * scale, tip.y - ph / 2., pw, ph),
+                tip,
+                tip.x,
+            )
         }
     };
     for (part, mut node, mut vis) in &mut parts {
@@ -1787,28 +1933,43 @@ fn popit_layout(
                 // Stacked bars narrowing to the tip; pointing at the focused tile.
                 let k = i as f32;
                 let n = TAIL_STEPS as f32;
-                let width = (11. - k * 2.) * scale;
-                let (len, tip_len) = match place {
-                    Place::Right => (TAIL_LEN_H * scale / n, TAIL_LEN_H * scale),
-                    _ => (TAIL_LEN_V * scale / n, TAIL_LEN_V * scale),
+                // D413: a leaning pill's tail is a wedge about 30 px wide at the pill
+                // (MEASURED, Pod play frame).
+                let width = if side == Side::Centre || place == Place::Beside {
+                    11. - k * 2.
+                } else {
+                    30. - k * 6.5
+                } * scale;
+                let len = match place {
+                    Place::Beside => TAIL_LEN_H * scale / n,
+                    Place::Above => (tail_at.y - (pill.1 + pill.3)) / n,
+                    Place::Below => (pill.1 - tail_at.y) / n,
                 };
-                let _ = tip_len;
+                // D413: a leaning pill's tail slants from its near end to the tile corner.
+                let x = tail_base + (tail_at.x - tail_base) * (k + 0.5) / n;
                 match place {
                     Place::Above => set(
                         &mut node,
-                        tail_at.x - width / 2.,
+                        x - width / 2.,
                         pill.1 + pill.3 - 1. * scale + k * len,
                         width,
                         len + 1.,
                     ),
                     Place::Below => set(
                         &mut node,
-                        tail_at.x - width / 2.,
+                        x - width / 2.,
                         pill.1 + 1. * scale - (k + 1.) * len,
                         width,
                         len + 1.,
                     ),
-                    Place::Right => set(
+                    Place::Beside if side == Side::Left => set(
+                        &mut node,
+                        pill.0 + pill.2 - 1. * scale + k * len,
+                        tail_at.y - width / 2.,
+                        len + 1.,
+                        width,
+                    ),
+                    Place::Beside => set(
                         &mut node,
                         pill.0 + 1. * scale - (k + 1.) * len,
                         tail_at.y - width / 2.,
@@ -2677,5 +2838,59 @@ fn spawn_nodes(
             GlobalZIndex(39),
             Visibility::Hidden,
         ));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// D413: the Pod card near the left edge leans its pill right; a centred card keeps
+    /// it centred; a card near the right edge leans left.
+    #[test]
+    fn d413_pill_side() {
+        let u = UNIT_PX;
+        // Pod play frame: card ~ 240..400 of 1280, focus button ~ 273..315, pill ~250 px.
+        assert_eq!(
+            pill_side([240., 400.], [273., 315.], 250., u, false, 1280.),
+            Side::Right
+        );
+        // Centred create card 555..725: the middle top button keeps the centred pill.
+        assert_eq!(
+            pill_side([555., 725.], [619., 661.], 120., u, false, 1280.),
+            Side::Centre
+        );
+        assert_eq!(
+            pill_side([1050., 1200.], [1080., 1120.], 60., u, false, 1280.),
+            Side::Left
+        );
+        assert_eq!(
+            pill_side([100., 260.], [160., 200.], 60., u, false, 1280.),
+            Side::Right
+        );
+    }
+
+    /// D414: on a centred card the outer buttons lean outward (the lerped centre leaves the
+    /// card: the Moon create frame's top-right focus with its pill to the right), and a
+    /// middle row's buttons take the outward side.
+    #[test]
+    fn d414_pill_side_outward() {
+        let (u, card) = (UNIT_PX, [555., 725.]);
+        assert_eq!(
+            pill_side(card, [662., 704.], 120., u, false, 1280.),
+            Side::Right
+        );
+        assert_eq!(
+            pill_side(card, [576., 618.], 120., u, false, 1280.),
+            Side::Left
+        );
+        assert_eq!(
+            pill_side(card, [576., 618.], 120., u, true, 1280.),
+            Side::Left
+        );
+        assert_eq!(
+            pill_side(card, [619., 661.], 120., u, true, 1280.),
+            Side::Right
+        );
     }
 }
