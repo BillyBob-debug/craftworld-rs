@@ -256,11 +256,6 @@ pub const STORY_LEVEL_THINGS: [(u32, [f32; 16]); 5] = [
     ),
 ];
 
-/// The shell level's pod Thing and the mesh it shows once the pod is open (MEASURED:
-/// pod.bin's script swaps it on tick 620, the change-over's end). STAND-IN for pod.bin
-/// (the Popit lane's).
-pub const STORY_SHELL_POD: (u32, u32) = (2, 0x0002_3959);
-
 /// The camera the planets world script writes while the pod computer is in use (MEASURED,
 /// steady from tick 620 to the end of the run: eye, direction, 1 rad, near 10, far
 /// 100,000, level units). STAND-IN for that script (the Popit lane's).
@@ -277,7 +272,7 @@ pub const POD_IN_USE_CAMERA: lbp_runtime::DisplayCamera = lbp_runtime::DisplayCa
 };
 
 /// `--story` without the game's scripts: the Story screen from the first tick, the pod
-/// open and the search state's Story entry run natively
+/// opened by pod.bin's native port and the search state's Story entry run natively
 /// ([`lbp_runtime::PodStateSearchStory`]).
 #[derive(Default)]
 pub struct Fallback {
@@ -285,16 +280,13 @@ pub struct Fallback {
 }
 
 impl Fallback {
-    /// After a tick: on the first, the pod open, the planets placed and Story chosen;
-    /// on every later one the open search's update. True on the tick it opens.
-    pub fn after_tick(&mut self, level: &mut LevelWorld, shell: Option<&mut LevelWorld>) -> bool {
+    /// After a tick: on the first, the planets placed and Story chosen; on every later
+    /// one the open search's update. True on the tick it opens; the caller then sets the
+    /// pod computer in use, and pod.bin's native port (D417) opens the pod (D354).
+    pub fn after_tick(&mut self, level: &mut LevelWorld) -> bool {
         if self.search.is_open() {
             self.search.update(level);
             return false;
-        }
-        if let Some(shell) = shell {
-            shell.pod.fade = Some(1.);
-            shell.set_thing_mesh(STORY_SHELL_POD.0, STORY_SHELL_POD.1);
         }
         for (thing, m) in STORY_LEVEL_THINGS {
             level.place_thing(thing, m);
