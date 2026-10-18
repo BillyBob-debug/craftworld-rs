@@ -113,6 +113,10 @@ struct Play {
     /// D359 `--level-scripts-group-at N` (QA): Cross on the Earth planet's selected group
     /// on tick N (the engine's `OnPlanetGroupSelected`, called after the tick).
     group_at: Option<u64>,
+    /// D361 `--level-scripts-move-at N:DIR[,M:DIR...]` (QA): the stick pushed left,
+    /// right, up or down on tick N, moving the Earth planet's cursor (the engine's pick,
+    /// after the tick), in tick order.
+    move_at: Vec<(u64, [f32; 2])>,
     /// Level1 part 3: the player's close button (C or Circle) on the open speech bubble,
     /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N. Part 4:
     /// the option takes a comma list (`120,600`), one press per tick, in order.
@@ -209,6 +213,37 @@ fn tick_option(all: &[String], flag: &str) -> Result<Option<u64>, String> {
                 .map_err(|_| format!("{flag} takes a tick count"))
         })
         .transpose()
+}
+
+/// D361: `--level-scripts-move-at`, `N:left|right|up|down` items, sorted by tick.
+fn move_list(all: &[String]) -> Result<Vec<(u64, [f32; 2])>, String> {
+    let flag = "--level-scripts-move-at";
+    let mut moves = value(all, flag)
+        .map(|v| {
+            v.split(',')
+                .map(|item| {
+                    let (t, d) = item
+                        .trim()
+                        .split_once(':')
+                        .ok_or(format!("{flag} takes N:DIR"))?;
+                    let tick = t
+                        .parse::<u64>()
+                        .map_err(|_| format!("{flag} takes a tick count"))?;
+                    let dir = match d {
+                        "left" => [-1., 0.],
+                        "right" => [1., 0.],
+                        "up" => [0., 1.],
+                        "down" => [0., -1.],
+                        _ => return Err(format!("{flag}: direction left, right, up or down")),
+                    };
+                    Ok((tick, dir))
+                })
+                .collect::<Result<Vec<_>, String>>()
+        })
+        .transpose()?
+        .unwrap_or_default();
+    moves.sort_by_key(|m| m.0);
+    Ok(moves)
 }
 
 /// A QA option of comma-separated tick counts (level1 part 4), sorted.
@@ -466,6 +501,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let close_at = tick_list(&all, "--level-scripts-close-at")?;
     let back_at = tick_list(&all, "--level-scripts-back-at")?;
     let group_at = tick_option(&all, "--level-scripts-group-at")?;
+    let move_at = move_list(&all)?;
     let trace = value(&all, "--level-scripts-trace")
         .map(|path| crate::story_fallback::Trace::create(&path))
         .transpose()?;
@@ -701,6 +737,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         close_at,
         back_at,
         group_at,
+        move_at,
         fallback_camera: (loaded == 0 && shell_present).then_some(POD_REST_CAMERA),
         trace,
         story: (loaded == 0 && shell_present).then(|| crate::story_fallback::Fallback {
@@ -1203,7 +1240,7 @@ fn step(
     // D359: Cross on the selected group, after the tick as the engine's planet cursor.
     if p.group_at == Some(p.scripts.ticks) && p.story.is_none() {
         p.group_at = None;
-        let result = p.host.world.pod.search.default_result;
+        let result = p.host.world.selected_result();
         let r = result.and_then(|i| {
             p.scripts
                 .planet_group_selected(&mut p.vm, &mut p.host, i, BUDGET_PER_CALL)
@@ -1266,7 +1303,7 @@ fn step(
     // own tick (the group's first update is on the next tick, as in the scripts).
     if p.group_at == Some(p.scripts.ticks) && p.story.is_some() {
         p.group_at = None;
-        let result = p.host.world.pod.search.default_result;
+        let result = p.host.world.selected_result();
         if let Some(story) = p.story.as_mut() {
             let slot = result.and_then(|i| p.host.world.story_slots.get(i).map(|s| s.id));
             let e = slot.and_then(|slot| story.puter.choose_group(&mut p.host, slot));
@@ -1275,6 +1312,15 @@ fn step(
                 p.scripts.ticks
             );
         }
+    }
+    // D361: the stick on the planet, after the tick (the engine's planet update).
+    while p.move_at.first().is_some_and(|m| m.0 == p.scripts.ticks) {
+        let (_, dir) = p.move_at.remove(0);
+        let to = p.host.world.move_result_cursor(dir);
+        println!(
+            "Cursor moved after tick {} ({dir:?}): result {to:?} (D361)",
+            p.scripts.ticks
+        );
     }
     if let Some(trace) = p.trace.as_mut() {
         let shell = p.shell.as_ref().map(|s| &s.host.world);
