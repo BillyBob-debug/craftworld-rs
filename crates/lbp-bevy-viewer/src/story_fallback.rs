@@ -215,6 +215,12 @@ pub enum FallbackEvent {
 }
 
 impl Fallback {
+    /// D372: before a tick of the planets level, the pod computer's pushes
+    /// ([`lbp_runtime::NativePodComputer::before_tick`]).
+    pub fn before_tick(&mut self, host: &mut Bindings<LevelWorld>) -> Option<FallbackEvent> {
+        self.puter.before_tick(host).map(FallbackEvent::Puter)
+    }
+
     /// After a tick of the planets level: the pod computer's states (the planets world's
     /// native port, D356, blends to each state's view and moves the camera).
     pub fn after_tick(&mut self, host: &mut Bindings<LevelWorld>) -> Option<FallbackEvent> {

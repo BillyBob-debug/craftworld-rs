@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D371 Story slides back (2026-10-18)
+## Latest: D372 the pod computer pushes first (2026-10-18)
+- Part 119 (`docs/level-scripts/part-119.md`): the native pod computer pushes the main
+  menu and Story before the tick, so the Pod world moves on the scripted tick.
+
+## D371 Story slides back (2026-10-18)
 - Part 118 (`docs/level-scripts/part-118.md`): native Pod menus follow the world Thing
   every tick, so Story back from a group slides in and settles as the scripted one.
 
@@ -22,11 +26,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D369 the menus slide in (2026-10-18)
 - Part 116 (`docs/level-scripts/part-116.md`): the native Pod menus slide in with the
   world Thing as the scripted ones do; no other search can be ported offline.
-
-## D368 the cursor's flight (2026-10-18)
-- Part 115 (`docs/level-scripts/part-115.md`): the Pod cursor flies to the next
-  result over a few frames (0x4298e8), plays `pod/pod_cursor_move` and takes no new
-  move until it lands.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
