@@ -1,20 +1,21 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-119.md` (118 for Story back, 117 for closed menus, 116 for
-   the slide-in, 115 for the cursor's flight, 114 for the launch warnings, 113 for
-   Sackboy, 112 for the entrance camera, 111 for the switch, 110 for the hand-off, 109
-   for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for choosing a
-   group, 105 for Back, 104 for the pod computer's stack and main menu)
+1. `docs/level-scripts/part-120.md` (119 for the pushes, 118 for Story back, 117 for
+   closed menus, 116 for the slide-in, 115 for the cursor's flight, 114 for the launch
+   warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the switch, 110 for
+   the hand-off, 109 for Cross on a level, 108 for the cursor, 107 for the group zoom,
+   106 for choosing a group, 105 for Back, 104 for the pod computer's stack and main
+   menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 174 (D371) merged. PR for D372 (branch `pod-world-lag`,
-  worktree `E:\Projects\wt-d324`): the pod computer pushes before the tick; handed to
-  the coordinator for merge once rust and python are green.
+- PRs 153 (D353) through 175 (D372) merged. PR for D373 (branch `pod-back-pop`,
+  worktree `E:\Projects\wt-d324`): the main menu built on the tick after Back; handed
+  to the coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D373.
+  Decision numbers: D348-D399, next free D374.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -29,6 +30,8 @@
   --level-scripts-trace PATH --qa-capture PNG` (each capture needs a new name).
   Disc + update only: `--snapshot local-analysis/d79-inventory-0133.json --game-dir
   "game-data/a1-disc;game-data/a1-update-0133"`. A run takes several minutes.
+- D373 runs: `local-analysis/d370/*-e1*` (`run370b.ps1`): native world Thing and drawn
+  menu equal scripted at every tick (0.001 float rounding at 741, 759).
 - D372 runs: `local-analysis/d370/*-d2*` (`run370b.ps1`): the native world Thing equals
   scripted at every tick; menus differ only at 740-741 and 759 (Back's pop).
 - D371 runs: `local-analysis/d370/*-c2*` (`run370b.ps1`): native Story slides back
@@ -89,13 +92,11 @@
   data file is on the disc or update.
 
 ## Next
-1. The main menu a tick early on Back at 740 (native pop builds it at once; scripted
-   draws Story on 740 and the main menu from 741), and 759. (The default result 23
-   before tick 640 is scripted mode's own seeding at load; native's none is kept,
-   D369.)
-2. Open: the cursor's height and drawing, the player-count texts
+1. Open: the cursor's height and drawing, the player-count texts
    (0x16e3b0, 0x16de78), the warning popup's drawing, the game's entrance animation
    and state 6/7 load.
-3. The other entries' states as they unlock (the other searches need the network).
-4. The cutscene threads (`PodIntroductionThread`, `LevelUnlockingThread`) and
+   (The native and scripted menus match through Back, D373; the default result 23
+   before tick 640 is scripted mode's own seeding at load, native's none is kept, D369.)
+2. The other entries' states as they unlock (the other searches need the network).
+3. The cutscene threads (`PodIntroductionThread`, `LevelUnlockingThread`) and
    `OnEnterPod__`'s voice-over; the interactive music.
