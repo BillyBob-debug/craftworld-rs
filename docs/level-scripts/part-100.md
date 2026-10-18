@@ -31,8 +31,8 @@ trace recorder that tests it against the scripted run.
 ### What changed
 
 - `lbp-runtime/src/story_native.rs`: `PodStateSearchStory`, the native Story entry
-  (`open` on the choice, `update` each tick after), and `LevelWorld::place_thing` /
-  `set_thing_mesh` for native stand-ins. It writes the trace's search state and builds the
+  (`open` on the choice, `update` each tick after), and `LevelWorld::place_thing` for
+  native stand-ins. It writes the trace's search state and builds the
   Story frame. It moves to the shared `NativeScript` trait when the Popit lane's lands.
 - Viewer `--story`: with the scripts it is the scripted path above (in use 600, choice
   640); with none loaded (`story_fallback.rs`) the first tick opens the pod, puts the

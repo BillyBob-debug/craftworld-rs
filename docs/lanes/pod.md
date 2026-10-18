@@ -5,11 +5,11 @@
 2. `crates/lbp-runtime/src/native_script.rs` (the Popit lane's shared trait, PR 152)
 
 ## State
-- PR for D353 (branch `d353-story`, worktree `E:\Projects\wt-d324`): the Story screen
-  without the game's scripts; handed to the coordinator for merge once rust and python
-  are green.
+- PR 153 (D353) merged. PR for D354 (branch `d354-story`, worktree
+  `E:\Projects\wt-d324`): the Story screen's pod opens through pod.bin's native port;
+  handed to the coordinator for merge once rust and python are green.
 - The lane also owns the Pod/Popit native scripts from here (Popit lane stopped,
-  2026-10-18). Decision numbers: D348-D399, next free D354.
+  2026-10-18). Decision numbers: D348-D399, next free D355.
 
 ## Facts
 - Toolchain from Git Bash: `source E:/Projects/d321-env.sh`,
@@ -25,12 +25,14 @@
   trace-native.jsonl the stand-in; vm-900.png vs native-120.png, mean abs 0.36).
 - The decrypted overlay holds only scripts (.ff) and SPU code; every Story data file is on
   the disc or update (slot list in DATA.FARC, strings in patch_0133.farc).
-- Measured stand-ins in `story_fallback.rs` (pod open, mesh 0x23959 on shell Thing 2,
-  planets Things 0-4, in-use camera) belong to pod.bin and the planets world script.
+- Measured stand-ins left in `story_fallback.rs` (planets Things 0-4, in-use camera)
+  belong to the planets world script; pod.bin runs as its D417 native port.
 
 ## Next
-1. Move `PodStateSearchStory` behind `NativeScript` (PR 152) and replace the measured
-   pod/planets stand-ins with native pod.bin (already in PR 152) and planets world scripts.
+1. Port the planets level's world script (camera dolly, world Thing, Moon) and Earth's
+   planet script behind `NativeScript`, checked against `trace-vm3.jsonl`; then drop
+   `STORY_LEVEL_THINGS` and `POD_IN_USE_CAMERA`. `PodStateSearch` is a pod computer state,
+   not a Thing script, so it stays a plain native entry until the state machine is ported.
 2. Play the moves (pod change-over, world Thing move in, Earth's turn, frame slide) from
    the trace instead of snapping to the end state.
 3. Leaving Story (back to the main menu); more searches.

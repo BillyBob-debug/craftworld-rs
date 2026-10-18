@@ -168,11 +168,6 @@ impl LevelWorld {
     pub fn place_thing(&mut self, thing: u32, world: [f32; 16]) {
         self.change_display(thing, |t| t.world_matrix = Some(world));
     }
-
-    /// D353: show another mesh on a Thing's PRenderMesh, as a script's mesh write does.
-    pub fn set_thing_mesh(&mut self, thing: u32, mesh: u32) {
-        self.change_display(thing, |t| t.mesh_guid = Some(mesh));
-    }
 }
 
 #[cfg(test)]
