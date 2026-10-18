@@ -66,6 +66,12 @@ fn run() -> Result<(), String> {
             w.box_from, w.port_from_raw, w.box_to, w.port_to_raw, w.swizzle_raw
         );
     }
+    // D700: the texture slots' GUIDs (numbers only), for tex_dump.
+    if let Ok(m) = lbp_resource::material::inspect(&bytes, || false) {
+        for (i, t) in m.prefix.textures.iter().enumerate() {
+            println!("  texture slot {i}: guid {:08x?} kind {}", t.guid, t.kind);
+        }
+    }
     // D331: the diffuse route's verdict with animation base on (the level-scene default).
     match lbp_preview::select_diffuse_with_animation_base(&g, true) {
         Ok(s) => println!(
