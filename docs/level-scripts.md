@@ -116,6 +116,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 110: starting a chosen story level (2026-10-18, D363)](level-scripts/part-110.md)
 - [Part 111: the viewer switches to the chosen level (2026-10-18, D364)](level-scripts/part-111.md)
 - [Part 112: the launched level starts at its entrance (2026-10-18, D365)](level-scripts/part-112.md)
+- [Part 113: Sackboy plays in the launched level (2026-10-18, D366)](level-scripts/part-113.md)
 
 ## Next
 

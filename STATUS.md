@@ -6384,3 +6384,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
   result that way, scored on Earth's surface as the engine does (0x42d584); the QA option
   `--level-scripts-move-at N:DIR` gives the same picks and an identical frame with and
   without the scripts.
+
+## D362 choosing a story level (2026-10-18)
+- Part 109 (`docs/level-scripts/part-109.md`): Cross on a story level
+  (`--level-scripts-cross-at`) asks for its launch as the engine does (0x4033b4), in both
+  modes; Back waits while a launch is pending, and a group's title follows the script.
