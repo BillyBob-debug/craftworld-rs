@@ -61,6 +61,8 @@ The facts AGENTS.md requires stay; repetition goes.
 - MODLOG.md entry: at most 6 lines.
 - Overwrite `STATUS-CURRENT.md` (at most ~60 lines) with the current state; move the
   previous "Latest" section to the end of STATUS.md, never keep it as "Before:".
+  `tests/test_doc_budget.py` (CI `python`) fails past 80 lines, on a "Before:" heading,
+  or on any `docs/**/*.md` over 1,500 lines.
 
 ## Build and test (Windows, PowerShell)
 
