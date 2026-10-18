@@ -1442,6 +1442,10 @@ fn follow_level(
 /// taken as the new placed one. D350 (part 97): the badge's first fill (no overlay shown
 /// before) shows its overlays settled, as the game's card does before it sets its grow
 /// flag; only overlays shown after that spring in.
+/// D351 (part 98): closing the Story search frees the cards with all their slots (FOUND
+/// 0x42a92c erases a card once its scale reaches 0, 0x4221d8 to 0x6fbaa0), so the next
+/// opening builds new cards, a first fill; hidden here means the card is gone, so the
+/// overlays vanish with it rather than shrink out one by one.
 #[allow(clippy::type_complexity)]
 fn grow_badge_overlays(
     v: Res<crate::Viewer>,

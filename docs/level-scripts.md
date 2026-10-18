@@ -101,6 +101,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 95: the goodies disc's pie (2026-10-17, D348)](level-scripts/part-95.md)
 - [Part 96: the badge overlays' spin and spring-in (2026-10-17, D349)](level-scripts/part-96.md)
 - [Part 97: the overlays' turn axis and the badge's first fill (2026-10-17, D350)](level-scripts/part-97.md)
+- [Part 98: a left overlay shrinks out, and the cards go when Story closes (2026-10-17, D351)](level-scripts/part-98.md)
 
 ## Next
 
