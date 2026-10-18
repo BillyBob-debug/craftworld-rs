@@ -927,11 +927,11 @@ pub fn install(app: &mut App) -> Result<(), String> {
             .after(crate::camera)
             .before(crate::capture),
     )
-    .add_systems(Update, (menu_keys, close_key))
+    .add_systems(Update, (warning_keys, menu_keys, close_key).chain())
     // D364: before the display's load (and the Pod shell's clearing), which the switch
     // asks for.
     .add_systems(Update, switch_level.before(crate::clear_pod_shell))
-    .add_systems(EguiPrimaryContextPass, (speech, window));
+    .add_systems(EguiPrimaryContextPass, (speech, warning_popup, window));
     Ok(())
 }
 
@@ -1092,7 +1092,8 @@ fn menu_keys(
         .shell
         .as_ref()
         .is_some_and(|s| s.host.world.pod_computer_in_use);
-    if !in_use || p.host.world.gooey.drawn_menu().is_none() {
+    let popup = !p.host.world.pod.launch_warnings.is_empty();
+    if !in_use || popup || p.host.world.gooey.drawn_menu().is_none() {
         return;
     }
     let pad = |b| pads.iter().any(|g| g.just_pressed(b));
@@ -1123,6 +1124,45 @@ fn menu_keys(
     }
 }
 
+/// D378: the launch warning popup answers Enter or Cross (Continue: the launch goes
+/// ahead) and C or Circle (Cancel: the launch is dropped). FOUND (01.33): the popup is
+/// modal (type 0x4b flags +0x48 bit 1), the manager (0x3e99f4) masks the pad meanwhile,
+/// so the menu and the speech bubble keys wait for it. INFERRED: Circle is the second
+/// button (trigger 6); the script that maps the pad to the buttons was not read.
+fn warning_keys(
+    mut play: NonSendMut<Play>,
+    keys: Res<ButtonInput<KeyCode>>,
+    pads: Query<&Gamepad>,
+) {
+    let world = &mut play.host.world;
+    if world.pod.launch_warnings.is_empty() {
+        return;
+    }
+    let pad = |b| pads.iter().any(|g| g.just_pressed(b));
+    let carry_on =
+        keys.any_just_pressed([KeyCode::Enter, KeyCode::NumpadEnter]) || pad(GamepadButton::South);
+    let cancel = keys.just_pressed(KeyCode::KeyC) || pad(GamepadButton::East);
+    if carry_on || cancel {
+        let warning = world.pod.launch_warnings[0];
+        world.answer_launch_warning(carry_on);
+        println!(
+            "Launch warning {warning:?} answered {}: {} left, launching {} (D378)",
+            if carry_on { "Continue" } else { "Cancel" },
+            world.pod.launch_warnings.len(),
+            world.pod.launch.is_some()
+        );
+    }
+}
+
+/// D378: draws the launch warning popup that is up (also under `--qa-hide-ui`: it is
+/// part of the game, not a panel).
+fn warning_popup(mut contexts: EguiContexts, play: NonSend<Play>) -> Result {
+    if let Some(popup) = play.host.world.launch_warning_popup() {
+        crate::launch_popup::draw(contexts.ctx_mut()?, &popup);
+    }
+    Ok(())
+}
+
 /// Level1 part 3: C or Circle closes the open speech bubble on the next tick, as the
 /// game's Circle does ([`LevelScripts::player_close_message`]); not while the pod
 /// computer is in use (its menu has the key).
@@ -1132,7 +1172,9 @@ fn close_key(mut play: NonSendMut<Play>, keys: Res<ButtonInput<KeyCode>>, pads: 
         .shell
         .as_ref()
         .is_some_and(|s| s.host.world.pod_computer_in_use);
+    let popup = !p.host.world.pod.launch_warnings.is_empty();
     if !in_use
+        && !popup
         && (keys.just_pressed(KeyCode::KeyC)
             || pads.iter().any(|g| g.just_pressed(GamepadButton::East)))
     {

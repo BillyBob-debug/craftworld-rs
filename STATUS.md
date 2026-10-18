@@ -6439,3 +6439,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D373 Back's main menu (2026-10-18)
 - Part 120 (`docs/level-scripts/part-120.md`): native Back from Story builds the main
   menu on the next tick, so the Pod's native and scripted menus now match every tick.
+
+## D374 the cursor arrives (2026-10-18)
+- Part 121 (`docs/level-scripts/part-121.md`): the native planets answer
+  `HasCursorArrived` and land a flight at once on `SetWantSearchDetails`' first flag.

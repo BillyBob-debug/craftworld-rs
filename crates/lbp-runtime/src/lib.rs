@@ -2852,10 +2852,29 @@ impl LevelWorld {
         LevelCross::Launch(slot)
     }
 
+    /// D378: the launch warning popup that is up: its text and its two buttons' labels,
+    /// from the disc's LAMS text (the built-in labels where a key has no text). FOUND
+    /// (01.33): the popup (type 0x4b, queued by 0x3e995c) is drawn by the script
+    /// `gamedata/scripts/gamemessagingmanager.ff` (GUID 42623), which only the patch's
+    /// encrypted archive holds, so the viewer draws it itself.
+    pub fn launch_warning_popup(&self) -> Option<LaunchWarningPopup> {
+        let warning = *self.pod.launch_warnings.first()?;
+        let label = |key, built_in: &str| self.lams(key).unwrap_or(built_in).to_string();
+        let [carry_on, cancel] = pod::LAUNCH_WARNING_BUTTONS;
+        Some(LaunchWarningPopup {
+            warning,
+            text: self.launch_warning_text(warning),
+            buttons: [label(carry_on, "Continue"), label(cancel, "Cancel")],
+        })
+    }
+
     /// D367: the player answers the launch warning that is up: Continue takes it down
     /// (the next one shows, or the hand-off goes ahead); Cancel drops the launch.
-    /// INFERRED: the popup's result handler was not traced; Cancel is taken to cancel
-    /// the pending launch as a new Cross on another level does.
+    /// D378 FOUND (01.33): the popup's config (0x3e3248, type 0x4b at +0x1770) maps
+    /// trigger 5 (the first button) to handler 0x10 (0x3e68e0), which only closes it, so
+    /// the pod's step (0x402560) commits the launch (0x4022fc) once it is gone; trigger 6
+    /// (the second button) to handler 0x3c (0x3e7870), which drops the pending launch
+    /// (0x402478 -> 0x3f9794: pod+0x9c4 = 0, the slot cleared, every 0x4b popup closed).
     pub fn answer_launch_warning(&mut self, carry_on: bool) {
         let pod = &mut self.pod;
         if pod.launch_warnings.is_empty() {

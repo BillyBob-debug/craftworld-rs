@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D377 the start checkpoint (2026-10-18)
+## Latest: D378 the launch warning popup (2026-10-18)
+- Part 125 (`docs/level-scripts/part-125.md`): a launch warning shows in a built-in
+  box; Cross carries on, Circle cancels the launch (handler 0x3c).
+
+## D377 the start checkpoint (2026-10-18)
 - Part 124 (`docs/level-scripts/part-124.md`): Sackboy starts at the checkpoint the
   game scores highest (entrance gate, active, infinite or double), not the first.
 
@@ -22,10 +26,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D375 the player-count texts (2026-10-18)
 - Part 122 (`docs/level-scripts/part-122.md`): the native launch warnings carry the
   slot's player bounds and give the popup text from the disc's LAMS tables.
-
-## D374 the cursor arrives (2026-10-18)
-- Part 121 (`docs/level-scripts/part-121.md`): the native planets answer
-  `HasCursorArrived` and land a flight at once on `SetWantSearchDetails`' first flag.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

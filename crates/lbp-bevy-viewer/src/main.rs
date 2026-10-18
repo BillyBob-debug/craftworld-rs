@@ -6,6 +6,7 @@ mod fog_tint;
 mod game_font;
 mod glow_post;
 mod gooey_ui;
+mod launch_popup;
 mod launcher;
 mod menu_layer;
 mod mlaa_post;
