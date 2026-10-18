@@ -2,7 +2,9 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use lbp_sim::character::{spawn_sackboy, SackboyBody, SackboyPlugin, FLOOR_REST, RADIUS};
+use lbp_sim::character::{
+    spawn_sackboy, SackboyBody, SackboyPlugin, FLOOR_REST, RADIUS, SPAWN_HOLD_TICKS,
+};
 use lbp_sim::sackboy::Input;
 use lbp_sim::{to_level, SimPlugin, ZSlab, TICK_HZ, UNIT_SCALE};
 use std::time::Duration;
@@ -182,4 +184,28 @@ fn lane_change_needs_floor_in_the_target_lane() {
     };
     let (p, ..) = (0..60).map(|_| tick(&mut app, right)).last().unwrap();
     assert!(p[1] < -100., "fell off the end of the back floor: {p:?}");
+}
+
+/// D376: a checkpoint's spawn hold keeps him in place for its ticks, then he moves.
+#[test]
+fn spawn_hold_keeps_him_still_then_releases() {
+    let mut app = world(|_| {});
+    let start = (0..5)
+        .map(|_| tick(&mut app, Input::default()))
+        .last()
+        .unwrap()
+        .0;
+    {
+        let world = app.world_mut();
+        let mut q = world.query::<&mut SackboyBody>();
+        q.single_mut(world).expect("one Sackboy").hold = SPAWN_HOLD_TICKS;
+    }
+    let right = Input {
+        x: 1.,
+        ..Default::default()
+    };
+    for _ in 0..SPAWN_HOLD_TICKS {
+        assert_eq!(tick(&mut app, right).0, start, "held");
+    }
+    assert!(tick(&mut app, right).0[0] > start[0], "released");
 }

@@ -6431,3 +6431,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D371 Story slides back (2026-10-18)
 - Part 118 (`docs/level-scripts/part-118.md`): native Pod menus follow the world Thing
   every tick, so Story back from a group slides in and settles as the scripted one.
+
+## D372 the pod computer pushes first (2026-10-18)
+- Part 119 (`docs/level-scripts/part-119.md`): the native pod computer pushes the main
+  menu and Story before the tick, so the Pod world moves on the scripted tick.

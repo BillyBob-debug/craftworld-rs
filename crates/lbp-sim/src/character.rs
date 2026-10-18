@@ -32,6 +32,12 @@ pub const GROUND_PROBE: f32 = 2.0;
 /// How far below Sackboy a lane must have floor for a lane change.
 pub const LANE_PROBE: f32 = 400.0;
 
+/// D376: how many ticks a checkpoint holds a player it spawns before releasing him. FOUND
+/// (01.33): 0x5a2d8 parents the player to the checkpoint with part 0 off and adds a
+/// spawning entry with timer 0; the checkpoint's update (0x5b118) counts it up each frame
+/// and releases him (0x58a24) once it passes 10, without moving him.
+pub const SPAWN_HOLD_TICKS: u8 = 11;
+
 /// Sackboy's movement state and this tick's pad input (set it before `FixedUpdate`).
 #[derive(Component, Debug, Clone, Default)]
 pub struct SackboyBody {
@@ -41,16 +47,25 @@ pub struct SackboyBody {
     pub grounded: bool,
     /// Position computed this tick (physics units), written by `apply_moves`.
     next: Option<Vector>,
+    /// D376: ticks left in a checkpoint's spawn hold ([`SPAWN_HOLD_TICKS`]); while it
+    /// runs he does not move or fall and his input is not read.
+    pub hold: u8,
 }
 
 /// Spawns Sackboy at `position` (world units; his position, [`FLOOR_REST`] above his feet)
 /// in lane `z`.
 pub fn spawn_sackboy(commands: &mut Commands, position: [f32; 2], z: f32) -> Entity {
+    spawn_sackboy_held(commands, position, z, 0)
+}
+
+/// [`spawn_sackboy`], held for `hold` ticks first (D376, [`SPAWN_HOLD_TICKS`]).
+pub fn spawn_sackboy_held(commands: &mut Commands, position: [f32; 2], z: f32, hold: u8) -> Entity {
     let p = sv(position);
     commands
         .spawn((
             SackboyBody {
                 controller: Sackboy::at_lane(z),
+                hold,
                 ..Default::default()
             },
             RigidBody::Kinematic,
@@ -86,6 +101,11 @@ fn drive_sackboy(
     // D330: Sackboy's fall follows the level's gravity setting.
     let gravity = GRAVITY_TICK * world_gravity.map_or(1.0, |g| g.scale());
     for (me, mut body, pos, mut slab, shape) in &mut q {
+        if body.hold > 0 {
+            body.hold -= 1;
+            body.grounded = false;
+            continue;
+        }
         let mut at = pos.0;
         let filter = SpatialQueryFilter::default().with_excluded_entities([me]);
         let in_lane = |z: f32| {
