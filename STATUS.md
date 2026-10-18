@@ -6423,3 +6423,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D369 the menus slide in (2026-10-18)
 - Part 116 (`docs/level-scripts/part-116.md`): the native Pod menus slide in with the
   world Thing as the scripted ones do; no other search can be ported offline.
+
+## D370 closed menus go (2026-10-18)
+- Part 117 (`docs/level-scripts/part-117.md`): a closed or covered Pod menu's frame
+  goes 15 ticks after it is last built, so the scripts' `OldStates` empty again.

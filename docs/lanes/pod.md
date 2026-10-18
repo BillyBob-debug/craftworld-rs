@@ -1,21 +1,20 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-120.md` (119 for the pushes, 118 for Story back, 117 for
-   closed menus, 116 for the slide-in, 115 for the cursor's flight, 114 for the launch
-   warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the switch, 110 for
-   the hand-off, 109 for Cross on a level, 108 for the cursor, 107 for the group zoom,
-   106 for choosing a group, 105 for Back, 104 for the pod computer's stack and main
-   menu)
+1. `docs/level-scripts/part-121.md` (120 for Back, 119 for the pushes, 118 for Story back,
+   117 for closed menus, 116 for the slide-in, 115 for the cursor's flight, 114 for the
+   launch warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the switch, 110
+   for the hand-off, 109 for Cross on a level, 108 for the cursor, 107 for the group zoom,
+   106 for choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 175 (D372) merged. PR for D373 (branch `pod-back-pop`,
-  worktree `E:\Projects\wt-d324`): the main menu built on the tick after Back; handed
-  to the coordinator for merge once rust and python are green.
+- PRs 153 (D353) through 176 (D373) merged. PR for D374 (branch `pod-next`,
+  worktree `E:\Projects\wt-d324`): `HasCursorArrived` and the land-at-once flag;
+  handed to the coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D374.
+  Decision numbers: D348-D399, next free D375.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -92,11 +91,11 @@
   data file is on the disc or update.
 
 ## Next
-1. Open: the cursor's height and drawing, the player-count texts
-   (0x16e3b0, 0x16de78), the warning popup's drawing, the game's entrance animation
-   and state 6/7 load.
+1. Open: the player-count texts (0x16e3b0, 0x16de78), the warning popup's drawing, the
+   game's entrance animation and state 6/7 load.
    (The native and scripted menus match through Back, D373; the default result 23
-   before tick 640 is scripted mode's own seeding at load, native's none is kept, D369.)
+   before tick 640 is scripted mode's own seeding at load, native's none is kept, D369.
+   The cursor's height and blend have no reader and its drawing is script-side, D374.)
 2. The other entries' states as they unlock (the other searches need the network).
 3. The cutscene threads (`PodIntroductionThread`, `LevelUnlockingThread`) and
    `OnEnterPod__`'s voice-over; the interactive music.
