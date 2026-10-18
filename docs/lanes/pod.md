@@ -83,8 +83,8 @@
 
 ## Next
 1. Pruning `OldStates` frames. (The default result 23 before tick 640 is scripted mode's
-   own seeding at load, `add_story_results`; the game sets none before the search
-   opens, so native mode's none is kept. D369 check.)
+   own seeding at load, `add_story_results`; INFERRED the game sets none before the
+   search opens (no script call), so native mode's none is kept. D369 check.)
 2. Story's slide back from a group (721-730, the view moves) and the native world
    Thing's tick of lag. Open: the cursor's height and drawing, the player-count texts
    (0x16e3b0, 0x16de78), the warning popup's drawing, the game's entrance animation
