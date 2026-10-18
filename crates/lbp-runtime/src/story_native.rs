@@ -223,20 +223,66 @@ impl PodStateSearch {
         }
         let frame = world.pworld.frame;
         let key = self.details.frame_key();
-        let (menu, matrix) = match self.details {
-            SearchDetails::StoryLevels => (story_frame(), STORY_FRAME_MATRIX),
-            SearchDetails::Group(g) => (group_frame(&world.group_title(g)), GROUP_FRAME_MATRIX),
+        let (menu, rest, world_rest) = match self.details {
+            SearchDetails::StoryLevels => (story_frame(), STORY_FRAME_MATRIX, STORY_WORLD_REST),
+            SearchDetails::Group(g) => (
+                group_frame(&world.group_title(g)),
+                GROUP_FRAME_MATRIX,
+                GROUP_WORLD_REST,
+            ),
         };
+        let since = *world.gooey.first_built.entry(key).or_insert(frame);
+        let matrix = sliding_frame_matrix(world, frame - since, rest, world_rest);
         let g = &mut world.gooey;
-        g.first_built.entry(key).or_insert(frame);
         g.frames.insert(key, menu);
         g.item_matrices.insert(key, matrix);
         g.item_matrix_frames.insert(key, frame);
     }
 }
 
+/// D369 (part 116): the planets level's world Thing (Thing 0) where the Story frame's
+/// matrix was measured, tick 659 (MEASURED, d362 trace).
+pub const STORY_WORLD_REST: [f32; 16] = [
+    1.5296844, 0.44180164, -1.210321, 0., 0., 1.8787454, 0.6857956, 0., 1.2884353, -0.5245254,
+    1.4369438, 0., 1912.1056, 3423.4658, -9460.587, 1.,
+];
+
+/// D369: the world Thing where the group frame's matrix was measured, tick 695
+/// (MEASURED, d362 trace).
+pub const GROUP_WORLD_REST: [f32; 16] = [
+    1.5296844, 0.44180164, -1.210321, 0., 0., 1.8787454, 0.6857956, 0., 1.2884353, -0.5245254,
+    1.4369438, 0., 1912.1056, 1973.3236, -5172.7827, 1.,
+];
+
+/// D369: how long a menu frame follows the world Thing after it is first built. INFERRED:
+/// the measured slides settle in 15 to 19 ticks (601-619, 641-659, 681-695); the window
+/// allows the native world Thing's tick of lag. Later the frame is drawn at rest.
+pub const FRAME_SLIDE_TICKS: i32 = 30;
+
+/// D369 (part 116): the frame's matrix while the menu slides in. The scripts set it every
+/// tick to the world Thing's position times a fixed view (`SetupFrameMatrix`, FOUND), so
+/// the frame moves with the world Thing: `W(t) * inverse(world_rest) * rest`. For `age`
+/// ticks after the first build up to [`FRAME_SLIDE_TICKS`]; then, or with no world Thing,
+/// `rest`. Not done: a frame built again later (Story back from a group, 721-730), where
+/// the game's view itself moves; that frame is drawn at rest.
+pub fn sliding_frame_matrix(
+    world: &LevelWorld,
+    age: i32,
+    rest: [f32; 16],
+    world_rest: [f32; 16],
+) -> [f32; 16] {
+    if age > FRAME_SLIDE_TICKS {
+        return rest;
+    }
+    let now = world.world.and_then(|t| world.thing_display(t)?.world);
+    match (now, crate::transform::inverse(&world_rest)) {
+        (Some(now), Some(inv)) => crate::transform::mul(&crate::transform::mul(&now, &inv), &rest),
+        _ => rest,
+    }
+}
+
 /// D359: the group frame's matrix. MEASURED: settled from tick 695 (it slides in with the
-/// world Thing from tick 681; drawn where it comes to rest).
+/// world Thing from tick 681; D369 plays the slide, [`sliding_frame_matrix`]).
 pub const GROUP_FRAME_MATRIX: [f32; 16] = [
     1.7360102,
     0.0059023574,
@@ -309,8 +355,8 @@ pub fn group_frame(title: &str) -> GooeyFrame {
 }
 
 /// The Story frame's matrix, root frame units to the planets level's world. MEASURED:
-/// settled from tick 659 (it follows the world Thing's move in from tick 641; the move
-/// is not played here, the frame is drawn where it comes to rest).
+/// settled from tick 659 (it follows the world Thing's move in from tick 641; D369 plays
+/// the move, [`sliding_frame_matrix`]).
 pub const STORY_FRAME_MATRIX: [f32; 16] = [
     3.2550192,
     0.01106692,
@@ -746,5 +792,34 @@ mod tests {
         PodStateSearch::default().open(&mut w);
         assert_eq!(w.pod.search.default_result, None);
         assert!(w.story_open());
+    }
+
+    #[test]
+    fn d369_frames_slide_in_with_the_world_thing() {
+        let mut w = LevelWorld {
+            world: Some(0),
+            things: vec![crate::ThingState {
+                world_matrix: Some(STORY_WORLD_REST),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        let at = |w: &LevelWorld, age| {
+            sliding_frame_matrix(w, age, STORY_FRAME_MATRIX, STORY_WORLD_REST)
+        };
+        let close =
+            |a: [f32; 16], b: [f32; 16]| a.iter().zip(&b).all(|(a, b)| (a - b).abs() < 0.01);
+        // At rest the frame is where it was measured.
+        assert!(close(at(&w, 0), STORY_FRAME_MATRIX));
+        // The world Thing 1000 further down z: the frame goes with it.
+        w.things[0].world_matrix.as_mut().unwrap()[14] -= 1000.;
+        let m = at(&w, 5);
+        let mut moved = STORY_FRAME_MATRIX;
+        moved[14] -= 1000.;
+        assert!(close(m, moved));
+        // After the slide window, or with no world Thing, it is drawn at rest.
+        assert_eq!(at(&w, FRAME_SLIDE_TICKS + 1), STORY_FRAME_MATRIX);
+        w.world = None;
+        assert_eq!(at(&w, 5), STORY_FRAME_MATRIX);
     }
 }

@@ -45,9 +45,30 @@ pub const STORY_PLANETS_VIEW: i32 = 6;
 pub const GROUP_PLANETS_VIEW: i32 = 7;
 pub const NO_STATE_PLANETS_VIEW: i32 = 0;
 
+/// D369 (part 116): the planets level's world Thing (Thing 0) where the main menu frame's
+/// matrix was measured, tick 620 (MEASURED, d362 trace).
+pub const MAIN_MENU_WORLD_REST: [f32; 16] = [
+    1.995102,
+    -0.047966495,
+    0.1314048,
+    0.,
+    0.,
+    1.8787454,
+    0.6857956,
+    0.,
+    -0.1398857,
+    -0.6841161,
+    1.8741444,
+    0.,
+    -1400.,
+    4479.9565,
+    -10021.8,
+    1.,
+];
+
 /// The main menu frame's matrix, root frame units to the planets level's world. MEASURED:
-/// settled from tick 620 (it follows the world Thing's move in from tick 601; the move is
-/// not played here, the frame is drawn where it comes to rest).
+/// settled from tick 620 (it follows the world Thing's move in from tick 601; D369 plays
+/// the move with [`crate::sliding_frame_matrix`]).
 pub const MAIN_MENU_FRAME_MATRIX: [f32; 16] = [
     3.0380177,
     0.010329125,
@@ -276,10 +297,16 @@ impl NativePodComputer {
             g.focus_since = Some(frame);
         }
         g.high_bits = MAIN_MENU_FRAME_KEY.0;
-        g.first_built.entry(MAIN_MENU_FRAME_KEY).or_insert(frame);
+        let since = *g.first_built.entry(MAIN_MENU_FRAME_KEY).or_insert(frame);
+        let matrix = crate::sliding_frame_matrix(
+            world,
+            frame - since,
+            MAIN_MENU_FRAME_MATRIX,
+            MAIN_MENU_WORLD_REST,
+        );
+        let g = &mut world.gooey;
         g.frames.insert(MAIN_MENU_FRAME_KEY, main_menu_frame());
-        g.item_matrices
-            .insert(MAIN_MENU_FRAME_KEY, MAIN_MENU_FRAME_MATRIX);
+        g.item_matrices.insert(MAIN_MENU_FRAME_KEY, matrix);
         g.item_matrix_frames.insert(MAIN_MENU_FRAME_KEY, frame);
         g.focus_moved = false;
     }
