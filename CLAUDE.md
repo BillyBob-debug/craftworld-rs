@@ -50,7 +50,8 @@ counts, don't print the JSON. Viewer QA logs: grep for placement/error lines.
 
 ## Handoff writing budget
 
-Handoff notes are written every milestone and reread later, so keep them short.
+Lane state files (`docs/lanes/<lane>.md`) are rewritten every PR and reread after every
+compaction, so keep them under ~40 lines.
 The facts AGENTS.md requires stay; repetition goes.
 
 - Full detail (rule evidence, pins, applicability, every command) goes once, in the
@@ -122,9 +123,12 @@ copy the relevant ones into each subagent brief.
   Agent-tool subagent that returns a file path plus a 3-line verdict. Implementer
   batches run as local `claude -p` workers in worktrees on the owner's plan usage,
   never cloud credit, and no follow-up work goes to finished cloud agents.
-- **Context rollover: plan at ~150k, stop near ~170k tokens** (floor is ~99k). Finish the task, update the handoff
-  (`docs/handoff-pc-<date>*.md`, short, no copied logs) and STATUS-CURRENT.md first,
-  then stop and let a fresh session continue.
+- **Lane state instead of handoff parts** (owner-approved 2026-10-18, docs/handoff-research.md).
+  Each PC lane keeps one `docs/lanes/<lane>.md` (template in docs/lanes/README.md), rewritten
+  after every PR in that PR. Context rollover is auto-compaction in place at ~170k in the
+  thread folder, not a fresh session; after a compaction, re-read the lane file before
+  continuing. A fresh thread on a lane starts from that file plus the open PR's branch.
+  Do not write new `docs/handoff-pc-*.md` files.
 - **Do not install the archive.org DLC fix.** The owner declined it.
 - **Permissions.** Sessions run in auto mode. A step the classifier blocks is fixed by
   extending `autoMode.allow` in `$HOME\.claude\settings.json` with a script the user
