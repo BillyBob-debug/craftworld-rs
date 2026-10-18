@@ -1585,6 +1585,8 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
     // The display: the level as the Load button loads it, without the Pod's rig, Puter
     // state, Story lights and the old scene's Thing map.
     v.level.switch_to(Some(guid), None);
+    // D365: the view starts over the level's entrance, as the game's camera does.
+    v.level.entrance = true;
     v.requested = true;
     v.ready_frames = 0;
     commands.remove_resource::<crate::PodRigRes>();

@@ -175,6 +175,9 @@ struct LevelMode {
     no_per_bone: bool,
     /// D147 `--level-focus-thing N`: frame the view on that Thing's item (QA captures).
     focus: Option<usize>,
+    /// D365 `--level-entrance-camera` (and every level the Pod launches): the view starts
+    /// at the game's default camera over the level's entrance (`entrance_orbit`).
+    entrance: bool,
     /// P2 `--pod-camera N`: home view placing Thing N (the Pod globe) where the RPCS3
     /// reference shows it (pod_menu::pod_camera).
     pod: Option<usize>,
@@ -246,6 +249,7 @@ impl LevelMode {
         self.guid = guid;
         self.path = path;
         self.focus = None;
+        self.entrance = false;
         self.pod = None;
         self.shell = None;
         self.t0 = None;
@@ -841,6 +845,10 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
             // Read by activate_on_show().
             continue;
         }
+        if flag == "--level-entrance-camera" {
+            v.level.entrance = true;
+            continue;
+        }
         if flag == "--level-report" {
             v.level.report = true;
             continue;
@@ -894,7 +902,7 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
             println!("lbp-bevy-viewer --snapshot FILE --game-dir DIRECTORY [--select-guid HEX]\n--play-animation HEX: play an animation on the selected mesh\n--animation-frame N: hold that running frame instead of playing (QA captures)\n--skinning gpu|cpu: Bevy joint skinning (default) or the CPU reference path\n--model-up z|y: single-mesh model up axis (default z: Z-up, front -Y, shown upright facing the camera; y: raw axes)\n--browse-query TEXT; --show-unavailable: browser filters\n--animation-base: local animation base-row snapshot (not game time; also levels)\n--no-animation-base, --no-instance-default: turn off the D188 single-mesh defaults (animation base values; white instance color 1,1,1,1 when no Thing supplies one) and the D191 level defaults (animation base values; each Thing's editorColor as its instance color, inferred)\n--instance-rgba R,G,B,A: supplied linear instance color (overrides the white default)\n--synthetic: authored depth/UV/repeat/clamp scene\n--synthetic-groups: authored mixed material groups\n--synthetic-affine: authored UV scale/offset/reflection\n--qa-capture NEW_PNG_UNDER_LOCAL_ANALYSIS: capture then exit (window shown without taking focus)
 --no-activate: show the window without taking focus or the foreground (interactive runs)
 --qa-hide-ui: draw no panels (clean captures)\n--window-16-9: 1280x720 window (the game's 16:9 frame; RPCS3 comparisons)\n--preview-lighting: key + ambient preview lighting (not game lighting; levels use their stored settings, approximate)\n--lighting-preset N|main: with a level, light from its stored preset N instead of the main settings (P2l; --lbp-lighting defaults to preset 0 when one is stored, main forces the main block)\n--lbp-lighting: preview lighting shaped like the community brdf.cg reconstruction (hemisphere ambient, sun, two rims, squared combine; unfitted stored values, uniform mapping inferred, P2l); on by default in level mode (P2w), --no-lbp-lighting draws levels unlit, --preview-lighting keeps the older Lambert preview\n--no-glow: skip material glow (output port 4; P3h A/B)\n--no-edge-glow: skip the glow post pass on the Pod dissolve's line (D292 A/B)
---final-pass / --no-final-pass: with a level on the level lighting, the game's final pass over the frame, x1.2998 and its vignette mixed back by the scene's alpha: 0 in the Pod picture (--pod-camera), the scene's own elsewhere (D294, D300; on by default)\n--depth-of-field / --no-depth-of-field: with a level on the level lighting, the game's depth of field over the scripts' Cam.SetDOFAndFog range (D298; on by default in the Pod picture, --pod-camera, off by default in other levels, D304)\n--mlaa / --no-mlaa: in the Pod picture (--pod-camera) on the level lighting, the game's anti-aliasing job (EDGE MLAA: edge thresholds 10 and 0.348 of the brighter pixel, Reshetov blend) after the depth of field, without MSAA (D302; on by default there, D304)\n--no-baked-ao: skip the backdrop lightmap baked AO under --lbp-lighting (P3k A/B)\n--bump-gloss / --no-bump-gloss: material bump maps (output port 3) and static gloss colours (port 2) under --lbp-lighting, on with it by default (P2q; offsets and frame inferred)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels are clear glass (D286; --runtime-texture 00002f6c:0:HEX paints a texture on them, --no-pod-wall is accepted and does nothing); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open; --pod-figure-data: closed spot from the shell's data (checkpoint + spawn offset, dropped to the floor) instead of the RPCS3 fit (both are reported)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera and in the scripted Pod, --level-scripts with --pod-camera N, unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts, with the open speech bubbles and the subtitle drawn as plain boxes the level lit again when a script changes the global lighting or darkness, and each Thing's own model hidden, tinted and moved as the scripts set it (a mesh that is not visible in play mode is hidden), and the camera moved to a script's override camera while one is on, or put at the camera a script writes itself (the Pod's planets level: with --pod-camera N and no --pod-shell the level also hangs under its script-moved world Thing); --level-scripts-flags N,..: progression flags set on the profile; --profile-records PATH: the local profile's goodies counts by SlotID (lines TYPE ID COLLECTED TOTAL, written by scripts/rpcs3_profile_records.py from a running game; D341), so the Story info bubble shows its goodies row, and a line colours C0 C1 C2 C3 colours the players (D342) and the Story badge's frame (D345) with the profile's first colour, and lines overlays TYPE ID MASK put the default group's medals on its badge (D346); --level-scripts-hold-at N (QA): the scripts stop after tick N, so a capture shows that tick; --level-scripts-in-use-at N (QA): the pod computer is in use once N ticks have run (a stand-in for the player engaging it), so the Pod level's change-over runs and its pod mesh is swapped; with --pod-camera N and --pod-shell HEX the shell level is played in the same session with a Sackboy (not drawn, a placeholder) on the pod computer's trigger, and Space or gamepad Square is the engage button on the pad the scripts read for one tick (the pod's own script then asks for the pod computer, once the intro has set its progression flags), or while the computer is in use a request to the host to close it, as Esc or Circle (placeholder: no script path for closing was found); --level-scripts-press-at N (QA): that engage press on tick N without a key; the scripted Pod has the viewer's own Sackboy (the play mode in pod.bin) with the pod computer's clips, --no-pod-sackboy leaves him out\n--play-sackboy: with a level, its shapes as a physics world and Sackboy at the first checkpoint, drawn as his mesh (0000043f unless --select-guid) with stand/walk/lane/jump/land clips picked from his state (rules inferred; --play-animation HEX plays one clip instead) (arrows walk and change lanes, Space jumps, I/K/L/J moods happy/sad/angry/scared; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f, mood presses U D R L) with the position printed each tick; --qa-record DIR,START,END[,SPEED] (QA only) saves one PNG per scripted tick START..END into a new local-analysis DIR, game time at SPEED (default 0.25), then exits\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
+--final-pass / --no-final-pass: with a level on the level lighting, the game's final pass over the frame, x1.2998 and its vignette mixed back by the scene's alpha: 0 in the Pod picture (--pod-camera), the scene's own elsewhere (D294, D300; on by default)\n--depth-of-field / --no-depth-of-field: with a level on the level lighting, the game's depth of field over the scripts' Cam.SetDOFAndFog range (D298; on by default in the Pod picture, --pod-camera, off by default in other levels, D304)\n--mlaa / --no-mlaa: in the Pod picture (--pod-camera) on the level lighting, the game's anti-aliasing job (EDGE MLAA: edge thresholds 10 and 0.348 of the brighter pixel, Reshetov blend) after the depth of field, without MSAA (D302; on by default there, D304)\n--no-baked-ao: skip the backdrop lightmap baked AO under --lbp-lighting (P3k A/B)\n--bump-gloss / --no-bump-gloss: material bump maps (output port 3) and static gloss colours (port 2) under --lbp-lighting, on with it by default (P2q; offsets and frame inferred)\n{CENSUS_FLAGS_HELP}\n--print-census: print the corpus-count panel text and exit (no window)\n--ui-demo: authored UI layer demo (no game data; other options ignored)\n--slot-browser: story slot browser over --snapshot/--game-dir (--slot-browser-report prints counts and exits; --slot-browser-slots adds one line per slot)\n--text-browser: .trans tables (search by text, tag or key) and font glyph sheets (--text-browser-report prints counts and exits)\n--ui-script CLASS: run one of your UI scripts headlessly (stub natives) and draw the frame tree it builds; --ui-script-function NAME (default UpdateUI__Q5Gooey), --ui-script-report prints counts and the outline (--qa-hide-ui draws the tree without the count lines)\n--pod-menu CLASS: the Pod main menu as pills on a globe and moon (placeholder spheres; pill positions from the RPCS3 reference), Up/Down/Enter; with a level, the pills over the level view\n--pod-camera N: with a level, home view that puts Thing N (the Pod globe) where the RPCS3 frame has it\n--pod-shell HEX: with --pod-camera, the Pod shell level (000027b9) as a layer over the view; Space or gamepad Square opens/closes the Puter (camera dolly), Esc or Circle closes; --pod-game-camera: the planets view through the game's own camera (presets, vfov 57.3 deg), World transform and main-menu Earth/Moon placement instead of the globe fit (P2k);\n--pod-open: start open; the side panels are clear glass (D286; --runtime-texture 00002f6c:0:HEX paints a texture on them, --no-pod-wall is accepted and does nothing); --pod-t T: start at opening progress T (0-1, mid-dolly captures); --pod-shell-camera FX,FY,FZ,TX,TY,TZ: closed shell eye from the game camera preset (shell level units); --select-guid HEX (Sackboy 0000043f) stands in front of the DualShock, --play-animation HEX plays on him, --pod-hold-animation HEX while the Puter is open; --pod-figure-data: closed spot from the shell's data (checkpoint + spawn offset, dropped to the floor) instead of the RPCS3 fit (both are reported)\n--puter-screen CLASS: in the 3D view, that UI script's frame tree on a screen quad (arrows/Enter focus); --puter-function NAME, --puter-at X,Y,Z[,WIDTH] (display units, facing +Z; default 1.1,0,0,1.2)\n--popit: inventory browser over the disc plans (--popit-report prints counts; add --popit-decode-icons to measure icon decoding)\n--level-guid HEX | --level-path MAP_PATH: level scene mode (RENDER_MESH Things at POS)\n--level-placement inverse-bind|pos-only: POS Things at POS x inverse bind of bone 0 (default, D120) or POS only (D113)\n--shape-bevels: with a level, bevelled shapes (geometry inferred, unverified; default straight)\n--per-bone-placement: with a level, models with boneThings place each vertex by its bone's Thing (P2m; inferred rigid skinning; default bone 0 rule, but on under --pod-game-camera and in the scripted Pod, --level-scripts with --pod-camera N, unless --no-per-bone-placement)\n--runtime-texture MESH:SLOT:TEXTURE (hex GUIDs, slot 0-7, repeatable): with a level (and --pod-shell), draw Solid groups of that mesh whose material lists SLOT as unrendered with TEXTURE (UV0, Repeat, untinted; inferred, game binding unconfirmed)\n--level-report: with a level, print scene counts and exit (no window)\n--level-focus-thing N: with a level, frame the view on Thing N (reader order)\n--level-entrance-camera: with a level, start the view at the game's default camera over its entrance (the first checkpoint, where Sackboy spawns; also every level the Pod launches)\n--level-scripts: with a level, run its scripts at 30 Hz (OnCreate__, then Update__ each tick) and show the counts, with the open speech bubbles and the subtitle drawn as plain boxes the level lit again when a script changes the global lighting or darkness, and each Thing's own model hidden, tinted and moved as the scripts set it (a mesh that is not visible in play mode is hidden), and the camera moved to a script's override camera while one is on, or put at the camera a script writes itself (the Pod's planets level: with --pod-camera N and no --pod-shell the level also hangs under its script-moved world Thing); --level-scripts-flags N,..: progression flags set on the profile; --profile-records PATH: the local profile's goodies counts by SlotID (lines TYPE ID COLLECTED TOTAL, written by scripts/rpcs3_profile_records.py from a running game; D341), so the Story info bubble shows its goodies row, and a line colours C0 C1 C2 C3 colours the players (D342) and the Story badge's frame (D345) with the profile's first colour, and lines overlays TYPE ID MASK put the default group's medals on its badge (D346); --level-scripts-hold-at N (QA): the scripts stop after tick N, so a capture shows that tick; --level-scripts-in-use-at N (QA): the pod computer is in use once N ticks have run (a stand-in for the player engaging it), so the Pod level's change-over runs and its pod mesh is swapped; with --pod-camera N and --pod-shell HEX the shell level is played in the same session with a Sackboy (not drawn, a placeholder) on the pod computer's trigger, and Space or gamepad Square is the engage button on the pad the scripts read for one tick (the pod's own script then asks for the pod computer, once the intro has set its progression flags), or while the computer is in use a request to the host to close it, as Esc or Circle (placeholder: no script path for closing was found); --level-scripts-press-at N (QA): that engage press on tick N without a key; the scripted Pod has the viewer's own Sackboy (the play mode in pod.bin) with the pod computer's clips, --no-pod-sackboy leaves him out\n--play-sackboy: with a level, its shapes as a physics world and Sackboy at the first checkpoint, drawn as his mesh (0000043f unless --select-guid) with stand/walk/lane/jump/land clips picked from his state (rules inferred; --play-animation HEX plays one clip instead) (arrows walk and change lanes, Space jumps, I/K/L/J moods happy/sad/angry/scared; camera follows); --play-sackboy-at X,Y,Z spawn; --play-sackboy-input r:40,rj:12,-:30 scripted keys (l r j b f, mood presses U D R L) with the position printed each tick; --qa-record DIR,START,END[,SPEED] (QA only) saves one PNG per scripted tick START..END into a new local-analysis DIR, game time at SPEED (default 0.25), then exits\nLeft drag orbit; right/middle drag pan; wheel zoom; R reset; F frame.");
             std::process::exit(0);
         }
         let value = args.next().ok_or("Missing option value")?;
@@ -1675,6 +1683,18 @@ fn load(
                 }
             }
             *orbit = v.level.home.unwrap_or_default();
+            if v.level.entrance {
+                match entrance_orbit(&level.scene.checkpoints, planets_normalize) {
+                    Some((entrance, thing, feet)) => {
+                        *orbit = entrance;
+                        println!(
+                            "Entrance camera (D365): checkpoint Thing {thing}, Sackboy's spawn ({:.0}, {:.0}, {:.0}), the game's default camera at distance {:.0} (vfov 60 deg) seen at vfov 45 deg from {ENTRANCE_DISTANCE:.0}",
+                            feet[0], feet[1], feet[2], sackboy_play::FOLLOW_EYE[2]
+                        );
+                    }
+                    None => println!("Entrance camera (D365): no checkpoint; the whole level"),
+                }
+            }
             if let Some((rig, shell_plan, rig_line)) = rig {
                 let checkpoint = level
                     .shell
@@ -3112,6 +3132,37 @@ fn level_home(lo: Vec3, hi: Vec3) -> Result<(Mat4, Orbit), String> {
         },
     ))
 }
+/// D365: the game's default camera distance ([`sackboy_play::FOLLOW_EYE`] z, vfov 60
+/// deg) at the viewer's 45 deg vertical FOV, so the view is as tall as the game's.
+const ENTRANCE_DISTANCE: f32 = sackboy_play::FOLLOW_EYE[2] * 0.577_350_3 / 0.414_213_57;
+
+/// D365: the view a level starts in: Sackboy's spawn at its first checkpoint
+/// (`sackboy_play::SPAWN_OFFSET`, without the floor rule) with the game's default camera
+/// over it, straight on along -z at [`ENTRANCE_DISTANCE`], in display units. Returns the
+/// orbit, the checkpoint Thing and the spawn (level units). INFERRED: the first
+/// checkpoint in reader order is the entrance, as `--play-sackboy` takes it.
+fn entrance_orbit(
+    checkpoints: &[(usize, [f32; 16])],
+    normalize: Mat4,
+) -> Option<(Orbit, usize, [f32; 3])> {
+    let (thing, m) = checkpoints.first()?;
+    let o = sackboy_play::SPAWN_OFFSET;
+    let feet = [m[12] + o[0], m[13] + o[1], m[14] + o[2]];
+    let [ex, ey, _] = sackboy_play::FOLLOW_EYE;
+    let target = normalize.transform_point3(Vec3::new(feet[0] + ex, feet[1] + ey, feet[2]));
+    let scale = normalize.x_axis.truncate().length();
+    Some((
+        Orbit {
+            yaw: 0.,
+            pitch: 0.,
+            distance: ENTRANCE_DISTANCE * scale,
+            target,
+        },
+        *thing,
+        feet,
+    ))
+}
+
 /// Items whose mesh has display buckets get a Transform; others are counted by reason.
 type Placement = (Vec<(usize, Transform)>, Orbit, Vec<String>, Mat4);
 fn place_items<T>(
@@ -4928,6 +4979,19 @@ fn synthetic_groups(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn d365_entrance_orbit_is_the_default_camera_over_the_first_spawn() {
+        let mut m = Mat4::IDENTITY.to_cols_array();
+        (m[12], m[13], m[14]) = (1000., 500., -250.);
+        let normalize = Mat4::from_scale(Vec3::splat(0.001));
+        let (orbit, thing, feet) =
+            super::entrance_orbit(&[(7, m), (9, Mat4::IDENTITY.to_cols_array())], normalize)
+                .unwrap();
+        assert_eq!((thing, feet), (7, [1000., 292., 0.]));
+        assert!((orbit.target - Vec3::new(1.296, 0.46, 0.)).length() < 1e-5);
+        assert!((orbit.distance - 1.218 * 0.577_350_3 / 0.414_213_57).abs() < 1e-4);
+        assert!(super::entrance_orbit(&[], normalize).is_none());
+    }
     #[test]
     fn runtime_texture_flag_is_repeatable_and_refuses_conflicts() {
         let mut rules = Vec::new();
