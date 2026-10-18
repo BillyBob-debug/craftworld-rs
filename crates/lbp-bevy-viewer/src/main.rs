@@ -305,6 +305,9 @@ struct Viewer {
     hide_ui: bool,
     /// `--window-16-9`: a 1280x720 window (the game's frame aspect) for RPCS3 comparisons.
     window_16_9: bool,
+    /// D703 `--window-scale N`: the window at N x its size in physical pixels (scale factor 1),
+    /// to match an RPCS3 frame at N00% resolution scale.
+    window_scale: u32,
     browser: browser::Browser,
     selector: level_selector::LevelSelector,
     census: CorpusCounts,
@@ -676,6 +679,7 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
         synthetic: false,
         hide_ui: false,
         window_16_9: false,
+        window_scale: 1,
         browser: browser::Browser::default(),
         selector: level_selector::LevelSelector::default(),
         census: CorpusCounts::default(),
@@ -970,6 +974,13 @@ fn options_from(mut args: impl Iterator<Item = String>) -> Result<Viewer, String
             "--level-focus-thing" => {
                 v.level.focus = Some(value.parse().map_err(|_| "invalid --level-focus-thing")?)
             }
+            "--window-scale" => {
+                v.window_scale = value
+                    .parse()
+                    .ok()
+                    .filter(|n| (1..=4).contains(n))
+                    .ok_or("invalid --window-scale (1-4)")?
+            }
             "--qa-capture" => {
                 let base = std::fs::canonicalize("local-analysis").map_err(|e| e.to_string())?;
                 let path = PathBuf::from(value);
@@ -1173,6 +1184,12 @@ fn main() {
     } else {
         (1280, 800)
     };
+    let scale = viewer.window_scale;
+    let mut resolution: bevy::window::WindowResolution =
+        (resolution.0 * scale, resolution.1 * scale).into();
+    if scale > 1 {
+        resolution.set_scale_factor_override(Some(1.));
+    }
     let mut app = App::new();
     app.insert_resource(viewer)
         .insert_resource(bevy::light::DirectionalLightShadowMap {
@@ -1183,7 +1200,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "craftworld-rs".into(),
-                resolution: resolution.into(),
+                resolution,
                 visible: false,
                 focused: activate_on_show(),
                 ..default()
@@ -2152,8 +2169,9 @@ fn prepare(
             raw_uv0_from_bump(bump.uv_channel, bump.uv_transform, &bump.sampling_uv)
         })
         .collect();
+    let narrowed = narrow_eyes(preview, &g.positions);
     let mut prepared = prepare_buckets(
-        &g.positions,
+        narrowed.as_deref().unwrap_or(&g.positions),
         preview.normals.as_deref(),
         buckets,
         normalize,
@@ -2168,6 +2186,53 @@ fn prepare(
         }
     }
     Ok(prepared)
+}
+/// D703: Sackboy's eye material (`eye.gmat`).
+const EYE_MATERIAL: u32 = 0x0000_053c;
+/// D703: the eyes' width in the game over the authored width, MEASURED in a 4K RPCS3 frame of
+/// the default Pod view (eye 24-26 px wide against our 27-28 px at the same eye spacing;
+/// heights equal). Where the game narrows them is not found yet.
+const EYE_WIDTH: f32 = 0.88;
+/// D703: the eye vertices narrowed across the face (model X; the figure faces -Y) about each
+/// eye's centre by [`EYE_WIDTH`]. The eyes follow only their own bones and no morph reaches
+/// them (D702), so narrowing the bind positions narrows every pose. `positions` are the mesh's
+/// vertices (the preview's, or a clip's bind positions for the CPU morph path).
+pub(crate) fn narrow_eyes(
+    preview: &lbp_preview::GroupedMesh,
+    positions: &[[f32; 3]],
+) -> Option<Vec<[f32; 3]>> {
+    let g = &preview.geometry;
+    let mut eye = vec![false; positions.len()];
+    for (primitive, range) in g.metadata.primitives.iter().zip(&g.primitive_triangles) {
+        if primitive.material_guid == Some(EYE_MATERIAL) {
+            for t in g.triangles.get(range.clone()).unwrap_or_default() {
+                for &v in t {
+                    if let Some(e) = eye.get_mut(v as usize) {
+                        *e = true;
+                    }
+                }
+            }
+        }
+    }
+    let xs: Vec<f32> = (0..eye.len())
+        .filter(|&v| eye[v])
+        .map(|v| positions[v][0])
+        .collect();
+    if xs.is_empty() {
+        return None;
+    }
+    let mid = xs.iter().sum::<f32>() / xs.len() as f32;
+    let centre = |left: bool| {
+        let side: Vec<f32> = xs.iter().copied().filter(|&x| (x < mid) == left).collect();
+        side.iter().sum::<f32>() / side.len().max(1) as f32
+    };
+    let (left, right) = (centre(true), centre(false));
+    let mut out = positions.to_vec();
+    for (p, _) in out.iter_mut().zip(&eye).filter(|(_, e)| **e) {
+        let c = if p[0] < mid { left } else { right };
+        p[0] = c + (p[0] - c) * EYE_WIDTH;
+    }
+    Some(out)
 }
 /// D192: triangles and primitive ranges without the material-less groups. The game's
 /// per-primitive draw loop skips a primitive whose material is null (no bind, no draw;
@@ -5548,6 +5613,7 @@ mod tests {
             synthetic: false,
             hide_ui: false,
             window_16_9: false,
+            window_scale: 1,
             selector: level_selector::LevelSelector::default(),
             browser: browser::Browser::default(),
             census: CorpusCounts::default(),
