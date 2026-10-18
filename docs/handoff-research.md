@@ -111,6 +111,73 @@ call reads for the price of ~3.75k fresh tokens and the new tokens, outputs and 
 writes are a comparable share. Both views favour the same change: fewer cold restarts
 and fewer orientation reads, not a smaller per-call window.
 
+## Implementation (owner-approved 2026-10-18)
+
+Done in this PR: `docs/lanes/` with README (rules, template) and seeded state files for the
+pod/Story, popit, sackboy, level1 and launcher lanes, each copied from the lane's latest
+handoff part. The level-globals lane is finished and gets no file.
+
+Left for the user, because sessions cannot edit CLAUDE.md or `.claude/settings.json`
+(auto-mode classifier). Paste these by hand.
+
+1. Thread folder (`Documents\Projects\LBP2 Rust Rewrite` under the user profile),
+   `.claude\settings.json`, merged into the existing object. The window is a plain token
+   count (settings-reference: 100000-1000000 or "auto"); the hook's stdout is added to the
+   context after each compaction. Note the setting applies to every PC thread in that
+   folder at once; the "pilot" is therefore watching the Popit lane closely for a day (it
+   rolls over most often) and reverting the key if facts get lost.
+
+   ```json
+   {
+     "autoCompactWindow": 170000,
+     "hooks": {
+       "SessionStart": [
+         {
+           "matcher": "compact",
+           "hooks": [
+             {
+               "type": "command",
+               "command": "echo Context was compacted. Before anything else, re-read your lane state file docs/lanes/LANE.md in your worktree (the summary names the lane and worktree), then continue its Next list."
+             }
+           ]
+         }
+       ]
+     }
+   }
+   ```
+
+2. Thread-folder `CLAUDE.md`: replace the line "Plan the handoff at ~150k, stop near ~170k."
+   with the two blocks below.
+
+   ```markdown
+   - Context rollover is auto-compaction in place (autoCompactWindow 170k). Do not stop
+     at a context size and do not write docs/handoff-pc-*.md; rewrite docs/lanes/<lane>.md
+     after every PR in that PR. After a compaction, re-read it before continuing.
+
+   # Compact instructions
+   Keep, under these headings and verbatim where they are facts: Lane and worktree path;
+   Read first (at most 5 files or sections); State (open PR number, branch, merge status,
+   decision-number range and next free number, anything running in the background); Facts
+   (every address, flag, command line, measured value and owner rule stated so far, copied
+   exactly, never paraphrased or rounded); Next (ordered). Drop tool output, file contents
+   already in the repo, and reasoning that led to a committed result.
+   ```
+
+3. Repo `CLAUDE.md`, standing rule "Context rollover: plan at ~150k, stop near ~170k
+   tokens": replace with "Lane state instead of handoff parts: each PC lane keeps one
+   docs/lanes/<lane>.md (template in docs/lanes/README.md), rewritten after every PR in
+   that PR. Rollover is auto-compaction in place at ~170k in the thread folder; after a
+   compaction re-read the lane file. A fresh thread starts from that file plus the open
+   PR's branch. Do not write new docs/handoff-pc-*.md files." The "Handoff writing
+   budget" heading's first sentence becomes "Lane state files are rewritten every PR and
+   reread after every compaction, so keep them under ~40 lines."
+
+4. Coordinator briefs: name the lane and `docs/lanes/<lane>.md` as the only "Read first";
+   drop "plan the handoff at 150k" and the per-PR `ctx_audit.py` check (keep it as an
+   optional measurement); stop relaying standing rules on rollover, since there is no
+   rollover; on a crashed or user-restarted thread, brief from the lane file on main plus
+   the open PR's branch.
+
 ## Sources
 
 - Transcripts: `~/.claude/projects/<thread folder>/*.jsonl`, 40 most recent, via
