@@ -114,6 +114,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 108: moving between results on the planet (2026-10-18, D361)](level-scripts/part-108.md)
 - [Part 109: choosing a story level (2026-10-18, D362)](level-scripts/part-109.md)
 - [Part 110: starting a chosen story level (2026-10-18, D363)](level-scripts/part-110.md)
+- [Part 111: the viewer switches to the chosen level (2026-10-18, D364)](level-scripts/part-111.md)
 
 ## Next
 

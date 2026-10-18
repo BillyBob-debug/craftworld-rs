@@ -6373,3 +6373,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Part 106 (`docs/level-scripts/part-106.md`): with no scripts, choosing a Story group
   (`--level-scripts-group-at`) pushes the group's search state over Story and Back brings
   Story back on top, with the scripted search state on every tick 640-760.
+
+## D360 a Story group zooms in on its planet (2026-10-18)
+- Part 107 (`docs/level-scripts/part-107.md`): with no scripts, a chosen Story group
+  selects its default level, wants the zoom view (7) and the 500 extra planet zoom, so the
+  planets zoom in as the scripted run does (planets level identical on every tick 680-760).
