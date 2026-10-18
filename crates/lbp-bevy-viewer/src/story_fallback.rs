@@ -57,6 +57,11 @@ impl Trace {
         line += &format!(",\"story_open\":{}", level.story_open());
         line += &format!(",\"search\":{}", search_json(&level.pod.search));
         line += &format!(",\"camera\":{}", camera_json(level));
+        let point = level.story_planet_point();
+        line += &format!(
+            ",\"story_point\":{}",
+            floats(point.as_ref().map(|p| &p[..]))
+        );
         line += &format!(
             ",\"fade\":{}",
             opt(shell.and_then(LevelWorld::pod_transition))
@@ -171,90 +176,18 @@ fn camera_json(world: &LevelWorld) -> String {
     }
 }
 
-/// The planets level's Things as the scripted run leaves them once Story has settled
-/// (MEASURED, the golden trace: the world Thing 0 at rest from tick 659, Earth 1 and its
-/// two parts turned toward the default story group from tick 660, the Moon 4 placed on
-/// tick 1). STAND-IN: the world Thing and the Moon are the planets world script's, Earth's
-/// turn its planet script's (the Popit lane's native Pod scripts); until those exist the
-/// Story screen puts them where the scripts leave them, without the move.
-pub const STORY_LEVEL_THINGS: [(u32, [f32; 16]); 5] = [
-    (
-        0,
-        [
-            1.5296844, 0.44180164, -1.210321, 0., 0., 1.8787454, 0.6857956, 0., 1.2884353,
-            -0.5245254, 1.4369438, 0., 1912.1056, 3423.4658, -9460.587, 1.,
-        ],
-    ),
-    (
-        1,
-        [
-            0.46183985,
-            0.050123278,
-            0.84126467,
-            0.,
-            0.08878192,
-            0.95107496,
-            -0.10540562,
-            0.,
-            -0.83806705,
-            0.12837523,
-            0.45243573,
-            0.,
-            -1250.,
-            0.,
-            0.,
-            1.,
-        ],
-    ),
-    (
-        2,
-        [
-            0.46885338,
-            0.050884455,
-            0.85404015,
-            0.,
-            0.09231041,
-            0.98887384,
-            -0.10959479,
-            0.,
-            -0.83806694,
-            0.12837522,
-            0.45243567,
-            0.,
-            -1250.0015,
-            0.0022529147,
-            -0.0012144588,
-            1.,
-        ],
-    ),
-    (
-        3,
-        [
-            0.46885344,
-            0.05088446,
-            0.85404027,
-            0.,
-            0.09231041,
-            0.98887384,
-            -0.10959479,
-            0.,
-            -0.83806705,
-            0.12837523,
-            0.45243573,
-            0.,
-            -1249.9999,
-            -0.00010386089,
-            0.00021825377,
-            1.,
-        ],
-    ),
-    (
-        4,
-        [
-            2.112109, 0., 0., 0., 0., 2.112109, 0., 0., 0., 0., 2.1121097, 0., 2000., 0., 0., 1.,
-        ],
-    ),
-];
+/// The planets level's world Thing (Thing 0) as the scripted run leaves it once the pod
+/// computer is in use (MEASURED, the golden trace: at rest from tick 659). STAND-IN for
+/// the planets world script (`PlanetsWorld`, not ported yet); until that exists the Story
+/// screen puts the world Thing where the script leaves it, without the move. The planets
+/// themselves run as native ports (`Earth`, `OrbitingMoon`, D355).
+pub const STORY_LEVEL_THINGS: [(u32, [f32; 16]); 1] = [(
+    0,
+    [
+        1.5296844, 0.44180164, -1.210321, 0., 0., 1.8787454, 0.6857956, 0., 1.2884353, -0.5245254,
+        1.4369438, 0., 1912.1056, 3423.4658, -9460.587, 1.,
+    ],
+)];
 
 /// The camera the planets world script writes while the pod computer is in use (MEASURED,
 /// steady from tick 620 to the end of the run: eye, direction, 1 rad, near 10, far
@@ -290,6 +223,10 @@ impl Fallback {
         }
         for (thing, m) in STORY_LEVEL_THINGS {
             level.place_thing(thing, m);
+        }
+        if let Some(earth) = level.thing_with_script(lbp_runtime::EARTH_SCRIPT) {
+            let offset = lbp_script_vm::Value::Float(lbp_runtime::STORY_EARTH_SPIN_OFFSET);
+            level.set_script_member(earth, "SpinOffset", offset);
         }
         self.search.open(level);
         true
