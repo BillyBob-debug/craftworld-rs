@@ -780,9 +780,14 @@ mod tests {
         );
         assert_eq!(w.pod.warning_flags, 0x11);
         assert_eq!(w.pod_launch_step(), None);
+        // D378: the first warning is the one up, with the built-in labels (no LAMS here).
+        let popup = w.launch_warning_popup().expect("a popup is up");
+        assert_eq!(popup.warning, LaunchWarning::MotionNeeded);
+        assert_eq!(popup.buttons, ["Continue", "Cancel"]);
         w.answer_launch_warning(true);
         assert_eq!(w.pod_launch_step(), None);
         w.answer_launch_warning(true);
+        assert_eq!(w.launch_warning_popup(), None);
         assert_eq!(w.pod_launch_step().map(|s| s.slot), Some((1, 43)));
         // Another player without Move gets the party text; five is too many.
         w.pod.party = vec![pad(true, true), pad(false, false)];

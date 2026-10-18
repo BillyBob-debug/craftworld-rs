@@ -372,6 +372,16 @@ impl LaunchWarning {
 /// LAMS keys of the warning popups' buttons, Continue and Cancel.
 pub const LAUNCH_WARNING_BUTTONS: [u32; 2] = [0x119fbf3b, 0x5162e2b2];
 
+/// D378: the launch warning popup that is up ([`crate::LevelWorld::launch_warning_popup`]):
+/// the warning, its text (`None` with no LAMS text) and the labels of its first button
+/// (Continue: the launch goes ahead) and second (Cancel: the launch is dropped).
+#[derive(Debug, Clone, PartialEq)]
+pub struct LaunchWarningPopup {
+    pub warning: LaunchWarning,
+    pub text: Option<String>,
+    pub buttons: [String; 2],
+}
+
 /// D367: the local players' controllers; with none set, one player on a Wireless
 /// Controller, the viewer's pad.
 pub fn party_or_default(party: &[PartyPad]) -> Vec<PartyPad> {
