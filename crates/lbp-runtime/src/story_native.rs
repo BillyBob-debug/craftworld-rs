@@ -28,36 +28,55 @@ pub const POD_STATE_SEARCH_CLASS: &str = "PodStateSearch";
 /// the search state's own).
 pub const STORY_FRAME_KEY: (i32, i32) = (2, 1);
 
+/// D359: the first group search's frame key (MEASURED: named frame 1 under high bits 3,
+/// the third state the pod computer made: the main menu 1, Story 2, the group 3).
+pub const GROUP_FRAME_KEY: (i32, i32) = (3, 1);
+
 /// The Story frame's title (MEASURED: the text the script passed).
 pub const STORY_TITLE: &str = "STORY";
 
 /// The search the state was pushed with (the script's `SearchDetails` subclasses).
 /// FOUND (01.33 listings): the Story button pushes `SearchDetails.CreateStoryLevels()`.
+/// D359: Cross on a group's planet pushes `SearchDetails.CreateGroup(slot, true)`, a
+/// `SearchDetailsGroup` for the group's slot id.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum SearchDetails {
     #[default]
     StoryLevels,
+    Group((i32, i32)),
 }
 
 impl SearchDetails {
     /// `GetPlanet`: the planet selected while the search is up (MEASURED: Earth, 1).
     pub fn planet(self) -> i32 {
         match self {
-            Self::StoryLevels => 1,
+            Self::StoryLevels | Self::Group(_) => 1,
         }
     }
 
-    /// `GetDefaultBrowseMode` (FOUND: 1 for the story levels; MEASURED, tick 641).
+    /// `GetDefaultBrowseMode` (FOUND: 1 for the story levels; MEASURED, tick 641). A
+    /// group's is 1 for a slot of type 4 or 9 and 0 for any other (FOUND,
+    /// `SearchDetailsGroup.GetDefaultBrowseMode`; MEASURED 1 for the default group).
     pub fn default_browse_mode(self) -> i32 {
         match self {
             Self::StoryLevels => 1,
+            Self::Group((kind, _)) => i32::from(kind == 4 || kind == 9),
         }
     }
 
-    /// `GetAllowedBrowseModes` (FOUND: 0 for the story levels; MEASURED, tick 641).
+    /// `GetAllowedBrowseModes` (FOUND: 0 for the story levels; MEASURED, tick 641, and 0
+    /// for the default group, tick 681).
     pub fn allowed_browse_modes(self) -> i32 {
         match self {
-            Self::StoryLevels => 0,
+            Self::StoryLevels | Self::Group(_) => 0,
+        }
+    }
+
+    /// The frame key of the state's menu.
+    pub fn frame_key(self) -> (i32, i32) {
+        match self {
+            Self::StoryLevels => STORY_FRAME_KEY,
+            Self::Group(_) => GROUP_FRAME_KEY,
         }
     }
 }
@@ -99,11 +118,23 @@ impl PodStateSearch {
     /// details' planet selected, the search details asked for, the cursor mode 1, and
     /// the info bubble's page counting from this frame; the default result is the
     /// default story group's.
+    ///
+    /// D359: a group's push (MEASURED, tick 680) selects the planet, asks for the search
+    /// details and sets the cursor mode 1 the same, but the default result stays the one
+    /// the Story state under it saved and the info bubble keeps counting from Story's
+    /// push.
     pub fn open(&mut self, world: &mut LevelWorld) {
         let frame = world.pworld.frame;
         self.opened = Some(frame);
         self.ticks = 0;
         self.browse_mode = self.details.default_browse_mode();
+        if let SearchDetails::Group(_) = self.details {
+            let search = &mut world.pod.search;
+            search.selected_planet = Some(self.details.planet());
+            search.want_search_details_calls += 1;
+            search.cursor_mode = Some(1);
+            return;
+        }
         let default = world
             .story_slots
             .iter()
@@ -122,11 +153,38 @@ impl PodStateSearch {
     /// longer in control; the default result is kept (only a deactivation that keeps
     /// the selection saves it, and Back does not).
     pub fn close(&mut self, world: &mut LevelWorld) {
+        self.deactivate(world, false);
+    }
+
+    /// D359, `OnDeactivate(true)`: a state pushed over this one (a group chosen). FOUND
+    /// (`OnDeactivateImpl`): the selected result is saved as the default result before
+    /// the same clearing as [`Self::close`] (MEASURED, tick 680).
+    pub fn suspend(&mut self, world: &mut LevelWorld) {
+        self.deactivate(world, true);
+    }
+
+    /// D359, `OnActivate(false)`: the state back on top after the one pushed over it
+    /// popped. MEASURED (tick 720): the planet selected, the search details asked for
+    /// and the cursor mode 1 as on a push, but the default result and the info bubble's
+    /// page are the ones it had; the browse mode is the one saved at the suspend.
+    pub fn resume(&mut self, world: &mut LevelWorld) {
+        self.opened = Some(world.pworld.frame);
+        self.ticks = 0;
+        let search = &mut world.pod.search;
+        search.selected_planet = Some(self.details.planet());
+        search.want_search_details_calls += 1;
+        search.cursor_mode = Some(1);
+    }
+
+    fn deactivate(&mut self, world: &mut LevelWorld, keep: bool) {
         if self.opened.take().is_none() {
             return;
         }
         self.ticks = 0;
         let search = &mut world.pod.search;
+        if keep {
+            search.default_result = search.cur_result.or(search.default_result);
+        }
         search.cursor_mode = Some(0);
         search.want_search_details_calls += 1;
         search.selected_planet = Some(0);
@@ -154,12 +212,89 @@ impl PodStateSearch {
             search.loader = Some(0);
         }
         let frame = world.pworld.frame;
-        let title = story_frame();
+        let key = self.details.frame_key();
+        let (menu, matrix) = match self.details {
+            SearchDetails::StoryLevels => (story_frame(), STORY_FRAME_MATRIX),
+            SearchDetails::Group(_) => (group_frame(""), GROUP_FRAME_MATRIX),
+        };
         let g = &mut world.gooey;
-        g.first_built.entry(STORY_FRAME_KEY).or_insert(frame);
-        g.frames.insert(STORY_FRAME_KEY, title);
-        g.item_matrices.insert(STORY_FRAME_KEY, STORY_FRAME_MATRIX);
-        g.item_matrix_frames.insert(STORY_FRAME_KEY, frame);
+        g.first_built.entry(key).or_insert(frame);
+        g.frames.insert(key, menu);
+        g.item_matrices.insert(key, matrix);
+        g.item_matrix_frames.insert(key, frame);
+    }
+}
+
+/// D359: the group frame's matrix. MEASURED: settled from tick 695 (it slides in with the
+/// world Thing from tick 681; drawn where it comes to rest).
+pub const GROUP_FRAME_MATRIX: [f32; 16] = [
+    1.7360102,
+    0.0059023574,
+    -0.003893707,
+    0.,
+    0.004361921,
+    -1.6463118,
+    -0.55083793,
+    0.,
+    -0.0055652764,
+    0.55082124,
+    -1.64632,
+    0.,
+    -2090.9067,
+    1179.0103,
+    160.82642,
+    1.,
+];
+
+/// D359: the group search's frame (MEASURED, tick 681): a 2400 x 1250 frame holding a
+/// style 9 panel at most 700 wide with the group's title (`SearchDetailsGroup.DoTitle`;
+/// empty for the default Story group offline, MEASURED).
+pub fn group_frame(title: &str) -> GooeyFrame {
+    let bits = GROUP_FRAME_KEY.0;
+    let other = |pairs: &[(&str, f32)]| -> BTreeMap<String, Vec<f32>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), vec![*v]))
+            .collect()
+    };
+    let panel = GooeyFrame {
+        high_bits: bits,
+        layout: Some((0, 0, 1.)),
+        sizing: Some([0., 0.]),
+        borders: Some([32., 32., 32., 32.]),
+        spacing: Some([0., 32.]),
+        other: other(&[
+            ("SetFrameCornerRadius", 64.),
+            ("SetFrameCurvature", 20.),
+            ("SetFrameMaxWidth", 700.),
+            ("SetFrameOutlineWidth", 35.),
+            ("SetFrameStyle", 9.),
+        ]),
+        children: vec![GooeyItem::Text {
+            text: title.to_owned(),
+            style: 1,
+            font_scale: 1.,
+        }],
+        ..Default::default()
+    };
+    let column = GooeyFrame {
+        high_bits: bits,
+        layout: Some((3, 0, 1.)),
+        sizing: Some([0., 0.]),
+        other: other(&[("SetFrameMaxWidth", 800.)]),
+        children: vec![GooeyItem::Frame(panel)],
+        ..Default::default()
+    };
+    GooeyFrame {
+        id: Some(GROUP_FRAME_KEY.1),
+        high_bits: bits,
+        layout: Some((0, 1, 1.)),
+        sizing: Some([2400., 1250.]),
+        borders: Some([64., 64., 64., 0.]),
+        transition: Some([15., 15.]),
+        other: BTreeMap::from([("SetFrameUseBlurForTransitions".to_owned(), vec![])]),
+        children: vec![GooeyItem::Frame(column)],
+        ..Default::default()
     }
 }
 
@@ -345,6 +480,47 @@ mod tests {
         // A second close (nothing open) changes nothing.
         story.close(&mut w);
         assert_eq!(w.pod.search.want_search_details_calls, 2);
+    }
+
+    /// D359: the default group chosen on tick 680 of the golden trace: Story's
+    /// `OnDeactivate(true)` then the group's `OnActivate`, and the group's first update.
+    #[test]
+    fn d359_group_choice_matches_the_scripted_trace() {
+        let mut w = world();
+        let mut story = PodStateSearch::new(SearchDetails::StoryLevels);
+        story.open(&mut w);
+        w.pworld.frame += 1;
+        story.update(&mut w);
+        let mut group = PodStateSearch::new(SearchDetails::Group(STORY_DEFAULT_GROUP));
+        story.suspend(&mut w);
+        group.open(&mut w);
+        assert!(!story.is_open() && group.is_open());
+        let s = &w.pod.search;
+        assert_eq!(s.selected_planet, Some(1));
+        assert_eq!(s.cursor_mode, Some(1));
+        assert_eq!((s.browse_mode, s.allowed_browse_modes), (Some(0), Some(0)));
+        assert_eq!((s.loader, s.earth_has_control), (Some(0), Some(false)));
+        assert_eq!(s.want_search_details_calls, 3);
+        assert_eq!(s.publish_cursor_badge_calls, 1);
+        assert_eq!(s.default_result, Some(2), "the selected result saved");
+        assert_eq!(s.info_bubble_since, Some(219_906), "still Story's");
+        w.pworld.frame += 1;
+        group.update(&mut w);
+        let s = &w.pod.search;
+        assert_eq!(s.cursor_mode, Some(4));
+        assert_eq!(s.browse_mode, Some(1));
+        assert_eq!(s.earth_has_control, Some(true));
+        assert_eq!(s.publish_cursor_badge_calls, 2);
+        let menu = &w.gooey.frames[&GROUP_FRAME_KEY];
+        assert_eq!(menu.sizing, Some([2400., 1250.]));
+        assert_eq!(w.gooey.item_matrices[&GROUP_FRAME_KEY], GROUP_FRAME_MATRIX);
+    }
+
+    #[test]
+    fn d359_group_default_browse_mode_by_slot_type() {
+        assert_eq!(SearchDetails::Group((4, 27)).default_browse_mode(), 1);
+        assert_eq!(SearchDetails::Group((9, 1)).default_browse_mode(), 1);
+        assert_eq!(SearchDetails::Group((2, 1)).default_browse_mode(), 0);
     }
 
     #[test]

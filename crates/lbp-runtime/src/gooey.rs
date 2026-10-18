@@ -828,6 +828,11 @@ impl LevelWorld {
         receiver: Option<&Value>,
         args: &[Value],
     ) -> Option<Value> {
+        if class == "PodComputer" {
+            if let Some(Value::Object(Some(o))) = receiver {
+                self.pod.puter = Some(*o);
+            }
+        }
         if let Some(v) = self.story_result_query(class, mangled, receiver, args) {
             return Some(v);
         }
@@ -906,6 +911,11 @@ impl LevelWorld {
                 search.error_message_calls += 1;
                 Value::Void
             }
+            // D359: the group's details. INFERRED: the slot the group was made from (the
+            // factory's argument, kept by the host's group choice); the full game owns no
+            // DLC filter here.
+            ("SearchDetailsGroup", "GetSlotID__") => Value::Object(self.pod.group_slot),
+            ("SearchDetailsGroup", "IsOnlyOwnedDLC__") => Value::Bool(false),
             // No grief report is open.
             ("GriefReport", "ClearContext__") => Value::Void,
             // D358: the search state's Back (`EndFrameInput` bit 0x200). FOUND (01.33
@@ -1013,6 +1023,15 @@ impl LevelWorld {
                 Value::Void
             }
             ("Planet", "GetCurResult__") => handle_of(search.cur_result.or(search.default_result)),
+            // D359: the search state's `OnDeactivateImpl` keeps it as the default result
+            // when a group is pushed over it (a handle, used without a null check).
+            // INFERRED: the result under the Earth's cursor.
+            ("Planets", "GetCurrentSelectedResult__") => {
+                handle_of(search.cur_result.or(search.default_result))
+            }
+            // D359: `OnDeactivateImpl` saves it in the state's `BrowseMode`, set again when
+            // the state comes back on top. INFERRED: the mode last set.
+            ("Planets", "GetBrowseMode__") => Value::Int(search.browse_mode.unwrap_or(0)),
             // No grief report is open; the context the search state hands it is not kept.
             ("GriefReport", "SetContext__Q18SearchResultHandle") => Value::Void,
             _ => return None,

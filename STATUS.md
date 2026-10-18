@@ -6347,3 +6347,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
   golden trace of the scripted run (`--level-scripts-trace`). Viewer `--story` opens Story
   with no scripts loaded; the friends exe's Story button is on. Mean abs 0.36 levels
   against the scripted frame.
+
+## D354 the Story screen's pod opens through pod.bin's native port (2026-10-18)
+- Part 101 (`docs/level-scripts/part-101.md`): the Story stand-in sets the pod computer in
+  use and the D417 port of pod.bin opens the pod (0.05 a tick, open on tick 21, mesh
+  swapped), as the scripts do; the measured pod-open values are gone.

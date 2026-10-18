@@ -3310,7 +3310,7 @@ pub const UI_CLASSES: [&str; 2] = ["Gooey", "Callout"];
 /// D319: natives of other classes the pod computer's per-frame step and its main menu ask
 /// (part 46 found 28 kinds of them unbound in the planets level), also answered by
 /// [`World::ui_call`].
-pub const UI_NATIVES: [(&str, &str); 72] = [
+pub const UI_NATIVES: [(&str, &str); 76] = [
     ("Planets", "CheckOverlayNeedsUpdate__"),
     ("PodComputer", "GetPodComputerUserPlayerNumber__"),
     (
@@ -3341,6 +3341,11 @@ pub const UI_NATIVES: [(&str, &str); 72] = [
     ("System", "GetLanguageID__"),
     // D327: the pod's search state.
     ("SearchDetails", "GetPlanet__"),
+    // D359: the Story group's details.
+    ("SearchDetailsGroup", "GetSlotID__"),
+    ("SearchDetailsGroup", "IsOnlyOwnedDLC__"),
+    ("Planets", "GetCurrentSelectedResult__"),
+    ("Planets", "GetBrowseMode__"),
     ("Planets", "SelectPlanet__i"),
     ("Planets", "GetFocusPlanet__"),
     ("Planets", "SetCursorMode__i"),

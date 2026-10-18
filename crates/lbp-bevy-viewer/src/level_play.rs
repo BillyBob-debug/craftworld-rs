@@ -110,6 +110,9 @@ struct Play {
     /// D358 `--level-scripts-back-at N[,M...]` (QA): the menu's Back on tick N (as the
     /// Puter key's Back), one press per listed tick, in order.
     back_at: Vec<u64>,
+    /// D359 `--level-scripts-group-at N` (QA): Cross on the Earth planet's selected group
+    /// on tick N (the engine's `OnPlanetGroupSelected`, called after the tick).
+    group_at: Option<u64>,
     /// Level1 part 3: the player's close button (C or Circle) on the open speech bubble,
     /// for the next tick; `--level-scripts-close-at N` (QA) sets it on tick N. Part 4:
     /// the option takes a comma list (`120,600`), one press per tick, in order.
@@ -462,6 +465,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let choose_at = tick_option(&all, "--level-scripts-choose-at")?;
     let close_at = tick_list(&all, "--level-scripts-close-at")?;
     let back_at = tick_list(&all, "--level-scripts-back-at")?;
+    let group_at = tick_option(&all, "--level-scripts-group-at")?;
     let trace = value(&all, "--level-scripts-trace")
         .map(|path| crate::story_fallback::Trace::create(&path))
         .transpose()?;
@@ -696,6 +700,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         close: false,
         close_at,
         back_at,
+        group_at,
         fallback_camera: (loaded == 0 && shell_present).then_some(POD_REST_CAMERA),
         trace,
         story: (loaded == 0 && shell_present).then(|| crate::story_fallback::Fallback {
@@ -1195,6 +1200,23 @@ fn step(
             .scripts
             .tick_level(&mut p.vm, &mut p.host, BUDGET_PER_CALL),
     };
+    // D359: Cross on the selected group, after the tick as the engine's planet cursor.
+    if p.group_at == Some(p.scripts.ticks) && p.story.is_none() {
+        p.group_at = None;
+        let result = p.host.world.pod.search.default_result;
+        let r = result.and_then(|i| {
+            p.scripts
+                .planet_group_selected(&mut p.vm, &mut p.host, i, BUDGET_PER_CALL)
+        });
+        println!(
+            "Group selected after tick {} (result {result:?}): PodComputer.OnPlanetGroupSelected__Q6SlotIDbb: {r:?}{}",
+            p.scripts.ticks,
+            match &r {
+                Some(Err(_)) => format!(" at {:?}", p.vm.last_site()),
+                _ => String::new(),
+            }
+        );
+    }
     // D358: the scripted search state's Back asked the pod computer to cancel.
     if let Some(r) = p
         .scripts
@@ -1222,11 +1244,9 @@ fn step(
                 match state {
                     PuterState::MainMenu => "the main menu",
                     PuterState::StorySearch => "the Story search",
+                    PuterState::GroupSearch => "the group search",
                 },
-                match state {
-                    PuterState::MainMenu => lbp_runtime::MAIN_MENU_PLANETS_VIEW,
-                    PuterState::StorySearch => lbp_runtime::STORY_PLANETS_VIEW,
-                }
+                state.planets_view()
             ),
             Some(FallbackEvent::Puter(PodComputerEvent::Popped(top))) => {
                 println!("Pod computer at tick {ticks}: back, {top:?} on top again (D357)")
@@ -1240,6 +1260,20 @@ fn step(
                 );
             }
             None => {}
+        }
+    }
+    // D359: with no scripts the native pod computer takes the group choice after its
+    // own tick (the group's first update is on the next tick, as in the scripts).
+    if p.group_at == Some(p.scripts.ticks) && p.story.is_some() {
+        p.group_at = None;
+        let result = p.host.world.pod.search.default_result;
+        if let Some(story) = p.story.as_mut() {
+            let slot = result.and_then(|i| p.host.world.story_slots.get(i).map(|s| s.id));
+            let e = slot.and_then(|slot| story.puter.choose_group(&mut p.host, slot));
+            println!(
+                "Group selected after tick {} (result {result:?}, slot {slot:?}): the native pod computer: {e:?} (D359)",
+                p.scripts.ticks
+            );
         }
     }
     if let Some(trace) = p.trace.as_mut() {

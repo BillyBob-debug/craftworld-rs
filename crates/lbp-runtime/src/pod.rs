@@ -103,6 +103,12 @@ pub struct PodState {
     /// D358: the pod computer `PodComputer.TriggerOnPlanetCancel__` was called on this
     /// tick (the search state's Back), for [`crate::LevelScripts::planet_cancel`].
     pub planet_cancel: Option<lbp_script_vm::ObjectId>,
+    /// D359: the pod computer, the last receiver of a `PodComputer` native (for the
+    /// engine's calls into its script exports).
+    pub puter: Option<lbp_script_vm::ObjectId>,
+    /// D359: the SlotID the last group choice passed (`SearchDetails.CreateGroup`), which
+    /// the group's details answer from `SearchDetailsGroup.GetSlotID__`.
+    pub group_slot: Option<lbp_script_vm::ObjectId>,
 }
 
 /// D327 (part 78): the values the search state (`PodStateSearch`) hands the planets and
