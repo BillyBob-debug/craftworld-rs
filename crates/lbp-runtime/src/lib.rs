@@ -33,6 +33,7 @@ mod gooey;
 mod media;
 mod message_view;
 mod messages;
+mod native_bubble;
 mod native_planets_world;
 mod native_script;
 mod pod;
@@ -47,6 +48,7 @@ pub use gooey::*;
 pub use media::*;
 pub use message_view::*;
 pub use messages::*;
+pub use native_bubble::*;
 pub use native_planets_world::*;
 pub use native_script::*;
 pub use pod::*;
@@ -3959,10 +3961,15 @@ impl LevelScripts {
         report: &mut StepReport,
     ) {
         for inst in self.instances.clone() {
+            // D504: a native port is asked too (it answers no value when it has no such
+            // function).
+            let native = (inst.class.is_none() || self.runner.force_native)
+                && native_script(inst.guid).is_some();
             if self.stopped.contains(&inst.thing)
-                || !inst
-                    .class
-                    .is_some_and(|c| vm.has_code(c, SWITCH_ACTIVATION))
+                || !(native
+                    || inst
+                        .class
+                        .is_some_and(|c| vm.has_code(c, SWITCH_ACTIVATION)))
             {
                 continue;
             }

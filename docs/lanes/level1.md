@@ -1,40 +1,40 @@
-# Lane state: level1 (Rookie Test played with scripts) (2026-10-17, seeded from handoff-pc-2026-10-17-level1-part4.md)
+# Lane state: level1 (Rookie Test played with scripts) (2026-10-18)
 
 ## Read first
-1. docs/level1-play.md, section "Part 4" (the route right of the spawn, line 3)
-2. crates/lbp-bevy-viewer/src/sackboy_play.rs `parse_script` (the `--play-sackboy-input` keys)
+1. docs/level1-play.md, section "Part 5" (native speech bubble, the script trace)
+2. crates/lbp-runtime/src/native_script.rs (the D417 registry) and native_bubble.rs
 
 ## State
-- PR 133 (branch level1-4, D503): `--level-scripts-close-at` takes a comma list of ticks.
-  Merged 2026-10-17. Worktree `E:\Projects\wt-level1` is on branch `level1-5`.
-- Next D number: D504.
+- PR 155 (branch `level1-5`, worktree `E:\Projects\wt-level1`, D504): native port of
+  `Trigger_Speech_Bubble` in the D417 registry; handed to the coordinator.
+- Decision numbers: D504-599, next free D505.
 
 ## Facts
 - Route run: `--level-guid 0001e786 --level-scripts --play-sackboy --qa-hide-ui
   --level-scripts-close-at 120,600,1150 --play-sackboy-input
   "-:620,r:160,rj:20,r:330,f:15,-:5,r:400,rj:20,r:400" --level-scripts-hold-at 2000
-  --qa-capture local-analysis/<new>.png`, run from the canonical repo folder (the capture
-  path must be under its local-analysis). Sackboy positions print every tick ("sackboy tick N").
-- Line 3 opens on tick 882 at bubble 1485. Sackboy stops at x -938 (a jump clears it) and at
-  x -385; with no input after tick 1965 he falls from x -385.
-- Line 2's bubble 1054 has no SWITCH part, so its end pulse feeds nothing.
-- There is no per-Thing wiring dump; local-analysis/level1/p2-switch-debug.patch (throwaway
-  LBP_DBG_SW) is the only one. level1/dump.txt has trigger positions.
-- Toolchain env: local-analysis/toolchain (RUSTUP_HOME, CARGO_HOME, cargo\bin and the gnu
-  self-contained bin on PATH); CARGO_TARGET_DIR E:\Projects\wt-level1\target. A background
-  cargo build may still hold the target lock; build in the foreground before running.
-- Standing rule (owner, 2026-10-18): the app must never need a decrypted copy of anything.
-  The route run above uses local-analysis/d133-edat-overlay (decrypted EDAT files): fine for
-  research, but whatever Rookie Test needs from encrypted files must get a built-in fallback
-  before it ships.
+  --qa-capture local-analysis/<new>.png`, run from the canonical repo folder (capture under
+  its local-analysis, a new name each run).
+- No decrypted files: `--snapshot local-analysis/d68-inventory-0133-verified.json
+  --game-dir "game-data/a1-disc;game-data/a1-update-0133"` (the d133 edat snapshot needs
+  the overlay). Lines open 63/419/882, close 120/600/1150, same as with the overlay.
+- Trace check: the route with the overlay, once plain and once with `--native-scripts`,
+  traced with the D417 trace (lbp_script_vm::trace). Known difference: 21
+  `OnCreate__ set HasUpdateWorkToDo` (VM skips `.init__` on Thing scripts).
+- Rookie Test classes: PostItNote 165, Trigger_Speech_Bubble 21, Launcher 19,
+  TriggerMusic 9, TutorialMonitor 3, PostItNoteUnlockStickers 1, PostItNoteUnlockSuicide 1,
+  Score_Board 1, WorldMooCamera 1 (`level_scripts` example, `instances_by_class`).
+- Script listings (research only): local-analysis/d133-script-listings-0133/<sha1>.txt;
+  bubble spec local-analysis/level1/p5/tsb-spec.md.
+- Line 3 opens on tick 882 at bubble 1485. Sackboy stops at x -938 (a jump clears it) and
+  at x -385; with no input after tick 1965 he falls from x -385.
+- Toolchain: `. ./scripts/use-local-rust.ps1` from the canonical folder, then cd to the
+  worktree; CARGO_TARGET_DIR E:\Projects\wt-level1\target.
 
 ## Next
-1. The route past x -385: get a game reference (RPCS3 F12 frames past line 2, background
-   only) or try jumps and layer moves there.
-2. The camera at x -938 (a frame at tick 1600 looks through a front wall).
-3. Under the no-decrypted-copy rule: all 426 game scripts live only in patch.edat, so
-   without the overlay Rookie Test loads no scripts. It needs a built-in fallback for the
-   script behaviour it relies on (Da Vinci's lines, the bubble switches). Approved strategy
-   (docs/project-boost.md): native Rust per script, one script per task, with the RScript
-   VM kept as a dev oracle that records golden traces to test it.
+1. Native classes for the other Rookie Test scripts, one per PR, each checked with the
+   trace: Launcher, TriggerMusic, PostItNote(+Unlock*), TutorialMonitor, WorldMooCamera
+   (Score_Board may be shared with other lanes; ask the coordinator).
+2. The route past x -385: a game reference (RPCS3 F12 frames past line 2) or jumps there.
+3. The camera at x -938 (a frame at tick 1600 looks through a front wall).
 4. Sackboy pushed into a wall turns to the camera and plays `stand`, not a push.
