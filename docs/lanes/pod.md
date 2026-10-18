@@ -1,20 +1,20 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-114.md` (113 for Sackboy, 112 for the entrance camera,
-   111 for the switch, 110 for the hand-off,
+1. `docs/level-scripts/part-115.md` (114 for the launch warnings, 113 for Sackboy,
+   112 for the entrance camera, 111 for the switch, 110 for the hand-off,
    109 for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for
    choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 169 (D366) merged. PR for D367 (branch `pod-launch-warnings`,
-  worktree `E:\Projects\wt-d324`): the launch warnings (`pod.rs` `launch_warnings`,
-  `answer_launch_warning`); handed to the coordinator for merge once rust and python
+- PRs 153 (D353) through 170 (D367) merged. PR for D368 (branch `pod-cursor-flight`,
+  worktree `E:\Projects\wt-d324`): the cursor's flight (`pod.rs` `move_cursor_to`,
+  `cursor_flight_step`); handed to the coordinator for merge once rust and python
   are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D368.
+  Decision numbers: D348-D399, next free D369.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -29,6 +29,8 @@
   --level-scripts-trace PATH --qa-capture PNG` (each capture needs a new name).
   Disc + update only: `--snapshot local-analysis/d79-inventory-0133.json --game-dir
   "game-data/a1-disc;game-data/a1-update-0133"`. A run takes several minutes.
+- D368 runs: `local-analysis/d368/*-a1*`, `*-a2*` (`run368.ps1`): moves at 700, 720,
+  740 land at 707, 726, 743; a move mid-flight is refused.
 - D367 runs: `local-analysis/d367/*-a1*` (`run367.ps1`, as D366's): no warnings for
   Trash Valley, switch at tick 761. Dispatcher disassembly:
   `local-analysis/d367/disp*.asm`.
@@ -76,7 +78,7 @@
   data file is on the disc or update.
 
 ## Next
-1. The cursor's flight and sound, then the other searches. Open: the player-count
+1. The other searches. Open: the cursor's height and drawing, the player-count
    texts (0x16e3b0, 0x16de78) and the warning popup's drawing. Later: the game's
    entrance animation and state 6/7 load.
 2. The default result before the search opens (scripts 23 from tick 600, native none),

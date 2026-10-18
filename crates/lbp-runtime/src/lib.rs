@@ -2903,11 +2903,15 @@ impl LevelWorld {
     /// tangent plane at the current result (east from the world up, north from there) and
     /// the distance the angle between the slots' `location`s; no lock state is read
     /// offline, so the group search leaves out only groups (type 4, as its default pick)
-    /// and the Story search takes the slots in no group. Left out: results joined by a
-    /// link, the cursor's flight (no next move until it lands) and the move sound
-    /// `pod/pod_cursor_move`.
+    /// and the Story search takes the slots in no group. D368 (part 115): no move while
+    /// the cursor flies (FOUND, 0x42df50 waits for the landing); a pick plays
+    /// `pod/pod_cursor_move` and starts the flight (`PlanetsSearch::move_cursor_to`).
+    /// Left out: results joined by a link.
     pub fn move_result_cursor(&mut self, dir: [f32; 2]) -> Option<usize> {
         let search = &self.pod.search;
+        if search.cursor_flight.is_some() {
+            return None;
+        }
         let group = search.group;
         let unit = |l: [f32; 4]| {
             let n = (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]).sqrt();
@@ -2963,8 +2967,22 @@ impl LevelWorld {
             }
         }
         let (_, i) = best?;
-        self.pod.search.cur_result = Some(i);
+        let to = self.story_slots[i].location;
+        let from = cur
+            .and_then(|c| self.story_slots.get(c))
+            .map(|s| s.location);
+        self.pod.search.move_cursor_to(i, Some(to), from, false);
+        *self
+            .sounds_played
+            .entry("pod/pod_cursor_move".to_owned())
+            .or_default() += 1;
         Some(i)
+    }
+
+    /// D368: one frame of the Earth planet's cursor flight
+    /// (`PlanetsSearch::cursor_flight_step`); the result landed on, if it landed.
+    pub fn cursor_flight_step(&mut self) -> Option<usize> {
+        self.pod.search.cursor_flight_step()
     }
 
     /// D360 (part 107): the result a group search selects when it opens with

@@ -11,7 +11,12 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D367 the launch warnings (2026-10-18)
+## Latest: D368 the cursor's flight (2026-10-18)
+- Part 115 (`docs/level-scripts/part-115.md`): the Pod cursor flies to the next
+  result over a few frames (0x4298e8), plays `pod/pod_cursor_move` and takes no new
+  move until it lands.
+
+## D367 the launch warnings (2026-10-18)
 - Part 114 (`docs/level-scripts/part-114.md`): a Pod launch raises the game's Move and
   player-count warnings (0x402b24) and waits for them; Trash Valley raises none. The
   select sound is only a badge lookup.
@@ -25,11 +30,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Part 112 (`docs/level-scripts/part-112.md`): a level the Pod launches (or one loaded
   with `--level-entrance-camera`) starts at the game's default camera over Sackboy's
   spawn at its first checkpoint (Trash Valley: its entrance pipe).
-
-## D364 the viewer switches to the chosen level (2026-10-18)
-- Part 111 (`docs/level-scripts/part-111.md`): after the pod's hand-off the viewer reads
-  the chosen level on a worker thread and replaces the pod with it, in both modes
-  (switch after tick 761 in the part 109 runs).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

@@ -1028,12 +1028,19 @@ impl LevelWorld {
                 search.cur_result = search.default_result;
                 Value::Void
             }
+            // D368: the script's bool is the snap (FOUND, 0x618a3c -> 0x429554).
             ("Planet", "MoveCursorToResult__Q18SearchResultHandleb") => {
                 if let Some(i) = by_handle(args.first()) {
-                    search.cur_result = Some(i);
+                    let snap = matches!(args.get(1), Some(Value::Bool(true)));
+                    let from = search.cur_result.or(search.default_result);
+                    let at = |i: usize| slots.get(i).map(|s| s.location);
+                    search.move_cursor_to(i, at(i), from.and_then(at), snap);
                 }
                 Value::Void
             }
+            // D368 FOUND (0x610a3c, 0x6109a8): Planet+0x140 != 0 and Planet+0x148.
+            ("Planet", "IsCursorMoving__") => Value::Bool(search.cursor_flight.is_some()),
+            ("Planet", "GetMoveCursorStep__") => Value::Float(search.cursor_step),
             ("Planet", "GetCurResult__") => handle_of(search.cur_result.or(search.default_result)),
             // D359: the search state's `OnDeactivateImpl` keeps it as the default result
             // when a group is pushed over it (a handle, used without a null check).

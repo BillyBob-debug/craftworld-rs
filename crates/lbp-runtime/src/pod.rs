@@ -166,9 +166,108 @@ pub struct PlanetsSearch {
     pub group: Option<(i32, i32)>,
     /// D328: `Planet.SetSearchResults__Q13SearchResults` calls.
     pub set_search_results_calls: u64,
+    /// D368: the Earth planet's cursor direction (Planet+0x190, a unit vector), `None`
+    /// before the cursor first moves; the flight in progress (Planet+0x140 set) and the
+    /// move step (`GetMoveCursorStep__`, Planet+0x148).
+    pub cursor_dir: Option<[f32; 3]>,
+    pub cursor_flight: Option<CursorFlight>,
+    pub cursor_step: f32,
     /// D340: `PWorld.Frame` when the Story info bubble was first up (the page's frame
     /// count starts there; [`crate::LevelWorld::story_info_bubble`]), `None` while it is not.
     pub info_bubble_since: Option<i32>,
+}
+
+/// D368 (part 115): the cursor's flight to a result (FOUND 01.33, set by
+/// `MoveCursorToResult` 0x429554, flown by 0x4298e8): the start and target directions
+/// (Planet+0x160, +0x150) and the progress (+0x144, an angle in radians).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct CursorFlight {
+    pub start: [f32; 3],
+    pub target: [f32; 3],
+    pub progress: f32,
+}
+
+/// D368: Planet+0x1c in the flight's speed, unidentified. INFERRED 0 (no size read
+/// offline), which gives the fastest flight the formula allows.
+pub const CURSOR_FLIGHT_PLANET_SIZE: f32 = 0.;
+
+fn unit3(l: [f32; 4]) -> Option<[f32; 3]> {
+    let n = (l[0] * l[0] + l[1] * l[1] + l[2] * l[2]).sqrt();
+    (n > 0.).then(|| [l[0] / n, l[1] / n, l[2] / n])
+}
+
+fn dot3(a: [f32; 3], b: [f32; 3]) -> f32 {
+    a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+}
+
+impl PlanetsSearch {
+    /// D368: `Planet.MoveCursorToResult` (FOUND 01.33, 0x429554): the result changes at
+    /// once; with `snap` the cursor jumps to the result's direction (its slot's
+    /// `location`), else a flight starts from the cursor's direction to it, progress 0
+    /// and step 0. A cursor not yet placed starts from `from` (the result it was on).
+    pub fn move_cursor_to(
+        &mut self,
+        result: usize,
+        location: Option<[f32; 4]>,
+        from: Option<[f32; 4]>,
+        snap: bool,
+    ) {
+        self.cur_result = Some(result);
+        let Some(target) = location.and_then(unit3) else {
+            self.cursor_flight = None;
+            return;
+        };
+        let start = self.cursor_dir.or_else(|| from.and_then(unit3));
+        match start {
+            Some(start) if !snap => {
+                self.cursor_flight = Some(CursorFlight {
+                    start,
+                    target,
+                    progress: 0.,
+                });
+                self.cursor_step = 0.;
+            }
+            _ => {
+                self.cursor_flight = None;
+                self.cursor_dir = Some(target);
+            }
+        }
+    }
+
+    /// D368: one frame of the cursor's flight (FOUND 01.33, 0x4298e8, last in the planet
+    /// update 0x42f43c). With `d` the angle from start to target, the progress grows by
+    /// `((d / pi) * 240 + 60) / (size * 0.5 + 2500)`; once it reaches `d` (or `d` is
+    /// under 0.001) the cursor lands: step 1, the target direction, no flight. Else
+    /// `s` = smoothstep(progress / d), the step `s * s` and the direction the slerp from
+    /// start to target by `s` (a normalized lerp above a dot of 0.999). Returns the result
+    /// landed on. Left out: the cursor's height and blend (+0x1a0, +0x1b0) and the planets'
+    /// flag that lands it at once (Planets+0xb0).
+    pub fn cursor_flight_step(&mut self) -> Option<usize> {
+        let f = self.cursor_flight.as_mut()?;
+        let cos = dot3(f.start, f.target).clamp(-1., 1.);
+        let d = cos.acos();
+        f.progress +=
+            ((d / std::f32::consts::PI) * 240. + 60.) / (CURSOR_FLIGHT_PLANET_SIZE * 0.5 + 2500.);
+        if f.progress >= d || d < 0.001 {
+            let target = f.target;
+            self.cursor_flight = None;
+            self.cursor_step = 1.;
+            self.cursor_dir = Some(target);
+            return self.cur_result;
+        }
+        let t = f.progress / d;
+        let s = (3. * t * t - 2. * t * t * t).clamp(0., 1.);
+        let (a, b) = if cos > 0.999 {
+            (1. - s, s)
+        } else {
+            let sin = d.sin();
+            (((1. - s) * d).sin() / sin, (s * d).sin() / sin)
+        };
+        let v = [0, 1, 2].map(|k| a * f.start[k] + b * f.target[k]);
+        self.cursor_step = s * s;
+        self.cursor_dir = unit3([v[0], v[1], v[2], 0.]);
+        None
+    }
 }
 
 /// D363: what the pod hands to the game when a launch's request is done (FUN_004022fc ->
