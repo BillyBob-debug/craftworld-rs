@@ -331,19 +331,30 @@ pub enum LaunchWarning {
     MotionNeeded,
     /// The level recommends Move and another player has no Motion Controller.
     MotionNotAll,
-    /// Fewer players than the level's minimum (text from 0x16e3b0, not ported).
-    TooFewPlayers(u8),
-    /// More players than the level's maximum (text from 0x16de78, not ported).
-    TooManyPlayers(u8),
+    /// Fewer players than the level's minimum; the slot's minimum and maximum (D375,
+    /// text from 0x16e3b0).
+    TooFewPlayers(u8, u8),
+    /// More players than the level's maximum; the slot's minimum and maximum (D375,
+    /// text from 0x16de78).
+    TooManyPlayers(u8, u8),
 }
 
 impl LaunchWarning {
-    /// The LAMS key of the popup's text, for the two fixed texts.
-    pub fn text_key(self) -> Option<u32> {
+    /// D375 (part 122): the LAMS key of the popup's text and the numbers put in it.
+    /// FOUND (01.33): the player counts' texts are built by 0x16e3b0 (too few) and
+    /// 0x16de78 (too many) from the slot's minimum and maximum, never the party's count:
+    /// a range text with both bounds (too many: the maximum first), or with equal bounds
+    /// a text with the one bound; too many with both bounds 1 has a text of its own.
+    pub fn text(self) -> (u32, Vec<i64>) {
+        let n = |v: u8| i64::from(v);
         match self {
-            LaunchWarning::MotionNeeded => Some(0x5d46982a),
-            LaunchWarning::MotionNotAll => Some(0xae61784b),
-            _ => None,
+            LaunchWarning::MotionNeeded => (0x5d46982a, vec![]),
+            LaunchWarning::MotionNotAll => (0xae61784b, vec![]),
+            LaunchWarning::TooFewPlayers(a, b) if a == b => (0xf5796f9e, vec![n(a)]),
+            LaunchWarning::TooFewPlayers(a, b) => (0x018707a4, vec![n(a), n(b)]),
+            LaunchWarning::TooManyPlayers(1, 1) => (0x1a2ff9c1, vec![]),
+            LaunchWarning::TooManyPlayers(a, b) if a == b => (0x0ada56d4, vec![n(a)]),
+            LaunchWarning::TooManyPlayers(a, b) => (0x16e7eeda, vec![n(b), n(a)]),
         }
     }
 
@@ -352,8 +363,8 @@ impl LaunchWarning {
         match self {
             LaunchWarning::MotionNeeded => 1,
             LaunchWarning::MotionNotAll => 0,
-            LaunchWarning::TooFewPlayers(_) => 0x10,
-            LaunchWarning::TooManyPlayers(_) => 0x20,
+            LaunchWarning::TooFewPlayers(..) => 0x10,
+            LaunchWarning::TooManyPlayers(..) => 0x20,
         }
     }
 }
@@ -395,9 +406,53 @@ pub fn launch_warnings(slot: &SearchSlot, party: &[PartyPad]) -> Vec<LaunchWarni
     let min = slot.min_players.unwrap_or(1);
     let max = slot.max_players.unwrap_or(4);
     if n < usize::from(min) {
-        out.push(LaunchWarning::TooFewPlayers(min));
+        out.push(LaunchWarning::TooFewPlayers(min, max));
     } else if usize::from(max) < n {
-        out.push(LaunchWarning::TooManyPlayers(max));
+        out.push(LaunchWarning::TooManyPlayers(min, max));
+    }
+    out
+}
+
+/// D375: the game's text formatting (FOUND 01.33, 0x518d0): `%` and a digit 1-9 puts
+/// that argument (1-based); `%d`, `%s` or `%l` and a character put the next argument in
+/// turn; numbers in decimal (0x514d4). A placeholder past the arguments is kept as
+/// written. INFERRED: `%` before any other character is kept, and a numbered placeholder
+/// does not move the next-in-turn argument.
+pub fn format_lams(text: &str, args: &[i64]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    let mut next = 0;
+    while let Some(c) = chars.next() {
+        if c != '%' {
+            out.push(c);
+            continue;
+        }
+        let (index, written) = match chars.peek().copied() {
+            Some(d @ '1'..='9') => {
+                chars.next();
+                (d as usize - '1' as usize, format!("%{d}"))
+            }
+            Some(k @ ('d' | 's')) => {
+                chars.next();
+                next += 1;
+                (next - 1, format!("%{k}"))
+            }
+            Some('l') => {
+                chars.next();
+                let mut w = String::from("%l");
+                w.extend(chars.next());
+                next += 1;
+                (next - 1, w)
+            }
+            _ => {
+                out.push('%');
+                continue;
+            }
+        };
+        match args.get(index) {
+            Some(v) => out.push_str(&v.to_string()),
+            None => out.push_str(&written),
+        }
     }
     out
 }

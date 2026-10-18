@@ -667,6 +667,22 @@ mod tests {
     /// D374: `HasCursorArrived` answers the flight's end, and `SetWantSearchDetails`' first
     /// flag lands a flight on its first frame.
     #[test]
+    fn d375_player_count_texts_use_the_slot_bounds() {
+        use crate::{format_lams, LaunchWarning as L};
+        assert_eq!(L::TooFewPlayers(2, 4).text(), (0x018707a4, vec![2, 4]));
+        assert_eq!(L::TooFewPlayers(3, 3).text(), (0xf5796f9e, vec![3]));
+        assert_eq!(L::TooManyPlayers(2, 3).text(), (0x16e7eeda, vec![3, 2]));
+        assert_eq!(L::TooManyPlayers(2, 2).text(), (0x0ada56d4, vec![2]));
+        assert_eq!(L::TooManyPlayers(1, 1).text(), (0x1a2ff9c1, vec![]));
+        assert_eq!(format_lams("a %1 b %2 c", &[2, 4]), "a 2 b 4 c");
+        assert_eq!(format_lams("%2-%1", &[3, 2]), "2-3");
+        assert_eq!(format_lams("x %d y %s", &[5, 6]), "x 5 y 6");
+        assert_eq!(format_lams("%ls!", &[7]), "7!");
+        assert_eq!(format_lams("%3 and %d%%", &[1]), "%3 and 1%%");
+        assert_eq!(format_lams("%d %d", &[1]), "1 %d");
+    }
+
+    #[test]
     fn d374_cursor_arrives_and_lands_at_once_on_the_first_flag() {
         use lbp_script_vm::Value;
         let mut w = LevelWorld::default();
@@ -757,7 +773,10 @@ mod tests {
         w.cross_on_level(1);
         assert_eq!(
             w.pod.launch_warnings,
-            [LaunchWarning::MotionNeeded, LaunchWarning::TooFewPlayers(2)]
+            [
+                LaunchWarning::MotionNeeded,
+                LaunchWarning::TooFewPlayers(2, 4)
+            ]
         );
         assert_eq!(w.pod.warning_flags, 0x11);
         assert_eq!(w.pod_launch_step(), None);
@@ -775,7 +794,7 @@ mod tests {
         assert_eq!((w.pod.launch, w.pod_launch_step()), (None, None));
         w.pod.party = vec![pad(true, true); 5];
         w.cross_on_level(1);
-        assert_eq!(w.pod.launch_warnings, [LaunchWarning::TooManyPlayers(4)]);
+        assert_eq!(w.pod.launch_warnings, [LaunchWarning::TooManyPlayers(2, 4)]);
     }
 
     #[test]

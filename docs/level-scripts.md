@@ -125,6 +125,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 119: the pod computer pushes first (2026-10-18, D372)](level-scripts/part-119.md)
 - [Part 120: Back's main menu (2026-10-18, D373)](level-scripts/part-120.md)
 - [Part 121: the cursor arrives (2026-10-18, D374)](level-scripts/part-121.md)
+- [Part 122: the player-count texts (2026-10-18, D375)](level-scripts/part-122.md)
 
 ## Next
 
