@@ -6655,3 +6655,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D513 class defaults for native runs (2026-10-19)
 - level1 Part 14 (`docs/level1-play.md`): native ports give their class defaults, so
   reads of members the level does not store return the VM's values, not errors.
+
+## D514 the VM runs scripts' .init__ for Thing members (2026-10-19)
+- The VM gives scripted Things the members their class `.init__` sets before the stored
+  ones; the bubbles' 21 tick-0 `Update__` runs now match native (docs/level1-play.md P15).

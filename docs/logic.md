@@ -160,7 +160,7 @@ What a mode does (FOUND unless marked):
 - The rate (0xcfedc, jump table 0xcffa4): held 0; mode 0 1 while the ternary is set,
   else 0; mode 1 the ternary as a float (1 or -1), and with the ternary 0 either 0 or -1
   by the port test 0x900730 (taken here as -1, INFERRED: an off switch sends a direction
-  piston back); mode 2 1; mode 3 the activation; mode 4 is 0xc9e80 (not decoded; 1 here).
+  piston back); mode 2 1; mode 3 the activation; mode 4 is 0xc9e80 (Part 8).
 - The length (0xc9790's branch at 0xc993c, wired and mode 1 or 4): base + 2 × frame ×
   range / time, the base for time < 1, with no phase, pattern or wave. Other modes use
   the Part 4 rule on the clock.
@@ -193,3 +193,29 @@ gone).
 
 Test: `d1104_a_direction_piston_ramps_out_while_on_and_back_while_off` (lbp-sim sandbox,
 updated for the limit).
+
+## Part 8: speed pistons servo to their signal (D1106)
+
+What the game does (EBOOT 01.33, FOUND unless marked):
+- The mode 4 case of the joint pass (0xd00c8) calls 0xc9e80 with the signal's analog
+  value (input `+0x18`, not the ternary). For types 3 and 4 the target is s = max(value,
+  0), stored as Speed (`+0xd4`) and flipped to 1 - s when the range is negative and the
+  pattern is not 2. The current length (measured, 0xc9d38) as a fraction of the way from
+  min to max of base and base + range gives the error e = s - fraction; the clock rate is
+  1 above 0.1, -1 below -0.1, else 10 × e (SetScale 0xc7648). The length then follows
+  the Part 6 ramp, so the piston moves at full speed and eases into the target.
+- Type 9 runs the same servo on a wrapped angle (0xca008, INFERRED).
+- The other cases, confirmed: mode 0 the ternary set, mode 1 the ternary or 0 / -1 by
+  0x900730, mode 2 1, mode 3 the analog value.
+- 0x900730 is a component validity test on the signal's type (table 0x900778: types 2,
+  10 and 20 always, 36-38, 44 and 55 by index), not a live-signal test. Which type a
+  switch output has is still not mapped, so mode 1's off rate stays -1 (INFERRED).
+- Motors and winches (Toolkit names, INFERRED: type 3 winch, 9 motor) share the length
+  function 0xc9790; a motor spins on pattern 1 (base + frame × Speed) inside angle limits
+  about `+0xe0` (0x95f494; unbounded when range is 2π or more); strength is `+0xc0`
+  clamped to [0, 1] (0xca760). Not applied yet.
+
+lbp-sim: `SceneJoint::servo_scale` gives the mode 4 rate, with the commanded length
+standing in for the measured one (INFERRED). The Rookie Test has no mode 4 piston.
+
+Test: `d1106_a_speed_piston_settles_at_its_signal_fraction` (lbp-sim sandbox).

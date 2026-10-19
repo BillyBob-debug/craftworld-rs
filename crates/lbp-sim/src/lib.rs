@@ -196,7 +196,8 @@ pub struct PistonDrive {
 
 /// D1103: at tick `now` sets each piston's clock rate, 1 with no input, else from the
 /// `signal` on its input (ternary, activation) by its mode ([`scene::piston_scale`],
-/// D1104), then its length from the clock, waking both ends when it changed.
+/// D1104; mode 4 [`scene::SceneJoint::servo_scale`], D1106), then its length from the
+/// clock, waking both ends when it changed.
 pub fn drive_pistons(
     commands: &mut Commands,
     q: &mut Query<(&mut PistonDrive, &mut PrismaticJoint)>,
@@ -206,7 +207,15 @@ pub fn drive_pistons(
     for (mut drive, mut joint) in q.iter_mut() {
         let input = signal(&drive.joint);
         let p = drive.joint.params;
-        let s = input.map_or(1., |(t, a)| scene::piston_scale(p.mode, p.held, t, a));
+        let s = match input {
+            None => 1.,
+            Some(_) if p.held => 0.,
+            Some((_, a)) if p.mode == 4 => {
+                let l = drive.joint.length(drive.clock.frame(now), true);
+                drive.joint.servo_scale(a, l)
+            }
+            Some((t, a)) => scene::piston_scale(p.mode, p.held, t, a),
+        };
         drive.clock.set_scale(now, s);
         let frame = drive.clock.frame(now);
         let l = drive.joint.length(frame, input.is_some()) * UNIT_SCALE;

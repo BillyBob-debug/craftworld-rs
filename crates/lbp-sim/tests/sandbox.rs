@@ -878,3 +878,49 @@ fn d1104_a_direction_piston_ramps_out_while_on_and_back_while_off() {
     // Unwired, the same joint follows its free-running wave instead.
     assert_eq!(j.length(15., false), j.free_length(15.));
 }
+
+/// D1106: a speed piston (mode 4) servos its length to the analog signal's fraction of the
+/// way from base to base + range, at full rate until within a tenth (0xc9e80).
+#[test]
+fn d1106_a_speed_piston_settles_at_its_signal_fraction() {
+    use lbp_sim::scene::{Endpoint, JointKind, PistonClock, SceneJoint};
+    let mut params = JointParams {
+        mode: 4,
+        ..Default::default()
+    };
+    params.motion[..2].copy_from_slice(&[300., 60.]);
+    let mut j = SceneJoint {
+        thing: 0,
+        kind: JointKind::Piston,
+        a: Endpoint::Static(0),
+        b: Endpoint::Static(1),
+        world_a: [0.; 2],
+        world_b: [0.; 2],
+        local_a: [0.; 2],
+        local_b: [0.; 2],
+        length: 500.,
+        min_length: 500.,
+        max_length: 500.,
+        params,
+    };
+    // Rate: full out below the target, full back above it, 10 × the error near it.
+    assert_eq!(
+        (j.servo_scale(0.5, 500.), j.servo_scale(0., 800.)),
+        (1., -1.)
+    );
+    assert!((j.servo_scale(0.5, 620.) - 1.).abs() < 1e-5);
+    assert!((j.servo_scale(-1., 530.) + 1.).abs() < 1e-5);
+    // Driven on the clock, a signal of 0.5 settles half way out (650).
+    let mut c = PistonClock::default();
+    c.set_scale(0., 0.);
+    let mut l = 500.;
+    for now in 0..400 {
+        let now = now as f32;
+        c.set_scale(now, j.servo_scale(0.5, l));
+        l = j.length(c.frame(now), true);
+    }
+    assert!((l - 650.).abs() < 1., "{l}");
+    // A negative range flips the target: signal 0 holds the piston at its base.
+    j.params.motion[0] = -300.;
+    assert_eq!(j.servo_scale(0., 500.), 0.);
+}
