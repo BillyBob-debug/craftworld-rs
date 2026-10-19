@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1007 the previous level (2026-10-19)
+## Latest: D1008 the viewer's level slots (2026-10-19)
+- Part 155 (`docs/level-scripts/part-155.md`): a launched level gets its story slot,
+  and back in the Pod it is the previous level `OnEnterPod__` reads.
+
+## D1007 the previous level (2026-10-19)
 - Part 154 (`docs/level-scripts/part-154.md`): `Game.GetPreviousLevelSlotID__` and
   `IsPreviousLevelValid__`; entering the Pod asks for the level-created dialogue.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1001 where a key's kind 2 comes from (2026-10-19)
 - Part 148 (`docs/level-scripts/part-148.md`): a search key of kind 2 is a user's
   result; Story slots only give kind 1, so the Pod is unchanged.
-
-## D1000 the native intro's video request (2026-10-19)
-- Part 147 (`docs/level-scripts/part-147.md`): the native Pod intro asks for its video
-  as the game's script does; no video plays yet, so its wait is unchanged.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
