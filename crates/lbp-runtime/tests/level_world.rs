@@ -259,7 +259,7 @@ fn class_defaults_inherited_natives_and_parts() {
     assert!(world
         .get_member(MemberKind::Thing, &me, "Lamp", "tweaking")
         .is_err());
-    world.add_class_defaults(&vm);
+    world.add_class_defaults(&mut vm);
     // A superclass field the instance never stores exists at its default; stored wins.
     let get = |w: &mut LevelWorld, f| w.get_member(MemberKind::Thing, &me, "Lamp", f);
     assert_eq!(get(&mut world, "tweaking"), Ok(Value::Bool(false)));
@@ -662,7 +662,7 @@ fn stage3_outputs_in_things_and_score_boards() {
     };
     assert_eq!(board(&mut host, thing(1)), Ok(Value::Bool(true)));
     assert_eq!(board(&mut host, thing(2)), Ok(Value::Bool(false)));
-    host.world.add_class_defaults(&vm);
+    host.world.add_class_defaults(&mut vm);
     assert_eq!(board(&mut host, thing(2)), Ok(Value::Bool(true)));
     assert_eq!(board(&mut host, thing(3)), Ok(Value::Bool(false)));
     assert_eq!(board(&mut host, thing(0)), Ok(Value::Bool(false)));
@@ -2737,7 +2737,7 @@ fn d263_a_script_cast_tests_the_things_class_chain() {
     let mut w = LevelWorld::from_things(&level());
     // Before the classes are resolved nothing is known and every cast passes.
     assert!(w.thing_is(1, "Other") && w.thing_is(2, "Lamp"));
-    w.add_class_defaults(&vm);
+    w.add_class_defaults(&mut vm);
     // Thing 1 carries a Lamp, which derives from Base; Thing 2 has no script.
     assert_eq!(w.things[1].script_classes, ["Lamp", "Base"]);
     assert!(w.thing_is(1, "Lamp") && w.thing_is(1, "Base"));

@@ -62,9 +62,9 @@ fn run() -> Result<(), String> {
     let mut world = read(planets)?;
     let mut sworld = read(shell)?;
     world.bind_objects(&mut vm);
-    world.add_class_defaults(&vm);
+    world.add_class_defaults(&mut vm);
     sworld.bind_objects(&mut shell_vm);
-    sworld.add_class_defaults(&shell_vm);
+    sworld.add_class_defaults(&mut shell_vm);
     let stored: Vec<Option<[f32; 16]>> = world.things.iter().map(|t| t.world_matrix).collect();
     for &t in &watch {
         let s = &world.things[t as usize];

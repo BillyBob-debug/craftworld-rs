@@ -64,7 +64,7 @@ fn d507_the_native_post_it_note_keeps_its_text_and_unlocks() {
     let mut vm = Vm::default();
     let mut world = LevelWorld::from_things(&note_level());
     world.bind_objects(&mut vm);
-    world.add_class_defaults(&vm);
+    world.add_class_defaults(&mut vm);
     assert_eq!(world.things[1].script_classes[0], "PostItNote");
     assert_eq!(world.things[2].script_classes[0], "PostItNoteUnlockCostume");
     let mut host = Bindings::defaulting(world);

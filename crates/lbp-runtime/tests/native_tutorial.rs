@@ -61,7 +61,7 @@ fn d508_the_native_tutorial_monitor_plays_its_video() {
     let mut vm = Vm::default();
     let mut world = LevelWorld::from_things(&monitor_level());
     world.bind_objects(&mut vm);
-    world.add_class_defaults(&vm);
+    world.add_class_defaults(&mut vm);
     assert_eq!(world.things[1].script_classes[0], "TutorialMonitor");
     let mut host = Bindings::defaulting(world);
     let mut scripts = LevelScripts::new(&vm, &host.world);

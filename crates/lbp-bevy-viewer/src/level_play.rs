@@ -381,7 +381,7 @@ impl WorldSource {
             ..
         } = read;
         let built = world.bind_objects(&mut vm);
-        world.add_class_defaults(&vm);
+        world.add_class_defaults(&mut vm);
         world.progression_flags = self.flags;
         if let Some((slot, previous)) = slots {
             world.level_slot_id = slot;
@@ -521,7 +521,7 @@ fn start_shell(
 ) -> ShellLevel {
     let mut shell_world = shell_world;
     let built = shell_world.bind_objects(&mut shell_vm);
-    shell_world.add_class_defaults(&shell_vm);
+    shell_world.add_class_defaults(&mut shell_vm);
     let mut shell_host = Bindings::defaulting(shell_world);
     let engine = lbp_runtime::add_engine_objects(&mut shell_vm, &mut shell_host, BUDGET_PER_CALL);
     let room = MAX_FAULT_LINES.saturating_sub(faults.len());
