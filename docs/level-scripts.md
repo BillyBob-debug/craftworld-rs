@@ -139,6 +139,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 133: drawing the links (2026-10-18, D386)](level-scripts/part-133.md)
 - [Part 134: a badge's radius (2026-10-19, D387)](level-scripts/part-134.md)
 - [Part 135: a level badge's radius (2026-10-19, D388)](level-scripts/part-135.md)
+- [Part 136: a link's width and look (2026-10-19, D389)](level-scripts/part-136.md)
 
 ## Next
 
