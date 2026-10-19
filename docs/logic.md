@@ -118,3 +118,30 @@ wakes both ends. Wired pistons (27 of 33 here) keep their rest length until the
 switch-driven clock is read. The base length is the stored length (INFERRED).
 
 Test: `d1102_an_unwired_piston_moves_out_and_back_on_its_wave` (lbp-sim sandbox).
+
+## Part 5: switched pistons run their clock while the signal is on (D1103)
+
+The retimed frame from Part 4 is the piston's own clock (EBOOT 01.33, FOUND unless
+marked):
+- `+0x190` points into the joint itself (0xc80a0: `+0x110`; 0xc76e0 may swap in a copy at
+  `+0x150`), so the clock is the saved modStartFrame, modDeltaFrames and modScale:
+  frame = (now - start) × scale + start + delta, with now the game frame (0xc7548).
+- SetScale 0xc7648: delta += (old scale - 1) × (now - start), start = now, scale = new.
+  The frame stays continuous, so a signal changes the rate and never moves the piston.
+- The per-frame pass 0xcfedc skips joints with no input. For a wired one it sets the scale
+  by the mode (`+0xa0`, jump table 0xcffa4): 0 on/off, scale 1 while the signal's
+  ternary is set, else 0 (the piston holds where it is); 1 direction, +value or -1 (or 0
+  after a signal-type test 0x900730); 2 always 1, with a restart at the cycle's end
+  (0x11f26c, 0xc7574); 3 the analog value; 4 speed (0xc9e80, not decoded). With no live
+  signal object the clock resets to 0, 0, 1 (0xd0054).
+- The mode is set only by the tweak menu setter 0x1110e0 (pattern 0: choice 0 mode 0,
+  1 mode 3, 2 mode 1) and is not saved. How a loaded piston gets it is not found.
+
+In the Rookie Test every piston saves modStartFrame 5,306,444 and modScale 0. Play starts
+from the reset clock 0, 0, 1 instead (INFERRED; with the saved values nothing would move).
+
+lbp-sim keeps a `PistonClock` per piston. The viewer gives every wired piston mode 0
+(INFERRED: the menu's first choice) through `LevelWorld::tweak_activation(thing, 0)`, so
+it runs while its switch is on and holds while off; unwired ones run at 1 as in Part 4.
+
+Test: `d1103_a_switched_piston_clock_freezes_while_off_and_never_jumps` (lbp-sim sandbox).

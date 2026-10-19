@@ -6643,3 +6643,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D510 the scoreboard in native Rust (2026-10-19)
 - level1 Part 11 (`docs/level1-play.md`): `Score_Board` is a native port; once every
   Sackboy is in, it locks the score and ends the level (`EnterEndLevelFlow`).
+
+## D511 the Rookie Test route traced with all native scripts (2026-10-19)
+- level1 Part 12 (`docs/level1-play.md`): with every class native, the route without
+  the decrypted overlay makes the same 170,796 calls as with it.

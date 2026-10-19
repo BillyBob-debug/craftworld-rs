@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1102 pistons with no input run the game's wave (2026-10-19)
+## Latest: D1103 switched pistons run while their signal is on (2026-10-19)
+- Logic lane: each piston keeps the game clock (modStart/Delta/Scale); a switch sets
+  its rate, so an on/off piston runs while on and holds while off (docs/logic.md P5).
+
+## D1102 pistons with no input run the game's wave (2026-10-19)
 - Logic lane: unwired pistons move between base and base + range on the EBOOT's
   eased wave (0xc95ec); the 27 wired ones wait on the switch clock (docs/logic.md P4).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D512 the speech bubble in the Rookie Test call trace (2026-10-19)
 - level1 Part 13 (`docs/level1-play.md`): the bubble port's calls join the trace and
   match the VM's every tick but for unstored members and the known `.init__` run.
-
-## D511 the Rookie Test route traced with all native scripts (2026-10-19)
-- level1 Part 12 (`docs/level1-play.md`): with every class native, the route without
-  the decrypted overlay makes the same 170,796 calls as with it.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
