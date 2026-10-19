@@ -7,9 +7,12 @@
 
 ## State
 - PR 139 (D600) merged; Story button on (PR 153).
-- D601 (branch `launcher-first-run-help`, cloud thread): plain-words setup errors, disc
-  folder accepted, FARC-tag check for encrypted dumps, "didn't load" window in game modes,
-  README guide for non-programmers. Handed to the coordinator for merge.
+- D601 shipped: PR 195 merged as 9ce8441 (plain-words setup errors, disc folder accepted,
+  FARC-tag check for encrypted dumps, "didn't load" window in game modes, README guide).
+- Friends zip rebuilt from 9ce8441: craftworld-rs-preview-2026-10-19.zip (40.5 MB).
+- GitHub release: planned tag `preview-2026-10-19` (pre-release, title "craftworld-rs
+  preview 2026-10-19", zip attached). Publishing needs the owner's own approval on the PC
+  (the auto-mode permission check blocks `gh release create`); not posted yet.
 - Decision numbers D600-D699; next free D602.
 
 ## Facts
@@ -20,10 +23,15 @@
   Data in %LOCALAPPDATA%/craftworld-rs (disc/ copy 1.2 GB, inventory.json, launcher.txt).
   A disc folder (holding PS3_GAME) is read in place, not copied.
 - Every README error-table row matches a launcher/viewer message; change both together.
-- Zip: local-analysis/friends-build/craftworld-rs-preview-2026-10-18.zip predates D601.
-  No GitHub release yet: the README links the Releases page for when one is posted.
-  Rebuild, re-zip and any release wait for the owner's word.
+- Zip build: `cargo build --release -p lbp-bevy-viewer` with
+  CARGO_PROFILE_RELEASE_STRIP=true; zip with Windows `tar.exe -a` (forward-slash entries,
+  not PS 5.1 Compress-Archive). Contents: one folder holding lbp-bevy-viewer.exe (the name
+  the README uses), LICENSE-MIT, LICENSE-APACHE, THIRD-PARTY-NOTICES.md, README.txt. Lives
+  in ignored local-analysis/friends-build/; never committed.
+- 2026-10-19 smoke test: `--launcher-setup` with the real ISO + update ended "Ready in 17s";
+  the update folder given as the ISO gives the D601 "goes in the second box" message, exit 1.
+  The exe has no user paths or email strings.
 
 ## Next
-1. Owner's go: rebuild the zip with D601 and (if asked) publish a release.
-2. On the PC: run Set up against the real ISO once to confirm the FARC check passes.
+1. Owner approves the release publish; then post it with the zip.
+2. On the PC: run Set up from the GUI against the real ISO once (headless already passes).
