@@ -1069,6 +1069,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             drive_pistons,
             drive_winches,
             drive_motors,
+            drive_spins,
             follow_colour_correction,
             follow_things,
             follow_story_world,
@@ -2148,6 +2149,24 @@ fn follow_tweaks(
 ) {
     let world = &play.host.world;
     lbp_sim::follow_tweaks(&mut commands, &mut q, |t| {
+        world.tweak_activation(t.thing, t.behavior)
+    });
+}
+
+/// D1109: gyroscopes and rotators turn their bodies ([`lbp_sim::drive_spins`]) with
+/// their switch activation (FOUND, 0xcaf9c).
+fn drive_spins(
+    play: NonSend<Play>,
+    mut commands: Commands,
+    mut q: Query<(
+        Entity,
+        &lbp_sim::SpinTweaks,
+        &lbp_sim::avian2d::prelude::Rotation,
+        &mut lbp_sim::avian2d::prelude::AngularVelocity,
+    )>,
+) {
+    let world = &play.host.world;
+    lbp_sim::drive_spins(&mut commands, &mut q, |t| {
         world.tweak_activation(t.thing, t.behavior)
     });
 }

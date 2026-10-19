@@ -995,3 +995,51 @@ fn d1108_a_motor_turns_at_its_speed_on_its_clock() {
     assert!((d.turn(20., Some((1, 1.))) - 0.05 * hz).abs() < 1e-3);
     assert!(d.turn(30., Some((0, 0.))).abs() < 1e-6);
 }
+
+#[test]
+fn d1109_gyroscopes_right_their_body_and_rotators_turn_at_their_speed() {
+    // A box carrying a gyroscope (Thing 2) as saved in the Rookie Test: range π/15 per
+    // tick, strength 1.
+    let mut things = vec![
+        floor(),
+        thing(
+            1,
+            matrix(0., 300., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(2, matrix(0., 300., 0., 0., 1., 1.), None, false),
+    ];
+    things[2].parent = Some(1);
+    things[2].data.physics_tweak = Some(PhysicsTweak {
+        configuration: 1,
+        vel_range: 0.2094394,
+        accel_strength: 1.,
+        ..Default::default()
+    });
+    let scene = build_scene(&things);
+    let gyro = scene.bodies[0].spins[0];
+    // Tilted by 1 rad and still: it turns back, no faster than its range per tick.
+    let (mut angle, mut w) = (1f32, 0f32);
+    for _ in 0..120 {
+        w = gyro.turn(angle, w, 1.);
+        assert!(w.abs() <= 0.2094394 + 1e-6, "speed {w}");
+        angle += w;
+    }
+    assert!(angle.abs() < 0.05, "upright again: {angle}");
+    // Switched off, it leaves the body alone.
+    assert_eq!(gyro.turn(1., 0.3, 0.), 0.3);
+    // A rotator (configuration 9) speeds up by accel × range per tick to its speed.
+    let rot = lbp_sim::scene::SpinTweak {
+        thing: 2,
+        configuration: 9,
+        behavior: 0,
+        range: 0.20943,
+        accel: 0.125,
+        decel: 0.125,
+        speed: 0.03490659,
+    };
+    let w = rot.turn(0., 0., 1.);
+    assert!((w - 0.20943 * 0.125).abs() < 1e-6, "{w}");
+    assert!((rot.turn(0., w, 1.) - 0.03490659).abs() < 1e-6);
+}

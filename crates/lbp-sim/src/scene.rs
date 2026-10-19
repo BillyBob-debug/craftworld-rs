@@ -96,6 +96,8 @@ pub struct SceneBody {
     pub fixed: bool,
     /// D1100: an anti-gravity tweaker glued to the body, if any.
     pub anti_gravity: Option<AntiGravity>,
+    /// D1109: the gyroscopes and rotators glued to the body (configurations 1 and 9).
+    pub spins: Vec<SpinTweak>,
 }
 
 /// D1100: the PPhysicsTweaks with configuration 0 (anti-gravity tweakers) on a body's
@@ -128,6 +130,64 @@ impl AntiGravity {
     pub fn gravity_scale(&self, activation: impl Fn(&AntiGravityTweak) -> f32) -> f32 {
         let cancelled: f32 = self.tweaks.iter().map(|t| t.gravity * activation(t)).sum();
         (1. - cancelled).clamp(0., 1.)
+    }
+}
+
+/// D1109: a PPhysicsTweak that turns its body: configuration 1 (the gyroscope, turning
+/// towards world up) or 9 (the rotator, turning at a set speed). Read from the SPU row
+/// packer 0x95fb20 (EBOOT 01.33); angles in radians, speeds per game tick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SpinTweak {
+    /// The PPhysicsTweak's Thing index.
+    pub thing: usize,
+    pub configuration: u32,
+    /// PPhysicsTweak.behavior, read as the input mode (D1101).
+    pub behavior: i32,
+    /// velRange: the gyroscope's top speed and the scale of both strengths.
+    pub range: f32,
+    /// accelStrength and decelStrength.
+    pub accel: f32,
+    pub decel: f32,
+    /// The rotator's speed (middleVel z; per tick).
+    pub speed: f32,
+}
+
+/// D1109: `angle` wrapped into [-π, π] (the packer's vrfim step at 0x960790).
+fn wrap_angle(angle: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    angle - TAU * ((angle + PI) / TAU).floor()
+}
+
+impl SpinTweak {
+    /// D1109: the turn speed (per tick) the tweak wants for a body at `angle` and its
+    /// change limits (lo, hi) for this tick, before the activation. FOUND (0x95fb20):
+    /// limits ±accel × range; the rotator's target is its speed, with decel × range on
+    /// the side that slows it (0x95fd4c); the gyroscope aims at world up, angle error
+    /// wrapped, target clamped to ±range (0x960858). INFERRED: the target shape inside
+    /// 0x1c21f4 (a stop-in-time rule), read as sign(e) × sqrt(2 × accel × range × |e|).
+    pub fn target(&self, angle: f32) -> (f32, f32, f32) {
+        let a = self.accel * self.range;
+        match self.configuration {
+            9 => {
+                let d = self.decel * self.range;
+                let lo = if self.speed >= 0. { -d } else { -a };
+                let hi = if self.speed <= 0. { d } else { a };
+                (self.speed, lo, hi)
+            }
+            _ => {
+                let e = wrap_angle(-angle);
+                let w = e.signum() * (2. * a * e.abs()).sqrt();
+                (w.clamp(-self.range, self.range), -a, a)
+            }
+        }
+    }
+
+    /// D1109: the body's turn speed (per tick) after this tweak's row at `activation`:
+    /// the change towards the target, clamped to the limits scaled by the activation
+    /// (0x95fdc8). The 1/mass factor there is left out (INFERRED: the solver undoes it).
+    pub fn turn(&self, angle: f32, w: f32, activation: f32) -> f32 {
+        let (target, lo, hi) = self.target(angle);
+        w + (target - w).clamp(lo * activation, hi * activation)
     }
 }
 
@@ -390,6 +450,7 @@ fn build_scene_inner(
                             frozen: pb.frozen,
                             fixed: is_world(thing) || is_pickup(thing),
                             anti_gravity: None,
+                            spins: vec![],
                         });
                         scene.bodies.len() - 1
                     })
@@ -500,6 +561,30 @@ fn build_scene_inner(
             for (d, t) in total.dampening.iter_mut().zip(tw.dampening) {
                 *d += t * a;
             }
+        }
+    }
+    for (i, t) in things.iter().enumerate() {
+        let Some(tw) = t
+            .data
+            .physics_tweak
+            .as_ref()
+            .filter(|tw| matches!(tw.configuration, 1 | 9))
+        else {
+            continue;
+        };
+        let slot = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        if let Some(b) = slot {
+            scene.bodies[b].spins.push(SpinTweak {
+                thing: i,
+                configuration: tw.configuration,
+                behavior: tw.behavior,
+                range: tw.vel_range,
+                accel: tw.accel_strength,
+                decel: tw.decel_strength,
+                speed: tw.middle_vel[2],
+            });
         }
     }
     scene.add_joints(things);

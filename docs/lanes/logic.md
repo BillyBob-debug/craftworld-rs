@@ -6,8 +6,8 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-10 (pistons: length, clock, saved mode, ends, speed mode;
-   winches; motors)
+4. docs/logic.md Parts 4-11 (pistons: length, clock, saved mode, ends, speed mode;
+   winches; motors; gyroscopes and rotators)
 
 ## State
 - Owner (2026-10-19): "i think we might need to work on getting the games logic and
@@ -16,9 +16,9 @@
   8f435e8), D1104 (PR 245, 0b2d19a: each piston's saved mode and held flag).
 - Owner paused (2026-10-19 "pause for now") and resumed ("unpause") the same day.
 - D1105 merged (PR 246, e84bd7a), D1106 (PR 247, c632357), D1107 (PR 248, 67fd1db:
-  winches). PR for D1108 (branch `logic-motor`, worktree `E:\Projects\wt-d324`):
-  motors turn on the piston clock.
-- Decision numbers: D1100-D1199, next free D1109.
+  winches), D1108 (PR 249, 6c79cd5: motors). PR for D1109 (branch `logic-mover`,
+  worktree `E:\Projects\wt-d324`): gyroscopes and rotators turn their bodies.
+- Decision numbers: D1100-D1199, next free D1110.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -37,15 +37,17 @@
 - EBOOT 01.33: PPhysicsTweak part bit 30; activation getter 0xcaf9c; body update 0xc5f1c
   (gravity scale clamp(1 - Σ gravity × activation, 0, 1) at 0xc6308); SPU packer 0x1c7ed0
   (configurations 1-5 and 9 via 0x95fb20; 6-8 and 11 via 0x957df4).
-- Movers, rotators and followers (configurations other than 0) run on the SPU; their math
-  needs SPU disassembly or RPCS3 memory reads of a moving body.
+- Row packer 0x95fb20 (Part 11): configuration 1 is the gyroscope (aims at world up),
+  2 and 9 rotators, 3-5 aim along velocity / stick / target. Row: target turn speed
+  +0x20, limits +0x24/+0x28 = ±accel × velRange, × activation × 1/mass (0x95fdc8).
+  Stop-in-time helper 0x1c21f4. Followers (11) and 6-8 via 0x957df4, unread.
 
 ## Next
 1. Motors (docs/logic.md Part 10): the position term and strength cap of row 0x95f494,
    the turn sign; check thing 58's swing in RPCS3 (Part 10). The type 4 / angle-wrap question at
    0x962590. The switch type bucket in 0x900730.
-2. Movers and rotators (configurations 1 and 11): read the SPU job or measure a body
-   in RPCS3, then apply them.
+2. Followers and movers (configurations 11, 8, 6-7) through 0x957df4; then 3-5 and 12;
+   the gyroscope's exact 0x1c21f4 target and the flip flag.
 3. SWITCH_INPUT, MATERIAL_TWEAK (friction, restitution) and EMITTER.
 4. The 38 stored-signal switches; the sensors' cone and layer tests.
 5. Sequencers, controlinators, creatures.

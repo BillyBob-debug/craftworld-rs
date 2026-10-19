@@ -183,6 +183,33 @@ pub fn follow_tweaks(
     }
 }
 
+/// D1109: a body's gyroscopes and rotators, for [`drive_spins`].
+#[derive(Component, Debug, Clone)]
+pub struct SpinTweaks(pub Vec<scene::SpinTweak>);
+
+/// D1109: each gyroscope and rotator moves its body's turn speed towards its target
+/// ([`scene::SpinTweak::turn`], per tick, in order) with the tweak's current activation,
+/// and wakes a body whose speed changed.
+pub fn drive_spins(
+    commands: &mut Commands,
+    q: &mut Query<(Entity, &SpinTweaks, &Rotation, &mut AngularVelocity)>,
+    activation: impl Fn(&scene::SpinTweak) -> f32,
+) {
+    let hz = TICK_HZ as f32;
+    for (e, tweaks, rot, mut w) in q.iter_mut() {
+        let angle = rot.as_radians();
+        let before = w.0 / hz;
+        let after = tweaks
+            .0
+            .iter()
+            .fold(before, |v, t| t.turn(angle, v, activation(t)));
+        if (after - before).abs() > 1e-6 {
+            w.0 = after * hz;
+            commands.queue(avian2d::dynamics::solver::islands::WakeBody(e));
+        }
+    }
+}
+
 /// D1102: a piston joint, kept so its length can follow the game's piston rule, with its
 /// clock (D1103).
 #[derive(Component, Debug, Clone)]
@@ -394,6 +421,9 @@ pub fn spawn_scene(commands: &mut Commands, scene: &PhysicsScene) -> Spawned {
                     GravityScale(a.gravity_scale(|t| t.saved)),
                     AntiGravityTweaks(a.clone()),
                 ));
+            }
+            if !b.spins.is_empty() {
+                e.insert(SpinTweaks(b.spins.clone()));
             }
             if !b.fixed && b.frozen != 0 {
                 e.insert(StartAsleep {
