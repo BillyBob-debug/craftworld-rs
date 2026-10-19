@@ -334,3 +334,39 @@ fn d396_a_group_is_locked_while_all_its_slots_are() {
     h.world.story_slots[3].initially_locked = false;
     assert!(h.world.slot_unlocked(pack));
 }
+
+/// D1004: the Pod's music is set once, with a whole-second delay, and its stereo pairs'
+/// volumes are set for view 0; later frames set nothing while the view stays.
+#[test]
+fn d1004_pod_music_is_set_once() {
+    let mut h = host();
+    run(&mut h, "OnCreate__", &[]);
+    frame(&mut h, true);
+    for _ in 0..10 {
+        frame(&mut h, false);
+    }
+    assert_eq!(h.world.media.music_starts, 1);
+    let music = h.world.media.music.clone().expect("no music set");
+    assert_eq!(
+        (music.guid, music.settings, music.volume),
+        (42103, 42108, 1.)
+    );
+    assert!((1. ..=8.).contains(&music.delay) && music.delay.fract() == 0.);
+    assert_eq!(music.pair_volumes, [0., 0., 0., 1., 0., 0.]);
+    let pair_calls = h.world.audio_commands["SetInteractiveMusicStereoPairVolume"];
+    assert_eq!(pair_calls, 6);
+    assert_eq!(member(&mut h, "IMusicPlaying"), Value::Bool(true));
+    assert_eq!(member(&mut h, "IMusicInit"), Value::Bool(false));
+}
+
+/// D1004: the stereo pairs by the view type (FOUND, `UpdateInteractiveMusic__`).
+#[test]
+fn d1004_music_pairs() {
+    use lbp_runtime::music_pairs;
+    assert_eq!(music_pairs(0), [0., 0., 0., 1., 0., 0.]);
+    assert_eq!(music_pairs(1), [1., 0., 0., 1., 0., 0.]);
+    assert_eq!(music_pairs(3), [1., 0., 1., 1., 0., 0.]);
+    assert_eq!(music_pairs(7), [1., 0., 0., 1., 1., 0.]);
+    assert_eq!(music_pairs(28), [1., 1., 0., 1., 0., 0.]);
+    assert_eq!(music_pairs(38), [0., 0., 0., 1., 0., 0.]);
+}

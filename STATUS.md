@@ -6527,3 +6527,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D395 the active link look (2026-10-19)
 - Part 142 (`docs/level-scripts/part-142.md`): a link to a locked level is drawn white
   with the active texture band; pending (green) once the level unlocks.
+
+## D396 a group's lock (2026-10-19)
+- Part 143 (`docs/level-scripts/part-143.md`): a developer group or DLC pack is locked
+  while all its slots are, as 0x1a7efc gives; the runtime's lock test follows.
