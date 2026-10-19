@@ -3106,19 +3106,22 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     // answer. The core answers false, and starts nothing, while voice-over is switched
     // off (one global), for a line the profile has heard when the second flag is false,
     // and while a line plays that the first flag does not let it interrupt; else it
-    // starts the line's sound. Here no line starts: the game's false. INFERRED: the
-    // answer is true when a line starts (the end of the core was not read).
+    // starts the line's sound. D397: the world answers whether the line started (its
+    // length known from the game's voice-over bank); a world that keeps no lines gives the
+    // game's false. INFERRED: the answer is true when a line starts (the end of the core
+    // was not read).
     ("Audio", "RequestVoiceOver__Q7StringAbb", |w, c| {
         opt_text(param(c, 0)?)?;
         boolean(param(c, 1)?)?;
         boolean(param(c, 2)?)?;
         w.engine_call("RequestVoiceOver", None, c.params)?;
-        Ok(Value::Bool(false))
+        let started = w.state_query("Audio.RequestVoiceOver.started");
+        Ok(Value::Bool(matches!(started, Ok(Value::Bool(true)))))
     }),
     // FOUND (01.33, 0x5f8fdc -> 0x2de218). Declared static `bool IsVoiceOverPlaying()`
     // on Audio: false unless voice-over is switched on, the kept sound handle is valid
-    // and its sound is playing. The Pod's threads wait on it. A state query: false,
-    // since no line ever starts.
+    // and its sound is playing. The Pod's threads wait on it. A state query: D397, true
+    // while a started line has ticks left.
     ("Audio", "IsVoiceOverPlaying__", |w, _| {
         bool_query(w, "Audio.IsVoiceOverPlaying__")
     }),
@@ -4286,7 +4289,9 @@ mod tests {
                 "StartVideo Some(4) 3",
                 "StopVideo None 1",
                 "RequestVoiceOver None 3",
+                "query Audio.RequestVoiceOver.started",
                 "RequestVoiceOver None 3",
+                "query Audio.RequestVoiceOver.started",
                 "query Audio.IsVoiceOverPlaying__",
                 "StopVoiceOver None 0",
                 "SetMixOverlay None 2",

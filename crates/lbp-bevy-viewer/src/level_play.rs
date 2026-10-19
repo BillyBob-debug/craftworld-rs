@@ -225,6 +225,30 @@ struct WorldSource {
     native_scripts: bool,
 }
 
+/// D397: the voice-over lines' lengths from the first game folder that has the disc's
+/// voice-over bank (`lbp_runtime::VOICE_OVER_BANK` under `USRDIR`, or under
+/// `PS3_GAME/USRDIR` for a disc copy); none, and so no line starts, without one.
+fn voice_over_lengths(game: &str) -> std::collections::BTreeMap<String, u32> {
+    use std::io::Read;
+    for dir in game.split(';').map(Path::new) {
+        for usrdir in ["USRDIR", "PS3_GAME/USRDIR"] {
+            let path = dir.join(usrdir).join(lbp_runtime::VOICE_OVER_BANK);
+            let Ok(file) = std::fs::File::open(&path) else {
+                continue;
+            };
+            let mut head = Vec::new();
+            let max = lbp_runtime::VOICE_OVER_HEADER_MAX as u64;
+            if file.take(max).read_to_end(&mut head).is_ok() {
+                match lbp_runtime::voice_over_lengths(&head) {
+                    Ok(lengths) => return lengths,
+                    Err(e) => println!("Voice-over bank {}: {e}", path.display()),
+                }
+            }
+        }
+    }
+    Default::default()
+}
+
 /// D364: a level read by [`WorldSource::read`]: the scripts on a VM (and on a second VM
 /// for the shell level, when asked), the level's world and its identity, and the header.
 struct LevelRead {
@@ -322,6 +346,7 @@ impl WorldSource {
         let built = world.bind_objects(&mut vm);
         world.add_class_defaults(&vm);
         world.progression_flags = self.flags;
+        world.media.voice_over_lengths = voice_over_lengths(&self.game);
         // Unbound natives return their type's default and are counted (rscript-plan stage 1).
         let mut host = Bindings::defaulting(world);
         let mut faults = lbp_runtime::add_engine_objects(&mut vm, &mut host, BUDGET_PER_CALL);
@@ -1750,6 +1775,8 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
     // D381: the profile's state goes with the session (the game keeps one profile).
     host.world.progression_flags = p.host.world.progression_flags;
     host.world.story_progress = std::mem::take(&mut p.host.world.story_progress);
+    let heard = &mut p.host.world.media.voice_overs_heard;
+    host.world.media.voice_overs_heard = std::mem::take(heard);
     // D384: the pending links as SlotLink objects, for `LevelUnlockingThread`.
     lbp_runtime::add_pending_link_objects(&mut vm, &mut host);
     // D382: back in the Pod, its shell level plays again with it.

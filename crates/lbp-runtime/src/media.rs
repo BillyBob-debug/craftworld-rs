@@ -3,10 +3,12 @@
 //!
 //! Nothing here plays a video or a sound. A request is kept as the script made it, so
 //! that a later video or audio system can take it from here; the script is told what
-//! the game tells it when nothing started.
+//! the game tells it when nothing started. D397: a voice-over line whose length the
+//! game's voice-over bank gives "plays" silently for that long, so the scripts that wait
+//! on it wait as long as the game's.
 use crate::LevelWorld;
 use lbp_script_vm::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// One `Video.StartVideo__Q5Thinggb` call. No video started for it: the script got
 /// [`lbp_script_vm::natives::NO_VIDEO`].
@@ -22,8 +24,8 @@ pub struct VideoRequest {
     pub frame: i32,
 }
 
-/// One `Audio.RequestVoiceOver__Q7StringAbb` call. No line started for it: the script
-/// got false.
+/// One `Audio.RequestVoiceOver__Q7StringAbb` call. Unless its line started (D397,
+/// [`MediaState::voice_over_lengths`]) the script got false.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct VoiceOverRequest {
     /// The name of the line; `None` for a null string.
@@ -54,6 +56,18 @@ pub struct MediaState {
     /// name of the mix (a null string counts under the empty name).
     pub mix_overlays_set: BTreeMap<String, u64>,
     pub mix_overlays_removed: BTreeMap<String, u64>,
+    /// D397: each voice-over line's length in ticks at 30 Hz, by its name without
+    /// `.wav` ([`voice_over_lengths`]); empty when the bank was not read, and then no line
+    /// starts.
+    pub voice_over_lengths: BTreeMap<String, u32>,
+    /// D397: the line that plays and its ticks left.
+    pub voice_over: Option<(String, u32)>,
+    /// D397: the lines started so far. FOUND (0x2de6b8): a line the profile has heard
+    /// does not start again unless the request's second flag is set. INFERRED: the
+    /// session stands for the profile (a fresh profile has heard none).
+    pub voice_overs_heard: BTreeSet<String>,
+    /// D397: whether the last `RequestVoiceOver` started its line.
+    pub last_started: bool,
 }
 
 /// Most requests [`MediaState::videos`] and [`MediaState::voice_overs`] keep each.
@@ -69,6 +83,82 @@ impl MediaState {
     pub fn voice_over_requests(&self) -> u64 {
         self.voice_overs.len() as u64 + self.voice_overs_dropped
     }
+
+    /// D397: `Audio.IsVoiceOverPlaying__`, whether a started line has ticks left.
+    pub fn voice_over_playing(&self) -> bool {
+        self.voice_over.as_ref().is_some_and(|(_, left)| *left > 0)
+    }
+
+    /// D397: one tick of the line that plays; it ends when none is left.
+    pub fn tick(&mut self) {
+        if let Some((_, left)) = &mut self.voice_over {
+            *left = left.saturating_sub(1);
+            if *left == 0 {
+                self.voice_over = None;
+            }
+        }
+    }
+
+    /// D397 (FOUND 0x2de6b8, the core of `RequestVoiceOver`): the line starts unless
+    /// voice-over is off (here: no bank was read, or the bank has no such line), the
+    /// profile has heard it and `replay` (the second flag) is clear, or a line plays and
+    /// `interrupt` (the first flag) is clear.
+    fn request_voice_over(&mut self, name: Option<&str>, interrupt: bool, replay: bool) -> bool {
+        let Some((name, &ticks)) = name.and_then(|n| self.voice_over_lengths.get_key_value(n))
+        else {
+            return false;
+        };
+        if (!replay && self.voice_overs_heard.contains(name))
+            || (self.voice_over_playing() && !interrupt)
+        {
+            return false;
+        }
+        self.voice_overs_heard.insert(name.clone());
+        self.voice_over = Some((name.clone(), ticks));
+        true
+    }
+}
+
+/// D397: the game's voice-over bank, `gamedata/audio/voiceover.fsb` on the disc (an FMOD
+/// FSB4 bank, little-endian, not encrypted), the English one at that path.
+pub const VOICE_OVER_BANK: &str = "gamedata/audio/voiceover.fsb";
+/// D397: the bytes [`voice_over_lengths`] needs at most: the 48-byte header and the
+/// sample headers (3,600 bytes for the 45 lines of 01.00).
+pub const VOICE_OVER_HEADER_MAX: usize = 1 << 16;
+
+/// D397 (FOUND, the 01.00 disc's bank: `FSB4`, 45 samples, version 0x40000, every one at
+/// 44100 Hz): each line's length in ticks at 30 Hz (rounded up) by its name without
+/// `.wav`, from the bank's sample headers (u16 size, 30-byte name, u32 length in samples,
+/// then the compressed size, the loop start and end, the mode and the default frequency).
+pub fn voice_over_lengths(bank: &[u8]) -> Result<BTreeMap<String, u32>, String> {
+    let u32_at = |o: usize| -> Result<u32, String> {
+        let b = bank.get(o..o + 4).ok_or("FSB4: truncated header")?;
+        Ok(u32::from_le_bytes(b.try_into().unwrap()))
+    };
+    if bank.get(..4) != Some(b"FSB4") {
+        return Err("FSB4: not an FSB4 bank".into());
+    }
+    let (count, headers) = (u32_at(4)? as usize, u32_at(8)? as usize);
+    if 48 + headers > bank.len() {
+        return Err("FSB4: truncated sample headers".into());
+    }
+    let mut out = BTreeMap::new();
+    let mut o = 48;
+    for _ in 0..count {
+        let size = u16::from_le_bytes([bank[o], bank[o + 1]]) as usize;
+        if size < 56 || o + size > 48 + headers {
+            return Err("FSB4: bad sample header".into());
+        }
+        let raw = &bank[o + 2..o + 32];
+        let name = String::from_utf8_lossy(&raw[..raw.iter().position(|&b| b == 0).unwrap_or(30)]);
+        let (samples, rate) = (u32_at(o + 32)? as u64, u32_at(o + 52)? as u64);
+        if rate > 0 {
+            let name = name.strip_suffix(".wav").unwrap_or(&name).to_string();
+            out.insert(name, (samples * 30).div_ceil(rate) as u32);
+        }
+        o += size;
+    }
+    Ok(out)
 }
 
 fn name_of(v: Option<&Value>) -> Option<String> {
@@ -104,15 +194,22 @@ impl LevelWorld {
             }
             "StartVideo" => media.videos_dropped += 1,
             "StopVideo" => media.video_stops += 1,
-            "RequestVoiceOver" if media.voice_overs.len() < MAX_MEDIA_REQUESTS => {
-                media.voice_overs.push(VoiceOverRequest {
-                    name: name_of(args.first()),
-                    flags: [flag(1), flag(2)],
-                    frame,
-                });
+            "RequestVoiceOver" => {
+                let name = name_of(args.first());
+                media.last_started = media.request_voice_over(name.as_deref(), flag(1), flag(2));
+                if media.voice_overs.len() < MAX_MEDIA_REQUESTS {
+                    let flags = [flag(1), flag(2)];
+                    media
+                        .voice_overs
+                        .push(VoiceOverRequest { name, flags, frame });
+                } else {
+                    media.voice_overs_dropped += 1;
+                }
             }
-            "RequestVoiceOver" => media.voice_overs_dropped += 1,
-            "StopVoiceOver" => media.voice_over_stops += 1,
+            "StopVoiceOver" => {
+                media.voice_over_stops += 1;
+                media.voice_over = None;
+            }
             "SetMixOverlay" | "RemoveMixOverlay" => {
                 let by_name = if name == "SetMixOverlay" {
                     &mut media.mix_overlays_set
@@ -217,6 +314,50 @@ pub struct ProfileRecords {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A bank of one line, laid out as the disc's (a 48-byte header, one 80-byte sample
+    /// header).
+    fn bank(name: &str, samples: u32) -> Vec<u8> {
+        let mut b = b"FSB4".to_vec();
+        for w in [1u32, 80, 0, 0x40000, 0x20, 0, 0, 0, 0, 0, 0] {
+            b.extend(w.to_le_bytes());
+        }
+        let mut h = 80u16.to_le_bytes().to_vec();
+        let mut n = name.as_bytes().to_vec();
+        n.resize(30, 0);
+        h.extend(n);
+        for w in [samples, 0, 0, samples - 1, 0x80220, 44100] {
+            h.extend(w.to_le_bytes());
+        }
+        h.resize(80, 0);
+        b.extend(h);
+        b
+    }
+
+    #[test]
+    fn d397_a_line_plays_for_its_length_once() {
+        let lengths = voice_over_lengths(&bank("pod_1st_time.wav", 1_411_200)).unwrap();
+        assert_eq!(lengths["pod_1st_time"], 960);
+        let mut m = MediaState {
+            voice_over_lengths: lengths,
+            ..Default::default()
+        };
+        assert!(!m.request_voice_over(Some("pod_select_story"), true, true));
+        assert!(m.request_voice_over(Some("pod_1st_time"), false, false));
+        assert!(m.voice_over_playing());
+        // A line plays and the request may not interrupt it.
+        assert!(!m.request_voice_over(Some("pod_1st_time"), false, true));
+        for _ in 0..959 {
+            m.tick();
+        }
+        assert!(m.voice_over_playing());
+        m.tick();
+        assert!(!m.voice_over_playing());
+        // Heard, and the second flag is clear.
+        assert!(!m.request_voice_over(Some("pod_1st_time"), false, false));
+        assert!(m.request_voice_over(Some("pod_1st_time"), false, true));
+        assert!(voice_over_lengths(b"FSB5").is_err());
+    }
 
     #[test]
     fn d341_profile_records_are_read_by_slot_id() {

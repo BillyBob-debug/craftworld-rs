@@ -147,6 +147,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 141: the link shader and the active test (2026-10-19, D394)](level-scripts/part-141.md)
 - [Part 142: the active look (2026-10-19, D395)](level-scripts/part-142.md)
 - [Part 143: a group's lock (2026-10-19, D396)](level-scripts/part-143.md)
+- [Part 144: voice-over timing (2026-10-19, D397)](level-scripts/part-144.md)
 
 ## Next
 
