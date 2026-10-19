@@ -255,7 +255,8 @@ pub fn spawn_scene(commands: &mut Commands, scene: &PhysicsScene) -> Spawned {
                 AngularVelocity(b.angular_velocity),
             ));
             if let Some(a) = b.anti_gravity {
-                e.insert(GravityScale((1. - a.cancelled).into()));
+                // FOUND (01.33, 0xc6308): gravity scale clamp(1 - Σ, 0, 1).
+                e.insert(GravityScale((1. - a.cancelled).clamp(0., 1.)));
             }
             if !b.fixed && b.frozen != 0 {
                 e.insert(StartAsleep {

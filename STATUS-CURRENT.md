@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D515 why the Rookie Test route stops at x -385 (2026-10-19)
+## Latest: D1100 anti-gravity tweakers hold the Rookie Test walkway (2026-10-19)
+- Logic lane: tweakers are kept and configuration 0 cancels gravity as the EBOOT does;
+  the walkway stays up and the route reaches x 22,785 (docs/logic.md P1-P2).
+
+## D515 why the Rookie Test route stops at x -385 (2026-10-19)
 - Bumping the column at x -2940 wakes the whole frozen walkway row, which falls to the
   floor; we skip the tweakers and switches that hold it (docs/level1-play.md P16).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D509 the world script in native Rust (2026-10-19)
 - level1 Part 10 (`docs/level1-play.md`): `WorldMooCamera` (World) is a native port; the
   time and score limits go to the scoreboard and fluff feeds the multiplier.
-
-## D508 the tutorial monitors in native Rust (2026-10-19)
-- level1 Part 9 (`docs/level1-play.md`): `TutorialMonitor` is a native port; without the
-  overlay a switched-on monitor asks for its video (the game call is counted, unbound).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

@@ -43,10 +43,23 @@ row falling as one island once Sackboy bumped column T2739. That column carries
 anti-gravity tweaker T3090 (configuration 0, gravity 1, dampening [1, 1, 0],
 lastKnownActivation 1), and so does T2736 at the row's other end.
 
-lbp-sim now gives a body with a configuration 0 tweaker on its parent chain a gravity
-scale of `1 - gravity × lastKnownActivation`. With that, the row stays up and the same
-route inputs take Sackboy from x -385 to x 22,785 (tick 2012).
+What the game does (EBOOT 01.33, Ghidra):
+- PPhysicsTweak is part bit 30; configuration at +0x0c, input mode +0x10, gravity +0x18,
+  buoyancy +0x1c, dampening +0x20. Activation getter 0xcaf9c: mode 0 digital, mode 1
+  the analog value's magnitude.
+- The body update 0xc5f1c sums gravity × activation over every tweak in the body's
+  hierarchy and sets the gravity scale to clamp(1 - sum, 0, 1) (0xc6308-0xc63b0). So
+  gravity 1 at activation 1 cancels gravity; gravity 0 leaves it. Buoyancy and dampening
+  are summed the same way.
+- Other configurations go to SPU jobs through the packer 0x1c7ed0 (configuration above
+  11 skipped): 1-5 and 9 through 0x95fb20, 6-8 and 11 through 0x957df4 (11 adds a
+  position target). Their force math runs on the SPU and is not read yet; which gadget
+  each number is stays INFERRED. No maximumMass limit was found on the PPU side.
 
-GAME_RULES
+lbp-sim now does the same for configuration 0: each body's gravity scale is
+`clamp(1 - Σ gravity × lastKnownActivation, 0, 1)` over the tweaks on its hierarchy,
+with the saved activation standing in until switch signals reach tweakers (item 2).
+Dampening and buoyancy are kept but not applied. With that, the row stays up and the same route
+inputs take Sackboy from x -385 to x 22,785 (tick 2012).
 
 Test: `d1100_an_anti_gravity_tweaker_holds_its_body_up` (lbp-sim sandbox, synthetic).

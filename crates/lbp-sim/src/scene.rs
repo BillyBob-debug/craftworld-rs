@@ -98,12 +98,13 @@ pub struct SceneBody {
     pub anti_gravity: Option<AntiGravity>,
 }
 
-/// D1100: a PPhysicsTweak with configuration 0 (the anti-gravity tweaker) as it acts on its
-/// body with the activation it was saved with.
+/// D1100: the PPhysicsTweaks with configuration 0 (anti-gravity tweakers) on a body's
+/// hierarchy, summed with the activation each was saved with.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct AntiGravity {
-    /// PPhysicsTweak.gravity × lastKnownActivation: the share of gravity cancelled.
+    /// Σ PPhysicsTweak.gravity × lastKnownActivation: the share of gravity cancelled.
     pub cancelled: f32,
+    /// Σ dampening × activation; kept, not applied yet (the SPU side is unread).
     pub dampening: [f32; 3],
 }
 
@@ -457,11 +458,18 @@ fn build_scene_inner(
         let slot = body_owner(things, i)
             .0
             .and_then(|b| body_of.get(&b).copied().flatten());
+        // FOUND (01.33, 0xc5f1c): each tweak in the body's hierarchy adds gravity × its
+        // activation (and dampening × activation) to the body's totals.
         if let Some(b) = slot {
-            scene.bodies[b].anti_gravity = Some(AntiGravity {
-                cancelled: tw.gravity * tw.last_known_activation,
-                dampening: tw.dampening,
+            let a = tw.last_known_activation;
+            let total = scene.bodies[b].anti_gravity.get_or_insert(AntiGravity {
+                cancelled: 0.,
+                dampening: [0.; 3],
             });
+            total.cancelled += tw.gravity * a;
+            for (d, t) in total.dampening.iter_mut().zip(tw.dampening) {
+                *d += t * a;
+            }
         }
     }
     scene.add_joints(things);

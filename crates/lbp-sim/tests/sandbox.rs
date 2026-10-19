@@ -253,8 +253,16 @@ fn d1100_an_anti_gravity_tweaker_holds_its_body_up() {
     assert!(scene.bodies[0].anti_gravity.is_none());
     assert_eq!(scene.bodies[1].anti_gravity.map(|a| a.cancelled), Some(1.));
     let out = run(&things, 60);
-    assert!((out[1].1[1] - 50.).abs() < 5., "the plain box falls: {:?}", out[1]);
-    assert!((out[2].1[1] - 300.).abs() < 1., "the tweaked box stays: {:?}", out[2]);
+    assert!(
+        (out[1].1[1] - 50.).abs() < 5.,
+        "the plain box falls: {:?}",
+        out[1]
+    );
+    assert!(
+        (out[2].1[1] - 300.).abs() < 1.,
+        "the tweaked box stays: {:?}",
+        out[2]
+    );
 }
 
 #[test]
