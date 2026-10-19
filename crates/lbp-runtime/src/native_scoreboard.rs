@@ -214,7 +214,8 @@ fn during_game_update(host: &mut dyn Host, thing: u32) -> Result<(), String> {
     if get_bool(host, thing, "Finished")? || mode(host)? != 0 {
         return Ok(());
     }
-    let mut mask = finishers(host, thing)?;
+    let before = finishers(host, thing)?;
+    let mut mask = before;
     for p in 0..32 {
         if mask & bit(p) != 0 {
             let connected = call(host, "Game", "IsPlayerConnected__i", &[Value::Int(p)])?;
@@ -223,7 +224,10 @@ fn during_game_update(host: &mut dyn Host, thing: u32) -> Result<(), String> {
             }
         }
     }
-    set_finishers(host, thing, mask)?;
+    // D511: the script erases from its array, so the member is written only on a change.
+    if mask != before {
+        set_finishers(host, thing, mask)?;
+    }
     let this = Value::Thing(Some(thing));
     let Some(world) = as_thing(&call(
         host,
@@ -233,8 +237,12 @@ fn during_game_update(host: &mut dyn Host, thing: u32) -> Result<(), String> {
     )?) else {
         return Ok(());
     };
+    // `len(Finishers) > 0 &&` comes first: no avatar count while nobody is in.
+    if mask == 0 {
+        return Ok(());
+    }
     let avatars = as_int(&call(host, "Game", "GetNumYellowHeadAvatars__", &[])?);
-    if mask == 0 || mask.count_ones() as i32 != avatars {
+    if mask.count_ones() as i32 != avatars {
         return Ok(());
     }
     // `World.GetCurrentChallenge__`, a script function: the world's member.

@@ -3,15 +3,15 @@
 ## Read first
 1. docs/level1-play.md, sections "Part 5" (native speech bubble, the script trace) and
    "Part 6" (native Launcher); Parts 7-11: TriggerMusic, PostItNote,
-   TutorialMonitor, WorldMooCamera, Score_Board
+   TutorialMonitor, WorldMooCamera, Score_Board; Part 12: the route's call trace
 2. crates/lbp-runtime/src/native_script.rs (the D417 registry), native_bubble.rs and
    native_launcher.rs (the smallest port, a template for the next ones)
 
 ## State
-- PRs 155 (D504), 228-231 (D505-D508) and 232 (D509, native `WorldMooCamera`) merged.
-  PR for D510 (branch `level1-scoreboard`, worktree `E:\Projects\wt-d324`): native
-  `Score_Board`; handed to the coordinator for merge once green.
-- Decision numbers: D504-599, next free D511.
+- PRs 155 (D504), 228-232 (D505-D509) and 233 (D510, native `Score_Board`) merged.
+  PR for D511 (branch `level1-native-route`, worktree `E:\Projects\wt-d324`): viewer
+  `--level-scripts-calls`, the route traced, two scoreboard fixes; for the coordinator.
+- Decision numbers: D504-599, next free D512.
 
 ## Facts
 - Route run: `--level-guid 0001e786 --level-scripts --play-sackboy --qa-hide-ui
@@ -25,6 +25,8 @@
 - Trace check: the route with the overlay, once plain and once with `--native-scripts`,
   traced with the D417 trace (lbp_script_vm::trace). Known difference: 21
   `OnCreate__ set HasUpdateWorkToDo` (VM skips `.init__` on Thing scripts).
+- D511 call trace: add `--level-scripts-calls local-analysis/level1/p12/<new>.json` to the
+  route run; compare with a short script (Counter of site, kind, name).
 - Rookie Test classes: PostItNote 165, Trigger_Speech_Bubble 21, Launcher 19,
   TriggerMusic 9, TutorialMonitor 3, PostItNoteUnlockStickers 1, PostItNoteUnlockSuicide 1,
   Score_Board 1, WorldMooCamera 1 (`level_scripts` example, `instances_by_class`).
@@ -39,8 +41,8 @@
 1. Native classes for the other Rookie Test scripts, one per PR, each checked with the
    trace: Launcher (done, D505), TriggerMusic (done, D506), PostItNote(+Unlock*) (done,
    D507), TutorialMonitor (done, D508), WorldMooCamera (done, D509), Score_Board
-   (done, D510). Next: run the route with `--native-scripts` and no overlay to the
-   scoreboard and compare its calls with the trace.
+   (done, D510). Route traced natively with and without the overlay (D511, Part 12).
+   Next: trace sites in the bubble port, so its calls join the comparison.
 2. The route past x -385: a game reference (RPCS3 F12 frames past line 2) or jumps there.
 3. The camera at x -938 (a frame at tick 1600 looks through a front wall).
 4. Sackboy pushed into a wall turns to the camera and plays `stand`, not a push.

@@ -89,6 +89,10 @@ fn d510_the_native_scoreboard_finishes_the_level_when_everyone_is_in() {
         Value::Int(0)
     );
 
+    // D511: with nobody in, the frame neither counts the avatars nor writes `Finishers`.
+    assert_eq!(frame(&mut host), Ok(NativeStep::Yielded));
+    assert_eq!(count(&host, "Game.GetNumYellowHeadAvatars__"), 0);
+
     // One of two Sackboys in, then out and the other in: not everyone yet.
     enter(&mut host, a);
     assert_eq!(frame(&mut host), Ok(NativeStep::Yielded));

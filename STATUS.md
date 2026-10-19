@@ -6611,3 +6611,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1016 the pod computer enters the Pod (2026-10-19)
 - Part 163 (`docs/level-scripts/part-163.md`): the pod computer's `OnEnterPod__` runs on
   each entry to the Pod; no script restores the launching group's search.
+
+## D1017 the pod computer leaves the Pod (2026-10-19)
+- Part 164 (`docs/level-scripts/part-164.md`): launching a level calls the pod computer's
+  `OnExitPod__`; the Pod's view type is kept for the return.
