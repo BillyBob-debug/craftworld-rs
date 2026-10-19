@@ -1,21 +1,22 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-152.md` (151 for the Pod's music, 150 for the intro's
-   video length, 149 for the line shader, 148 for a key's kind, 147 for the intro's
-   video request, 146 for the unlock voice-overs, 145 for the intro's voice-over, 144
-   for voice-over timing, 143 for a group's lock, 142 for the active look, 141 for the active test, 140 for a
-   short link, 139 for a link's texture, 138 for links between groups, 137 for which links
-   are wide, 136 for a link's width and look, 135 for a level badge's radius, 134 for a
-   badge's radius, 133 for drawing the links, 132 for the links' growth, 131 for the
-   scripted unlock sequence, 130 for the unlock sequence played, 129 for the return, 128
-   for the finish, 127 for the unlock sequence, 126 for the pod introduction, 125 for the
-   warning popup, 124 for the start checkpoint, 123 for the spawn hold, 122 for the player
-   texts, 121 for the cursor, 120 for Back, 119 for the pushes, 118 for Story back, 117
-   for closed menus, 116 for the slide-in, 115 for the cursor's flight, 114 for the launch
-   warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the switch, 110 for the
-   hand-off, 109 for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for
-   choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
+1. `docs/level-scripts/part-152.md` (151 for the Pod's music, 150 for the intro's video
+   length, 149 for the line shader, 148 for a key's kind, 147 for the intro's video
+   request, 146 for the unlock voice-overs, 145 for the intro's voice-over, 144 for
+   voice-over timing, 143 for a group's lock, 142 for the active look, 141 for the active
+   test, 140 for a short link, 139 for a link's texture, 138 for links between groups, 137
+   for which links are wide, 136 for a link's width and look, 135 for a level badge's
+   radius, 134 for a badge's radius, 133 for drawing the links, 132 for the links' growth,
+   131 for the scripted unlock sequence, 130 for the unlock sequence played, 129 for the
+   return, 128 for the finish, 127 for the unlock sequence, 126 for the pod introduction,
+   125 for the warning popup, 124 for the start checkpoint, 123 for the spawn hold, 122
+   for the player texts, 121 for the cursor, 120 for Back, 119 for the pushes, 118 for
+   Story back, 117 for closed menus, 116 for the slide-in, 115 for the cursor's flight,
+   114 for the launch warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the
+   switch, 110 for the hand-off, 109 for Cross on a level, 108 for the cursor, 107 for the
+   group zoom, 106 for choosing a group, 105 for Back, 104 for the pod computer's stack
+   and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
