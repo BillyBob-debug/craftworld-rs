@@ -1,4 +1,4 @@
-# Lane state: PC boost items (2026-10-18)
+# Lane state: PC boost items (2026-10-19)
 
 ## Read first
 1. docs/project-boost.md, items 2, 3, 6 and 7
@@ -29,7 +29,15 @@
   owner to paste (not sent yet): `"env": {"BASH_MAX_OUTPUT_LENGTH": "8000", "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet"}`.
   BASH_MAX_OUTPUT_LENGTH is documented for Bash only.
 
+- sccache 0.18.0 is in local-analysis/toolchain/cargo/bin (owner copied it, 2026-10-19).
+  `cargo build --release -p lbp-bevy-viewer` in a fresh worktree from origin/main: without
+  sccache 7m 51s (a second cold run 9m 07s); with sccache, filling an empty cache 7m 58s
+  (346 misses); warm cache after deleting target/ 5m 42s (301 hits, 45 misses, 87%). A new
+  worktree builds about 2-3 minutes faster.
+- The canonical checkout's scripts/use-local-rust.ps1 is older (bb7d26e) and does not set
+  RUSTC_WRAPPER; source the worktree's copy, or pull main there, to use sccache.
+
 ## Next
-1. If the owner says yes: unzip sccache.exe into the toolchain bin and measure a cold dependency build in a second worktree.
+1. Pull main into the canonical checkout so its use-local-rust.ps1 sets the wrapper.
 2. Try bevy/dynamic_linking in a dev-only feature, which may hit mingw's 65535-export limit.
 3. Send the owner the settings snippet.

@@ -380,3 +380,33 @@ OBSERVED (the Part 4 route with the overlay, `calls-vminit2`): the bubble events
 165,476 to 165,644 (native 165,728) and the bubble differences in the Part 12 comparison
 reduce to the `GetDescendentWithPTrigger` calls (Part 13). The other classes' events are
 unchanged, the parity set passes and Sackboy ends at x -384.6 as before.
+
+## Part 16: why the route stops at x -385 (D515, 2026-10-19)
+
+The Part 4 route with every script native and a longer run (`-:620,r:160,rj:20,r:330,
+f:15,-:5,r:400,rj:20,r:400,rj:20,r:300`, hold at 2400) still ends with Sackboy standing
+at x -384.6 y 1725.8, on the level floor (Thing 4, top y 1655), not on the walkway he
+started on (y about 5276). Five input variants end the same way.
+
+OBSERVED (a debug build that logged each Thing's first move): nothing moves until drive
+tick 984, when Sackboy walks into the wooden column at x -2940 (Things 2738/2739/2740,
+y 3334 to 15724). On that tick 19 bodies wake together and their children follow on
+tick 985: the column and the whole walkway row at y 5276 (bodies 1296, 2643, 1561, 1594,
+1951, 1306, 1584, 1574, 2695, 2705, 2715, 1330, 2736 and others, 420 units apart). They
+fall about 1,900 units to the floor; Sackboy falls with them. The glass box of body 1584
+(Thing 1583, metal cap, glass block x -721.6 to -325.0) lands across his path, and its
+side is the wall at x -384.6.
+
+Why it falls: every one of those bodies has `frozen` 1 and nothing under it. The glass
+legs stop at y 3544 and the column at y 3334; the only shape below them at x -367 is the
+floor at y 1655 (`general_infinite_mass_cant_jump_off.mat`). Our rule (scene.rs, INFERRED)
+starts a frozen body asleep and lets contacts wake it; the row touches end to end, so one
+bump wakes the whole island and gravity takes it. In the game the walkway stays up.
+
+What the level holds that we skip: the column has a `PHYSICS_TWEAK` (Thing 3090, an
+arcade-palette tweaker) and a `SWITCH_KEY` (Thing 2952); each walkway body has a
+`MATERIAL_TWEAK` child (for example Thing 2682); body 1584 carries a microchip with a
+switch (Thing 1582, switch type 36). lbp-level parses the tweakers and drops their
+fields, so the runtime applies none of them. Either `frozen` means "held until a logic
+or tweaker releases it", or a tweaker holds the row; that is the logic lane's first
+question. No code change in this part.
