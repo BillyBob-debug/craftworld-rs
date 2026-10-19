@@ -179,6 +179,8 @@ pub struct SwitchState {
     pub activation_hold_time: i32,
     /// BulletsRequired: the port count of an AND or OR gate, a counter's target.
     pub bullets_required: i32,
+    /// ResetWhenFull (PSwitch+0xe0): a projectile sensor empties itself once full.
+    pub reset_when_full: bool,
     /// The AND / OR output mode (stored in the RandomOffTimeMin slot).
     pub gate_mode: i32,
     /// The random switch's settings.
@@ -847,6 +849,7 @@ impl LevelWorld {
                         manual_activation: signal(&s.manual_activation),
                         activation_hold_time: s.activation_hold_time,
                         bullets_required: s.bullets_required,
+                        reset_when_full: s.reset_when_full,
                         gate_mode: s.random_off_time_min,
                         random: RandomSettings {
                             behavior: s.random_behavior,
@@ -874,6 +877,7 @@ impl LevelWorld {
                             manual: signal(&s.manual_activation),
                             count: s.bullets_detected,
                             timer: s.timer_count,
+                            refresh: s.bullet_refresh_time,
                             ..Default::default()
                         },
                     }),

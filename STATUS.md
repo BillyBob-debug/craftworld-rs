@@ -6695,3 +6695,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1107 winches run the piston rule (2026-10-19)
 - Logic lane: winches share the piston length function (0xc9790), so they wind and
   pay out on the piston clock; the rope only pulls (INFERRED, 0x960988 flag; P9).
+
+## D1108 motors turn at the game's rate on their clock (2026-10-19)
+- Logic lane: a motor's speed is radians per frame times its switch clock (0xc7370);
+  patterns 0 and 2 sweep on the piston rule's change per frame (0x95f494; P10).
