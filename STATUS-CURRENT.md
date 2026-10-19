@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1018 the native pod computer enters and leaves the Pod (2026-10-19)
+## Latest: D505 the launch pads in native Rust (2026-10-19)
+- level1 Part 6 (`docs/level1-play.md`): `Launcher` is a native port; without the
+  overlay Rookie Test's 19 launch pads set their sprite lights as the script does.
+
+## D1018 the native pod computer enters and leaves the Pod (2026-10-19)
 - Part 165 (`docs/level-scripts/part-165.md`): without the game's scripts the native
   planets world gets `OnEnterPod__` and `OnExitPod__`; the Pod's view type is kept.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1012 the unlock line's stop (2026-10-19)
 - Part 159 (`docs/level-scripts/part-159.md`): the Story state keeps whether its unlock
   line started and stops it when it closes (`_StartedVO`).
-
-## D1011 clearing a pending link (2026-10-19)
-- Part 158 (`docs/level-scripts/part-158.md`): clearing a pending link opens its target
-  (0x19aa7c), played or not; `UnlockBadge` no longer opens a slot.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

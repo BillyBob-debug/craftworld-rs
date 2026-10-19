@@ -1,4 +1,4 @@
-# Lane state: pod / Story (2026-10-18)
+# Lane state: pod / Story (2026-10-19, closed)
 
 ## Read first
 1. `docs/level-scripts/part-165.md` (164 for the pod computer's exit call, 163 for the pod
@@ -26,11 +26,13 @@
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 207 (D398) merged. PR for D399 (branch `pod-d399`, worktree
-  `E:\Projects\wt-d324`): the native unlock voice-overs; handed to the coordinator for
-  merge once rust and python are green.
+- PRs 153 (D353) through 227 (D1018) merged. The lane is closed (2026-10-19): its
+  offline queue is empty. An RPCS3 unlock capture is not allowed (finishing a level
+  autosaves the profile, against the never-save rule); the other searches need the
+  network; `i_pod.fsb` is not on the LBP2 disc. The worktree went to the level1 lane.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399 used; now D1000-D1099, next free D1019.
+  Decision numbers: D348-D399 used; now D1000-D1099, next free D1019
+  (unused, kept for a reopened lane).
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;

@@ -161,3 +161,22 @@ update only, `scripts loaded 0`) the three lines open on ticks 63, 419 and 882 a
 
 Not yet: the other eight classes (the post-it notes, launchers, music and score board have
 no native class, so they do nothing without the overlay); the route past x -385.
+
+## Part 6: the launch pads in native Rust (D505, 2026-10-19)
+
+Before: without the decrypted overlay Rookie Test's 19 launch pads ran no script, so their
+lights kept the level's stored sprite light.
+
+After: `Launcher` (g00012d39, base `Tweakable`) is a port in the D417 registry
+(`crates/lbp-runtime/src/native_launcher.rs`). Its 01.33 listing is small: `OnCreate__`
+sets the light Thing's sprite light, `FarDist` to `Distance * 2.5` and `Color` to
+(0.7, 0.7, 1, 1), the class's only vector constant; `SetDistance__f` stores the distance
+and sets `FarDist` again; `SetTeamFilter__i` stores 0 to 4 and ignores other values; the
+getters return the fields and `SwitchPerformReaction__b` is empty. The launch itself is
+the engine's. Left out: the create-mode tweak menu (`UpdateUI__`). A field the level does
+not store reads as its `.init__` value (`Distance` 1, `TeamFilter` 0).
+
+Test: `native_launcher::d505_the_native_launcher_sets_its_light` (synthetic Things, no
+script loaded).
+
+Not yet: TriggerMusic, the post-it notes, TutorialMonitor, WorldMooCamera, Score_Board.
