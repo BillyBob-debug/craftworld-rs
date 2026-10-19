@@ -177,6 +177,8 @@ pub struct SwitchState {
     pub bullets_required: i32,
     /// The AND / OR output mode (stored in the RandomOffTimeMin slot).
     pub gate_mode: i32,
+    /// The random switch's settings.
+    pub random: RandomSettings,
     pub team_filter: i32,
     pub include_touching: i32,
     /// Radius and MinRadius: the outer and inner edge of a sensor's range.
@@ -212,6 +214,8 @@ pub struct SwitchOutputState {
     /// The signal the level file stores.
     pub stored: SwitchInput,
     pub targets: Vec<(Option<u32>, i32)>,
+    /// The random switch's "on" byte for this output (SwitchOutput+0x24, FOUND).
+    pub random_on: bool,
 }
 
 /// What is wired to one input port: output `output` of the PSwitch on Thing `switch`.
@@ -811,6 +815,7 @@ impl LevelWorld {
                                         .iter()
                                         .map(|&(t, port)| (t.and_then(handle), port))
                                         .collect(),
+                                    random_on: false,
                                 })
                             })
                             .collect(),
@@ -818,6 +823,14 @@ impl LevelWorld {
                         activation_hold_time: s.activation_hold_time,
                         bullets_required: s.bullets_required,
                         gate_mode: s.random_off_time_min,
+                        random: RandomSettings {
+                            behavior: s.random_behavior,
+                            pattern: s.random_pattern,
+                            on_min: s.random_on_time_min,
+                            on_max: s.random_on_time_max,
+                            off_min: s.random_off_time_min,
+                            off_max: s.random_off_time_max,
+                        },
                         team_filter: s.team_filter,
                         include_touching: s.include_touching,
                         radius: s.radius,
@@ -836,6 +849,7 @@ impl LevelWorld {
                             manual: signal(&s.manual_activation),
                             count: s.bullets_detected,
                             timer: s.timer_count,
+                            ..Default::default()
                         },
                     }),
                     circuit_board: t
