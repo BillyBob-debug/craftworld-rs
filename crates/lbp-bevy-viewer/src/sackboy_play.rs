@@ -1382,29 +1382,61 @@ fn spawn_world(mut commands: Commands, mut play: ResMut<Play>) {
     spawn_sackboy_held(&mut commands, [x, y], z, hold);
 }
 
+/// Below this stick length a pad counts as at rest.
+const PAD_REST: f32 = 0.2;
+/// The walking deadzone: smaller stick movements are ignored.
+const PAD_DEADZONE: f32 = 0.3;
+
+/// Whether a pad may drive Sackboy. A pad is only trusted once it has been seen at rest:
+/// both sticks inside [`PAD_REST`] and no d-pad direction held. A pad that drifts, or one
+/// whose axes are mapped wrongly (a trigger or a stuck axis reported as the stick), never
+/// rests, so it is ignored instead of walking him across the level. Once trusted, a pad
+/// stays trusted while connected.
+fn pad_trusted(armed: &mut bool, left: Vec2, right: Vec2, dpad_held: bool) -> bool {
+    let finite = left.is_finite() && right.is_finite();
+    if finite && left.length() < PAD_REST && right.length() < PAD_REST && !dpad_held {
+        *armed = true;
+    }
+    *armed && finite
+}
+
+/// The walking input from a trusted pad's left stick: a radial deadzone of
+/// [`PAD_DEADZONE`], and full right stopping short of 1 as in the game, whose stick is a
+/// signed byte over 128.
+fn stick_walk_x(left: Vec2) -> f32 {
+    if !left.is_finite() || left.length() < PAD_DEADZONE {
+        return 0.;
+    }
+    left.x.clamp(-1., lbp_sim::sackboy::STICK_FULL_RIGHT)
+}
+
 fn read_pad(
     keys: Res<ButtonInput<KeyCode>>,
-    pads: Query<&Gamepad>,
+    pads: Query<(Entity, &Gamepad)>,
     play: Res<Play>,
     mut sackboy: Query<&mut SackboyBody>,
     pod: Option<Res<PodSackboy>>,
+    mut armed: Local<BTreeMap<Entity, bool>>,
 ) {
     if play.script.is_some() {
         return;
     }
     // D282: at the pod computer his movement input is not applied.
     let in_use = pod.is_some_and(|p| p.in_use);
-    let pad = pads.iter().next();
-    let held = |k: KeyCode, b: GamepadButton| keys.pressed(k) || pad.is_some_and(|p| p.pressed(b));
-    // A pad's stick is a signed byte over 128 in the game: full right stops short of 1.
-    let mut x = pad.map_or(0., |p| {
-        p.left_stick()
-            .x
-            .clamp(-1., lbp_sim::sackboy::STICK_FULL_RIGHT)
-    });
-    if x.abs() < 0.3 {
-        x = 0.;
+    // Forget pads that went away, then use the first trusted one.
+    armed.retain(|e, _| pads.contains(*e));
+    let mut pad = None;
+    for (e, p) in &pads {
+        let dpad = [GamepadButton::DPadLeft, GamepadButton::DPadRight]
+            .iter()
+            .any(|&b| p.pressed(b));
+        let a = armed.entry(e).or_default();
+        if pad_trusted(a, p.left_stick(), p.right_stick(), dpad) && pad.is_none() {
+            pad = Some(p);
+        }
     }
+    let held = |k: KeyCode, b: GamepadButton| keys.pressed(k) || pad.is_some_and(|p| p.pressed(b));
+    let mut x = pad.map_or(0., |p| stick_walk_x(p.left_stick()));
     if held(KeyCode::ArrowLeft, GamepadButton::DPadLeft) {
         x = -1.;
     }
@@ -1791,6 +1823,62 @@ pub(crate) static FRAMINGS: std::sync::atomic::AtomicUsize = std::sync::atomic::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pad_needs_rest_before_it_drives() {
+        let mut armed = false;
+        // A drifting or wrongly mapped stick never rests: ignored.
+        for _ in 0..10 {
+            assert!(!pad_trusted(
+                &mut armed,
+                Vec2::new(1., 0.),
+                Vec2::ZERO,
+                false
+            ));
+        }
+        // A held d-pad or a stuck right stick also keeps it untrusted.
+        assert!(!pad_trusted(&mut armed, Vec2::ZERO, Vec2::ZERO, true));
+        assert!(!pad_trusted(
+            &mut armed,
+            Vec2::ZERO,
+            Vec2::new(0., -1.),
+            false
+        ));
+        assert!(!pad_trusted(&mut armed, Vec2::NAN, Vec2::ZERO, false));
+        // At rest once: trusted from then on.
+        assert!(pad_trusted(
+            &mut armed,
+            Vec2::new(0.05, -0.1),
+            Vec2::ZERO,
+            false
+        ));
+        assert!(pad_trusted(
+            &mut armed,
+            Vec2::new(1., 0.),
+            Vec2::ZERO,
+            false
+        ));
+        // Except for a value that is not a number.
+        assert!(!pad_trusted(
+            &mut armed,
+            Vec2::new(f32::NAN, 0.),
+            Vec2::ZERO,
+            false
+        ));
+    }
+
+    #[test]
+    fn stick_deadzone() {
+        assert_eq!(stick_walk_x(Vec2::new(0.25, 0.)), 0.);
+        // Radial: a small x with the stick pushed up still walks a little.
+        assert_eq!(stick_walk_x(Vec2::new(0.2, 0.9)), 0.2);
+        assert_eq!(stick_walk_x(Vec2::new(-1., 0.)), -1.);
+        assert_eq!(
+            stick_walk_x(Vec2::new(1., 0.)),
+            lbp_sim::sackboy::STICK_FULL_RIGHT
+        );
+        assert_eq!(stick_walk_x(Vec2::new(f32::INFINITY, 0.)), 0.);
+    }
 
     #[test]
     fn input_script_steps() {
