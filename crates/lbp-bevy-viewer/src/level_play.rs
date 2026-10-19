@@ -2263,10 +2263,16 @@ fn follow_links(
         commands.entity(e).despawn();
     }
     *last = wanted;
-    let [r, g, b, a] = sw::LINK_COLOUR;
     for &(link, progress) in last.iter() {
         let Some((from, to)) = world.link_dirs(link) else {
             continue;
+        };
+        // D395 (INFERRED from 0x1a7efc, part 141): active while its target is locked.
+        let active = !world.slot_unlocked(link.to);
+        let [r, g, b, a] = if active {
+            sw::LINK_ACTIVE_COLOUR
+        } else {
+            sw::LINK_COLOUR
         };
         let Some(ribbon) = sw::link_ribbon(
             Vec3::from(from),
@@ -2279,6 +2285,7 @@ fn follow_links(
                 world.link_is_wide(link),
                 lbp_runtime::LevelWorld::link_joins_groups(link),
             ),
+            active,
         ) else {
             continue;
         };

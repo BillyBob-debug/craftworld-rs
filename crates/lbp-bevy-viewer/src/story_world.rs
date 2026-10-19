@@ -590,6 +590,11 @@ pub const LINK_HEAD_V: [f32; 2] = [0.5, 0.75];
 /// 1): the shaft's u, the same all along, and the head's, from its neck to its tip.
 pub const LINK_SHAFT_U: f32 = 0.25;
 pub const LINK_HEAD_U: [f32; 2] = [0.5, 1.];
+/// D395 (FOUND 0x426708, 0x4a1ef8, 0x4a2008): an active link's colour, white at alpha
+/// 160 (0xA0FFFFFF), and its v across the shaft and across the head.
+pub const LINK_ACTIVE_COLOUR: [f32; 4] = [1., 1., 1., 160. / 255.];
+pub const LINK_ACTIVE_SHAFT_V: [f32; 2] = [0.125, 0.25];
+pub const LINK_ACTIVE_HEAD_V: [f32; 2] = [0.75, 1.];
 
 /// D386 (INFERRED: no lift was found; this keeps the ribbon off the Earth's surface).
 pub const LINK_LIFT: f32 = 2.;
@@ -633,6 +638,9 @@ pub struct Ribbon {
 /// texture's ([`LINK_TEXTURE`]), at the UVs above. D393 (FOUND 0x4a215c-0x4a21ac): a
 /// link no longer than its head is one head-wide strip from the start to the tip, its u
 /// from `1 - 0.5 / (1 - f)` to 1, `f` being `(tip - head) / angle` ([`link_short_u`]).
+/// D395 (FOUND 0x4a2134, flag 0): an `active` link takes the active v and a shaft u
+/// from `neck / head` at the start to 0 at the neck, so its band repeats along it.
+#[allow(clippy::too_many_arguments)]
 pub fn link_ribbon(
     a: Vec3,
     b: Vec3,
@@ -641,6 +649,7 @@ pub fn link_ribbon(
     radius: f32,
     progress: f32,
     (width, head): (f32, f32),
+    active: bool,
 ) -> Option<Ribbon> {
     let (a, b) = (a.try_normalize()?, b.try_normalize()?);
     let theta = a.dot(b).clamp(-1., 1.).acos();
@@ -677,16 +686,25 @@ pub fn link_ribbon(
                 .extend([i, i + 2, i + 1, i + 1, i + 2, i + 3]);
         }
     };
+    let (shaft_v, head_v) = if active {
+        (LINK_ACTIVE_SHAFT_V, LINK_ACTIVE_HEAD_V)
+    } else {
+        (LINK_SHAFT_V, LINK_HEAD_V)
+    };
     if neck > 0. {
-        let u = [LINK_SHAFT_U; 2];
-        strip(0., neck, width, u, LINK_SHAFT_V);
+        let u = if active {
+            [neck / head, 0.]
+        } else {
+            [LINK_SHAFT_U; 2]
+        };
+        strip(0., neck, width, u, shaft_v);
     }
     let u = if neck > 0. {
         LINK_HEAD_U
     } else {
         [link_short_u((tip - head) / angle), LINK_HEAD_U[1]]
     };
-    strip(neck, tip, 2. * width, u, LINK_HEAD_V);
+    strip(neck, tip, 2. * width, u, head_v);
     Some(ribbon)
 }
 
@@ -891,7 +909,7 @@ mod tests {
         assert_eq!(link_short_u(0.), LINK_HEAD_U[0]);
         assert!((link_short_u(-1.) - 0.75).abs() < 1e-6);
         let (a, b) = (Vec3::Z, Vec3::X);
-        let r = link_ribbon(a, b, 0., 0., 1750., 0.01, (80., 9.)).unwrap();
+        let r = link_ribbon(a, b, 0., 0., 1750., 0.01, (80., 9.), false).unwrap();
         let f = (0.9 - 9.) / 90.;
         assert!((r.uvs[0][0] - link_short_u(f)).abs() < 1e-4);
         assert_eq!(r.uvs.last().unwrap()[0], 1.);
@@ -906,12 +924,32 @@ mod tests {
     }
 
     #[test]
+    fn d395_active_link_uvs() {
+        let (a, b) = (Vec3::Z, Vec3::X);
+        let r = LEVEL_BADGE_ANGLE;
+        let size = link_size(true, false);
+        let ribbon = link_ribbon(a, b, r, r, 1750., 1., size, true).unwrap();
+        let angle = 90. - 2. * r.to_degrees() + r.to_degrees();
+        let neck = angle - size.1;
+        // The shaft starts at u = neck / head, falls to 0 at the neck, on the active v.
+        assert!((ribbon.uvs[0][0] - neck / size.1).abs() < 1e-3);
+        assert_eq!(ribbon.uvs[0][1], LINK_ACTIVE_SHAFT_V[0]);
+        assert_eq!(ribbon.uvs[1][1], LINK_ACTIVE_SHAFT_V[1]);
+        let n = ribbon.uvs.len();
+        assert_eq!(ribbon.uvs[n - 1], [1., LINK_ACTIVE_HEAD_V[1]]);
+        assert!(ribbon
+            .uvs
+            .iter()
+            .any(|uv| uv == &[0., LINK_ACTIVE_SHAFT_V[0]]));
+    }
+
+    #[test]
     fn d386_link_ribbon_grows_along_the_arc() {
         let (a, b) = (Vec3::Z, Vec3::X);
         let r = LEVEL_BADGE_ANGLE;
-        assert!(link_ribbon(a, b, r, r, 1750., 0., link_size(true, false)).is_none());
-        assert!(link_ribbon(a, a, r, r, 1750., 1., link_size(true, false)).is_none());
-        assert!(link_ribbon(a, b, 0.8, 0.8, 1750., 1., link_size(true, false)).is_none());
+        assert!(link_ribbon(a, b, r, r, 1750., 0., link_size(true, false), false).is_none());
+        assert!(link_ribbon(a, a, r, r, 1750., 1., link_size(true, false), false).is_none());
+        assert!(link_ribbon(a, b, 0.8, 0.8, 1750., 1., link_size(true, false), false).is_none());
         let reach = |p: f32| {
             let r = link_ribbon(
                 a,
@@ -921,6 +959,7 @@ mod tests {
                 1750.,
                 p,
                 link_size(true, false),
+                false,
             )
             .unwrap();
             let n = r.positions.len();
@@ -935,7 +974,7 @@ mod tests {
         assert!((reach(0.5) - end / 2.).abs() < 1e-2);
         // D390: a narrow link's shaft is half as wide.
         let shaft = |wide| {
-            let r = link_ribbon(a, b, r, r, 1750., 1., link_size(wide, false)).unwrap();
+            let r = link_ribbon(a, b, r, r, 1750., 1., link_size(wide, false), false).unwrap();
             Vec3::from(r.positions[0]).distance(Vec3::from(r.positions[1]))
         };
         assert!((shaft(true) - LINK_WIDTH).abs() < 1e-2);

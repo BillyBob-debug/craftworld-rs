@@ -1,27 +1,27 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-141.md` (140 for a short link, 139 for a link's texture,
-   138 for links between groups, 137 for which links are wide, 136 for a link's width
-   and look, 135 for a level badge's radius, 134 for a badge's radius, 133 for drawing the
-   links, 132 for the links' growth, 131 for the scripted unlock sequence, 130 for the
-   unlock sequence played, 129 for the return, 128 for the finish, 127 for the unlock
-   sequence, 126 for the pod introduction, 125 for the warning popup, 124 for the start
-   checkpoint, 123 for the spawn hold, 122 for the player texts, 121 for the cursor, 120
-   for Back, 119 for the pushes, 118 for Story back, 117 for closed menus, 116 for the
-   slide-in, 115 for the cursor's flight, 114 for the launch warnings, 113 for Sackboy,
-   112 for the entrance camera, 111 for the switch, 110 for the hand-off, 109 for Cross on
-   a level, 108 for the cursor, 107 for the group zoom, 106 for choosing a group, 105 for
-   Back, 104 for the pod computer's stack and main menu)
+1. `docs/level-scripts/part-142.md` (141 for the active test, 140 for a short link, 139
+   for a link's texture, 138 for links between groups, 137 for which links are wide, 136
+   for a link's width and look, 135 for a level badge's radius, 134 for a badge's radius,
+   133 for drawing the links, 132 for the links' growth, 131 for the scripted unlock
+   sequence, 130 for the unlock sequence played, 129 for the return, 128 for the finish,
+   127 for the unlock sequence, 126 for the pod introduction, 125 for the warning popup,
+   124 for the start checkpoint, 123 for the spawn hold, 122 for the player texts, 121 for
+   the cursor, 120 for Back, 119 for the pushes, 118 for Story back, 117 for closed menus,
+   116 for the slide-in, 115 for the cursor's flight, 114 for the launch warnings, 113 for
+   Sackboy, 112 for the entrance camera, 111 for the switch, 110 for the hand-off, 109 for
+   Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for choosing a group,
+   105 for Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 199 (D393) merged. PR for D394 (branch `pod-d394`, worktree
-  `E:\Projects\wt-d324`): the link shader and the active test; handed to the coordinator
-  for merge once rust and python are green.
+- PRs 153 (D353) through 199 (D393) merged; PR 200 (D394, `pod-d394`) open. PR for
+  D395 (branch `pod-d395`, worktree `E:\Projects\wt-d324`, on top of D394): links to a
+  locked level drawn in the active look; handed to the coordinator for merge once green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D395.
+  Decision numbers: D348-D399, next free D396.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -107,7 +107,7 @@
 3. A finished level returns to the Pod (D382), whose native state 2 plays
    `LevelUnlockingThread` (D383), as does the scripted one (D384); the links grow with the
    game's timing (D385) and are drawn with the game's texture (D386, D392; open: the
-   line shader's program, the active look, a locked target (D394), the level badges'
+   line shader's program, the active band's motion (D394, D395), the level badges'
    radius, 0.08 from the settings block's default (D388), to measure in RPCS3 during an
    unlock; badge kind 2 comes from loaded data, D393). It, the
    intro and `OnEnterPod__` also wait on audio (none plays yet). The interactive music
