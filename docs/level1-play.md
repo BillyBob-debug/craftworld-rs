@@ -355,10 +355,10 @@ Left (INFERRED harmless, the values agree):
 ## Part 14: class defaults for native runs (D513, 2026-10-19)
 
 With `--native-scripts` and no script loaded, a Thing had no class defaults, so a read
-of a member its level does not store (Part 13) answered an error. A native port now gives its
-class's `.init__` values (`NativeScript::defaults`, the bubble's `defaults()` list), and
-`add_class_defaults` adds the ones the Thing lacks. With the script loaded nothing
-changes: the VM's class defaults come first, as before.
+of a member its level does not store (Part 13) answered an error. A native port now
+gives its class's `.init__` values (`NativeScript::defaults`, the bubble's `defaults()`
+list), and `add_class_defaults` adds the ones the Thing lacks. With the script loaded
+nothing changes: the VM's class defaults come first, as before.
 
 OBSERVED (the Part 13 route, native, no overlay): the 2,204 member reads that answered an
 error (`IsTweaking` 533, the three VoIP flags 524 each, `NeedsMoveControllerFixup` 66 and
