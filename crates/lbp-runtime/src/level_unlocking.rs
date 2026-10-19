@@ -301,13 +301,11 @@ impl LevelWorld {
                     for l in links {
                         let same = group.is_some() && self.slot_group(l.to) == group;
                         self.count_sound(if same { UNLOCK_LEVEL } else { UNLOCK_THEME });
-                        // `Game.ClearPendingLink` and `UnlockBadge`.
+                        // `Game.ClearPendingLink` (D1011: it opens the target) and
+                        // `UnlockBadge`.
                         let p = &mut self.story_progress;
-                        p.pending_links.retain(|x| *x != l);
+                        p.clear_pending_link(l);
                         p.unlocking.retain(|x| *x != l.to);
-                        if !p.unlocked.contains(&l.to) {
-                            p.unlocked.push(l.to);
-                        }
                         self.unlock_events
                             .push(format!("cluster {k}: {:?} unlocked", l.to));
                     }
@@ -491,7 +489,7 @@ impl LevelWorld {
             }
             ("Game", "ClearPendingLink__Q8SlotLink") => {
                 if let Some(l) = self.link_of(arg) {
-                    self.story_progress.pending_links.retain(|x| *x != l);
+                    self.story_progress.clear_pending_link(l);
                     self.unlock_events
                         .push(format!("link to {:?} cleared", l.to));
                 }
@@ -530,13 +528,11 @@ impl LevelWorld {
                 }
                 Value::Void
             }
+            // D1011 (FOUND, 0x63d4d0 -> 0x5037dc): the game finds the badge by the slot
+            // and calls a method of its object; the lock is left to `ClearPendingLink`.
             ("PodComputer", "UnlockBadge__Q6SlotID") => {
                 if let Some(id) = slot {
-                    let p = &mut self.story_progress;
-                    p.unlocking.retain(|x| *x != id);
-                    if !p.unlocked.contains(&id) {
-                        p.unlocked.push(id);
-                    }
+                    self.story_progress.unlocking.retain(|x| *x != id);
                     self.unlock_events.push(format!("{id:?} unlocked"));
                 }
                 Value::Void
@@ -755,9 +751,17 @@ mod tests {
         assert_eq!(w.story_progress.unlocking, [(0, 3)]);
         q(&mut w, "PodComputer", "UnlockBadge__Q6SlotID", &[obj(12)]);
         assert!(w.story_progress.unlocking.is_empty());
-        assert_eq!(w.story_progress.unlocked, [(0, 3)]);
+        assert!(
+            w.story_progress.unlocked.is_empty(),
+            "the badge alone opens nothing"
+        );
         q(&mut w, "Game", "ClearPendingLink__Q8SlotLink", &[obj(31)]);
         assert_eq!(w.story_progress.pending_links.len(), 3);
+        assert_eq!(
+            w.story_progress.unlocked,
+            [(0, 3)],
+            "D1011: the clear opens it"
+        );
         let to = q(
             &mut w,
             "PodComputer",
@@ -770,5 +774,28 @@ mod tests {
         let dir = q(&mut w, "PodComputer", "GetBadgeDir__Q6SlotID", &[obj(10)]);
         assert_eq!(dir, Some(Value::Vec4([1., 0., 0., 0.])));
         assert_eq!(q(&mut w, "PodComputer", "GetState__", &[]), None);
+    }
+
+    #[test]
+    fn d1011_clearing_a_link_opens_its_target() {
+        use crate::{PendingLink, StoryProgress};
+        let mut p = StoryProgress::default();
+        let level = PendingLink {
+            from: (0, 1),
+            to: (0, 2),
+        };
+        let local = PendingLink {
+            from: (0, 1),
+            to: (2, 7),
+        };
+        p.pending_links = vec![level, local];
+        p.clear_pending_link(local);
+        assert!(
+            p.unlocked.is_empty(),
+            "a local user level (type 2) has no lock bit set"
+        );
+        p.clear_pending_link(level);
+        assert!(p.pending_links.is_empty());
+        assert_eq!(p.unlocked, [(0, 2)]);
     }
 }

@@ -1033,8 +1033,8 @@ impl PlanetsWorldScript {
             _ => false,
         };
         if state == 2 && !running {
-            // The thread's `OnFinish__` (D381; links it did not play unlock there,
-            // PLACEHOLDER).
+            // The thread's `OnFinish__` (D381; clearing a link it did not play opens its
+            // target too, D1011).
             call(host, "Game", "ClearPendingLinks__", &[])?;
         }
         if matches!(state, 1 | 2) && !running {
