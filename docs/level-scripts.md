@@ -161,6 +161,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 155: the viewer's level slots (2026-10-19, D1008)](level-scripts/part-155.md)
 - [Part 156: the Pod's music files (2026-10-19, D1009)](level-scripts/part-156.md)
 - [Part 157: the planets' resting point (2026-10-19, D1010)](level-scripts/part-157.md)
+- [Part 158: clearing a pending link (2026-10-19, D1011)](level-scripts/part-158.md)
 
 ## Next
 

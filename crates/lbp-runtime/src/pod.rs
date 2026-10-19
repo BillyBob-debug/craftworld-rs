@@ -340,6 +340,20 @@ pub struct StoryProgress {
     pub unlocking: Vec<(i32, i32)>,
 }
 
+impl StoryProgress {
+    /// D1011 (FOUND, 0x19ab60 -> 0x19aa7c): clearing a pending link removes it and, when
+    /// its target's SlotID type is below 2 or is 8, sets bit 1 of the target's record
+    /// (+0x32, made if missing), the bit the lock query 0x1a7efc reads as unlocked
+    /// (part 141). So the target opens whether or not the unlock cutscene played it.
+    pub fn clear_pending_link(&mut self, link: PendingLink) {
+        self.pending_links.retain(|x| *x != link);
+        let to = link.to;
+        if (to.0 < 2 || to.0 == 8) && !self.unlocked.contains(&to) {
+            self.unlocked.push(to);
+        }
+    }
+}
+
 /// D381: the slot numbers from which the level-complete path links a slot (FOUND,
 /// 0x1aa43c: below 0x506ca; the other branch, numbers from 0x506cc but not 0x54747,
 /// is not ported: no story slot is there).

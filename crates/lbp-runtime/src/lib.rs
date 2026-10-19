@@ -2453,17 +2453,14 @@ impl World for LevelWorld {
         self.progression_flags |= mask;
         Ok(())
     }
-    /// D381: `Game.ClearPendingLinks__` (FOUND, 0x5f4e80 -> 0x19ac2c) empties the list.
-    /// PLACEHOLDER: `LevelUnlockingThread` (D383) unlocks each link's badge
-    /// (`UnlockBadge`) before it clears; for links it did not play (no search up) that
-    /// is folded in here, so the targets are marked unlocked.
+    /// D381: `Game.ClearPendingLinks__` (FOUND, 0x5f4e80 -> 0x19ac2c) clears the links
+    /// from the last, each as `ClearPendingLink` does (D1011: that opens its target).
+    /// The badges' unlocking marks are the port's and go with them.
     fn clear_pending_links(&mut self) -> Result<(), String> {
         let progress = &mut self.story_progress;
         progress.unlocking.clear();
-        for link in std::mem::take(&mut progress.pending_links) {
-            if !progress.unlocked.contains(&link.to) {
-                progress.unlocked.push(link.to);
-            }
+        while let Some(&link) = progress.pending_links.last() {
+            progress.clear_pending_link(link);
         }
         Ok(())
     }

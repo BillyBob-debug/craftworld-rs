@@ -6555,3 +6555,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1002 the line shader's programs (2026-10-19)
 - Part 149 (`docs/level-scripts/part-149.md`): the game's UI shaders take no time,
   so a link's active band does not move; the viewer already draws it so.
+
+## D1003 the intro waits for its video (2026-10-19)
+- Part 150 (`docs/level-scripts/part-150.md`): the Pod intro video's Bink header gives
+  379 ticks; the native intro now waits for it as the game does. The launcher keeps it.
