@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D395 the active link look (2026-10-19)
+## Latest: D396 a group's lock (2026-10-19)
+- Part 143 (`docs/level-scripts/part-143.md`): a developer group or DLC pack is locked
+  while all its slots are, as 0x1a7efc gives; the runtime's lock test follows.
+
+## D395 the active link look (2026-10-19)
 - Part 142 (`docs/level-scripts/part-142.md`): a link to a locked level is drawn white
   with the active texture band; pending (green) once the level unlocks.
 

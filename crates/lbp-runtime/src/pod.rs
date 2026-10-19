@@ -794,9 +794,25 @@ impl LevelWorld {
 
     /// D381: the slot is open to play: unlocked this session, or a story slot that is
     /// not `InitiallyLocked`. A slot not in the story list counts as unlocked.
+    /// D396 (FOUND 0x1a7efc, part 143): a developer group or a DLC pack (SlotID types 4
+    /// and 9) with slots in it is locked only while all of them are; one without takes
+    /// its own slot's lock (INFERRED: the empty case was not read).
     pub fn slot_unlocked(&self, id: (i32, i32)) -> bool {
+        if self.story_progress.unlocked.contains(&id) {
+            return true;
+        }
+        if matches!(id.0, 4 | 9) {
+            let mut members = self
+                .story_slots
+                .iter()
+                .filter(|s| s.group == Some(id) && s.id != id)
+                .peekable();
+            if members.peek().is_some() {
+                return members.any(|s| self.slot_unlocked(s.id));
+            }
+        }
         let slot = self.story_slots.iter().find(|s| s.id == id);
-        self.story_progress.unlocked.contains(&id) || slot.is_none_or(|s| !s.initially_locked)
+        slot.is_none_or(|s| !s.initially_locked)
     }
 }
 
