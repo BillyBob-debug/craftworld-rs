@@ -142,6 +142,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 136: a link's width and look (2026-10-19, D389)](level-scripts/part-136.md)
 - [Part 137: which links are wide (2026-10-19, D390)](level-scripts/part-137.md)
 - [Part 138: links between groups (2026-10-19, D391)](level-scripts/part-138.md)
+- [Part 139: a link's texture (2026-10-19, D392)](level-scripts/part-139.md)
 
 ## Next
 

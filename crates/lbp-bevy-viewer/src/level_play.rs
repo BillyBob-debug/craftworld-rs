@@ -2212,6 +2212,7 @@ fn follow_links(
     v: Res<crate::Viewer>,
     things: Option<Res<crate::thing_view::LevelThings>>,
     frame: Option<Res<crate::story_world::StoryFrame>>,
+    texture: Option<Res<crate::story_world::LinkTexture>>,
     items: Query<(&crate::thing_view::LevelThing, &GlobalTransform), Without<LinkRibbon>>,
     mut drawn: Query<(Entity, &mut Transform), With<LinkRibbon>>,
     mut commands: Commands,
@@ -2294,6 +2295,8 @@ fn follow_links(
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(crate::dual::material(StandardMaterial {
                 base_color: Color::srgba(r, g, b, a),
+                // D392: the game's line texture, or flat without it.
+                base_color_texture: texture.as_ref().map(|t| t.0.clone()),
                 alpha_mode: AlphaMode::Blend,
                 unlit: true,
                 cull_mode: None,

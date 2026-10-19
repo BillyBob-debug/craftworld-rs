@@ -6495,3 +6495,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D387 a badge's radius (2026-10-19)
 - Part 134 (`docs/level-scripts/part-134.md`): a badge's angular radius comes from a
   settings resource times a per-object factor; a level's needs a measurement.
+
+## D388 a level badge's radius (2026-10-19)
+- Part 135 (`docs/level-scripts/part-135.md`): a level badge's radius defaults to
+  0.08 in the game's settings block, and the viewer's link ends use it.
