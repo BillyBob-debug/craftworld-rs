@@ -98,6 +98,8 @@ pub struct SceneBody {
     pub anti_gravity: Option<AntiGravity>,
     /// D1109: the gyroscopes and rotators glued to the body (configurations 1 and 9).
     pub spins: Vec<SpinTweak>,
+    /// D1110: its movers and followers, in Thing order.
+    pub moves: Vec<MoveTweak>,
 }
 
 /// D1100: the PPhysicsTweaks with configuration 0 (anti-gravity tweakers) on a body's
@@ -189,6 +191,164 @@ impl SpinTweak {
         let (target, lo, hi) = self.target(angle);
         w + (target - w).clamp(lo * activation, hi * activation)
     }
+}
+
+/// D1110: a PPhysicsTweak that pushes its body: configuration 8 (the mover, a set
+/// velocity), 6 and 7 (stick movers) or 11 (the follower). Read from 0x957df4, which packs
+/// two linear rows for the packer 0x95fb20 (EBOOT 01.33); lengths in game units, speeds
+/// per game tick.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct MoveTweak {
+    /// The PPhysicsTweak's Thing index.
+    pub thing: usize,
+    pub configuration: u32,
+    /// PPhysicsTweak.behavior, read as the input mode (D1101).
+    pub behavior: i32,
+    /// velRange, accelStrength and decelStrength.
+    pub range: f32,
+    pub accel: f32,
+    pub decel: f32,
+    /// The mover's velocity (middleVel x, y; per tick).
+    pub vel: [f32; 2],
+    /// localSpace: the mover's velocity turns with its body (0x9582b4).
+    pub local: bool,
+    /// The follower's distance band and cone (degrees; 180 or more is no cone).
+    pub min_range: f32,
+    pub max_range: f32,
+    pub angle_range: f32,
+    /// flee: the follower keeps max_range from its target instead of min_range.
+    pub flee: bool,
+    /// allowUpDown: off drops the follower's push along its body's up axis.
+    pub up_down: bool,
+}
+
+/// D1110: `v` per unit length, or None for a zero vector.
+fn unit(v: [f32; 2]) -> Option<[f32; 2]> {
+    let l = v[0].hypot(v[1]);
+    (l > 0.).then(|| [v[0] / l, v[1] / l])
+}
+
+fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
+}
+
+impl MoveTweak {
+    /// D1110: whether a target at `d` (target minus body) is one this follower takes, for a
+    /// body whose up axis is `up`. FOUND (0x1c3e04): min_range < |d| < max_range in x, y,
+    /// max_range below 0 is 1e8, and a cone under 180 degrees. INFERRED: the cone is a
+    /// half-angle about the body's up axis.
+    pub fn sees(&self, d: [f32; 2], up: [f32; 2]) -> bool {
+        let r = d[0].hypot(d[1]);
+        let max = if self.max_range < 0. {
+            1e8
+        } else {
+            self.max_range
+        };
+        if r <= self.min_range || r >= max {
+            return false;
+        }
+        self.angle_range >= 180. || dot(d, up) >= r * self.angle_range.to_radians().cos()
+    }
+
+    /// D1110: the rows (axis, target, lo, hi) this tweak packs for a body with up axis `up`
+    /// and, for a follower, its target at `d` (target minus body), before the activation.
+    /// FOUND (0x957df4): row 1 runs along the wanted velocity v with limits -decel and
+    /// +accel times range; a zero v brakes along the body's velocity (or world up) with
+    /// ±decel × range; row 2 holds the cross axis at 0 with ±decel × range, only when that
+    /// is not 0. The follower aims at the point min_range (max_range when fleeing) short of
+    /// its target, with ±accel × range on both rows and its speed clamped to ±range.
+    /// INFERRED: the follower's 0x1c21f4 speed, read as sqrt(2 × accel × range × distance)
+    /// (as the gyroscope's, D1109); the input scale 0xcbed4 read as 1; the mirror flag and
+    /// the follower's +0x220 angle not modelled; stick movers (6, 7) see no stick.
+    pub fn rows(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>) -> Vec<Row> {
+        let a = self.accel * self.range;
+        let k = self.decel * self.range;
+        let follow = self.configuration == 11;
+        let side = if follow { a } else { k };
+        let want = match self.configuration {
+            8 if self.local => {
+                let [x, y] = self.vel;
+                [up[0] * y + up[1] * x, up[1] * y - up[0] * x]
+            }
+            8 => self.vel,
+            11 => d.map_or([0., 0.], |d| {
+                let r = d[0].hypot(d[1]);
+                let keep = if self.flee {
+                    self.max_range
+                } else {
+                    self.min_range
+                };
+                let mut off = [d[0] - d[0] / r * keep, d[1] - d[1] / r * keep];
+                if !self.up_down {
+                    let s = dot(off, up);
+                    off = [off[0] - up[0] * s, off[1] - up[1] * s];
+                }
+                off
+            }),
+            _ => [0., 0.],
+        };
+        let mut rows = Vec::with_capacity(2);
+        let axis = match unit(want) {
+            Some(axis) => {
+                let target = if follow {
+                    (2. * a * want[0].hypot(want[1])).sqrt().min(self.range)
+                } else {
+                    want[0].hypot(want[1])
+                };
+                let lo = if follow { -a } else { -k };
+                rows.push(Row {
+                    axis,
+                    target,
+                    lo,
+                    hi: a,
+                });
+                axis
+            }
+            None => {
+                let axis = unit(vel).unwrap_or([0., 1.]);
+                rows.push(Row {
+                    axis,
+                    target: 0.,
+                    lo: -side,
+                    hi: side,
+                });
+                axis
+            }
+        };
+        if k != 0. {
+            let cross = [axis[1], -axis[0]];
+            rows.push(Row {
+                axis: cross,
+                target: 0.,
+                lo: -side,
+                hi: side,
+            });
+        }
+        rows
+    }
+
+    /// D1110: the body's velocity (per tick) after this tweak's rows at `activation`: along
+    /// each axis the change towards the target, clamped to the limits scaled by the
+    /// activation (0x95fdc8; 1/mass left out as for D1109).
+    pub fn push(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>, act: f32) -> [f32; 2] {
+        let mut v = vel;
+        for r in self.rows(vel, up, d) {
+            let s = dot(v, r.axis);
+            let ds = (r.target - s).clamp(r.lo * act, r.hi * act);
+            v = [v[0] + r.axis[0] * ds, v[1] + r.axis[1] * ds];
+        }
+        v
+    }
+}
+
+/// D1110: one packed linear row: a unit axis, the speed along it the row wants, and the
+/// change limits for a tick before the activation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Row {
+    pub axis: [f32; 2],
+    pub target: f32,
+    pub lo: f32,
+    pub hi: f32,
 }
 
 /// One SHAPE Thing as a collider.
@@ -451,6 +611,7 @@ fn build_scene_inner(
                             fixed: is_world(thing) || is_pickup(thing),
                             anti_gravity: None,
                             spins: vec![],
+                            moves: vec![],
                         });
                         scene.bodies.len() - 1
                     })
@@ -584,6 +745,34 @@ fn build_scene_inner(
                 accel: tw.accel_strength,
                 decel: tw.decel_strength,
                 speed: tw.middle_vel[2],
+            });
+        }
+    }
+    for (i, t) in things.iter().enumerate() {
+        // D1110: a follower of tagged things (followKey) waits on the tag search.
+        let Some(tw) = t.data.physics_tweak.as_ref().filter(|tw| {
+            matches!(tw.configuration, 6..=8) || (tw.configuration == 11 && !tw.follow_key)
+        }) else {
+            continue;
+        };
+        let slot = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        if let Some(b) = slot {
+            scene.bodies[b].moves.push(MoveTweak {
+                thing: i,
+                configuration: tw.configuration,
+                behavior: tw.behavior,
+                range: tw.vel_range,
+                accel: tw.accel_strength,
+                decel: tw.decel_strength,
+                vel: [tw.middle_vel[0], tw.middle_vel[1]],
+                local: tw.local_space,
+                min_range: tw.min_range,
+                max_range: tw.max_range,
+                angle_range: tw.angle_range,
+                flee: tw.flee,
+                up_down: tw.allow_up_down,
             });
         }
     }

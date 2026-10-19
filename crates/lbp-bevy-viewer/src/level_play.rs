@@ -1070,6 +1070,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             drive_winches,
             drive_motors,
             drive_spins,
+            drive_moves,
             follow_colour_correction,
             follow_things,
             follow_story_world,
@@ -2167,6 +2168,27 @@ fn drive_spins(
 ) {
     let world = &play.host.world;
     lbp_sim::drive_spins(&mut commands, &mut q, |t| {
+        world.tweak_activation(t.thing, t.behavior)
+    });
+}
+
+/// D1110: every mover and follower pushes its body; a follower follows the play-mode
+/// Sackboy.
+fn drive_moves(
+    play: NonSend<Play>,
+    mut commands: Commands,
+    sackboy: Query<&lbp_sim::avian2d::prelude::Position, With<SackboyBody>>,
+    mut q: Query<(
+        Entity,
+        &lbp_sim::MoveTweaks,
+        &lbp_sim::avian2d::prelude::Position,
+        &lbp_sim::avian2d::prelude::Rotation,
+        &mut lbp_sim::avian2d::prelude::LinearVelocity,
+    )>,
+) {
+    let world = &play.host.world;
+    let player = sackboy.iter().next().map(|p| p.0);
+    lbp_sim::drive_moves(&mut commands, &mut q, player, |t| {
         world.tweak_activation(t.thing, t.behavior)
     });
 }

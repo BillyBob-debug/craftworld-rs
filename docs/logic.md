@@ -296,8 +296,8 @@ What the game does (EBOOT 01.33, SPU row packer 0x95fb20, configurations 1-5 and
   dampening are not read here. Input scale 0xcbed4 is 1 unless input mode is 2.
 - A flip flag (body matrix determinant < 0, XOR the byte at +0x224) negates the target;
   not modelled.
-- Configurations 6-8 and 11 (the follower, 35 in the level with followKey set) go
-  through 0x957df4 and are next.
+- Configurations 6-8 and 11 (the follower, 35 in the level, mostly with followKey set)
+  go through 0x957df4 (Part 12).
 
 lbp-sim (`SpinTweak`, `drive_spins`): per tick, in order, each gyroscope (1) and rotator
 (9) moves its body's turn speed towards its target by at most the limits × activation.
@@ -308,3 +308,46 @@ UNVERIFIED for rotators; the gyroscope is symmetric.
 
 Test: `d1109_gyroscopes_right_their_body_and_rotators_turn_at_their_speed` (lbp-sim
 sandbox).
+
+## Part 12: movers and followers push their bodies (D1110)
+
+0x957df4 (EBOOT 01.33) packs a tweak's linear rows for the packer 0x95fb20. It is called
+twice (0x1c8030, 0x1c80b0); the second call happens only when decel × velRange is not 0
+(0x1c8038). Each row is a unit axis, a target speed, limits, and 1/mass.
+
+Row 1 (0x958068-0x958124): the configuration gives a wanted velocity v (x, y). The axis is
+v / |v|, the target |v|, the limits -decel × velRange and +accel × velRange. A zero v
+brakes: axis along the body's velocity (or world up), target 0, ±decel × velRange
+(0x958260). Configurations other than 11 scale the target by the input scale 0xcbed4
+(0x95813c). The limits are then × activation × 1/mass (0x958188).
+
+Row 2 (0x958354): the cross axis (a.y, -a.x), target 0, ±decel × velRange; the follower
+uses ±accel × velRange (0x95839c).
+
+- Mirror (not 11; 0x957fb4): v.x negated when the body's determinant sign differs from
+  byte +0x224. Local space (byte +0x5c, localSpace; 0x9582b4): v turns with the body.
+- 8, the mover (0x9583c4): v = middleVel x, y. The census's one mover is [0, 35, 0].
+- 6 and 7 (0x957efc, 0x95840c): v = stick slots 1 and 2 (0xcb02c, 0xcb074), squared to a
+  circle. 6 multiplies the target by velRange and 7 does not.
+- 11, the follower: the target is found by 0x1c3e04 (min_range +0xe8, max_range +0xec, a
+  cone of angle_range degrees +0xf0, followKey +0xf4). followKey 0 searches players, and
+  1 searches keyed things. It takes the nearest with min_range < distance < max_range in
+  x, y; a negative max_range means 1e8, and a cone applies under 180 degrees. The goal is
+  the point min_range short of the target (max_range with flee, +0xf5). With allowUpDown
+  off (+0xe5), the push along the body's up axis turned by +0x220 is dropped. The speed
+  is 0x1c21f4 (stop-in-time; accel × velRange × activation × 0.5 at 0xd97fc4), clamped
+  to ±velRange × |input scale|. No target means the brake row with ±accel × velRange.
+
+lbp-sim (`MoveTweak`, `drive_moves`): per tick, in order, each row moves the body's speed
+along its axis towards its target by at most the limits × activation. INFERRED or not
+modelled:
+- The follower's speed is sqrt(2 × accel × velRange × distance), as the gyroscope's
+  (D1109).
+- The input scale is read as 1, and stick movers see no stick.
+- The mirror flag and the +0x220 angle are not modelled. The cone is a half-angle about
+  the body's up axis.
+- Followers with followKey (keyed things) wait on the tag search and are not built.
+- The follower follows the play-mode Sackboy. 1/mass is left out as in D1109.
+
+Test: `d1110_movers_reach_their_velocity_and_followers_stop_short_of_their_target`
+(lbp-sim sandbox).

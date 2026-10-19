@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-11 (pistons: length, clock, saved mode, ends, speed mode;
+4. docs/logic.md Parts 4-12 (pistons: length, clock, saved mode, ends, speed mode;
    winches; motors; gyroscopes and rotators)
 
 ## State
@@ -16,9 +16,10 @@
   8f435e8), D1104 (PR 245, 0b2d19a: each piston's saved mode and held flag).
 - Owner paused (2026-10-19 "pause for now") and resumed ("unpause") the same day.
 - D1105 merged (PR 246, e84bd7a), D1106 (PR 247, c632357), D1107 (PR 248, 67fd1db:
-  winches), D1108 (PR 249, 6c79cd5: motors). PR for D1109 (branch `logic-mover`,
-  worktree `E:\Projects\wt-d324`): gyroscopes and rotators turn their bodies.
-- Decision numbers: D1100-D1199, next free D1110.
+  winches), D1108 (PR 249, 6c79cd5: motors), D1109 (PR 250, b351ff1: gyroscopes and
+  rotators). PR for D1110 (branch `logic-follower`, worktree `E:\Projects\wt-d324`):
+  movers and followers push their bodies.
+- Decision numbers: D1100-D1199, next free D1111.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -46,8 +47,9 @@
 1. Motors (docs/logic.md Part 10): the position term and strength cap of row 0x95f494,
    the turn sign; check thing 58's swing in RPCS3 (Part 10). The type 4 / angle-wrap question at
    0x962590. The switch type bucket in 0x900730.
-2. Followers and movers (configurations 11, 8, 6-7) through 0x957df4; then 3-5 and 12;
-   the gyroscope's exact 0x1c21f4 target and the flip flag.
+2. Followers of keyed things (followKey; the tag search in 0x1c3e04 and the key filter
+   0xf9a64), then configurations 3-5 and 12; the exact 0x1c21f4 speed (gyroscope and
+   follower), the mirror flag and the follower's +0x220 angle (docs/logic.md P11-P12).
 3. SWITCH_INPUT, MATERIAL_TWEAK (friction, restitution) and EMITTER.
 4. The 38 stored-signal switches; the sensors' cone and layer tests.
 5. Sequencers, controlinators, creatures.
