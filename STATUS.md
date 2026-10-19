@@ -6583,3 +6583,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1009 the Pod's music files (2026-10-19)
 - Part 156 (`docs/level-scripts/part-156.md`): the Pod's music bank is not on the LBP2
   disc (part 151 measured LBP1's); its `.mus` settings are read.
+
+## D1010 the planets' resting point (2026-10-19)
+- Part 157 (`docs/level-scripts/part-157.md`): with nothing selected the game turns the
+  planets toward the planet's +0x190 (its position, inferred); comments only.

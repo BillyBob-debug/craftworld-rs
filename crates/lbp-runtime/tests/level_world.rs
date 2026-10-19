@@ -5495,6 +5495,55 @@ fn d1017_leaving_the_pod_keeps_its_view_type() {
     assert_eq!(view(&mut host), Ok(Value::Int(3)));
 }
 
+/// D1018: without the game's scripts (the planets world runs its native port, no pod
+/// computer object) leaving the Pod keeps the world's view type and the next entry
+/// restores it, as the scripted pod computer does (D1017).
+#[test]
+fn d1018_the_native_pod_computer_enters_and_leaves_the_pod() {
+    let world = Value::Thing(Some(0));
+    let start = |kept: Option<i32>| {
+        let mut vm = Vm::default();
+        let mut things = level();
+        things[0].data.script = Some(ScriptPart {
+            script: Some(desc(lbp_runtime::PLANETS_WORLD_SCRIPT)),
+            fields: vec![],
+        });
+        let mut host = Bindings::new(LevelWorld::from_things(&things));
+        host.world.pod_view_type = kept;
+        let mut level = LevelScripts::new(&vm, &host.world);
+        let r = level.create(&mut vm, &mut host, 1000);
+        assert!(r.thread_faults.is_empty(), "{:?}", r.thread_faults);
+        (vm, host, level)
+    };
+    let get = |host: &mut Bindings<LevelWorld>, field: &str| {
+        host.get_member(MemberKind::Thing, &world, "PlanetsWorld", field)
+    };
+    let (mut vm, mut host, mut level) = start(None);
+    assert_eq!(host.world.pod_computer, None);
+    let t = level.tick_level(&mut vm, &mut host, 1000);
+    assert!(t.thread_faults.is_empty(), "{:?}", t.thread_faults);
+    assert_eq!(get(&mut host, "ViewType"), Ok(Value::Int(0)));
+    host.set_member(
+        MemberKind::Thing,
+        &world,
+        "PlanetsWorld",
+        "ViewType",
+        Value::Int(6),
+    )
+    .unwrap();
+    let t = level.pod_computer_exit(&mut vm, &mut host, 1000);
+    assert!(t.thread_faults.is_empty(), "{:?}", t.thread_faults);
+    assert_eq!(get(&mut host, "LocalViewType"), Ok(Value::Int(6)));
+    assert_eq!(host.world.pod_view_type, Some(6));
+    // Back in the Pod: its first tick enters it in the kept view.
+    let (mut vm, mut host, mut level) = start(Some(6));
+    assert_eq!(get(&mut host, "ViewType"), Ok(Value::Int(0)));
+    let t = level.tick_level(&mut vm, &mut host, 1000);
+    assert!(t.thread_faults.is_empty(), "{:?}", t.thread_faults);
+    assert_eq!(get(&mut host, "ViewType"), Ok(Value::Int(6)));
+    assert_eq!(get(&mut host, "ViewTransition"), Ok(Value::Float(1.)));
+}
+
 #[test]
 fn d295_a_pod_computer_step_that_faults_is_not_made_again() {
     let assert_false = vec![

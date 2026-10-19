@@ -996,10 +996,16 @@ impl PlanetsWorldScript {
         site(host, PLANETS_WORLD, "OnEnterPod__");
         set_member(host, this, "State", Value::Int(0))?;
         Self::reset_interactive_music(host, this)?;
-        let previous = call(host, "Game", "GetPreviousLevelSlotID__", &[])?;
-        let kind = host.get_member(MemberKind::RefPtr, &previous, "SlotID", "Type")?;
-        let want =
-            as_int(&kind) == 2 && as_bool(&call(host, "Game", "IsPreviousLevelValid__", &[])?);
+        // D1018: without the game's scripts there is no SlotID object, and only story
+        // levels are played, so the previous level is not a user level.
+        let kind = match call(host, "Game", "GetPreviousLevelSlotID__", &[]) {
+            Ok(previous) => {
+                as_int(&host.get_member(MemberKind::RefPtr, &previous, "SlotID", "Type")?)
+            }
+            Err(e) if e.contains("no SlotID object") => 0,
+            Err(e) => return Err(e),
+        };
+        let want = kind == 2 && as_bool(&call(host, "Game", "IsPreviousLevelValid__", &[])?);
         set_member(host, this, "WantLevelCreatedDialogue", Value::Bool(want))?;
         let kind = int(host, this, "LocalViewType");
         set_member(host, this, "ViewType", Value::Int(kind))?;
