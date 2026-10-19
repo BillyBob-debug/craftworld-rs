@@ -192,14 +192,23 @@ impl Config {
         );
         std::fs::write(config_path(), text).map_err(|e| format!("Save settings: {e}"))
     }
-    /// The viewer's `--game-dir` list: the copied disc, then the installed update.
+    /// The viewer's `--game-dir` list: the disc (the copy out of the ISO, or the player's
+    /// own disc folder), then the installed update.
     fn game_dir(&self) -> String {
-        format!("{};{}", disc_dir().display(), self.update.trim())
+        let disc = match disc_input(&self.iso) {
+            Ok(Disc::Folder(root)) => root,
+            _ => disc_dir(),
+        };
+        format!("{};{}", disc.display(), clean(&self.update))
     }
     /// What the copy and index depend on: the ISO (path, size, time) and the update path.
     fn key(&self) -> String {
-        let iso = self.iso.trim();
-        let stamp = std::fs::metadata(iso)
+        let iso = clean(&self.iso);
+        let stamped = match disc_input(&iso) {
+            Ok(Disc::Folder(root)) => root.join("PS3_GAME").join("PARAM.SFO"),
+            _ => PathBuf::from(&iso),
+        };
+        let stamp = std::fs::metadata(stamped)
             .map(|m| {
                 let t = m
                     .modified()
@@ -209,7 +218,7 @@ impl Config {
                 format!("{}@{t}", m.len())
             })
             .unwrap_or_default();
-        format!("{iso}|{stamp}|{}", self.update.trim())
+        format!("{iso}|{stamp}|{}", clean(&self.update))
     }
     fn ready(&self) -> bool {
         !self.iso.trim().is_empty() && self.indexed == self.key() && index_path().is_file()
@@ -242,9 +251,21 @@ fn guess_update() -> Option<String> {
         .map(|p| p.display().to_string())
 }
 
-/// Accepts the game folder itself, RPCS3's folder, or its dev_hdd0.
+/// A pasted path without the quotes Windows' "Copy as path" puts around it.
+fn clean(path: &str) -> String {
+    path.trim().trim_matches('"').trim().to_owned()
+}
+
+/// Accepts the game folder itself, RPCS3's folder, its dev_hdd0, or the game's USRDIR.
 fn normalise_update(path: &str) -> PathBuf {
-    let p = PathBuf::from(path.trim());
+    let p = PathBuf::from(clean(path));
+    if p.file_name()
+        .is_some_and(|n| n.eq_ignore_ascii_case("USRDIR"))
+    {
+        if let Some(game) = p.parent().filter(|g| g.join("PARAM.SFO").is_file()) {
+            return game.to_path_buf();
+        }
+    }
     for sub in [&[][..], &["game"], &["dev_hdd0", "game"]] {
         let base = sub.iter().fold(p.clone(), |b, s| b.join(s));
         let game = base.join(iso::TITLE_ID);
@@ -255,18 +276,155 @@ fn normalise_update(path: &str) -> PathBuf {
     p
 }
 
-fn iso_problem(path: &str) -> Option<String> {
-    let p = Path::new(path.trim());
-    if path.trim().is_empty() {
-        return Some("Pick your LittleBigPlanet 2 ISO.".into());
+/// What the first box names: the .iso file, or a disc folder holding PS3_GAME (a game
+/// RPCS3 boots from a folder instead of an ISO), which is read in place.
+#[derive(Debug, PartialEq)]
+enum Disc {
+    Iso(PathBuf),
+    Folder(PathBuf),
+}
+
+/// Reads the first box, or says in plain words what is wrong with it and how to fix it.
+fn disc_input(path: &str) -> Result<Disc, String> {
+    let raw = clean(path);
+    if raw.is_empty() {
+        return Err(
+            "Pick your LittleBigPlanet 2 disc: the .iso file you play in RPCS3, or the \
+             game folder that holds PS3_GAME."
+                .into(),
+        );
+    }
+    let p = PathBuf::from(&raw);
+    if p.is_dir() {
+        let disc_root = [Some(p.as_path()), p.parent()]
+            .into_iter()
+            .flatten()
+            .find(|r| r.join("PS3_GAME").join("PARAM.SFO").is_file());
+        if let Some(root) = disc_root {
+            return Ok(Disc::Folder(root.to_path_buf()));
+        }
+        if p.join("USRDIR").is_dir() || p.join("dev_hdd0").is_dir() {
+            return Err(
+                "That's RPCS3's installed game/update folder, which goes in the second box. \
+                 The first box needs the disc: the .iso file, or the folder holding PS3_GAME."
+                    .into(),
+            );
+        }
+        return Err(format!(
+            "There's no PS3_GAME folder in {}. Pick the .iso file itself, or the game \
+             folder that holds PS3_GAME.",
+            p.display()
+        ));
     }
     if !p.is_file() {
-        return Some(format!("The ISO doesn't exist: {}", p.display()));
+        return Err(format!(
+            "Can't find {}. Check the path for typos, or use Browse to pick the file.",
+            p.display()
+        ));
     }
-    None
+    let ext = p
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "zip" | "7z" | "rar" | "gz" | "tar" => Err(
+            "That's a compressed archive, not the disc. Extract it first (right-click > \
+             Extract All, or 7-Zip), then pick the .iso inside."
+                .into(),
+        ),
+        "pkg" => Err(
+            "That's an update package. Install it in RPCS3 (File > Install Packages/Raps/Edats), \
+             then pick the game's .iso here and RPCS3's dev_hdd0/game/BCUS98245 below."
+                .into(),
+        ),
+        "rap" | "edat" | "dkey" | "ird" | "sfo" | "bin" | "self" | "elf" => Err(format!(
+            "That's a single .{ext} file, not the game disc. Pick the .iso file (about \
+             10 GB or more)."
+        )),
+        _ => Ok(Disc::Iso(p)),
+    }
+}
+
+/// Checks a disc's PARAM.SFO names the USA LittleBigPlanet 2.
+fn title_problem(sfo: &[u8], what: &str) -> Option<String> {
+    let id = lbp_io::sfo::read_identity(sfo)
+        .ok()
+        .and_then(|i| i.title_id);
+    match id.as_deref() {
+        Some(iso::TITLE_ID) => None,
+        Some(other) => Some(format!(
+            "{what} is {other}, not the USA LittleBigPlanet 2 ({}). Only the USA disc \
+             works for now; other regions come later.",
+            iso::TITLE_ID
+        )),
+        None => Some(format!(
+            "{what} has no readable PARAM.SFO: it isn't a PS3 game disc, or it's an \
+             encrypted disc dump. Use the ISO (or game folder) that RPCS3 actually plays."
+        )),
+    }
+}
+
+/// The game's archives end in the `FARC` tag. Files that don't were copied out of a disc
+/// image whose contents are still encrypted (a raw disc dump), which can't be read.
+fn archive_problem(disc_root: &Path) -> Option<String> {
+    fn walk(dir: &Path, found: &mut Vec<PathBuf>, depth: u32) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for e in entries.flatten() {
+            let p = e.path();
+            if p.is_dir() && depth < 8 {
+                walk(&p, found, depth + 1);
+            } else if p
+                .extension()
+                .is_some_and(|x| x.eq_ignore_ascii_case("farc"))
+            {
+                found.push(p);
+            }
+        }
+    }
+    let mut farcs = Vec::new();
+    walk(&disc_root.join("PS3_GAME").join("USRDIR"), &mut farcs, 0);
+    if farcs.is_empty() {
+        return Some(
+            "The disc has no game archives (.farc files) in PS3_GAME/USRDIR, so it's \
+             incomplete or not the LittleBigPlanet 2 disc."
+                .into(),
+        );
+    }
+    let tagged = |p: &Path| -> bool {
+        let Ok(mut f) = std::fs::File::open(p) else {
+            return false;
+        };
+        let mut tail = [0u8; 4];
+        use std::io::{Seek, SeekFrom};
+        f.seek(SeekFrom::End(-4)).is_ok() && f.read_exact(&mut tail).is_ok() && &tail == b"FARC"
+    };
+    let bad = farcs.iter().filter(|p| !tagged(p)).count();
+    (bad > 0).then(|| {
+        format!(
+            "{bad} of the disc's {} game archives can't be read: their contents are \
+             scrambled. That happens with an encrypted disc dump. Use the ISO (or game \
+             folder) that RPCS3 actually plays.",
+            farcs.len()
+        )
+    })
 }
 
 fn update_problem(path: &Path) -> Option<String> {
+    if path.as_os_str().is_empty() {
+        return Some(format!(
+            "Pick the update folder: RPCS3's dev_hdd0/game/{} (install the LBP2 updates \
+             in RPCS3 first).",
+            iso::TITLE_ID
+        ));
+    }
+    if path.is_file() {
+        return Some(format!(
+            "The second box needs a folder, not a file: RPCS3's dev_hdd0/game/{}.",
+            iso::TITLE_ID
+        ));
+    }
     let sfo = std::fs::read(path.join("PARAM.SFO")).ok();
     let identity = sfo
         .as_deref()
@@ -454,17 +612,33 @@ fn path_row(ui: &mut egui::Ui, label: &str, hint: &str, value: &mut String, file
 
 /// Copies the disc files out of the ISO (when the ISO changed) and builds the index.
 fn prepare(
-    iso_path: PathBuf,
+    disc: Disc,
     copy: bool,
     game_dir: String,
     copying: Arc<Mutex<bool>>,
     done: Arc<AtomicU64>,
     total: Arc<AtomicU64>,
 ) -> Result<(), String> {
-    if copy {
-        *copying.lock().unwrap() = true;
-        iso::extract(&iso_path, &disc_dir(), done, total)?;
-        *copying.lock().unwrap() = false;
+    let root = match disc {
+        Disc::Iso(iso_path) => {
+            if copy {
+                *copying.lock().unwrap() = true;
+                iso::extract(&iso_path, &disc_dir(), done, total)?;
+                *copying.lock().unwrap() = false;
+            }
+            disc_dir()
+        }
+        Disc::Folder(root) => {
+            let sfo = std::fs::read(root.join("PS3_GAME").join("PARAM.SFO"))
+                .map_err(|e| format!("Read the disc's PARAM.SFO: {e}"))?;
+            if let Some(problem) = title_problem(&sfo, "That game folder") {
+                return Err(problem);
+            }
+            root
+        }
+    };
+    if let Some(problem) = archive_problem(&root) {
+        return Err(problem);
     }
     // The scanner never overwrites, so the launcher removes its own previous index first.
     let index = index_path();
@@ -481,11 +655,15 @@ fn prepare(
 }
 
 fn start_setup(l: &mut Launcher) {
-    if let Some(problem) = iso_problem(&l.cfg.iso) {
-        l.message = problem;
-        l.error = true;
-        return;
-    }
+    l.cfg.iso = clean(&l.cfg.iso);
+    let disc = match disc_input(&l.cfg.iso) {
+        Ok(d) => d,
+        Err(problem) => {
+            l.message = problem;
+            l.error = true;
+            return;
+        }
+    };
     let update = normalise_update(&l.cfg.update);
     if let Some(problem) = update_problem(&update) {
         l.message = problem;
@@ -508,7 +686,8 @@ fn start_setup(l: &mut Launcher) {
         .join("|");
     let new_key = l.cfg.key();
     let new_iso = new_key.split('|').take(2).collect::<Vec<_>>().join("|");
-    let copy = old_iso != new_iso || !disc_dir().join("PS3_GAME").is_dir();
+    let copy = matches!(disc, Disc::Iso(_))
+        && (old_iso != new_iso || !disc_dir().join("PS3_GAME").is_dir());
     l.cfg.indexed.clear();
     let _ = l.cfg.save();
     let result: Slot<Result<(), String>> = Arc::new(Mutex::new(None));
@@ -516,10 +695,9 @@ fn start_setup(l: &mut Launcher) {
     let done = Arc::new(AtomicU64::new(0));
     let total = Arc::new(AtomicU64::new(0));
     let (r, c, d, t) = (result.clone(), copying.clone(), done.clone(), total.clone());
-    let iso_path = PathBuf::from(l.cfg.iso.trim());
     let game_dir = l.cfg.game_dir();
     std::thread::spawn(move || {
-        let out = prepare(iso_path, copy, game_dir, c, d, t);
+        let out = prepare(disc, copy, game_dir, c, d, t);
         *r.lock().unwrap() = Some(out);
     });
     l.job = Job::Preparing {
@@ -609,7 +787,10 @@ fn poll(l: &mut Launcher) {
                     l.error = false;
                 }
                 Err(e) => {
-                    l.message = format!("Set up stopped: {e}");
+                    l.message = format!(
+                        "Set up stopped: {e}\nSee Troubleshooting in the README on GitHub \
+                         (github.com/chilladept/craftworld-rs)."
+                    );
                     l.error = true;
                 }
             }
@@ -655,8 +836,8 @@ fn menu(mut contexts: EguiContexts, mut l: ResMut<Launcher>) -> Result {
             ui.add_enabled_ui(!busy, |ui| {
                 let mut changed = path_row(
                     ui,
-                    "LittleBigPlanet 2 ISO (USA, BCUS98245)",
-                    "the .iso RPCS3 boots",
+                    "LittleBigPlanet 2 disc (USA, BCUS98245)",
+                    "the .iso file RPCS3 boots, or the game folder holding PS3_GAME",
                     &mut l.cfg.iso,
                     true,
                 );
@@ -765,8 +946,93 @@ mod tests {
             assert_eq!(normalise_update(&picked.display().to_string()), game);
         }
         assert!(update_problem(&game).unwrap().contains("No installed game"));
-        assert!(iso_problem("").unwrap().contains("Pick"));
+        assert!(disc_input("").unwrap_err().contains("Pick"));
+        // The update folder in the disc box, and the update's USRDIR in the update box.
+        assert!(disc_input(&game.display().to_string())
+            .unwrap_err()
+            .contains("second box"));
+        std::fs::write(game.join("PARAM.SFO"), b"").unwrap();
+        assert_eq!(
+            normalise_update(&format!("\"{}\"", game.join("USRDIR").display())),
+            game
+        );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn disc_box_explains_wrong_picks() {
+        let dir = std::env::temp_dir().join(format!("lbp-launcher-disc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let usrdir = dir.join("PS3_GAME/USRDIR");
+        std::fs::create_dir_all(&usrdir).unwrap();
+        // No PS3_GAME/PARAM.SFO yet: not a disc folder.
+        assert!(disc_input(&dir.display().to_string())
+            .unwrap_err()
+            .contains("no PS3_GAME"));
+        std::fs::write(dir.join("PS3_GAME/PARAM.SFO"), b"").unwrap();
+        // The folder, PS3_GAME itself, and a quoted pasted path all find the disc root.
+        for picked in [
+            dir.display().to_string(),
+            dir.join("PS3_GAME").display().to_string(),
+            format!("\"{}\"", dir.display()),
+        ] {
+            assert_eq!(disc_input(&picked).unwrap(), Disc::Folder(dir.clone()));
+        }
+        for (name, says) in [
+            ("game.7z", "Extract it first"),
+            ("update.pkg", "Install it in RPCS3"),
+            ("key.rap", "not the game disc"),
+        ] {
+            let f = dir.join(name);
+            std::fs::write(&f, b"x").unwrap();
+            assert!(disc_input(&f.display().to_string())
+                .unwrap_err()
+                .contains(says));
+        }
+        let iso_file = dir.join("lbp2.iso");
+        std::fs::write(&iso_file, b"x").unwrap();
+        assert_eq!(
+            disc_input(&iso_file.display().to_string()).unwrap(),
+            Disc::Iso(iso_file)
+        );
+        assert!(disc_input(&dir.join("missing.iso").display().to_string())
+            .unwrap_err()
+            .contains("Can't find"));
+        // Archives: none, then one scrambled, then all tagged.
+        assert!(archive_problem(&dir).unwrap().contains("no game archives"));
+        std::fs::write(usrdir.join("DATA.FARC"), b"\x01\x02\x03\x04junk").unwrap();
+        assert!(archive_problem(&dir)
+            .unwrap()
+            .contains("encrypted disc dump"));
+        std::fs::write(usrdir.join("DATA.FARC"), b"\0\0\0\0FARC").unwrap();
+        assert_eq!(archive_problem(&dir), None);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn title_check_names_the_other_disc() {
+        let sfo = |id: &[u8]| {
+            let mut d = b"\0PSF".to_vec();
+            for n in [0x101_u32, 36, 48, 1] {
+                d.extend(n.to_le_bytes());
+            }
+            d.extend(0_u16.to_le_bytes());
+            d.extend(0x204_u16.to_le_bytes());
+            for n in [10_u32, 10, 0] {
+                d.extend(n.to_le_bytes());
+            }
+            d.extend(b"TITLE_ID\0");
+            d.resize(48, 0);
+            d.extend(id);
+            d.push(0);
+            d
+        };
+        assert_eq!(title_problem(&sfo(b"BCUS98245"), "That ISO"), None);
+        let other = title_problem(&sfo(b"BCES00850"), "That ISO").unwrap();
+        assert!(other.contains("BCES00850") && other.contains("USA"));
+        assert!(title_problem(b"junk", "That ISO")
+            .unwrap()
+            .contains("PARAM.SFO"));
     }
 
     #[test]

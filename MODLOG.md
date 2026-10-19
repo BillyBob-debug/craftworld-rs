@@ -1,5 +1,12 @@
 # Development log
 
+## 2026-10-19 - D601 setup errors in plain words
+
+Launcher. Set up now names the problem and the fix for wrong picks (archives, packages, the update folder in
+the disc box, other regions, encrypted disc dumps whose archives are scrambled) and accepts a disc folder.
+Game modes show a "didn't load" window instead of an empty scene. README gained a no-programming Play it
+guide with an error table. See docs/d600-launcher.md.
+
 ## 2026-10-18 - D600 one exe for friends
 
 Viewer. Double-clicking the viewer with no arguments opens a launcher: pick your own LBP2 ISO (USA) and
