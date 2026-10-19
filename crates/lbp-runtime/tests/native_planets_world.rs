@@ -162,6 +162,34 @@ fn d379_pod_introduction_zooms_in_then_sets_the_flags() {
     assert_eq!(member(&mut h, "State"), Value::Int(0));
 }
 
+/// D398: the introduction asks for `pod_1st_time` (interrupt and replay set) as it
+/// starts and, with the line's length known, waits for it after the zoom: it ends on
+/// the frame after the 32-second line's 960 ticks, where the zoom alone takes 451.
+#[test]
+fn d398_pod_introduction_waits_for_its_voice_over() {
+    let mut h = host();
+    h.world
+        .media
+        .voice_over_lengths
+        .insert("pod_1st_time".into(), 960);
+    run(&mut h, "OnCreate__", &[]);
+    frame(&mut h, true);
+    h.world.media.tick();
+    let asked = &h.world.media.voice_overs;
+    assert_eq!(asked.len(), 1);
+    assert_eq!(asked[0].name.as_deref(), Some("pod_1st_time"));
+    assert_eq!(asked[0].flags, [true, true]);
+    let mut frames = 1;
+    while member(&mut h, "State") == Value::Int(1) {
+        frame(&mut h, false);
+        h.world.media.tick();
+        frames += 1;
+        assert!(frames < 2000, "the introduction never ended");
+    }
+    assert_eq!(frames, 961);
+    assert_eq!(h.world.progression_flags, 3);
+}
+
 /// The view table's Story row and the blend speeds (FOUND, `PlanetsView`).
 #[test]
 fn d356_planets_views() {
