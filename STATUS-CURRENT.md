@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1003 the intro waits for its video (2026-10-19)
+## Latest: D1004 the Pod's music state (2026-10-19)
+- Part 151 (`docs/level-scripts/part-151.md`): `UpdateInteractiveMusic__` is ported and
+  the world keeps the music it sets, so it is set once; nothing plays yet.
+
+## D1003 the intro waits for its video (2026-10-19)
 - Part 150 (`docs/level-scripts/part-150.md`): the Pod intro video's Bink header gives
   379 ticks; the native intro now waits for it as the game does. The launcher keeps it.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D397 voice-over timing (2026-10-19)
 - Part 144 (`docs/level-scripts/part-144.md`): voice-over lines play silently for
   their length from the disc's bank, so the Pod's scripts wait as the game does.
-
-## D396 a group's lock (2026-10-19)
-- Part 143 (`docs/level-scripts/part-143.md`): a developer group or DLC pack is locked
-  while all its slots are, as 0x1a7efc gives; the runtime's lock test follows.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

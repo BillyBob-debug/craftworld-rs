@@ -25,6 +25,10 @@ use crate::native_script::{
 pub const PLANETS_WORLD_SCRIPT: u32 = 0x16e0a;
 /// D1000: the video GUID the pod introduction asks the pod computer to start (FOUND).
 pub const INTRO_VIDEO: u32 = 139230;
+/// D1004 (FOUND, `.init__`): the Pod's interactive music, `FSB` (the bank, `I_POD.FSB`
+/// on the disc) and `SettingsFile`.
+pub const POD_MUSIC: u32 = 42103;
+pub const POD_MUSIC_SETTINGS: u32 = 42108;
 
 const PLANETS_WORLD: &str = "PlanetsWorld";
 const DONE: NativeStep = NativeStep::Done(Value::Void);
@@ -752,6 +756,25 @@ fn mat(host: &mut dyn Host, function: &str, arg: Value) -> Result<[f32; 16], Str
     Ok(as_mat44(&math(host, function, &[arg])?))
 }
 
+/// D1004 (FOUND, `UpdateInteractiveMusic__`): the stereo pairs' volumes by the view type.
+/// Pair 3 is always 1. Views 1, 2, 33 to 35 and 45 add pair 0; the other listed views
+/// add pair 0 and one more; view 0 and views the script does not list add none.
+pub fn music_pairs(view: i32) -> [f32; 6] {
+    let mut v = [0., 0., 0., 1., 0., 0.];
+    let more = match view {
+        1 | 2 | 33..=35 | 45 => None,
+        6 | 7 => Some(4),
+        3..=5 | 8 | 9 | 12..=20 | 24..=27 | 29 | 30 | 36 | 37 | 39..=44 => Some(2),
+        10 | 11 | 21..=23 | 28 | 31 | 32 => Some(1),
+        _ => return v,
+    };
+    v[0] = 1.;
+    if let Some(p) = more {
+        v[p] = 1.;
+    }
+    v
+}
+
 /// The native port of `PlanetsWorld`.
 pub struct PlanetsWorldScript;
 
@@ -759,11 +782,86 @@ pub struct PlanetsWorldScript;
 pub static PLANETS_WORLD_PORT: PlanetsWorldScript = PlanetsWorldScript;
 
 impl PlanetsWorldScript {
+    /// D1004: `UpdateInteractiveMusic__`, each frame from `UpdatePlanetsView__`. It stops
+    /// the music in the attract loop, sets the Pod's music while the current music is
+    /// another (a whole-second delay from 1 to 8), and when the view or whether music is
+    /// heard changed, sets the six stereo pairs' volumes by the view ([`music_pairs`]);
+    /// not heard, as in view 0.
+    fn update_interactive_music(host: &mut dyn Host, this: u32) -> Result<(), String> {
+        let flag = |host: &mut dyn Host, field: &str| {
+            matches!(get_member(host, this, field), Ok(Value::Bool(true)))
+        };
+        let ask = |host: &mut dyn Host, class: &str, function: &str, args: &[Value]| {
+            call(host, class, function, args).map(|v| matches!(v, Value::Bool(true)))
+        };
+        let leader = call(host, "Game", "GetLocalLeadersPlayerNumber__", &[])?;
+        if ask(host, "Input", "IsInAttractionLoop__i", &[leader])? {
+            if flag(host, "IMusicPlaying") {
+                call(host, "Audio", "StopInteractiveMusic__", &[])?;
+                set_member(host, this, "IMusicPlaying", Value::Bool(false))?;
+                set_member(host, this, "IMusicInit", Value::Bool(false))?;
+            }
+            return Ok(());
+        }
+        let fsb = int(host, this, "FSB");
+        if as_int(&call(host, "Audio", "GetCurrMusicGuid__", &[])?) != fsb {
+            let between = [Value::Float(1.49), Value::Float(8.49)];
+            let delay = as_float(&math(host, "NonDeterministicRandomBetween__ff", &between)?);
+            let args = [
+                Value::Int(fsb),
+                Value::Int(int(host, this, "SettingsFile")),
+                Value::Float(1.),
+                Value::Float(delay as i32 as f32),
+                Value::Int(0),
+                Value::Thing(None),
+            ];
+            call(host, "Audio", "SetInteractiveMusic__ggffiQ5Thing", &args)?;
+            set_member(host, this, "IMusicPlaying", Value::Bool(true))?;
+            set_member(host, this, "IMusicInit", Value::Bool(true))?;
+        }
+        let view = int(host, this, "ViewType");
+        if int(host, this, "IMusicPlanetsView") != view {
+            set_member(host, this, "IMusicInit", Value::Bool(true))?;
+            set_member(host, this, "IMusicPlanetsView", Value::Int(view))?;
+        }
+        let user_music_off = ask(host, "Audio", "UserMusicIsStopped__", &[])?
+            || ask(host, "Audio", "UserMusicIsPaused__", &[])?;
+        let enabled = user_music_off && ask(host, "Audio", "IsInteractiveMusicAudible__", &[])?;
+        if flag(host, "IMusicEnabled") != enabled {
+            set_member(host, this, "IMusicInit", Value::Bool(true))?;
+            set_member(host, this, "IMusicEnabled", Value::Bool(enabled))?;
+        }
+        if flag(host, "IMusicInit") {
+            let view = if enabled {
+                int(host, this, "IMusicPlanetsView")
+            } else {
+                0
+            };
+            for (pair, volume) in music_pairs(view).into_iter().enumerate() {
+                let args = [
+                    Value::Int(fsb),
+                    Value::Int(pair as i32),
+                    Value::Float(volume),
+                    Value::Float(-1.),
+                ];
+                call(
+                    host,
+                    "Audio",
+                    "SetInteractiveMusicStereoPairVolume__giff",
+                    &args,
+                )?;
+            }
+        }
+        set_member(host, this, "IMusicInit", Value::Bool(false))
+    }
+
     /// `.init__` and `OnCreate__`: the fields' first values and the three views (each
     /// made by `PlanetsView..ctor__`, view 0).
     fn create(host: &mut dyn Host, this: u32) -> Result<NativeStep, String> {
         site(host, PLANETS_WORLD, "OnCreate__");
         let fields = [
+            ("FSB", Value::Int(POD_MUSIC as i32)),
+            ("SettingsFile", Value::Int(POD_MUSIC_SETTINGS as i32)),
             ("IMusicPlanetsView", Value::Int(0)),
             ("IMusicInit", Value::Bool(true)),
             ("IMusicEnabled", Value::Bool(false)),
@@ -1265,7 +1363,7 @@ impl PlanetsWorldScript {
             "SetWorldPosition__m",
             &[Value::Thing(Some(this)), Value::Mat44(m)],
         )?;
-        // `UpdateInteractiveMusic__` is not ported.
+        Self::update_interactive_music(host, this)?;
         let args = [
             Value::Float(current.dof_min * 2.),
             Value::Float(current.dof_max * 2.),

@@ -2394,15 +2394,19 @@ impl World for LevelWorld {
                 };
                 Value::Int(n as i32)
             }
-            "Game.GetNumAvatars__"
-            | "Game.GetLocalLeadersPlayerNumber__"
-            | "Audio.GetCurrMusicGuid__" => Value::Int(0),
+            // D1004: the bank `SetInteractiveMusic` set, else 0 (INFERRED: no music).
+            "Audio.GetCurrMusicGuid__" => {
+                Value::Int(self.media.music.as_ref().map_or(0, |m| m.guid as i32))
+            }
+            "Game.GetNumAvatars__" | "Game.GetLocalLeadersPlayerNumber__" => Value::Int(0),
             _ => return Err(format!("world does not provide {native}")),
         })
     }
-    /// Counted by name; nothing plays.
-    fn audio_command(&mut self, name: &str, _args: &[Value]) -> Result<(), String> {
+    /// Counted by name; nothing plays. D1004: the interactive music is kept
+    /// ([`LevelWorld::music_call`]).
+    fn audio_command(&mut self, name: &str, args: &[Value]) -> Result<(), String> {
         *self.audio_commands.entry(name.to_owned()).or_default() += 1;
+        self.music_call(name, args);
         Ok(())
     }
     /// Every bit of the mask is set in [`LevelWorld::progression_flags`]. A mask of 0 is

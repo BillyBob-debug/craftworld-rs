@@ -80,6 +80,30 @@ pub struct MediaState {
     pub last_video_handle: i32,
     /// D1003: the last `UpdateVideo`'s answer.
     pub last_video_update: bool,
+    /// D1004: the interactive music `Audio.SetInteractiveMusic` set; `None` before it
+    /// and after `StopInteractiveMusic`. Nothing plays yet.
+    pub music: Option<InteractiveMusic>,
+    /// D1004: `Audio.SetInteractiveMusic` calls.
+    pub music_starts: u64,
+}
+
+/// D1004: the stereo pairs `SetInteractiveMusicStereoPairVolume` sets (the Pod's script
+/// sets pairs 0 to 5).
+pub const MUSIC_PAIRS: usize = 6;
+
+/// D1004: the arguments of the last `Audio.SetInteractiveMusic__ggffiQ5Thing` and the
+/// stereo pairs' volumes since.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct InteractiveMusic {
+    /// The music bank's GUID (the Pod's is 42103, `I_POD.FSB` on the disc).
+    pub guid: u32,
+    /// The settings GUID (the Pod's is 42108).
+    pub settings: u32,
+    pub volume: f32,
+    /// The delay before it starts, in seconds.
+    pub delay: f32,
+    /// Each pair's volume, 0 until set. INFERRED: a call for another bank is ignored.
+    pub pair_volumes: [f32; MUSIC_PAIRS],
 }
 
 /// Most requests [`MediaState::videos`] and [`MediaState::voice_overs`] keep each.
@@ -236,6 +260,14 @@ fn name_of(v: Option<&Value>) -> Option<String> {
     }
 }
 
+fn float_of(v: Option<&Value>) -> f32 {
+    match v {
+        Some(Value::Float(f)) => *f,
+        Some(Value::Int(i)) => *i as f32,
+        _ => 0.,
+    }
+}
+
 fn guid_of(v: Option<&Value>) -> u32 {
     match v {
         Some(Value::Int(i)) => *i as u32,
@@ -245,6 +277,39 @@ fn guid_of(v: Option<&Value>) -> u32 {
 }
 
 impl LevelWorld {
+    /// D1004: the interactive-music calls of
+    /// [`lbp_script_vm::natives::World::audio_command`], kept in [`MediaState::music`].
+    /// INFERRED: `GetCurrMusicGuid` answers the bank this set (the Pod's script calls
+    /// `SetInteractiveMusic` again only while the answer is not its bank).
+    pub(crate) fn music_call(&mut self, name: &str, args: &[Value]) {
+        let media = &mut self.media;
+        match name {
+            "SetInteractiveMusic" => {
+                media.music_starts += 1;
+                media.music = Some(InteractiveMusic {
+                    guid: guid_of(args.first()),
+                    settings: guid_of(args.get(1)),
+                    volume: float_of(args.get(2)),
+                    delay: float_of(args.get(3)),
+                    pair_volumes: [0.; MUSIC_PAIRS],
+                });
+            }
+            "SetInteractiveMusicStereoPairVolume" => {
+                let pair = match args.get(1) {
+                    Some(Value::Int(i)) => *i as usize,
+                    _ => return,
+                };
+                if let Some(m) = &mut media.music {
+                    if m.guid == guid_of(args.first()) && pair < MUSIC_PAIRS {
+                        m.pair_volumes[pair] = float_of(args.get(2));
+                    }
+                }
+            }
+            "StopInteractiveMusic" => media.music = None,
+            _ => {}
+        }
+    }
+
     /// The video and audio calls of [`lbp_script_vm::natives::World::engine_call`]: kept in
     /// [`LevelWorld::media`]. Other names are not for this list.
     pub(crate) fn media_call(&mut self, name: &str, thing: Option<u32>, args: &[Value]) {
