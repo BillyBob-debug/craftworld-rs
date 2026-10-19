@@ -3632,9 +3632,10 @@ pub const PLANET_UPDATE: &str = "Update__rb";
 
 /// The point a planet is told to turn toward the camera while the host has set none.
 ///
-/// PLACEHOLDER, not a game value. While nothing is selected the game passes a vector of
-/// the planet object that was not read (its cursor point, INFERRED). (0, 0, 1) is the
-/// point that asks for no turn: the planet's script takes a spin of `-atan2(x, z)` and a
+/// PLACEHOLDER, not a game value. D1010 (FOUND, 0x421708): while nothing is selected the
+/// game passes the planet's vector at +0x190 (w cleared), which no planet code writes:
+/// INFERRED the base Thing's position, not read. (0, 0, 1) is the point that asks for no
+/// turn: the planet's script takes a spin of `-atan2(x, z)` and a
 /// pitch of `atan2(y, ..)` from it, both 0 here. It decides which side of a planet
 /// faces the camera, and neither its place nor its size.
 pub const PLACEHOLDER_PLANET_POINT: [f32; 4] = [0., 0., 1., 0.];
@@ -3674,7 +3675,12 @@ impl Default for PlanetFrame {
 /// 0, else a byte of the planet that a true result of the call sets ("arrived"). The
 /// vector (0x421708) is a point of the planet: the place of the entry that is selected
 /// on it, else a vector of the planet itself; every path that picks another entry clears
-/// "arrived". FOUND in the script listing: the function turns the planet so that the
+/// "arrived". D1010 (FOUND): 0x421708 only loads the vector (into v2, which 0x42115c
+/// hands to the script call 0x65a1ac): a locked focus first (planet +0x216 set, the
+/// vector at +0x220, both set by the native `SetLockFocus__r` at 0x4214d8; 0x420854
+/// unlocks), then the selected entry's (+0x94) record's place (+0x40), else the vector
+/// at +0x190. With the planets object's byte +0xb1 set, 0x4208fc loads +0x190 instead.
+/// FOUND in the script listing: the function turns the planet so that the
 /// point faces the camera, eased while the bool is false and at once while it is true,
 /// puts the planet at the place its class gives with the axis lengths it had when it was
 /// created, and returns whether it has reached the target.

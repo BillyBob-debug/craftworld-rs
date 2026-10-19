@@ -10,10 +10,11 @@
 //! (`CurrentView.Yaw`, ...): a port has no script objects of its own.
 //!
 //! D379: the pod introduction (`PodIntroductionThread`) is ported as the world's own
-//! state 1: its camera zoom over 451 ticks, then the progression flags. Not ported: the
-//! level unlocking cutscene thread (`LevelUnlockingThread`, null: state 2 ends on the
-//! next frame; ported since D383), the intro's video and voice-over requests (made
-//! since D398 and D1000), the "level created" voice-over and the interactive music.
+//! state 1: its camera zoom over 451 ticks, then the progression flags. Ported since: the
+//! level unlocking cutscene thread (`LevelUnlockingThread`, D383), the intro's video and
+//! voice-over requests (D398, D1000), the interactive music's state (D1004; its bank is
+//! not on the LBP2 disc, D1009) and `OnEnterPod__` with its level-created dialogue
+//! request (D1005, D1007).
 use lbp_script_vm::{Host, MemberKind, Value};
 
 use crate::native_script::{
