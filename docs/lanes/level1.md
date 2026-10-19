@@ -1,13 +1,16 @@
-# Lane state: level1 (Rookie Test played with scripts) (2026-10-18)
+# Lane state: level1 (Rookie Test played with scripts) (2026-10-19)
 
 ## Read first
-1. docs/level1-play.md, section "Part 5" (native speech bubble, the script trace)
-2. crates/lbp-runtime/src/native_script.rs (the D417 registry) and native_bubble.rs
+1. docs/level1-play.md, sections "Part 5" (native speech bubble, the script trace) and
+   "Part 6" (native Launcher)
+2. crates/lbp-runtime/src/native_script.rs (the D417 registry), native_bubble.rs and
+   native_launcher.rs (the smallest port, a template for the next ones)
 
 ## State
-- PR 155 (branch `level1-5`, worktree `E:\Projects\wt-level1`, D504): native port of
-  `Trigger_Speech_Bubble` in the D417 registry; handed to the coordinator.
-- Decision numbers: D504-599, next free D505.
+- PR 155 (D504, native `Trigger_Speech_Bubble`) merged. PR for D505 (branch
+  `pod-d1019`, worktree `E:\Projects\wt-d324`): native `Launcher`; handed to the
+  coordinator for merge once rust and python are green.
+- Decision numbers: D504-599, next free D506.
 
 ## Facts
 - Route run: `--level-guid 0001e786 --level-scripts --play-sackboy --qa-hide-ui
@@ -29,11 +32,12 @@
 - Line 3 opens on tick 882 at bubble 1485. Sackboy stops at x -938 (a jump clears it) and
   at x -385; with no input after tick 1965 he falls from x -385.
 - Toolchain: `. ./scripts/use-local-rust.ps1` from the canonical folder, then cd to the
-  worktree; CARGO_TARGET_DIR E:\Projects\wt-level1\target.
+  worktree; each worktree builds into its own `target/`.
 
 ## Next
 1. Native classes for the other Rookie Test scripts, one per PR, each checked with the
-   trace: Launcher, TriggerMusic, PostItNote(+Unlock*), TutorialMonitor, WorldMooCamera
+   trace: Launcher (done, D505), TriggerMusic, PostItNote(+Unlock*), TutorialMonitor,
+   WorldMooCamera
    (Score_Board may be shared with other lanes; ask the coordinator).
 2. The route past x -385: a game reference (RPCS3 F12 frames past line 2) or jumps there.
 3. The camera at x -938 (a frame at tick 1600 looks through a front wall).

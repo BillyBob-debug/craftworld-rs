@@ -81,6 +81,7 @@ pub const NATIVE_SCRIPTS: &[&dyn NativeScript] = &[
     &ORBITING_MOON,
     &crate::PLANETS_WORLD_PORT,
     &crate::native_bubble::TriggerSpeechBubbleScript,
+    &crate::native_launcher::LauncherScript,
 ];
 
 /// The native port of the script with this GUID.

@@ -6587,3 +6587,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1010 the planets' resting point (2026-10-19)
 - Part 157 (`docs/level-scripts/part-157.md`): with nothing selected the game turns the
   planets toward the planet's +0x190 (its position, inferred); comments only.
+
+## D1011 clearing a pending link (2026-10-19)
+- Part 158 (`docs/level-scripts/part-158.md`): clearing a pending link opens its target
+  (0x19aa7c), played or not; `UnlockBadge` no longer opens a slot.
