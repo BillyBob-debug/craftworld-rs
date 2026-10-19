@@ -220,4 +220,21 @@ nothing calls a script's `Render__` yet) and the create-mode text entry. INFERRE
 Test: `native_postit::d507_the_native_post_it_note_keeps_its_text_and_unlocks`
 (synthetic Things, no script loaded).
 
-Not yet: TutorialMonitor, WorldMooCamera, Score_Board.
+## Part 9: the tutorial monitors in native Rust (D508, 2026-10-19)
+
+Before: without the decrypted overlay Rookie Test's 3 tutorial monitors ran no script, so
+a switch turning one on asked for no tutorial video.
+
+After: `TutorialMonitor` (g00006b3c, base `Thing`) is a port in the D417 registry
+(`crates/lbp-runtime/src/native_tutorial.rs`). From its 01.33 listing: `OnCreate__` sets
+`VideoHandle` to -1; `PlayVideo__` calls `Game.PlayTutorialMonitorVideo(VideoFile,
+this)`; `SwitchPerformReaction__b` makes the same call when input 0's binary activation
+is on and no video has started (the argument is not read); the video GUID, handle and
+render size (640 x 360) are ported too. The game call is not bound yet, so it is only
+counted and no video plays. A field the level does not store reads as its `.init__`
+value (`VideoHandle` -1, `CurrentVolume` 1, `FadeOutTime` 60, `FadeInTime` 15).
+
+Test: `native_tutorial::d508_the_native_tutorial_monitor_plays_its_video` (synthetic
+Things, no script loaded).
+
+Not yet: WorldMooCamera, Score_Board.

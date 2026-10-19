@@ -6599,3 +6599,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1013 the level-created dialogue (2026-10-19)
 - Part 160 (`docs/level-scripts/part-160.md`): the planets world's state update clears
   the level-created dialogue's want; its line needs a My Levels search, not ported.
+
+## D1014 the unlock thread's group push (2026-10-19)
+- Part 161 (`docs/level-scripts/part-161.md`): the unlock thread ends by pushing the
+  group under the cursor and moving to its default level.

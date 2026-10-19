@@ -87,6 +87,7 @@ pub const NATIVE_SCRIPTS: &[&dyn NativeScript] = &[
     &crate::native_postit::POST_IT_NOTE_UNLOCK_STICKERS,
     &crate::native_postit::POST_IT_NOTE_UNLOCK_SUICIDE,
     &crate::native_postit::POST_IT_NOTE_UNLOCK_COSTUME,
+    &crate::native_tutorial::TutorialMonitorScript,
 ];
 
 /// The native port of the script with this GUID.
