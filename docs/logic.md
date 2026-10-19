@@ -377,3 +377,53 @@ on its own body. INFERRED or not modelled:
 - A keyed follower with no matching tag in range brakes.
 
 Test: `d1111_keyed_followers_find_tags_with_their_colour_and_name` (lbp-sim sandbox).
+
+
+## Part 14: every switch type across all levels (D1112)
+
+The census runs the `level_scripts` example with `--all` over every level resource in the
+01.33 catalog (378 levels, 358 read; 141,572 PSwitches). Counts by type, with how
+lbp-runtime's switch pass (`compute_output`) handles each:
+
+- Computed from inputs: microchip 36 and circuit board 37 (28,278 each), timer 16
+  (15,513), countdown 15 (7,090), NOT 23 (5,794), AND 14 (5,727), battery 28 (4,599),
+  OR 21 (4,089), selector 35 (2,869), toggle 17 (1,107), circuit node 40 (772), XOR 22
+  (648), direction 20 (344), sign split 27 (130), random 19 (1,213).
+- Sensors computed from the world: tag 4 (16,953), player 3 (5,627).
+- Kept as stored (the world signal is not modelled yet): impact 18 (3,944), camera
+  finished 32 (2,760), magic mouth 34 (1,426), projectile 39 (816),
+  linear velocity 42 (771), grab 6 (666), control pad 38 (535), key remote 54 (497),
+  button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123), angular velocity
+  43 (122), 65 (77), lever 1 (74), sticker 5 (68), score 30 (51), paint 8 (51),
+  movinator pad 44 (50), 55 (11), trinary 2 (7).
+- Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
+  of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
+- The names come from docs/runtime-evidence/logic.md A4; types 55, 57 and 65 are past
+  that table's LBP2 band and are named there as later additions (INFERRED: the 01.33
+  table has 0x42 types, so the band runs to 65).
+
+### The random switch (type 19)
+
+Its settings sit at PSwitch+0xa8..+0xbc: behaviour, pattern, on time min / max and off
+time min / max, in ticks (the AND / OR gates read their mode from the +0xb8 slot). Its
+state is a seed (+0x1c), a phase (+0x24) and an on byte per output (SwitchOutput+0x24).
+
+- Output (0x11c2e0): on (1.0, ternary 1) while that output's byte is set, with output
+  0's player, then the shared inversion tail.
+- Dice: seed = (seed × 0x2E90EDD + 0x0E908FC1) & 0x3FFFFFFF, then R(k) = k × (seed >>
+  16) >> 14, in 0..k. Where the seed is first set was not found; it starts at 0 here
+  (INFERRED).
+- Pick (0x10df10, n outputs): pattern 0 turns only R(n) on; 1 turns on one of the
+  outputs that are off (nothing, and no roll, when all are on); 2 is 1 but with all on
+  clears them and turns R(n) on; 3 toggles R(n); other values do nothing.
+- Step at the end of the update (0x12414c, table 0xd96504 entry 19): with port 0 wired,
+  behaviour 0 clears every byte while the input is off, behaviour 1 stores the input and
+  picks only on its rising edge (apply_signal 0x11f038); unwired on a sequencer,
+  behaviour 1 stores on; otherwise the phase ticks. The step only runs for a Thing that
+  is not deactivated (0x1244a4), so the deactivated branches do not arise.
+- Tick (0x124298): on (phase > 0) counts down; at 0, pattern 0 clears and an off time
+  of off_min + R(off_max - off_min) starts (one shorter when both on times are 0). Off
+  counts up; at 0 the switch picks and an on time of on_min + R(on_max - on_min) starts
+  (one shorter when both off times are 0). Neither time is ever 0.
+- Tests: `random_dice`, `random_pick_patterns`, `random_switch_times`,
+  `random_switch_inputs` in switches.rs.

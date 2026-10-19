@@ -341,6 +341,7 @@ mod tests {
                     signal: SIGNAL_OFF,
                     stored: SIGNAL_OFF,
                     targets: targets.iter().map(|&(t, p)| (Some(t), p)).collect(),
+                    random_on: false,
                 })],
                 radius: 100.,
                 angle_range: 180.,

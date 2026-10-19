@@ -6680,3 +6680,6 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Logic lane: each piston keeps the game clock (modStart/Delta/Scale); a switch sets
   its rate, so an on/off piston runs while on and holds while off (docs/logic.md P5).
 
+## D1104 pistons follow their saved mode (2026-10-19)
+- Logic lane: each piston saves its mode; the 27 wired ones are direction pistons that
+  ramp out while on and back while off; route reaches x 25,657 (docs/logic.md P6).

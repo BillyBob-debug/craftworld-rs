@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1111 keyed followers follow tags (2026-10-19)
+## Latest: D1112 every switch type counted; the random switch (2026-10-19)
+- Logic lane: a census of all 141,572 switches in 358 levels by type, and the random
+  switch's dice, pick patterns and on / off times from the EBOOT (docs/logic.md P14).
+
+## D1111 keyed followers follow tags (2026-10-19)
 - Logic lane: followers with followKey go to the nearest tag of their colour and name,
   and tags placed on chips sit at their parent (0x1c3e04; docs/logic.md P13).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1105 a piston's ends are a joint limit (2026-10-19)
 - Logic lane: the game never clamps a piston's clock; the solver holds its length
   between base and base + range, so a long-on piston waits before it returns (P7).
-
-## D1104 pistons follow their saved mode (2026-10-19)
-- Logic lane: each piston saves its mode; the 27 wired ones are direction pistons that
-  ramp out while on and back while off; route reaches x 25,657 (docs/logic.md P6).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

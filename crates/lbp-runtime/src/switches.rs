@@ -31,7 +31,7 @@
 //!   (pad types 0x26, 0x2c and 0x37 only).
 //! - The per-type work at the end of a switch's update other than the timer's (types 0,
 //!   8/0x27, 0x13, 0x1d).
-//! - The random switch (type 19): two of its four pick patterns are not read yet.
+//! - Where the random switch's seed (PSwitch+0x1c) starts; here at 0.
 //! - The player / team filter of a counter (always passes here).
 //! - Deactivation inside a sequencer and of a cursor chip; the re-fire flag (PSwitch+0xe3).
 //! - Switch types 0x24/0x25 standing in for their microchip's switch in the ordering.
@@ -65,6 +65,129 @@ pub struct SwitchMemory {
     pub count: i32,
     /// TimerCount (PSwitch+0x20): a timer's position in ticks.
     pub timer: f32,
+    /// The random switch's seed (PSwitch+0x1c, [`random_roll`]). Where the game first
+    /// sets it was not found; here it starts at 0 (INFERRED).
+    pub seed: u32,
+    /// The random switch's phase (PSwitch+0x24): ticks left on (positive) or off
+    /// (negative); 0 picks on the next step ([`random_tick`]).
+    pub phase: i32,
+}
+
+/// The random switch's settings (PSwitch+0xa8..=0xbc, FOUND): the behaviour, the pick
+/// pattern and the on and off times in ticks (30 per second INFERRED). The AND / OR
+/// gates read their mode from the `off_min` slot.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RandomSettings {
+    pub behavior: i32,
+    pub pattern: i32,
+    pub on_min: i32,
+    pub on_max: i32,
+    pub off_min: i32,
+    pub off_max: i32,
+}
+
+/// The random switch's dice (FOUND, 0x12414c and 0x10df10): a per-switch linear
+/// congruential generator. Advances `seed` once and returns `k * (seed >> 16) >> 14`,
+/// which is in 0..k for k > 0 (32-bit wrapping, arithmetic shift).
+pub fn random_roll(seed: &mut u32, k: i32) -> i32 {
+    *seed = seed.wrapping_mul(0x2E9_0EDD).wrapping_add(0x0E90_8FC1) & 0x3FFF_FFFF;
+    k.wrapping_mul((*seed >> 16) as i32) >> 14
+}
+
+fn random_clear(s: &mut SwitchState) {
+    for o in s.outputs.iter_mut().flatten() {
+        o.random_on = false;
+    }
+}
+
+fn random_set(s: &mut SwitchState, i: Option<usize>, on: impl FnOnce(bool) -> bool) {
+    if let Some(Some(o)) = i.and_then(|i| s.outputs.get_mut(i)) {
+        o.random_on = on(o.random_on);
+    }
+}
+
+/// Turns outputs on by the switch's pick pattern (FOUND, 0x10df10; n = output count):
+/// - 0: only output R(n) on (0x10e0e0).
+/// - 1: one of the outputs that are off, R(count off), on; nothing when all are on,
+///   and the dice are not rolled (0x10e090).
+/// - 2: as 1, but when all are on they all go off and R(n) goes on (0x10e15c).
+/// - 3: output R(n) toggled (0x10e038).
+/// - Any other pattern: nothing.
+///
+/// A null output is never one that is off (INFERRED: the game removes them at edit
+/// time).
+pub fn random_pick(s: &mut SwitchState) {
+    let n = i32::try_from(s.outputs.len()).unwrap_or(i32::MAX);
+    let roll = |s: &mut SwitchState, k| usize::try_from(random_roll(&mut s.memory.seed, k)).ok();
+    match s.random.pattern {
+        0 => {
+            let i = roll(s, n);
+            random_clear(s);
+            random_set(s, i, |_| true);
+        }
+        p @ (1 | 2) => {
+            let off: Vec<usize> = (0..s.outputs.len())
+                .filter(|&i| s.outputs[i].as_ref().is_some_and(|o| !o.random_on))
+                .collect();
+            if let Ok(count @ 1..) = i32::try_from(off.len()) {
+                let i = roll(s, count).and_then(|i| off.get(i).copied());
+                random_set(s, i, |_| true);
+            } else if p == 2 {
+                random_clear(s);
+                let i = roll(s, n);
+                random_set(s, i, |_| true);
+            }
+        }
+        3 => {
+            let i = roll(s, n);
+            random_set(s, i, |on| !on);
+        }
+        _ => {}
+    }
+}
+
+/// One step of the random switch's phase (FOUND, 0x124298). On (phase > 0): counts
+/// down; at 0, pattern 0 turns every output off and an off time of off_min +
+/// R(off_max - off_min) starts (one tick shorter when both on times are 0, at least
+/// one tick). Off (phase < 0): counts up; at 0, and when the phase is 0 to begin with,
+/// outputs are picked ([`random_pick`]) and an on time of on_min + R(on_max - on_min)
+/// starts (one tick shorter when both off times are 0, at least one tick). Patterns
+/// 1-3 keep their outputs on through the off time, so they add up.
+pub fn random_tick(s: &mut SwitchState) {
+    let r = s.random;
+    let mut t = s.memory.phase;
+    if t > 0 {
+        t -= 1;
+        if t == 0 {
+            if r.pattern == 0 {
+                random_clear(s);
+            }
+            let d = random_roll(&mut s.memory.seed, r.off_max.wrapping_sub(r.off_min));
+            t = r.off_min.wrapping_add(d).wrapping_neg();
+            if r.on_min == 0 && r.on_max == 0 {
+                t = t.wrapping_add(1);
+            }
+            if t == 0 {
+                t = -1;
+            }
+        }
+    } else {
+        if t < 0 {
+            t += 1;
+        }
+        if t == 0 {
+            random_pick(s);
+            let d = random_roll(&mut s.memory.seed, r.on_max.wrapping_sub(r.on_min));
+            t = r.on_min.wrapping_add(d);
+            if r.off_min == 0 && r.off_max == 0 {
+                t = t.wrapping_sub(1);
+            }
+            if t == 0 {
+                t = 1;
+            }
+        }
+    }
+    s.memory.phase = t;
 }
 
 /// Read access [`compute_output`] gets: the level, the PSwitch and its Thing.
@@ -339,7 +462,18 @@ pub fn compute_output(
         7 | 11..=13 | 26 | 31 | 33 | 46..=53 | 56 | 58..=64 => off(),
         // Past the table, 0x11bd58, FOUND: {0.0, 0, -1} (INFERRED: not inverted).
         t if t >= SWITCH_KIND_TYPES => return SIGNAL_OFF,
-        // RANDOM (19, 0x11c2e0) and the other sensors: the stored signal.
+        // RANDOM, 0x11c2e0, FOUND: on while the output's on byte is set; output 0's
+        // player.
+        19 => {
+            let on = s.outputs.get(output).and_then(Option::as_ref);
+            let on = on.is_some_and(|o| o.random_on);
+            standard(SwitchInput {
+                activation: f32::from(u8::from(on)),
+                ternary: i32::from(on),
+                player: cx.current(0).player,
+            })
+        }
+        // The other sensors: the stored signal.
         _ => None,
     };
     let Some((mut new, invert)) = computed else {
@@ -949,6 +1083,13 @@ impl LevelWorld {
                     player: signal.player,
                 };
             }
+            (19, _) if s.random.behavior == 1 => {
+                if let Some(s) = self.things[target as usize].switch.as_mut() {
+                    s.memory = m;
+                    random_pick(s);
+                }
+                return;
+            }
             (16, 0) if s.behavior == 3 => {
                 if m.timer == 0. {
                     m.timer = s.activation_hold_time as f32;
@@ -1025,6 +1166,40 @@ impl LevelWorld {
         }
         if let Some(s) = self.things[thing as usize].switch.as_mut() {
             s.memory = m;
+        }
+    }
+
+    /// The random switch's step at the end of its update (FOUND, 0x12414c). With input
+    /// port 0 wired: behaviour 0 turns every output off while the input is off;
+    /// behaviour 1 keeps the input in ManualActivation and only picks on an edge
+    /// ([`Self::apply_signal`]); otherwise the phase steps ([`random_tick`]). Unwired on
+    /// a sequencer's board, behaviour 0 turns every output off while deactivated and
+    /// behaviour 1 sets ManualActivation to on (off when deactivated) without stepping;
+    /// the step only runs for a Thing that is not deactivated (0x1244a4), so those two
+    /// deactivated cases do not arise here. Unwired elsewhere: the phase steps.
+    fn random_step(&mut self, thing: u32) {
+        let source = wired(self, thing, 0).map(|(_, signal)| signal);
+        let sequencer = source.is_none() && self.on_sequencer(thing);
+        let Some(t) = self.things.get_mut(thing as usize) else {
+            return;
+        };
+        let deactivated = t.deactivated;
+        let Some(s) = t.switch.as_mut() else {
+            return;
+        };
+        match (source, s.random.behavior) {
+            (Some(i), 0) if i.ternary == 0 => random_clear(s),
+            (Some(i), 1) => s.memory.manual = i,
+            (None, 0) if sequencer && deactivated => random_clear(s),
+            (None, 1) if sequencer => {
+                let on = !deactivated;
+                s.memory.manual = SwitchInput {
+                    activation: f32::from(u8::from(on)),
+                    ternary: i32::from(on),
+                    player: 0,
+                };
+            }
+            _ => random_tick(s),
         }
     }
 
@@ -1123,6 +1298,9 @@ impl LevelWorld {
         if !deactivated && switch_type == 16 {
             self.timer_step(thing);
         }
+        if !deactivated && switch_type == 19 {
+            self.random_step(thing);
+        }
         visits
     }
 
@@ -1188,6 +1366,7 @@ mod tests {
                             signal: *s,
                             stored: *s,
                             targets: targets.iter().map(|&(t, p)| (Some(t), p)).collect(),
+                            random_on: false,
                         })
                     })
                     .collect(),
@@ -1583,9 +1762,8 @@ mod tests {
             w.update_switches();
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
-        // The other sensors and the random switch keep the stored signal, also when
-        // inverted.
-        for ty in [0, 6, 18, 19, 30, 38, 41, 54, 65] {
+        // The other sensors keep the stored signal, also when inverted.
+        for ty in [0, 6, 18, 30, 38, 41, 54, 65] {
             let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
             let s = t.switch.as_mut().unwrap();
             (s.switch_type, s.inverted) = (ty, true);
@@ -1709,6 +1887,175 @@ mod tests {
         set_battery(&mut w, 1, SIGNAL_OFF);
         w.update_switches();
         assert_eq!(outputs(&w), [0, 0, 1]);
+    }
+
+    #[test]
+    fn random_dice() {
+        // From seed 0, the game's generator rolls these.
+        let mut seed = 0;
+        let rolls: Vec<i32> = (0..8).map(|_| random_roll(&mut seed, 10)).collect();
+        assert_eq!(rolls, [2, 5, 2, 3, 3, 5, 6, 9]);
+        assert_eq!(seed, 0x3c2d_0818);
+        // Always 0..k, and every value comes up.
+        let mut seen = [0; 7];
+        for _ in 0..1000 {
+            seen[random_roll(&mut seed, 7) as usize] += 1;
+        }
+        assert!(seen.iter().all(|&n| n > 0), "{seen:?}");
+        // 0 and 1 always roll 0.
+        assert_eq!(
+            (random_roll(&mut seed, 0), random_roll(&mut seed, 1)),
+            (0, 0)
+        );
+    }
+
+    /// A random switch's state with `outputs` outputs and the given pattern.
+    fn random(pattern: i32, outputs: usize) -> SwitchState {
+        let mut t = logic(19, outputs);
+        let mut s = t.switch.take().unwrap();
+        s.random.pattern = pattern;
+        s
+    }
+
+    fn on_bytes(s: &SwitchState) -> Vec<bool> {
+        s.outputs
+            .iter()
+            .map(|o| o.as_ref().unwrap().random_on)
+            .collect()
+    }
+
+    #[test]
+    fn random_pick_patterns() {
+        // 0: exactly one on, each time.
+        let mut s = random(0, 4);
+        for _ in 0..6 {
+            random_pick(&mut s);
+            assert_eq!(on_bytes(&s).iter().filter(|&&on| on).count(), 1);
+        }
+        // 1: one more that was off each time; with all on, nothing (no roll).
+        let mut s = random(1, 4);
+        for n in 1..=4 {
+            random_pick(&mut s);
+            assert_eq!(on_bytes(&s).iter().filter(|&&on| on).count(), n);
+        }
+        let seed = s.memory.seed;
+        random_pick(&mut s);
+        assert_eq!((on_bytes(&s), s.memory.seed), (vec![true; 4], seed));
+        // 2: as 1, but with all on they go off and one comes on.
+        let mut s = random(2, 3);
+        for _ in 0..3 {
+            random_pick(&mut s);
+        }
+        assert_eq!(on_bytes(&s), [true; 3]);
+        random_pick(&mut s);
+        assert_eq!(on_bytes(&s).iter().filter(|&&on| on).count(), 1);
+        // 3: toggles R(n): from seed 0 with two outputs R(2) rolls 0, 1, 0.
+        let mut s = random(3, 2);
+        random_pick(&mut s);
+        assert_eq!(on_bytes(&s), [true, false]);
+        random_pick(&mut s);
+        assert_eq!(on_bytes(&s), [true, true]);
+        random_pick(&mut s);
+        assert_eq!(on_bytes(&s), [false, true]);
+        // Other patterns: nothing.
+        let mut s = random(4, 2);
+        random_pick(&mut s);
+        assert_eq!((on_bytes(&s), s.memory.seed), (vec![false; 2], 0));
+    }
+
+    /// A world with a random switch (Thing `thing`) and its settings.
+    fn random_world(mut things: Vec<ThingState>, settings: RandomSettings) -> LevelWorld {
+        let mut t = logic(19, 2);
+        t.switch.as_mut().unwrap().random = settings;
+        things.push(t);
+        world(things)
+    }
+
+    /// Runs `ticks` passes and returns, per tick, which outputs of `thing` are on.
+    fn random_run(w: &mut LevelWorld, thing: usize, ticks: usize) -> Vec<[i32; 2]> {
+        (0..ticks)
+            .map(|_| {
+                w.update_switches();
+                [out(w, thing, 0).ternary, out(w, thing, 1).ternary]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn random_switch_times() {
+        // Pattern 0, on for 2 ticks, off for 3: the pick shows a tick after the step.
+        let settings = RandomSettings {
+            on_min: 2,
+            on_max: 2,
+            off_min: 3,
+            off_max: 3,
+            ..Default::default()
+        };
+        let mut w = random_world(vec![], settings);
+        let any = |v: Vec<[i32; 2]>| v.iter().map(|o| o[0] | o[1]).collect::<Vec<_>>();
+        assert_eq!(any(random_run(&mut w, 0, 8)), [0, 1, 1, 0, 0, 0, 1, 1]);
+        assert_eq!(state(&mut w, 0).memory.phase, -3);
+        // The output carries output 0's player and is inverted like any other.
+        assert_eq!(out(&w, 0, 0).player, -1);
+        state(&mut w, 0).inverted = true;
+        w.update_switches();
+        assert_eq!(any(random_run(&mut w, 0, 1)), [1]);
+
+        // No times at all: a new pick every tick.
+        let mut w = random_world(vec![], RandomSettings::default());
+        assert_eq!(any(random_run(&mut w, 0, 5)), [0, 1, 1, 1, 1]);
+
+        // Pattern 1 keeps its picks: both on after two picks, and they stay on.
+        let settings = RandomSettings {
+            pattern: 1,
+            ..Default::default()
+        };
+        let mut w = random_world(vec![], settings);
+        assert_eq!(random_run(&mut w, 0, 6).last(), Some(&[1, 1]));
+
+        // Deactivated: off, and the phase does not move.
+        let mut w = random_world(vec![], settings);
+        w.set_deactivated(0, true);
+        assert_eq!(random_run(&mut w, 0, 3), [[0, 0]; 3]);
+        assert_eq!(state(&mut w, 0).memory.phase, 0);
+    }
+
+    #[test]
+    fn random_switch_inputs() {
+        // Behaviour 0: off while the input is off, the phase held; running while on.
+        let settings = RandomSettings {
+            on_min: 5,
+            on_max: 5,
+            ..Default::default()
+        };
+        let mut w = random_world(vec![battery(SIGNAL_OFF, &[(1, 0)])], settings);
+        assert_eq!(random_run(&mut w, 1, 2), [[0, 0]; 2]);
+        assert_eq!(state(&mut w, 1).memory.phase, 0);
+        set_battery(&mut w, 0, ON);
+        random_run(&mut w, 1, 2);
+        assert_eq!(state(&mut w, 1).memory.phase, 3);
+        // The input going off turns the outputs off at the step, a tick later.
+        set_battery(&mut w, 0, SIGNAL_OFF);
+        assert_eq!(random_run(&mut w, 1, 2)[1], [0, 0]);
+        assert_eq!(state(&mut w, 1).memory.phase, 3);
+
+        // Behaviour 1: each rising edge picks; no time passes. Pattern 3 toggles.
+        let settings = RandomSettings {
+            behavior: 1,
+            pattern: 3,
+            ..Default::default()
+        };
+        let mut w = random_world(vec![battery(SIGNAL_OFF, &[(1, 0)])], settings);
+        assert_eq!(random_run(&mut w, 1, 2), [[0, 0]; 2]);
+        set_battery(&mut w, 0, sig(1., 1, 3));
+        // From seed 0, R(2) rolls 0 then 1.
+        assert_eq!(random_run(&mut w, 1, 2), [[1, 0]; 2]);
+        assert_eq!(state(&mut w, 1).memory.manual, sig(1., 1, 3));
+        set_battery(&mut w, 0, SIGNAL_OFF);
+        assert_eq!(random_run(&mut w, 1, 1), [[1, 0]]);
+        set_battery(&mut w, 0, ON);
+        assert_eq!(random_run(&mut w, 1, 1), [[1, 1]]);
+        assert_eq!(state(&mut w, 1).memory.phase, 0);
     }
 
     fn timer(length: i32, behavior: i32) -> ThingState {

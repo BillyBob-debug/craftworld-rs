@@ -6,8 +6,8 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-13 (pistons; winches; motors; gyroscopes and rotators;
-   movers and followers; tags)
+4. docs/logic.md Parts 4-14 (pistons; winches; motors; gyroscopes and rotators;
+   movers and followers; tags; every switch type and the random switch)
 
 ## State
 - Owner (2026-10-19): "i think we might need to work on getting the games logic and
@@ -20,9 +20,10 @@
   are chased. Playing levels comes back once the logic set is complete.
 - Merged: D1100 (PR 241) to D1109 (PR 250, b351ff1); D1110 (PR 251, da39db8: movers and
   followers); PR 252 (849bf6a: follower rows in game units per tick).
-- D1111 (branch `logic-tag-follow`, worktree `E:\Projects\wt-d324`): keyed followers
-  follow tags; tags with no position take their parent's.
-- Decision numbers: D1100-D1199, next free D1112.
+- Merged: D1111 (PR 253, e164663): keyed followers follow tags.
+- D1112 (branch `logic-switch-census`, worktree `E:\Projects\wt-d324`): the census of
+  every switch type across all levels (docs/logic.md Part 14) and the random switch.
+- Decision numbers: D1100-D1199, next free D1113.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -32,7 +33,9 @@
   at tick 1970; after D1104 x 25,657 on tick 2006; after D1105 x 25,645;
   after D1108 x 24,635 on
   tick 2008: the wobble bolt on microchip 57 swings at once, Part 10; after PR 252
-  x 25,657 on tick 2003; after D1111 x 24,464 on tick 2005).
+  x 25,657 on tick 2003; after D1111 x 24,464 on tick 2005; after D1112 x 24,464 on tick 2005, unchanged).
+- Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
+  into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -52,9 +55,9 @@
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
 EBOOT rule and unit tests:
-1. Switches and gates: the census of every switch type across all levels, then each
-   type's rule (AND, OR, XOR, NOT, toggle, timer, countdown, selector, randomiser,
-   the 38 stored-signal switches) in crates/lbp-runtime/src/switches.rs.
+1. The switches kept as stored (Part 14), by count: impact 18, camera finished 32,
+   magic mouth 34, projectile 39, velocity 42 / 43, grab 6, control pad 38, key remote
+   54, button 0, then the rest.
 2. Sensors: the cone and layer tests (player, tag, grab, impact, proximity).
 3. Outputs not yet modelled: configurations 3-5 and 12, the exact 0x1c21f4 speed, the
    mirror flag and the follower's +0x220 angle; SWITCH_INPUT, MATERIAL_TWEAK, EMITTER.
