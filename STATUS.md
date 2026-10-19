@@ -6703,3 +6703,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1109 gyroscopes and rotators turn their bodies (2026-10-19)
 - Logic lane: gyroscope tweakers turn their body upright at the game's stop-in-time
   rate and rotators spin at their stored speed (packer 0x95fb20; docs/logic.md P11).
+
+## D1110 movers and followers push their bodies (2026-10-19)
+- Logic lane: movers reach their set velocity and followers walk to Sackboy, stopping
+  short by their range, on the game's two linear rows (0x957df4; docs/logic.md P12).
