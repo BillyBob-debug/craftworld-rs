@@ -6603,3 +6603,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1014 the unlock thread's group push (2026-10-19)
 - Part 161 (`docs/level-scripts/part-161.md`): the unlock thread ends by pushing the
   group under the cursor and moving to its default level.
+
+## D1015 no push without links (2026-10-19)
+- Part 162 (`docs/level-scripts/part-162.md`): with no pending link the unlock thread
+  ends at once and pushes no group (corrects D1014).
