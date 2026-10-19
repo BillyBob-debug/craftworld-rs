@@ -392,11 +392,11 @@ lbp-runtime's switch pass (`compute_output`) handles each:
 - Sensors computed from the world: tag 4 (16,953), player 3 (5,627), impact 18
   (3,944; Part 15), camera finished 32 (2,760; Part 16), magic mouth 34 (1,426;
   Part 17), projectile 39 (816) and paint 8 (51; Part 18), linear velocity 42 (771)
-  and angular velocity 43 (122; Part 19).
-- Kept as stored (the world signal is not modelled yet): grab 6 (666), control pad 38
-  (535), key remote 54 (497), button 0 (224), motion recorder 45 (142), angle 41 (126),
-  57 (123), 65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44
-  (50), 55 (11), trinary 2 (7).
+  and angular velocity 43 (122; Part 19), grab 6 (666; Part 20).
+- Kept as stored (the world signal is not modelled yet): control pad 38 (535), key
+  remote 54 (497), button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123),
+  65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
+  (11), trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
 - The names come from docs/runtime-evidence/logic.md A4; types 55, 57 and 65 are past
@@ -560,3 +560,32 @@ sends both to 0x11d28c (linear 0x11d1d0, angular 0x11d2a8); nothing is stored.
 - Tests: `linear_velocity_modes_scale_and_threshold`,
   `linear_velocity_spin_and_local_frame`, `angular_velocity_modes_and_threshold` in
   velocity.rs.
+
+## Part 20: the grab switch (D1118)
+
+The grab switch (type 6, 666 placed) is on while a player grabs the object it sits on.
+compute_output's table sends it to 0x11cb50, which calls 0x10f508; nothing is stored and
+there is no end-of-update step (table 0x124b0c entry 6 is the epilogue 0x124940).
+
+- Object: the switch Thing's parent (Thing+0x5c), or the Thing itself with no parent
+  (0x10f580). With none, off.
+- Mode: PSwitch+0x8c (the IncludeTouching slot), dispatched at 0x10f6e4: 1 (0x10fb64)
+  and 2 (0x10f7ac, which adds a test 0x1d31c0) look for a player whose grab target is
+  the object; 3 (0x10fae4) for one whose held object (*(sub+0x140)+4) is it; any other
+  value falls through to off (0x10f700).
+- A player counts while grabbing (player+0x1c & 0x1001 and the byte +0x180). PlayerMode
+  (+0x64) 0: only the local player (0x228818, 0x240a88); otherwise any player. With the
+  tag filter (+0xc9, read as RequireAll) he must also carry a tag of the key (0x1d2540).
+- Signal: {1.0, 1, the grabber's player number (sub+0x230)} or off; the ternary is set
+  directly. Inverted through the standard tail (table 0x11bfd4 entry 6 → 0x11c16c).
+- Census (census-all-2.json): mode 0 271, 1 1, 2 14, 3 380; PlayerMode 0 607, 1 25,
+  2 34; tag filter 7; inverted 79; every one has a parent. The 271 of mode 0 read off
+  (on when inverted) in the game too, unless a load step sets the mode (not looked for).
+- INFERRED: modes 2 and 3 read as mode 1; the local player is the first player
+  record's. Not modelled: creatures that grab (world+0x114, kind 0xc), the joint walk
+  when PSwitch+0xcc is set, and the branch for a Thing under an ancestor of object kind
+  0x96 (0x10f350).
+- lbp-runtime: `grab_sensor` in grab.rs reads `PlayerState.grabbing`. The host does not
+  fill it yet, so grab switches read off (or on when inverted) for now.
+- Tests: `grab_switch_sees_the_player_grabbing_its_object`,
+  `grab_switch_modes_parent_and_tags` in grab.rs.

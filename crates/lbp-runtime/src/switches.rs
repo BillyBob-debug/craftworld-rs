@@ -18,8 +18,9 @@
 //!   `SwitchPerformReaction__bf` on the target's own script.
 //!
 //! The logic types are computed, and so are the tag sensor, the player sensor and the
-//! impact sensor (`sensors.rs`) and the velocity sensors (`velocity.rs`); the other types whose signal comes from the world
-//! (physics, the pads) keep the signal the level file stores.
+//! impact sensor (`sensors.rs`), the velocity sensors (`velocity.rs`) and the grab switch
+//! (`grab.rs`); the other types whose signal comes from the world (physics, the pads)
+//! keep the signal the level file stores.
 //!
 //! Not modelled:
 //! - The dirty flags. The game re-runs the event-driven switch types only when something
@@ -38,6 +39,7 @@
 //! - The other object kinds a signal is applied to (lights, emitters, movers and so on).
 //! - The activating player the game records on the target before the dispatch.
 use crate::cutscene::camera_finished;
+use crate::grab::grab_sensor;
 use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
 use crate::velocity::velocity_sensor;
 use crate::{InputWire, LevelWorld, SwitchState, ThingState};
@@ -474,6 +476,8 @@ pub fn compute_output(
         3 => standard(player_sensor(cx)),
         4 => standard(tag_sensor(cx)),
         18 => standard(impact_sensor(cx)),
+        // GRAB, 0x11cb50 → 0x10f508, FOUND (grab.rs).
+        6 => standard(grab_sensor(cx)),
         // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
         42 | 43 => standard(velocity_sensor(cx)),
         // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.
@@ -1870,7 +1874,7 @@ mod tests {
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
         // The other sensors keep the stored signal, also when inverted.
-        for ty in [0, 6, 30, 38, 41, 54, 65] {
+        for ty in [0, 30, 38, 41, 54, 65] {
             let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
             let s = t.switch.as_mut().unwrap();
             (s.switch_type, s.inverted) = (ty, true);

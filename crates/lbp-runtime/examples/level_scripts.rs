@@ -354,6 +354,18 @@ impl Switches {
             let Some(s) = t.switch.as_ref() else {
                 continue;
             };
+            if s.switch_type == 6 {
+                count("grab".into(), true);
+                count(
+                    format!("grab include_touching={}", s.include_touching),
+                    true,
+                );
+                count(format!("grab player_mode={}", s.player_mode), true);
+                count("grab require_all".into(), s.require_all);
+                count("grab inverted".into(), s.inverted);
+                count("grab without a parent".into(), t.parent.is_none());
+                continue;
+            }
             let p = match s.switch_type {
                 3 => "player",
                 4 => "tag",

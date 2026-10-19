@@ -31,6 +31,7 @@ mod cutscene;
 mod display;
 mod global_settings;
 mod gooey;
+mod grab;
 mod level_unlocking;
 mod media;
 mod message_view;
@@ -264,6 +265,9 @@ pub struct PlayerState {
     pub number: i32,
     /// Nearest and farthest z his body covers (the layers he stands in).
     pub layers: (f32, f32),
+    /// The Thing he is grabbing (player+0x1c & 0x1001 and +0x180 set), for the grab
+    /// switch; the host fills it.
+    pub grabbing: Option<u32>,
 }
 
 /// What a trigger did to a Thing this tick.
@@ -1248,6 +1252,7 @@ impl LevelWorld {
             thing,
             number,
             layers,
+            grabbing: None,
         });
         self.move_player(thing, position, layers);
         thing

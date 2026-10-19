@@ -25,9 +25,10 @@
 - Merged: D1112 (PR 254, 5c1ef1c): the switch census (Part 14) and the random switch.
 - Merged: D1113 (PR 256, 1acd570) impact, D1114 (PR 257, e44851a) camera finished,
   D1115 (PR 258, 9c12aea) magic mouth, D1116 (PR 259, a2ad940) projectile and paint.
-- D1117 (branch `logic-velocity`, worktree `E:\Projects\wt-d324`): the velocity
-  switches (docs/logic.md Part 19).
-- Decision numbers: D1100-D1199, next free D1118.
+- Merged: D1117 (PR 260, d94b874) the velocity switches.
+- D1118 (branch `logic-grab`, worktree `E:\Projects\wt-d324`): the grab switch
+  (docs/logic.md Part 20).
+- Decision numbers: D1100-D1199, next free D1119.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -43,9 +44,11 @@
   unchanged: no cutscene camera on the route;
   after D1115 x 24,464 on tick 2004, unchanged;
   after D1116 x 24,464 on tick 2004, unchanged;
-  after D1117 x 24,464 on tick 2004, unchanged: nothing fills the bodies yet).
+  after D1117 x 24,464 on tick 2004, unchanged: nothing fills the bodies yet;
+  after D1118 x 24,464 on tick 2005, unchanged: nothing fills the grabs yet).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
-  into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches).
+  into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
+  census-all-2.json adds the grab counts (Part 20).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -65,8 +68,9 @@
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
 EBOOT rule and unit tests:
-1. The switches kept as stored (Part 14), by count: grab 6, control pad 38, key remote
-   54, button 0, then the rest. The host must fill `ThingState.body` from avian2d for
+1. The switches kept as stored (Part 14), by count: control pad 38, key remote 54,
+   button 0, then the rest. The host must fill `PlayerState.grabbing` for the grab
+   switch (Part 20) and `ThingState.body` from avian2d for
    the velocity switches (Part 19). The host must fill
    `LevelWorld.contacts` from avian2d (Things by `lbp_sim::ThingIndex`) for the impact
    switch (Part 15) to see anything, and call `projectile_hit` for projectile and paint
