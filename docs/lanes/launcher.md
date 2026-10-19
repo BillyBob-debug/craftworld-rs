@@ -14,7 +14,10 @@
   (pre-release, target 9ce8441, zip attached):
   https://github.com/chilladept/craftworld-rs/releases/tag/preview-2026-10-19
   `gh release create --target` needs the full commit SHA (a short one gives HTTP 422).
-- Decision numbers D600-D699; next free D602.
+- D602 (branch `launcher-voiceover`): Set up also copies the disc's loose, unencrypted
+  GAMEDATA/AUDIO/VOICEOVER.FSB (~19 MB) for the Story lane's D397 voice-over timing; older
+  copies lack it, so the menu asks for Set up again. Not in the posted release.
+- Decision numbers D600-D699; next free D603.
 
 ## Facts
 - Owner rule (2026-10-18, standing): the app needs only the user's fully updated USA ISO

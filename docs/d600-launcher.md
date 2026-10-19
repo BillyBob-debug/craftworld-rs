@@ -60,3 +60,11 @@ Tests: `disc_box_explains_wrong_picks`, `title_check_names_the_other_disc` and t
 `update_folder_is_found_from_rpcs3_or_its_dev_hdd0` (launcher.rs). Not tested on the PC
 against the real ISO in this change (cloud thread); the FARC tag check assumes every
 retail `.farc` ends in `FARC`, as lbp-archive already requires.
+
+## D602: keep the voice-over bank (2026-10-19)
+
+The Story lane's D397 times the Pod's voice-over waits from the headers of
+`PS3_GAME/USRDIR/gamedata/audio/voiceover.fsb`, which sits loose and unencrypted on the disc
+(about 19 MB). Set up skipped every `.fsb`; it now keeps that one file (`iso::KEPT_AUDIO`).
+A copy made before this lacks it, so `ready()` is false and the menu asks for Set up again,
+which copies once more. Test: `lists_and_filters_a_small_image` (kept bank, skipped music).

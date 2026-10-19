@@ -221,7 +221,11 @@ impl Config {
         format!("{iso}|{stamp}|{}", clean(&self.update))
     }
     fn ready(&self) -> bool {
-        !self.iso.trim().is_empty() && self.indexed == self.key() && index_path().is_file()
+        let copied = !matches!(disc_input(&self.iso), Ok(Disc::Iso(_))) || copy_complete();
+        !self.iso.trim().is_empty()
+            && self.indexed == self.key()
+            && index_path().is_file()
+            && copied
     }
 }
 
@@ -249,6 +253,16 @@ fn guess_update() -> Option<String> {
         .map(|r| r.join("dev_hdd0").join("game").join(iso::TITLE_ID))
         .find(|p| p.join("USRDIR").is_dir())
         .map(|p| p.display().to_string())
+}
+
+/// The copy out of the ISO holds everything this build copies; copies made before the
+/// voice-over bank was kept (D397) lack it, so Set up copies again.
+fn copy_complete() -> bool {
+    let disc = disc_dir();
+    disc.join("PS3_GAME").is_dir()
+        && iso::KEPT_AUDIO
+            .iter()
+            .all(|p| disc.join(p.trim_start_matches('/')).is_file())
 }
 
 /// A pasted path without the quotes Windows' "Copy as path" puts around it.
@@ -686,8 +700,7 @@ fn start_setup(l: &mut Launcher) {
         .join("|");
     let new_key = l.cfg.key();
     let new_iso = new_key.split('|').take(2).collect::<Vec<_>>().join("|");
-    let copy = matches!(disc, Disc::Iso(_))
-        && (old_iso != new_iso || !disc_dir().join("PS3_GAME").is_dir());
+    let copy = matches!(disc, Disc::Iso(_)) && (old_iso != new_iso || !copy_complete());
     l.cfg.indexed.clear();
     let _ = l.cfg.save();
     let result: Slot<Result<(), String>> = Arc::new(Mutex::new(None));
