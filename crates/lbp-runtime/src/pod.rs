@@ -179,6 +179,9 @@ pub struct PlanetsSearch {
     /// D340: `PWorld.Frame` when the Story info bubble was first up (the page's frame
     /// count starts there; [`crate::LevelWorld::story_info_bubble`]), `None` while it is not.
     pub info_bubble_since: Option<i32>,
+    /// D1012: the Story state's `_StartedVO` (FOUND, script 110fc2e8 `StartVO__`): the
+    /// result of the last line it asked for. Nothing clears it, as in the script.
+    pub story_vo_started: bool,
 }
 
 /// D368 (part 115): the cursor's flight to a result (FOUND 01.33, set by

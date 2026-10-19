@@ -25,8 +25,4 @@ Part 130 ported `LevelUnlockingThread` without its voice-overs. This part reads
 
 ### Not modelled
 
-- The story state's kept answer and its stop on closing; the line plays out instead.
-
-### Next
-
-The story state's stop, once states close natively mid-line.
+- (Corrected in part 159: the kept answer and the stop on closing are ported.)

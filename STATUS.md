@@ -6559,3 +6559,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1003 the intro waits for its video (2026-10-19)
 - Part 150 (`docs/level-scripts/part-150.md`): the Pod intro video's Bink header gives
   379 ticks; the native intro now waits for it as the game does. The launcher keeps it.
+
+## D1004 the Pod's music state (2026-10-19)
+- Part 151 (`docs/level-scripts/part-151.md`): `UpdateInteractiveMusic__` is ported and
+  the world keeps the music it sets, so it is set once; nothing plays yet.

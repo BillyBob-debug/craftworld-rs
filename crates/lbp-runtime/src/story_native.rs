@@ -185,6 +185,12 @@ impl PodStateSearch {
         if self.opened.take().is_none() {
             return;
         }
+        // D1012 (FOUND, script 110fc2e8 `OnDeactivate__Q5Gooey`): a state whose line
+        // started stops the voice-over (`Audio.StopVoiceOver__`); only the Story state
+        // starts one (`PlayVO__`).
+        if matches!(self.details, SearchDetails::StoryLevels) && world.pod.search.story_vo_started {
+            world.media_call("StopVoiceOver", None, &[]);
+        }
         self.ticks = 0;
         let search = &mut world.pod.search;
         // D360: a group search closed: the Story search's own cursor again.
@@ -527,6 +533,26 @@ mod tests {
         // A second close (nothing open) changes nothing.
         story.close(&mut w);
         assert_eq!(w.pod.search.want_search_details_calls, 2);
+        assert_eq!(w.media.voice_over_stops, 0, "no line started");
+    }
+
+    /// D1012: a Story state whose unlock line started stops the voice-over when it
+    /// closes or is suspended; a group's state does not.
+    #[test]
+    fn d1012_the_story_state_stops_its_line() {
+        let mut w = world();
+        let mut story = PodStateSearch::new(SearchDetails::StoryLevels);
+        story.open(&mut w);
+        w.pod.search.story_vo_started = true;
+        story.suspend(&mut w);
+        assert_eq!(w.media.voice_over_stops, 1);
+        let mut group = PodStateSearch::new(SearchDetails::Group((4, 1)));
+        group.open(&mut w);
+        group.close(&mut w);
+        assert_eq!(w.media.voice_over_stops, 1);
+        story.resume(&mut w);
+        story.close(&mut w);
+        assert_eq!(w.media.voice_over_stops, 2, "the flag is never cleared");
     }
 
     /// D359: the default group chosen on tick 680 of the golden trace: Story's

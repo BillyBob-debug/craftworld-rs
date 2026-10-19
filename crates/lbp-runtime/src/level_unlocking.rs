@@ -393,8 +393,8 @@ pub const UNLOCK_VOICE_OVERS: [(i32, &str, Option<&str>); 5] = [
 impl LevelWorld {
     /// D399: `PlayVO__`. The four level lines go through the story state's `StartVO__`
     /// and the theme line straight to `Audio.RequestVoiceOver`; both ask with interrupt
-    /// set and replay clear (FOUND, script 110fc2e8 for `StartVO__`). Not modelled: the
-    /// state keeps whether its line started (`_StartedVO`) and stops it when it closes.
+    /// set and replay clear (FOUND, script 110fc2e8 for `StartVO__`). D1012: `StartVO__`
+    /// keeps whether its line started (`_StartedVO`), which the state's close reads.
     fn play_unlock_voice_over(&mut self, links: &[PendingLink]) {
         let line = links.iter().find_map(|l| {
             (l.to.0 == 0)
@@ -418,6 +418,9 @@ impl LevelWorld {
             Value::Bool(false),
         ];
         self.media_call("RequestVoiceOver", None, &args);
+        if !name.starts_with("pod_complete_theme") {
+            self.pod.search.story_vo_started = self.media.last_started;
+        }
         self.unlock_events.push(format!("voice-over {name}"));
     }
 }
