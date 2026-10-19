@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D394 the line shader's constant and the active test (2026-10-19)
+## Latest: D395 the active link look (2026-10-19)
+- Part 142 (`docs/level-scripts/part-142.md`): a link to a locked level is drawn white
+  with the active texture band; pending (green) once the level unlocks.
+
+## D394 the line shader's constant and the active test (2026-10-19)
 - Part 141 (`docs/level-scripts/part-141.md`): the link shader's constant is read and
   only one badge class can make a link active; links stay drawn pending.
 
