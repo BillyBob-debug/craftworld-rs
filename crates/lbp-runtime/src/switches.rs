@@ -41,6 +41,7 @@ use crate::cutscene::camera_finished;
 use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
 use crate::{InputWire, LevelWorld, SwitchState, ThingState};
 use lbp_script_vm::natives::SwitchInput;
+use lbp_script_vm::Value;
 use std::collections::BTreeSet;
 
 /// The signal of an output that is forced off (FOUND, 0x1244a4: activation 0.0, ternary
@@ -461,6 +462,8 @@ pub fn compute_output(
         18 => standard(impact_sensor(cx)),
         // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.
         32 => standard(camera_finished(cx)),
+        // MAGIC_MOUTH, 0x11c874, FOUND: the script's OutputEndSignalFrames.
+        34 => standard(magic_mouth(cx)),
         // PRESSURE, SACKBOT_*, INACTIVE, DEATH, CUTSCENE_CAM_ACTIVE and the later types
         // whose signal is not made in the pass, 0x11bf08, FOUND: {0.0, 0, -1}.
         7 | 11..=13 | 26 | 31 | 33 | 46..=53 | 56 | 58..=64 => off(),
@@ -516,6 +519,35 @@ pub fn compute_output(
 }
 
 /// AND: ports 0 and 1, then up to the gate's port count (BulletsRequired).
+/// The script member a magic mouth's switch reads (the name at TOC 0xdaa0c0+0x2e3c).
+pub const MOUTH_END_FRAMES: &str = "OutputEndSignalFrames";
+
+/// The magic mouth (switch type 34).
+///
+/// FOUND (0x11c874): the handler takes the Thing's script part and reads its integer
+/// member `OutputEndSignalFrames` through 0x89032c → 0x61fd88; above 0 it gives {1.0, 1,
+/// -1} (1.0 from 0xd95f84), else off (0x11bf08), both through the shared tail, so an
+/// inverted mouth is turned round. The script's `SwitchGetNewActivation__i` is not asked.
+/// The bubble script sets the member to 2 when its message stops and counts it down in
+/// `Update__` (docs/level1-play.md). With no script or no such member, off (INFERRED: the
+/// getter's failed lookup gives 0).
+pub(crate) fn magic_mouth(cx: &SwitchContext<'_>) -> SwitchInput {
+    let frames = cx
+        .world
+        .things
+        .get(cx.thing as usize)
+        .and_then(|t| t.members.as_ref())
+        .and_then(|m| m.get(MOUTH_END_FRAMES));
+    match frames {
+        Some(Value::Int(n)) if *n > 0 => SwitchInput {
+            activation: 1.,
+            ternary: 1,
+            player: -1,
+        },
+        _ => SIGNAL_OFF,
+    }
+}
+
 fn and_gate(cx: &SwitchContext<'_>) -> SwitchInput {
     let one = |t: i32| if t == 0 { 1. } else { t as f32 };
     let ports = usize::try_from(cx.switch.bullets_required).unwrap_or(0);
@@ -1776,6 +1808,36 @@ mod tests {
             assert!(w.update_switches().is_empty());
             assert_eq!(out(&w, 0, 0), sig(0.5, 1, 2), "{ty}");
         }
+    }
+
+    #[test]
+    fn magic_mouth_reads_its_end_signal_frames() {
+        let frames = |w: &mut LevelWorld, n: i32| {
+            let m = w.things[0].members.get_or_insert_with(Default::default);
+            m.insert(MOUTH_END_FRAMES.into(), Value::Int(n));
+        };
+        let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
+        t.switch.as_mut().unwrap().switch_type = 34;
+        let mut w = world(vec![t]);
+        // No script members: off, whatever the file stored.
+        w.update_switches();
+        assert_eq!(out(&w, 0, 0), SIGNAL_OFF);
+        // Above 0: on, with no player; at 0 or below: off.
+        for (n, want) in [(2, sig(1., 1, -1)), (1, sig(1., 1, -1)), (0, SIGNAL_OFF)] {
+            frames(&mut w, n);
+            w.update_switches();
+            assert_eq!(out(&w, 0, 0), want, "{n}");
+        }
+        frames(&mut w, -3);
+        w.update_switches();
+        assert_eq!(out(&w, 0, 0), SIGNAL_OFF);
+        // Inverted: the shared tail turns the off round.
+        state(&mut w, 0).inverted = true;
+        w.update_switches();
+        assert_eq!(out(&w, 0, 0).ternary, 1);
+        frames(&mut w, 2);
+        w.update_switches();
+        assert_eq!(out(&w, 0, 0).ternary, 0);
     }
 
     #[test]
