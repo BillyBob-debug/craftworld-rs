@@ -7,10 +7,14 @@
 //!
 //! D399 (part 146): a finished cluster asks for its voice-over (`PlayVO__`).
 //!
+//! D1014 (part 161): at the end, a group under the cursor has its search pushed (by the
+//! native pod computer, [`LevelWorld::unlock_group_push`]) and the cursor moves to the
+//! group's default level.
+//!
 //! Not ported: `CanStartEndOfLevelSequence__` (always
 //! true here), the swap from a group search back to Story (the return opens Story), the
-//! cached-info updates, the push of the focus planet's group at the end, the link
-//! drawing and the state-2 camera. No audio plays; the sounds are counted.
+//! cached-info updates, the link drawing and the state-2 camera. No audio plays; the
+//! sounds are counted.
 
 use crate::{LevelWorld, PendingLink};
 use lbp_script_vm::{ObjectId, Value};
@@ -75,6 +79,8 @@ pub struct LevelUnlocking {
     pub started: bool,
     pub clusters: Vec<PendingLinkCluster>,
     pub current: usize,
+    /// D1014: the group whose search the end asked for, once asked.
+    pub group: Option<(i32, i32)>,
 }
 
 fn unit(l: [f32; 4]) -> Option<[f32; 3]> {
@@ -356,11 +362,12 @@ impl LevelWorld {
                 self.story_progress.pending_links.len(),
                 u.clusters.len()
             ));
-            if u.clusters.is_empty() {
-                self.pod.search.cursor_mode = Some(4);
-                return false;
+            if !u.clusters.is_empty() {
+                return true;
             }
-            return true;
+        }
+        if let Some(group) = u.group {
+            return self.unlock_group_wait(group);
         }
         while u.current < u.clusters.len() {
             if !self.cluster_update(u, u.current) {
@@ -368,6 +375,43 @@ impl LevelWorld {
             }
             self.play_unlock_voice_over(&u.clusters[u.current].links);
             u.current += 1;
+        }
+        self.pod.search.cursor_mode = Some(4);
+        // D1014 (FOUND, script ec688550 `Run__` 0199-0241): a focus planet whose cursor
+        // result is a slot (`GetType__` 1) of a group (`SlotID.Type` 4) has
+        // `SearchDetails(CreateGroup__(slot, false))` pushed with the cursor mode 2.
+        let group = (self.pod.search.selected_planet)
+            .and_then(|_| self.selected_result())
+            .and_then(|i| self.story_slots.get(i))
+            .map(|s| s.id)
+            .filter(|id| id.0 == 4);
+        let Some(group) = group else {
+            return false;
+        };
+        self.unlock_events.push(format!("push the group {group:?}"));
+        self.pod.search.cursor_mode = Some(2);
+        self.unlock_group_push = Some(group);
+        u.group = Some(group);
+        true
+    }
+
+    /// D1014 (FOUND, `Run__` 0242-0278): the thread yields while the view blends
+    /// (`ViewTransition` < 1), the search is busy or its decorations load, then moves the
+    /// cursor (no snap) to the focus planet's default result (`PickDefaultResult__`) and
+    /// sets the cursor mode 4. INFERRED: the pushed group is ready the tick after its
+    /// push, as the native search answers at once.
+    fn unlock_group_wait(&mut self, group: (i32, i32)) -> bool {
+        if self.unlock_group_push.is_some() {
+            return true;
+        }
+        if self.pod.search.group == Some(group) {
+            if let Some(i) = self.group_default_result(group) {
+                let to = self.story_slots[i].location;
+                let from = (self.pod.search.cur_result)
+                    .and_then(|c| self.story_slots.get(c))
+                    .map(|s| s.location);
+                self.pod.search.move_cursor_to(i, Some(to), from, false);
+            }
         }
         self.pod.search.cursor_mode = Some(4);
         false
@@ -800,5 +844,35 @@ mod tests {
         p.clear_pending_link(level);
         assert!(p.pending_links.is_empty());
         assert_eq!(p.unlocked, [(0, 2)]);
+    }
+
+    /// D1014: the default group under the cursor at the end is pushed; the thread waits
+    /// for the push, then moves the cursor to the group's default level.
+    #[test]
+    fn d1014_the_end_pushes_the_group_under_the_cursor() {
+        let slot = |id: (i32, i32), location: [f32; 4], group| SearchSlot {
+            id,
+            location,
+            group,
+            ..Default::default()
+        };
+        let mut w = LevelWorld {
+            story_slots: vec![
+                slot((4, 27), [1., 0., 0., 0.], None),
+                slot((0, 1), [0., 1., 0., 0.], Some((4, 27))),
+            ],
+            ..Default::default()
+        };
+        w.pod.search.selected_planet = Some(1);
+        w.pod.search.default_result = Some(0);
+        assert!(w.level_unlocking_tick(), "no links: the group is asked for");
+        assert_eq!(w.unlock_group_push, Some((4, 27)));
+        assert_eq!(w.pod.search.cursor_mode, Some(2));
+        assert!(w.level_unlocking_tick(), "waits for the push");
+        w.unlock_group_push = None;
+        w.pod.search.group = Some((4, 27));
+        assert!(!w.level_unlocking_tick());
+        assert_eq!(w.pod.search.cur_result, Some(1));
+        assert_eq!(w.pod.search.cursor_mode, Some(4));
     }
 }

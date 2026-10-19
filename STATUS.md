@@ -6567,3 +6567,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1005 entering the Pod (2026-10-19)
 - Part 152 (`docs/level-scripts/part-152.md`): `OnEnterPod__` is native; it restores the
   view kept on leaving and resets the interactive music.
+
+## D1006 whether a video plays (2026-10-19)
+- Part 153 (`docs/level-scripts/part-153.md`): `Video.IsVideoPlaying__` answers true
+  while the video slot is in use, so the Pod sees the intro video.

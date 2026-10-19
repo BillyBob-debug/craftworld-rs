@@ -237,6 +237,19 @@ impl NativePodComputer {
         Some(PodComputerEvent::Pushed(PuterState::GroupSearch))
     }
 
+    /// D1014: the unlock thread's end (`LevelUnlockingThread.Run__`, FOUND):
+    /// `PushState__(SearchDetails(CreateGroup__(slot, false)))` over whatever is on top.
+    pub fn push_group(
+        &mut self,
+        host: &mut Bindings<LevelWorld>,
+        slot: (i32, i32),
+    ) -> Option<PodComputerEvent> {
+        self.top()?;
+        self.group = PodStateSearch::new(SearchDetails::Group(slot));
+        self.push(host, PuterState::GroupSearch);
+        Some(PodComputerEvent::Pushed(PuterState::GroupSearch))
+    }
+
     fn set_view(host: &mut Bindings<LevelWorld>, view: i32) {
         if let Some(world) = host.world.world {
             let args = [(4, Value::Int(view))];
