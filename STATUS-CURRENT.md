@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D507 the post-it notes in native Rust (2026-10-19)
+## Latest: D508 the tutorial monitors in native Rust (2026-10-19)
+- level1 Part 9 (`docs/level1-play.md`): `TutorialMonitor` is a native port; without the
+  overlay a switched-on monitor asks for its video (the game call is counted, unbound).
+
+## D507 the post-it notes in native Rust (2026-10-19)
 - level1 Part 8 (`docs/level1-play.md`): `PostItNote` and its three unlock notes are
   native ports; without the overlay a note keeps its text, an unlock note sets its flag.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1015 no push without links (2026-10-19)
 - Part 162 (`docs/level-scripts/part-162.md`): with no pending link the unlock thread
   ends at once and pushes no group (corrects D1014).
-
-## D1014 the unlock thread's group push (2026-10-19)
-- Part 161 (`docs/level-scripts/part-161.md`): the unlock thread ends by pushing the
-  group under the cursor and moving to its default level.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

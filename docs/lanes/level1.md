@@ -2,15 +2,15 @@
 
 ## Read first
 1. docs/level1-play.md, sections "Part 5" (native speech bubble, the script trace) and
-   "Part 6" (native Launcher); Parts 7 and 8 are native TriggerMusic and PostItNote
+   "Part 6" (native Launcher); Parts 7-9: TriggerMusic, PostItNote, TutorialMonitor
 2. crates/lbp-runtime/src/native_script.rs (the D417 registry), native_bubble.rs and
    native_launcher.rs (the smallest port, a template for the next ones)
 
 ## State
-- PRs 155 (D504), 228 (D505) and 229 (D506, native `TriggerMusic`) merged. PR for D507
-  (branch `level1-postit`, worktree `E:\Projects\wt-d324`): native `PostItNote` and its
-  unlock subclasses; handed to the coordinator for merge once rust and python are green.
-- Decision numbers: D504-599, next free D508.
+- PRs 155 (D504), 228 (D505), 229 (D506) and 230 (D507, native `PostItNote`) merged.
+  PR for D508 (branch `level1-tutorial`, worktree `E:\Projects\wt-d324`): native
+  `TutorialMonitor`; handed to the coordinator for merge once rust and python are green.
+- Decision numbers: D504-599, next free D509.
 
 ## Facts
 - Route run: `--level-guid 0001e786 --level-scripts --play-sackboy --qa-hide-ui
@@ -37,7 +37,7 @@
 ## Next
 1. Native classes for the other Rookie Test scripts, one per PR, each checked with the
    trace: Launcher (done, D505), TriggerMusic (done, D506), PostItNote(+Unlock*) (done,
-   D507), TutorialMonitor, WorldMooCamera
+   D507), TutorialMonitor (done, D508), WorldMooCamera
    (Score_Board may be shared with other lanes; ask the coordinator).
 2. The route past x -385: a game reference (RPCS3 F12 frames past line 2) or jumps there.
 3. The camera at x -938 (a frame at tick 1600 looks through a front wall).
