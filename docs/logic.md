@@ -134,8 +134,8 @@ marked):
   after a signal-type test 0x900730); 2 always 1, with a restart at the cycle's end
   (0x11f26c, 0xc7574); 3 the analog value; 4 speed (0xc9e80, not decoded). With no live
   signal object the clock resets to 0, 0, 1 (0xd0054).
-- The mode is set only by the tweak menu setter 0x1110e0 (pattern 0: choice 0 mode 0,
-  1 mode 3, 2 mode 1) and is not saved. How a loaded piston gets it is not found.
+- The tweak menu setter 0x1110e0 sets the mode (pattern 0: choice 0 mode 0,
+  1 mode 3, 2 mode 1); it is also saved (Part 6).
 
 In the Rookie Test every piston saves modStartFrame 5,306,444 and modScale 0. Play starts
 from the reset clock 0, 0, 1 instead (INFERRED; with the saved values nothing would move).
@@ -145,3 +145,31 @@ lbp-sim keeps a `PistonClock` per piston. The viewer gives every wired piston mo
 it runs while its switch is on and holds while off; unwired ones run at 1 as in Part 4.
 
 Test: `d1103_a_switched_piston_clock_freezes_while_off_and_never_jumps` (lbp-sim sandbox).
+
+## Part 6: each piston's saved mode (D1104)
+
+The mode at `+0xa0` is saved after all (EBOOT 01.33, FOUND): it is the last field the
+PJoint serializer 0xb41850 registers (0xb41bfc, through 0xb3c7d4, an int). The bool just
+before hideInPlayMode is `+0x1cc`, which holds the piston (scale 0). lbp-level now keeps
+both as `JointParams::mode` and `held`.
+
+In the Rookie Test all 27 wired pistons save mode 1 (direction), as do one unwired piston
+and the wired type 9 joint; every other joint saves 0 and none is held.
+
+What a mode does (FOUND unless marked):
+- The rate (0xcfedc, jump table 0xcffa4): held 0; mode 0 1 while the ternary is set,
+  else 0; mode 1 the ternary as a float (1 or -1), and with the ternary 0 either 0 or -1
+  by the port test 0x900730 (taken here as -1, INFERRED: an off switch sends a direction
+  piston back); mode 2 1; mode 3 the activation; mode 4 is 0xc9e80 (not decoded; 1 here).
+- The length (0xc9790's branch at 0xc993c, wired and mode 1 or 4): base + 2 × frame ×
+  range / time, the base for time < 1, with no phase, pattern or wave. Other modes use
+  the Part 4 rule on the clock.
+- Neither function clamps the frame, but a direction piston stops at its ends. The
+  runtime keeps the clock between 0 (the base) and time / 2 (base + range), moving its
+  delta so it turns back at once (INFERRED; where the game bounds it is not found).
+
+lbp-sim: `scene::piston_scale` gives the rate, `SceneJoint::length` the length,
+`SceneJoint::ramp_frames` and `PistonClock::clamp` the ends; the viewer passes the
+signal on each piston's input (`LevelWorld::input_signal`).
+
+Test: `d1104_a_direction_piston_ramps_out_while_on_and_back_while_off` (lbp-sim sandbox).

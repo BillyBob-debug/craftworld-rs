@@ -6647,3 +6647,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D511 the Rookie Test route traced with all native scripts (2026-10-19)
 - level1 Part 12 (`docs/level1-play.md`): with every class native, the route without
   the decrypted overlay makes the same 170,796 calls as with it.
+
+## D512 the speech bubble in the Rookie Test call trace (2026-10-19)
+- level1 Part 13 (`docs/level1-play.md`): the bubble port's calls join the trace and
+  match the VM's every tick but for unstored members and the known `.init__` run.

@@ -194,19 +194,25 @@ pub struct PistonDrive {
     pub clock: scene::PistonClock,
 }
 
-/// D1103: at tick `now` sets each piston's clock scale from `scale` (1 for a piston with
-/// no input; a switched one 1 while its signal is on and 0 while off, 0xcfedc mode 0),
-/// then its length from the clock, waking both ends when it changed.
+/// D1103: at tick `now` sets each piston's clock rate, 1 with no input, else from the
+/// `signal` on its input (ternary, activation) by its mode ([`scene::piston_scale`],
+/// D1104), then its length from the clock, waking both ends when it changed.
 pub fn drive_pistons(
     commands: &mut Commands,
     q: &mut Query<(&mut PistonDrive, &mut PrismaticJoint)>,
     now: f32,
-    scale: impl Fn(&scene::SceneJoint) -> f32,
+    signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32)>,
 ) {
     for (mut drive, mut joint) in q.iter_mut() {
-        let s = scale(&drive.joint);
+        let input = signal(&drive.joint);
+        let p = drive.joint.params;
+        let s = input.map_or(1., |(t, a)| scene::piston_scale(p.mode, p.held, t, a));
         drive.clock.set_scale(now, s);
-        let l = drive.joint.free_length(drive.clock.frame(now)) * UNIT_SCALE;
+        if let Some((lo, hi)) = drive.joint.ramp_frames(input.is_some()) {
+            drive.clock.clamp(now, lo, hi);
+        }
+        let frame = drive.clock.frame(now);
+        let l = drive.joint.length(frame, input.is_some()) * UNIT_SCALE;
         if joint.limits.is_some_and(|d| d.min == l && d.max == l) {
             continue;
         }
