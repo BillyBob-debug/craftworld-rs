@@ -6619,3 +6619,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1018 the native pod computer enters and leaves the Pod (2026-10-19)
 - Part 165 (`docs/level-scripts/part-165.md`): without the game's scripts the native
   planets world gets `OnEnterPod__` and `OnExitPod__`; the Pod's view type is kept.
+
+## D505 the launch pads in native Rust (2026-10-19)
+- level1 Part 6 (`docs/level1-play.md`): `Launcher` is a native port; without the
+  overlay Rookie Test's 19 launch pads set their sprite lights as the script does.

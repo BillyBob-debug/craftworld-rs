@@ -51,6 +51,11 @@ pub trait NativeScript: Sync {
     fn superclasses(&self) -> &'static [&'static str] {
         &["Thing"]
     }
+    /// The class's `.init__` values (D513). With the script not loaded the Thing gets them
+    /// for the members its level does not store, as the VM's class defaults do.
+    fn defaults(&self) -> Vec<(&'static str, Value)> {
+        Vec::new()
+    }
     /// `OnCreate__`, once when the level starts.
     fn on_create(&self, _host: &mut dyn Host, _thing: u32) -> NativeResult {
         None

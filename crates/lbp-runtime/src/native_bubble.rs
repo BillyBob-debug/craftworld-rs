@@ -38,6 +38,9 @@ impl NativeScript for TriggerSpeechBubbleScript {
     fn superclasses(&self) -> &'static [&'static str] {
         &["Tweakable", "Native", "Thing"]
     }
+    fn defaults(&self) -> Vec<(&'static str, Value)> {
+        defaults()
+    }
     fn on_create(&self, host: &mut dyn Host, thing: u32) -> NativeResult {
         Some(Bubble(&mut Ctx { host, this: thing }).on_create())
     }
