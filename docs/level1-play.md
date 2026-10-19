@@ -179,4 +179,23 @@ not store reads as its `.init__` value (`Distance` 1, `TeamFilter` 0).
 Test: `native_launcher::d505_the_native_launcher_sets_its_light` (synthetic Things, no
 script loaded).
 
-Not yet: TriggerMusic, the post-it notes, TutorialMonitor, WorldMooCamera, Score_Board.
+## Part 7: the music triggers in native Rust (D506, 2026-10-19)
+
+Before: without the decrypted overlay Rookie Test's 9 music triggers ran no script, so a
+player entering one started no interactive music.
+
+After: `TriggerMusic` (g00004750, base `Tweakable`) is a port in the D417 registry
+(`crates/lbp-runtime/src/native_music.rs`). From its 01.33 listing: `Play__fi(fade,
+player)` calls `Audio.SetInteractiveMusic(FSB, SettingsFile, 1, StartPoint, player,
+this)` and sets the six stereo pairs to `Pair_<n>_Volume` (fade -1 when `fade` is
+negative, else 0); `Enter__Q5Thing` plays (-1, 0) when music is safe to trigger and input
+0 is unwired; `SwitchPerformReaction__b` plays the same when input 0's binary activation
+or the argument is on; `Mute__` sets every pair to 0. The GUID, start point and mixer
+calls are ported too. Left out: the create-mode tweak menu and preview, the editor's
+radius drawing and the dead sync-point branch of `SetMixerChannel__if`. A field the level
+does not store reads as its `.init__` value (`StartPoint` 0, each pair 1).
+
+Test: `native_music::d506_the_native_trigger_music_plays_and_mutes` (synthetic Things,
+no script loaded).
+
+Not yet: the post-it notes, TutorialMonitor, WorldMooCamera, Score_Board.
