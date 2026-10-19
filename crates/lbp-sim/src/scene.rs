@@ -100,12 +100,35 @@ pub struct SceneBody {
 
 /// D1100: the PPhysicsTweaks with configuration 0 (anti-gravity tweakers) on a body's
 /// hierarchy, summed with the activation each was saved with.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AntiGravity {
     /// Σ PPhysicsTweak.gravity × lastKnownActivation: the share of gravity cancelled.
     pub cancelled: f32,
     /// Σ dampening × activation; kept, not applied yet (the SPU side is unread).
     pub dampening: [f32; 3],
+    /// D1101: each tweak, so a live switch signal can replace the saved activation.
+    pub tweaks: Vec<AntiGravityTweak>,
+}
+
+/// D1101: one anti-gravity tweaker on a body's hierarchy.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AntiGravityTweak {
+    /// The PPhysicsTweak's Thing index.
+    pub thing: usize,
+    pub gravity: f32,
+    /// PPhysicsTweak.behavior, read as the input mode (0 digital, 1 analog; INFERRED).
+    pub behavior: i32,
+    /// lastKnownActivation, the activation until a signal says otherwise.
+    pub saved: f32,
+}
+
+impl AntiGravity {
+    /// FOUND (01.33, 0xc6308): the body's gravity scale clamp(1 - Σ gravity × activation,
+    /// 0, 1), with `activation` giving each tweak's current activation.
+    pub fn gravity_scale(&self, activation: impl Fn(&AntiGravityTweak) -> f32) -> f32 {
+        let cancelled: f32 = self.tweaks.iter().map(|t| t.gravity * activation(t)).sum();
+        (1. - cancelled).clamp(0., 1.)
+    }
 }
 
 /// One SHAPE Thing as a collider.
@@ -465,8 +488,15 @@ fn build_scene_inner(
             let total = scene.bodies[b].anti_gravity.get_or_insert(AntiGravity {
                 cancelled: 0.,
                 dampening: [0.; 3],
+                tweaks: vec![],
             });
             total.cancelled += tw.gravity * a;
+            total.tweaks.push(AntiGravityTweak {
+                thing: i,
+                gravity: tw.gravity,
+                behavior: tw.behavior,
+                saved: a,
+            });
             for (d, t) in total.dampening.iter_mut().zip(tw.dampening) {
                 *d += t * a;
             }

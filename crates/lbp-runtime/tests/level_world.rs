@@ -5890,3 +5890,36 @@ fn d342_profile_colour_colours_the_players() {
         lbp_script_vm::natives::DEFAULT_PLAYER_COLOUR
     );
 }
+
+/// D1101: what a physics tweak sees. Thing 0's output (activation 0.25, ternary 0) goes to
+/// Thing 1 port 0; Thing 2's (activation -0.5, ternary -1) to Thing 3 port 0; Thing 4 has
+/// no input.
+#[test]
+fn d1101_a_tweak_reads_its_input_digitally_or_by_magnitude() {
+    let mut t: Vec<ThingRecord> = (0..5)
+        .map(|index| ThingRecord {
+            index,
+            ..Default::default()
+        })
+        .collect();
+    let switch = |activation, ternary, target| {
+        Some(Switch {
+            outputs: vec![Some(SwitchOutput {
+                signal: SwitchSignal {
+                    activation,
+                    ternary,
+                    player: 0,
+                },
+                targets: vec![(Some(target), 0)],
+            })],
+            ..Default::default()
+        })
+    };
+    t[0].data.switch = switch(0.25, 0, 1);
+    t[2].data.switch = switch(-0.5, -1, 3);
+    let world = LevelWorld::from_things(&t);
+    let read = |thing, behavior| world.tweak_activation(thing, behavior);
+    assert_eq!((read(1, 0), read(1, 1), read(1, 2)), (0., 0.25, 1.));
+    assert_eq!((read(3, 0), read(3, 1)), (1., 0.5));
+    assert_eq!((read(4, 0), read(4, 1)), (1., 1.));
+}

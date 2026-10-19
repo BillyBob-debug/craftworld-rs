@@ -251,7 +251,10 @@ fn d1100_an_anti_gravity_tweaker_holds_its_body_up() {
     });
     let scene = build_scene(&things);
     assert!(scene.bodies[0].anti_gravity.is_none());
-    assert_eq!(scene.bodies[1].anti_gravity.map(|a| a.cancelled), Some(1.));
+    assert_eq!(
+        scene.bodies[1].anti_gravity.as_ref().map(|a| a.cancelled),
+        Some(1.)
+    );
     let out = run(&things, 60);
     assert!(
         (out[1].1[1] - 50.).abs() < 5.,
@@ -742,5 +745,27 @@ fn tilted_shape_with_vertex_z_collides_in_its_projected_outline() {
             .floor_below([-5., 500.], 0.)
             .map(|t| (t + 300.).abs() < 1e-3),
         Some(true)
+    );
+}
+
+/// D1101: a tweak switched off gives its body gravity back; analog activations add up.
+#[test]
+fn d1101_a_switched_off_anti_gravity_tweaker_lets_its_body_fall() {
+    let tweak = |thing, gravity| lbp_sim::scene::AntiGravityTweak {
+        thing,
+        gravity,
+        behavior: 0,
+        saved: 1.,
+    };
+    let a = lbp_sim::scene::AntiGravity {
+        cancelled: 1.5,
+        dampening: [0.; 3],
+        tweaks: vec![tweak(3, 1.), tweak(4, 0.5)],
+    };
+    assert_eq!(a.gravity_scale(|t| t.saved), 0.);
+    assert_eq!(a.gravity_scale(|_| 0.), 1.);
+    assert_eq!(
+        a.gravity_scale(|t| if t.thing == 3 { 0.25 } else { 1. }),
+        0.25
     );
 }

@@ -6635,3 +6635,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D508 the tutorial monitors in native Rust (2026-10-19)
 - level1 Part 9 (`docs/level1-play.md`): `TutorialMonitor` is a native port; without the
   overlay a switched-on monitor asks for its video (the game call is counted, unbound).
+
+## D509 the world script in native Rust (2026-10-19)
+- level1 Part 10 (`docs/level1-play.md`): `WorldMooCamera` (World) is a native port; the
+  time and score limits go to the scoreboard and fluff feeds the multiplier.
