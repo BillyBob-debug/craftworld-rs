@@ -14,6 +14,9 @@ use std::{
 const SECTOR: u64 = 2048;
 /// Kinds the viewer never reads: Bink and MP4 video, FMOD and MP3 audio, packages, firmware.
 const SKIPPED: &[&str] = &["BIK", "MP4", "FSB", "MP3", "PKG", "PUP"];
+/// Audio the viewer does read: the voice-over bank, whose headers time the Pod's voice-over
+/// waits (D397). Loose and unencrypted on the disc, about 19 MB.
+pub const KEPT_AUDIO: &[&str] = &["/PS3_GAME/USRDIR/GAMEDATA/AUDIO/VOICEOVER.FSB"];
 /// The disc this version reads (USA, 01.00 on the disc; other regions come later).
 pub const TITLE_ID: &str = "BCUS98245";
 
@@ -103,8 +106,9 @@ pub fn wanted(entries: &[Entry]) -> Vec<&Entry> {
         .filter(|e| e.path.starts_with("/PS3_GAME/"))
         .filter(|e| !e.path.starts_with("/PS3_GAME/USRDIR/GAMEDATA/VIDEOS/"))
         .filter(|e| {
-            let ext = e.path.rsplit_once('.').map(|(_, x)| x.to_ascii_uppercase());
-            !ext.is_some_and(|x| SKIPPED.contains(&x.as_str()))
+            let upper = e.path.to_ascii_uppercase();
+            let ext = upper.rsplit_once('.').map(|(_, x)| x);
+            KEPT_AUDIO.contains(&upper.as_str()) || !ext.is_some_and(|x| SKIPPED.contains(&x))
         })
         .collect()
 }
@@ -188,7 +192,7 @@ mod tests {
     /// video, written to a temporary file and listed back.
     #[test]
     fn lists_and_filters_a_small_image() {
-        let mut img = vec![0u8; 24 * SECTOR as usize];
+        let mut img = vec![0u8; 25 * SECTOR as usize];
         let s = |n: usize| n * SECTOR as usize;
         img[s(16)] = 1;
         img[s(16) + 1..s(16) + 6].copy_from_slice(b"CD001");
@@ -202,16 +206,45 @@ mod tests {
         game.extend(record(&[1], 18, 2048, true));
         game.extend(record(b"PARAM.SFO;1", 20, 9, false));
         game.extend(record(b"INTRO.BIK;1", 21, 4, false));
+        game.extend(record(b"USRDIR", 22, 2048, true));
         img[s(19)..s(19) + game.len()].copy_from_slice(&game);
         img[s(20)..s(20) + 9].copy_from_slice(b"BCUS98245");
+        // USRDIR/GAMEDATA/AUDIO holds the kept voice-over bank and a skipped music bank.
+        let mut usr = record(&[0], 22, 2048, true);
+        usr.extend(record(&[1], 19, 2048, true));
+        usr.extend(record(b"GAMEDATA", 23, 2048, true));
+        img[s(22)..s(22) + usr.len()].copy_from_slice(&usr);
+        let mut gd = record(&[0], 23, 2048, true);
+        gd.extend(record(&[1], 22, 2048, true));
+        gd.extend(record(b"AUDIO", 24, 2048, true));
+        img[s(23)..s(23) + gd.len()].copy_from_slice(&gd);
+        let mut audio = record(&[0], 24, 2048, true);
+        audio.extend(record(&[1], 23, 2048, true));
+        audio.extend(record(b"VOICEOVER.FSB;1", 20, 4, false));
+        audio.extend(record(b"MUSIC.FSB;1", 20, 4, false));
+        img[s(24)..s(24) + audio.len()].copy_from_slice(&audio);
         let path = std::env::temp_dir().join(format!("lbp-iso-test-{}.iso", std::process::id()));
         std::fs::write(&path, &img).unwrap();
         let mut f = File::open(&path).unwrap();
         let entries = list(&mut f).unwrap();
         let names: Vec<&str> = entries.iter().map(|e| e.path.as_str()).collect();
-        assert_eq!(names, ["/PS3_GAME/PARAM.SFO", "/PS3_GAME/INTRO.BIK"]);
+        assert_eq!(
+            names,
+            [
+                "/PS3_GAME/PARAM.SFO",
+                "/PS3_GAME/INTRO.BIK",
+                "/PS3_GAME/USRDIR/GAMEDATA/AUDIO/VOICEOVER.FSB",
+                "/PS3_GAME/USRDIR/GAMEDATA/AUDIO/MUSIC.FSB"
+            ]
+        );
         let kept: Vec<&str> = wanted(&entries).iter().map(|e| e.path.as_str()).collect();
-        assert_eq!(kept, ["/PS3_GAME/PARAM.SFO"]);
+        assert_eq!(
+            kept,
+            [
+                "/PS3_GAME/PARAM.SFO",
+                "/PS3_GAME/USRDIR/GAMEDATA/AUDIO/VOICEOVER.FSB"
+            ]
+        );
         assert!(contains(
             &param_sfo(&mut f, &entries).unwrap(),
             TITLE_ID.as_bytes()
