@@ -6607,3 +6607,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1015 no push without links (2026-10-19)
 - Part 162 (`docs/level-scripts/part-162.md`): with no pending link the unlock thread
   ends at once and pushes no group (corrects D1014).
+
+## D1016 the pod computer enters the Pod (2026-10-19)
+- Part 163 (`docs/level-scripts/part-163.md`): the pod computer's `OnEnterPod__` runs on
+  each entry to the Pod; no script restores the launching group's search.
