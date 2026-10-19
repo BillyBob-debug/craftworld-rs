@@ -6699,3 +6699,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1108 motors turn at the game's rate on their clock (2026-10-19)
 - Logic lane: a motor's speed is radians per frame times its switch clock (0xc7370);
   patterns 0 and 2 sweep on the piston rule's change per frame (0x95f494; P10).
+
+## D1109 gyroscopes and rotators turn their bodies (2026-10-19)
+- Logic lane: gyroscope tweakers turn their body upright at the game's stop-in-time
+  rate and rotators spin at their stored speed (packer 0x95fb20; docs/logic.md P11).

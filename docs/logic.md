@@ -391,12 +391,12 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   (648), direction 20 (344), sign split 27 (130), random 19 (1,213).
 - Sensors computed from the world: tag 4 (16,953), player 3 (5,627), impact 18
   (3,944; Part 15), camera finished 32 (2,760; Part 16), magic mouth 34 (1,426;
-  Part 17), projectile 39 (816) and paint 8 (51; Part 18).
-- Kept as stored (the world signal is not modelled yet): linear velocity 42 (771),
-  grab 6 (666), control pad 38 (535), key remote 54 (497), button 0 (224), motion
-  recorder 45 (142), angle 41 (126), 57 (123), angular velocity 43 (122), 65 (77),
-  lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55 (11),
-  trinary 2 (7).
+  Part 17), projectile 39 (816) and paint 8 (51; Part 18), linear velocity 42 (771)
+  and angular velocity 43 (122; Part 19).
+- Kept as stored (the world signal is not modelled yet): grab 6 (666), control pad 38
+  (535), key remote 54 (497), button 0 (224), motion recorder 45 (142), angle 41 (126),
+  57 (123), 65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44
+  (50), 55 (11), trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
 - The names come from docs/runtime-evidence/logic.md A4; types 55, 57 and 65 are past
@@ -528,3 +528,35 @@ and 39 to 0x11ca04.
 - lbp-runtime: arm `8 | 15 | 39` of `compute_output` and `projectile_step` in
   switches.rs; the countdown is `SwitchMemory.refresh`, loaded from bulletRefreshTime.
 - Test: `projectile_sensor_counts_and_empties_when_full` in switches.rs.
+
+## Part 19: the velocity switches (D1117)
+
+The linear velocity sensor (type 42, 771 placed) and the angular velocity sensor (type
+43, 122 placed) read the motion of a physics body each tick. compute_output's table
+sends both to 0x11d28c (linear 0x11d1d0, angular 0x11d2a8); nothing is stored.
+
+- Body: the switch Thing's parent's (Thing+0x5c), or the Thing's own with no parent.
+  With no body, or a body with +0x140 set, off (0x11bf08); linear is also off when that
+  Thing has no position (Thing+0x2c).
+- Scale: angleRange (PSwitch+0x7c, the float after minRadius at +0x74 and +0x78; the
+  angle switch 0x11cd3c reads it too). Mode: bulletsRequired (+0xcc).
+- Signal: value / scale, kept to [-1, 1]; ternary 1 at or above T, -1 at or below -T,
+  else 0, T 1.0 for linear (r2-0x4174) and 0.999 for angular (r2-0x3e10); player -1.
+  Inverted through the standard tail (table 0x11bfd4 entries 42, 43 → 0x11c16c).
+- Linear (0x11db10): 0 when the body's halfword +0xe is set; else the velocity of the
+  Thing's point, linear + s (r.y, -r.x), r the Thing's position less the body's centre
+  and s the angular velocity. ResetWhenFull (+0xe0, 0x11da58) turns it into the frame of
+  0x1141f4's matrix m: x' = x m.x + y m.y, y' = x m.y - y m.x. Modes: 1 y, 2 x, 3
+  max(-y, 0), 4 max(y, 0), 5 max(-x, 0), 6 max(x, 0), 0 and above 6 the speed.
+- Angular: the body's angular velocity w. Modes: 1 max(w, 0), 2 max(-w, 0), 0 and
+  above 2 w.
+- INFERRED: m is the unit x axis of the body Thing's world matrix (0x1141f4 may also
+  turn it to the nearest quarter turn). Not modelled: a Thing under an ancestor of
+  object kind 0x96 (0x3c594), which reads a joint's angle (0x1d3700) or motion
+  (0x1d315c) instead.
+- lbp-runtime: `velocity_sensor` in velocity.rs reads `ThingState.body`
+  (`BodyMotion { linear, centre, angular, still, inactive }`). The host does not fill it
+  yet, so velocity switches read off (or on when inverted) for now.
+- Tests: `linear_velocity_modes_scale_and_threshold`,
+  `linear_velocity_spin_and_local_frame`, `angular_velocity_modes_and_threshold` in
+  velocity.rs.
