@@ -6483,3 +6483,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D384 the game's own unlock sequence (2026-10-18)
 - Part 131 (`docs/level-scripts/part-131.md`): with the scripts, the Pod's own
   `LevelUnlockingThread` plays the new link and unlocks the next level.
+
+## D385 the links' growth (2026-10-18)
+- Part 132 (`docs/level-scripts/part-132.md`): pending links grow with the game's
+  own timing and their progress is kept for drawing.
