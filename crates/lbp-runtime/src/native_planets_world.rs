@@ -987,14 +987,18 @@ impl PlanetsWorldScript {
 
     /// D1005: `OnEnterPod__`. It clears the state, resets the interactive music
     /// (`ResetPodInteractiveMusic__`), restores the view type kept by `OnExitPod__` and
-    /// snaps all three views to it. FOUND: `WantLevelCreatedDialogue` is set when the
-    /// previous level's slot is of type 2 and the previous level is valid. INFERRED: the
-    /// world keeps no previous level yet, so it is cleared.
+    /// snaps all three views to it. D1007: `WantLevelCreatedDialogue` is set when the
+    /// previous level's slot is of type 2 (a user level stored locally) and the previous
+    /// level is valid.
     pub fn on_enter_pod(host: &mut dyn Host, this: u32) -> Result<(), String> {
         site(host, PLANETS_WORLD, "OnEnterPod__");
         set_member(host, this, "State", Value::Int(0))?;
         Self::reset_interactive_music(host, this)?;
-        set_member(host, this, "WantLevelCreatedDialogue", Value::Bool(false))?;
+        let previous = call(host, "Game", "GetPreviousLevelSlotID__", &[])?;
+        let kind = host.get_member(MemberKind::RefPtr, &previous, "SlotID", "Type")?;
+        let want =
+            as_int(&kind) == 2 && as_bool(&call(host, "Game", "IsPreviousLevelValid__", &[])?);
+        set_member(host, this, "WantLevelCreatedDialogue", Value::Bool(want))?;
         let kind = int(host, this, "LocalViewType");
         set_member(host, this, "ViewType", Value::Int(kind))?;
         set_member(host, this, "ViewTransition", Value::Float(1.))?;
@@ -1049,7 +1053,7 @@ impl PlanetsWorldScript {
         if as_int(&call(host, "Game", "GetNumPendingLinks__", &[])?) > 0 {
             return Self::set_state(host, this, 2);
         }
-        // `WantLevelCreatedDialogue` is only set by `OnEnterPod__` (D1005).
+        // `WantLevelCreatedDialogue` is only set by `OnEnterPod__` (D1005, D1007).
         Ok(())
     }
 

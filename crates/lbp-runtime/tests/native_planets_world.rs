@@ -9,7 +9,7 @@ use lbp_runtime::{
     PLANETS_WORLD_SCRIPT,
 };
 use lbp_script_vm::natives::Bindings;
-use lbp_script_vm::{Host, MemberKind, Value};
+use lbp_script_vm::{Host, MemberKind, ObjectId, Value};
 
 const WORLD: u32 = 0;
 const EARTH: u32 = 1;
@@ -37,6 +37,8 @@ fn host() -> Bindings<LevelWorld> {
             thing(None, at(EARTH_AT)),
             thing(None, at(MOON_AT)),
         ],
+        // D1007: the previous level's SlotID object (`add_engine_objects` makes it).
+        previous_level_slot: Some(ObjectId(1)),
         ..LevelWorld::default()
     };
     Bindings::new(world)
@@ -428,4 +430,27 @@ fn d1006_the_intro_video_is_playing() {
         h.world.media.tick();
     }
     assert_eq!(playing(&mut h), Ok(Value::Bool(false)));
+}
+
+/// D1007: entering the Pod wants the level-created dialogue only after a valid user level
+/// stored locally (slot type 2), as the game's `OnEnterPod__` asks.
+#[test]
+fn d1007_the_level_created_dialogue_follows_the_previous_level() {
+    for (previous, want) in [
+        ((2, 5), true),
+        ((2, 0), false),
+        ((0, 5), false),
+        ((0, 0), false),
+    ] {
+        let mut h = host();
+        h.world.previous_level_slot_id = previous;
+        run(&mut h, "OnCreate__", &[]);
+        frame(&mut h, true);
+        run(&mut h, "OnEnterPod__", &[]);
+        assert_eq!(
+            member(&mut h, "WantLevelCreatedDialogue"),
+            Value::Bool(want),
+            "previous slot {previous:?}"
+        );
+    }
 }
