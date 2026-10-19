@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1113 the impact switch (2026-10-19)
+## Latest: D1114 the camera finished switch (2026-10-19)
+- Logic lane: camera finished switches (2,760) follow the game's cutscene timer:
+  hold time, the 3-tick ending and 9 ticks after (docs/logic.md Part 16).
+
+## D1113 the impact switch (2026-10-19)
 - Logic lane: impact switches (3,944) follow the EBOOT rule from this tick's physics
   contacts: player mode, touching and the tag filter (docs/logic.md Part 15).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1107 winches run the piston rule (2026-10-19)
 - Logic lane: winches share the piston length function (0xc9790), so they wind and
   pay out on the piston clock; the rope only pulls (INFERRED, 0x960988 flag; P9).
-
-## D1106 speed pistons servo to their signal (2026-10-19)
-- Logic lane: a mode 4 piston runs its clock toward the analog signal's fraction of
-  its range, full speed until within a tenth (0xc9e80; docs/logic.md P8).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

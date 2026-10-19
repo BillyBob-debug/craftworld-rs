@@ -6,9 +6,9 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-15 (pistons; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-16 (pistons; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type, the random
-   and impact switches)
+   impact and camera finished switches)
 
 ## State
 - Owner (2026-10-19): "i think we might need to work on getting the games logic and
@@ -23,9 +23,10 @@
   followers); PR 252 (849bf6a: follower rows in game units per tick).
 - Merged: D1111 (PR 253, e164663): keyed followers follow tags.
 - Merged: D1112 (PR 254, 5c1ef1c): the switch census (Part 14) and the random switch.
-- D1113 (branch `logic-impact`, worktree `E:\Projects\wt-d324`): the impact switch
-  (docs/logic.md Part 15).
-- Decision numbers: D1100-D1199, next free D1114.
+- D1113 (branch `logic-impact`, PR 256): the impact switch (docs/logic.md Part 15).
+- D1114 (branch `logic-camera`, worktree `E:\Projects\wt-d324`, stacked on PR 256):
+  the camera finished switch and the cutscene timer (docs/logic.md Part 16).
+- Decision numbers: D1100-D1199, next free D1115.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -37,7 +38,7 @@
   tick 2008: the wobble bolt on microchip 57 swings at once, Part 10; after PR 252
   x 25,657 on tick 2003; after D1111 x 24,464 on tick 2005; after D1112
   x 24,464 on tick 2005, unchanged; after D1113 x 24,464 on tick 2005,
-  unchanged: nothing fills the contacts yet).
+  unchanged: nothing fills the contacts yet; after D1114 x 24,464 on tick 2005, unchanged: no cutscene camera on the route).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
@@ -59,8 +60,8 @@
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
 EBOOT rule and unit tests:
-1. The switches kept as stored (Part 14), by count: camera finished 32, magic mouth 34,
-   projectile 39, velocity 42 / 43, grab 6, control pad 38, key remote 54, button 0,
+1. The switches kept as stored (Part 14), by count: magic mouth 34, projectile 39,
+   velocity 42 / 43, grab 6, control pad 38, key remote 54, button 0,
    then the rest. The host must fill `LevelWorld.contacts` from avian2d (Things by
    `lbp_sim::ThingIndex`) for the impact switch (Part 15) to see anything.
 2. Sensors: the cone and layer tests (player, tag, grab, impact, proximity).
