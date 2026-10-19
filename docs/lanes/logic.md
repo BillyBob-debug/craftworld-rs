@@ -12,8 +12,9 @@
 - Owner (2026-10-19): "i think we might need to work on getting the games logic and
   circuits accurate in order to go further". The level1 lane is paused for this one.
 - D1100 merged (PR 241), D1101 (PR 242, e3337c2), D1102 (PR 243, 447b32d), D1103 (PR 244,
-  8f435e8). PR for D1104 (branch `logic-piston-modes`, worktree `E:\Projects\wt-d324`):
-  each piston's saved mode and held flag; direction pistons ramp out and back.
+  8f435e8), D1104 (PR 245, 0b2d19a: each piston's saved mode and held flag).
+- Paused by the owner (2026-10-19, "pause for now"). Branch `logic-piston-ends` in
+  `E:\Projects\wt-d324` is main plus this note; resume with Next item 1.
 - Decision numbers: D1100-D1199, next free D1105.
 
 ## Facts
