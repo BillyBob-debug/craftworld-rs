@@ -1068,6 +1068,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             follow_tweaks,
             drive_pistons,
             drive_winches,
+            drive_motors,
             follow_colour_correction,
             follow_things,
             follow_story_world,
@@ -2183,6 +2184,25 @@ fn drive_winches(
     let world = &play.host.world;
     let now = play.scripts.ticks as f32;
     lbp_sim::drive_winches(&mut commands, &mut q, now, |j| {
+        world
+            .input_signal(j.thing)
+            .map(|s| (s.ternary, s.activation))
+    });
+}
+
+/// D1108: motors turn at the game's angle rule on the piston clock
+/// ([`lbp_sim::drive_motors`]).
+fn drive_motors(
+    play: NonSend<Play>,
+    mut commands: Commands,
+    mut q: Query<(
+        &mut lbp_sim::PistonDrive,
+        &mut lbp_sim::avian2d::prelude::RevoluteJoint,
+    )>,
+) {
+    let world = &play.host.world;
+    let now = play.scripts.ticks as f32;
+    lbp_sim::drive_motors(&mut commands, &mut q, now, |j| {
         world
             .input_signal(j.thing)
             .map(|s| (s.ternary, s.activation))

@@ -458,8 +458,10 @@ fn string_stops_a_falling_box_at_its_length() {
 
 #[test]
 fn motor_turns_a_bolted_wheel_in_place() {
+    // D1108: pattern 1 turns at speed (rad per frame) × 30 ticks a second: 0.1 is 3 rad/s.
     let params = JointParams {
-        motion: [0., 0., 0., 3., 0., 0., 0., 0., 0., 0.],
+        animation_pattern: 1,
+        motion: [0., 0., 0., 0.1, 0., 0., 0., 0., 0., 0.],
         ..Default::default()
     };
     let things = vec![
@@ -958,4 +960,38 @@ fn d1107_a_winch_follows_the_piston_rule() {
     // pays out to its base length.
     assert!((d.step(200., Some((0, 0.))) / u - 200.).abs() < 1e-3);
     assert!((d.step(400., Some((0, 0.))) / u - 400.).abs() < 1e-3);
+}
+
+#[test]
+fn d1108_a_motor_turns_at_its_speed_on_its_clock() {
+    use lbp_sim::scene::{Endpoint, JointKind, PistonClock, SceneJoint};
+    let mut params = JointParams {
+        mode: 0,
+        animation_pattern: 1,
+        ..Default::default()
+    };
+    params.motion[3] = 0.05;
+    let mut d = lbp_sim::PistonDrive {
+        joint: SceneJoint {
+            thing: 0,
+            kind: JointKind::Motor,
+            a: Endpoint::Static(0),
+            b: Endpoint::Static(1),
+            world_a: [0.; 2],
+            world_b: [0.; 2],
+            local_a: [0.; 2],
+            local_b: [0.; 2],
+            length: 0.,
+            min_length: 0.,
+            max_length: 0.,
+            params,
+        },
+        clock: PistonClock::default(),
+    };
+    let hz = lbp_sim::TICK_HZ as f32;
+    // Free running: 0.05 rad per frame, one frame a tick.
+    assert!((d.turn(10., None) - 0.05 * hz).abs() < 1e-3);
+    // Switched (mode 0, on/off): it turns while on and stops when off.
+    assert!((d.turn(20., Some((1, 1.))) - 0.05 * hz).abs() < 1e-3);
+    assert!(d.turn(30., Some((0, 0.))).abs() < 1e-6);
 }

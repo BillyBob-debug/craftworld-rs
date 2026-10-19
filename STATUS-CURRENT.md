@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1107 winches run the piston rule (2026-10-19)
+## Latest: D1108 motors turn at the game's rate on their clock (2026-10-19)
+- Logic lane: a motor's speed is radians per frame times its switch clock (0xc7370);
+  patterns 0 and 2 sweep on the piston rule's change per frame (0x95f494; P10).
+
+## D1107 winches run the piston rule (2026-10-19)
 - Logic lane: winches share the piston length function (0xc9790), so they wind and
   pay out on the piston clock; the rope only pulls (INFERRED, 0x960988 flag; P9).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1101 anti-gravity tweakers follow their switch signals (2026-10-19)
 - Logic lane: a tweak reads its wired switch (digital, or analog magnitude) as the
   EBOOT does; the 3 wired tweakers in the Rookie Test now switch (docs/logic.md P3).
-
-## D1100 anti-gravity tweakers hold the Rookie Test walkway (2026-10-19)
-- Logic lane: tweakers are kept and configuration 0 cancels gravity as the EBOOT does;
-  the walkway stays up and the route reaches x 22,785 (docs/logic.md P1-P2).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

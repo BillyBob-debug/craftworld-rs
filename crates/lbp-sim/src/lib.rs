@@ -85,9 +85,6 @@ fn sv(p: [f32; 2]) -> Vector {
     Vector::new(p[0] * UNIT_SCALE, p[1] * UNIT_SCALE)
 }
 
-/// MOTOR joint target angular velocity (rad/s) per unit of the stored speed. PLACEHOLDER:
-/// the unit of PJoint speed is UNVERIFIED.
-pub const MOTOR_SPEED_SCALE: f32 = 1.0;
 /// Joint motors: share of the speed error removed per substep (avian `AccelerationBased`
 /// damping; above 1 it overshoots). Our choice; the motor strength is not modelled.
 pub const MOTOR_DAMPING: f32 = 0.5;
@@ -213,6 +210,19 @@ impl PistonDrive {
         self.clock.set_scale(now, s);
         self.joint.length(self.clock.frame(now), input.is_some()) * UNIT_SCALE
     }
+
+    /// D1108: steps the clock as [`Self::step`] does and returns the motor's turn rate in
+    /// rad/s: the change of its angle ([`scene::SceneJoint::motor_angle`]) over the next
+    /// frame of its clock, as the motor row builder 0x95f494 takes it (0xc99d0 at frame and
+    /// frame + 1), times [`TICK_HZ`] (one game frame per tick). Pattern 1 gives speed (+0xd4,
+    /// rad per frame) × clock rate, as 0xc7370 returns.
+    pub fn turn(&mut self, now: f32, input: Option<(i32, f32)>) -> f32 {
+        self.step(now, input);
+        let wired = input.is_some();
+        let f = self.clock.frame(now);
+        let a = |f| self.joint.motor_angle(f, wired);
+        (a(f + self.clock.scale) - a(f)) * TICK_HZ as f32
+    }
 }
 
 /// D1103: at tick `now` steps each piston ([`PistonDrive::step`]) with the `signal` on its
@@ -252,6 +262,26 @@ pub fn drive_winches(
             continue;
         }
         joint.limits = DistanceLimit::new(0., l);
+        wake_ends(commands, joint.body1, joint.body2);
+    }
+}
+
+/// D1108: at tick `now` sets each motor's (MOTOR, type 9) target turn rate from its clock
+/// and angle rule ([`PistonDrive::turn`]), waking both ends when it changed. INFERRED: the
+/// row's position term (error to the measure 0xc9250) and its strength cap are left out.
+pub fn drive_motors(
+    commands: &mut Commands,
+    q: &mut Query<(&mut PistonDrive, &mut RevoluteJoint)>,
+    now: f32,
+    signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32)>,
+) {
+    for (mut drive, mut joint) in q.iter_mut() {
+        let input = signal(&drive.joint);
+        let w = drive.turn(now, input);
+        if joint.motor.target_velocity == w {
+            continue;
+        }
+        joint.motor.target_velocity = w;
         wake_ends(commands, joint.body1, joint.body2);
     }
 }
@@ -443,15 +473,23 @@ fn spawn_joint(
     let mut e = commands.spawn((ThingIndex(j.thing), JointCollisionDisabled));
     match j.kind {
         scene::JointKind::Bolt => e.insert(pivot()),
-        scene::JointKind::Motor => e.insert(
-            pivot().with_motor(
-                AngularMotor::new(MotorModel::AccelerationBased {
-                    stiffness: 0.,
-                    damping: MOTOR_DAMPING,
-                })
-                .with_target_velocity(j.params.motion[3] * MOTOR_SPEED_SCALE),
-            ),
-        ),
+        scene::JointKind::Motor => {
+            let mut drive = PistonDrive {
+                joint: j.clone(),
+                clock: scene::PistonClock::default(),
+            };
+            let w = drive.turn(0., None);
+            e.insert(
+                pivot().with_motor(
+                    AngularMotor::new(MotorModel::AccelerationBased {
+                        stiffness: 0.,
+                        damping: MOTOR_DAMPING,
+                    })
+                    .with_target_velocity(w),
+                ),
+            )
+            .insert(drive)
+        }
         scene::JointKind::SpringAngular => e.insert(
             pivot().with_motor(
                 AngularMotor::new(MotorModel::SpringDamper {

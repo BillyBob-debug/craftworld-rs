@@ -6663,3 +6663,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D515 why the Rookie Test route stops at x -385 (2026-10-19)
 - Bumping the column at x -2940 wakes the whole frozen walkway row, which falls to the
   floor; we skip the tweakers and switches that hold it (docs/level1-play.md P16).
+
+## D1100 anti-gravity tweakers hold the Rookie Test walkway (2026-10-19)
+- Logic lane: tweakers are kept and configuration 0 cancels gravity as the EBOOT does;
+  the walkway stays up and the route reaches x 22,785 (docs/logic.md P1-P2).
