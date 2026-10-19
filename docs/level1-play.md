@@ -198,4 +198,26 @@ does not store reads as its `.init__` value (`StartPoint` 0, each pair 1).
 Test: `native_music::d506_the_native_trigger_music_plays_and_mutes` (synthetic Things,
 no script loaded).
 
-Not yet: the post-it notes, TutorialMonitor, WorldMooCamera, Score_Board.
+## Part 8: the post-it notes in native Rust (D507, 2026-10-19)
+
+Before: without the decrypted overlay Rookie Test's post-it notes ran no script, so
+another script asking a note for its text, or a switch wired to an unlock note, got
+nothing back.
+
+After: `PostItNote` (g000174fc, base `Tweakable`) and its unlock subclasses
+`PostItNoteUnlockStickers` (g0001e9cf), `PostItNoteUnlockSuicide` (g0001e9d0) and
+`PostItNoteUnlockCostume` (g0001e9b7) are ports in the D417 registry
+(`crates/lbp-runtime/src/native_postit.rs`). From the 01.33 listing: the note translates
+its `Text` as a LAMS key unless a player typed it, keeps a typed text's filtered and
+original forms (each cut to 256 units), upper-cases a new LAMS key, keeps a typed text
+in `OldUserEnteredText` when Webternate replaces it, and asks
+`PostItNote.IsVisibleInPlayMode__` whether it renders in play mode. An unlock note's
+`SwitchPerformReaction__b(true)` sets its progression flag (4864, 2048 or 128) every time
+it is on. Left out: the bubble drawing (`Render__`, `UpdateBubble__`, `RenderBubble__`;
+nothing calls a script's `Render__` yet) and the create-mode text entry. INFERRED:
+`SetLAMSKey__`'s inherited `SetNeedsUpdate__b(true)` sets `NeedUpdate` to 1.
+
+Test: `native_postit::d507_the_native_post_it_note_keeps_its_text_and_unlocks`
+(synthetic Things, no script loaded).
+
+Not yet: TutorialMonitor, WorldMooCamera, Score_Board.

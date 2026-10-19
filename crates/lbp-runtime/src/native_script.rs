@@ -83,6 +83,10 @@ pub const NATIVE_SCRIPTS: &[&dyn NativeScript] = &[
     &crate::native_bubble::TriggerSpeechBubbleScript,
     &crate::native_launcher::LauncherScript,
     &crate::native_music::TriggerMusicScript,
+    &crate::native_postit::POST_IT_NOTE_PORT,
+    &crate::native_postit::POST_IT_NOTE_UNLOCK_STICKERS,
+    &crate::native_postit::POST_IT_NOTE_UNLOCK_SUICIDE,
+    &crate::native_postit::POST_IT_NOTE_UNLOCK_COSTUME,
 ];
 
 /// The native port of the script with this GUID.
