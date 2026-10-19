@@ -6627,3 +6627,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D506 the music triggers in native Rust (2026-10-19)
 - level1 Part 7 (`docs/level1-play.md`): `TriggerMusic` is a native port; without the
   overlay Rookie Test's 9 music triggers start the interactive music as the script does.
+
+## D507 the post-it notes in native Rust (2026-10-19)
+- level1 Part 8 (`docs/level1-play.md`): `PostItNote` and its three unlock notes are
+  native ports; without the overlay a note keeps its text, an unlock note sets its flag.

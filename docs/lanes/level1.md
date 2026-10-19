@@ -5,15 +5,15 @@
    "Part 6" (native Launcher); Parts 7-11: TriggerMusic, PostItNote,
    TutorialMonitor, WorldMooCamera, Score_Board; Part 12: the route's call trace;
    Part 13: the bubble in that trace; Part 14: class defaults for native runs;
-   Part 15: the VM runs `.init__`
+   Part 15: the VM runs `.init__`; Part 16: why the route stops at x -385
 2. crates/lbp-runtime/src/native_script.rs (the D417 registry), native_bubble.rs and
    native_launcher.rs (the smallest port, a template for the next ones)
 
 ## State
-- PRs 155 (D504), 228-235 (D505-D512) and 236 (D513, native class defaults) merged.
-  PR for D514 (branch `level1-vm-init`, worktree `E:\Projects\wt-d324`): the VM runs
-  Thing script classes' `.init__` for unstored members; for the coordinator.
-- Decision numbers: D504-599, next free D515.
+- PRs 155 (D504), 228-236 (D505-D513) and 237 (D514, the VM runs `.init__`) merged.
+  PR for D515 (branch `level1-floor-row`, worktree `E:\Projects\wt-d324`): Part 16,
+  findings only. The lane pauses for the logic lane (owner, 2026-10-19).
+- Decision numbers: D504-599, next free D516.
 
 ## Facts
 - Route run: `--level-guid 0001e786 --level-scripts --play-sackboy --qa-hide-ui
@@ -45,8 +45,9 @@
    D507), TutorialMonitor (done, D508), WorldMooCamera (done, D509), Score_Board
    (done, D510). Route traced natively with and without the overlay (D511, Part 12).
    Bubble port in the trace (D512, Part 13). Class defaults without the script (D513,
-   Part 14). The VM runs `.init__` (D514, Part 15). Next: Score_Board's per-frame
-   `ScoreboardGooey` path, which the port leaves out (12,022 VM events, Part 12).
-2. The route past x -385: a game reference (RPCS3 F12 frames past line 2) or jumps there.
+   Part 14). The VM runs `.init__` (D514, Part 15). All nine classes are ported; the
+   per-frame `ScoreboardGooey` path is UI and stays out of this lane.
+2. The route past x -385: the walkway row falls when Sackboy bumps the column at x -2940
+   (Part 16). Waits on the logic lane's answer for `frozen` bodies and tweakers.
 3. The camera at x -938 (a frame at tick 1600 looks through a front wall).
 4. Sackboy pushed into a wall turns to the camera and plays `stand`, not a push.
