@@ -391,12 +391,12 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   (648), direction 20 (344), sign split 27 (130), random 19 (1,213).
 - Sensors computed from the world: tag 4 (16,953), player 3 (5,627), impact 18
   (3,944; Part 15), camera finished 32 (2,760; Part 16), magic mouth 34 (1,426;
-  Part 17).
-- Kept as stored (the world signal is not modelled yet): projectile 39 (816),
-  linear velocity 42 (771), grab 6 (666), control pad 38 (535), key remote 54 (497),
-  button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123), angular velocity
-  43 (122), 65 (77), lever 1 (74), sticker 5 (68), score 30 (51), paint 8 (51),
-  movinator pad 44 (50), 55 (11), trinary 2 (7).
+  Part 17), projectile 39 (816) and paint 8 (51; Part 18).
+- Kept as stored (the world signal is not modelled yet): linear velocity 42 (771),
+  grab 6 (666), control pad 38 (535), key remote 54 (497), button 0 (224), motion
+  recorder 45 (142), angle 41 (126), 57 (123), angular velocity 43 (122), 65 (77),
+  lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55 (11),
+  trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
 - The names come from docs/runtime-evidence/logic.md A4; types 55, 57 and 65 are past
@@ -502,3 +502,29 @@ address is at +0x2e3c.
 - INFERRED: with no script, or no such member, off.
 - lbp-runtime: `magic_mouth` in switches.rs reads `ThingState.members`.
 - Test: `magic_mouth_reads_its_end_signal_frames` in switches.rs.
+
+## Part 18: the projectile and paint switches (D1116)
+
+The projectile sensor (type 39, 816 placed) and the paint sensor (type 8, 51 placed)
+count hits like the counter. compute_output's jump table (0x11be00) sends types 8, 15
+and 39 to 0x11ca04.
+
+- Activation: BulletsDetected (PSwitch+0x18) / BulletsRequired (+0xcc, at least 1),
+  clamped to 0..1. The player is the one stored with the count (+0x14).
+- Ternary (0x11873c): the counter is on when full (0x1187e8); paint and projectile take
+  the timer's rule (0x118874): 0 at 0, 1 when full, otherwise held from the output.
+- End of update (table 0x124b0c entries 8 and 39 → 0x124c1c → 0x10d5f8): a running
+  BulletRefreshTime (+0x1c) goes down by one, and at 0 the sensor empties (0x10a504:
+  count 0, player -1). With none running, a projectile sensor with ResetWhenFull
+  (+0xe0) whose count has reached BulletsRequired starts one of 6 ticks. A paint sensor
+  first checks the hits it holds (0x10d690, not modelled), so it never starts one here.
+- Hits (0x11dcb8): the count goes up by n, never above BulletsRequired or below 0 (such
+  a hit changes nothing), and the player is kept unless it is -1. A projectile hit
+  (0x373914, in 0x37349c) passes 1; a message (0x11f650) passes its own amount. The
+  game also checks a tag key (0x11dd0c) and a player mask (0xf9a64), not modelled.
+- Which hits count (0x10b6f0, by the projectile's kind byte, not modelled yet): a paint
+  sensor takes only paint (0x8f); a projectile sensor by BulletTypes (+0xc4): 0 any but
+  paint, 1 0x8c, 2 0x8d, 3 0x8e, 4 0x8b, above 4 none.
+- lbp-runtime: arm `8 | 15 | 39` of `compute_output` and `projectile_step` in
+  switches.rs; the countdown is `SwitchMemory.refresh`, loaded from bulletRefreshTime.
+- Test: `projectile_sensor_counts_and_empties_when_full` in switches.rs.

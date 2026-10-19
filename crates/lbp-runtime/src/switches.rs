@@ -73,7 +73,13 @@ pub struct SwitchMemory {
     /// The random switch's phase (PSwitch+0x24): ticks left on (positive) or off
     /// (negative); 0 picks on the next step ([`random_tick`]).
     pub phase: i32,
+    /// BulletRefreshTime (PSwitch+0x1c, the random switch's seed slot): ticks until a
+    /// full projectile or paint sensor empties ([`LevelWorld::projectile_step`]).
+    pub refresh: i32,
 }
+
+/// Ticks a full projectile sensor stays full before it empties (FOUND, 0x10d660).
+pub const PROJECTILE_RESET_TICKS: i32 = 6;
 
 /// The random switch's settings (PSwitch+0xa8..=0xbc, FOUND): the behaviour, the pick
 /// pattern and the on and off times in ticks (30 per second INFERRED). The AND / OR
@@ -434,16 +440,23 @@ pub fn compute_output(
             player: memory.manual.player,
         }),
         35 => off(),
-        // COUNTDOWN (counter), 0x11ca04, FOUND: count / target, on when full.
-        15 => {
+        // COUNTDOWN (counter), PAINT and PROJECTILE, 0x11ca04, FOUND: count / target.
+        // The counter is on when full (0x1187e8); paint and projectile sensors take the
+        // timer's ternary (0x118874).
+        8 | 15 | 39 => {
             let activation = clamp(
                 memory.count as f32 / s.bullets_required.max(1) as f32,
                 0.,
                 1.,
             );
+            let ternary = if s.switch_type == 15 {
+                i32::from(activation >= 1.)
+            } else {
+                timer_ternary(cx, activation)
+            };
             standard(SwitchInput {
                 activation,
-                ternary: i32::from(activation >= 1.),
+                ternary,
                 player: memory.manual.player,
             })
         }
@@ -1239,6 +1252,57 @@ impl LevelWorld {
         }
     }
 
+    /// A projectile or paint sensor takes `n` hits by `player` (FOUND, 0x11dcb8; a
+    /// projectile hit passes 1 from 0x373914). The count may not go above
+    /// BulletsRequired or below 0: such a hit changes nothing and returns false. Otherwise
+    /// the count goes up by `n` and the player is kept unless it is -1. Not modelled: the
+    /// tag key and player mask checks (0x11dd0c, 0xf9a64) and which projectiles a sensor
+    /// takes (0x10b6f0, docs/logic.md Part 18).
+    pub fn projectile_hit(&mut self, thing: u32, player: i32, n: i32) -> bool {
+        let Some(s) = self
+            .things
+            .get_mut(thing as usize)
+            .and_then(|t| t.switch.as_mut())
+        else {
+            return false;
+        };
+        let count = s.memory.count + n;
+        if count > s.bullets_required || count < 0 {
+            return false;
+        }
+        if player != -1 {
+            s.memory.manual.player = player;
+        }
+        s.memory.count = count;
+        true
+    }
+
+    /// The step of a projectile (39) or paint (8) sensor at the end of its update (FOUND,
+    /// 0x10d5f8 from table 0x124b0c). A refresh count above 0 goes down by one; when it
+    /// reaches 0 the sensor empties: count 0 and player -1 (0x10a504). With no refresh
+    /// running, a projectile sensor with ResetWhenFull whose count has reached
+    /// BulletsRequired starts one of [`PROJECTILE_RESET_TICKS`]. Not modelled: a paint
+    /// sensor's start of the refresh, which first checks the hits it holds (0x10d690).
+    fn projectile_step(&mut self, thing: u32) {
+        let Some(s) = self
+            .things
+            .get_mut(thing as usize)
+            .and_then(|t| t.switch.as_mut())
+        else {
+            return;
+        };
+        let m = &mut s.memory;
+        if m.refresh != 0 {
+            m.refresh -= 1;
+            if m.refresh == 0 {
+                m.manual.player = -1;
+                m.count = 0;
+            }
+        } else if s.switch_type == 39 && s.reset_when_full && m.count >= s.bullets_required {
+            m.refresh = PROJECTILE_RESET_TICKS;
+        }
+    }
+
     /// One tick of one PSwitch: computes and writes each output's signal, applies it to
     /// the output's targets ([`Self::apply_signal`]) and returns the targets visited, in
     /// output then target order. Null outputs and targets with a null Thing are skipped.
@@ -1336,6 +1400,9 @@ impl LevelWorld {
         }
         if !deactivated && switch_type == 19 {
             self.random_step(thing);
+        }
+        if !deactivated && matches!(switch_type, 8 | 39) {
+            self.projectile_step(thing);
         }
         visits
     }
@@ -1918,6 +1985,56 @@ mod tests {
             w.update_switches();
         }
         assert_eq!(state(&mut w, 2).memory.count, 1);
+    }
+
+    #[test]
+    fn projectile_sensor_counts_and_empties_when_full() {
+        let mut w = world(vec![logic(39, 1)]);
+        state(&mut w, 0).bullets_required = 4;
+        // Hits: the count goes up, never past BulletsRequired; player -1 keeps the player.
+        assert!(w.projectile_hit(0, 2, 3));
+        assert!(!w.projectile_hit(0, 1, 2));
+        assert!(w.projectile_hit(0, -1, 1));
+        assert_eq!(state(&mut w, 0).memory.count, 4);
+        assert_eq!(state(&mut w, 0).memory.manual.player, 2);
+        assert!(!w.projectile_hit(0, 1, -5));
+        let set = |w: &mut LevelWorld, count: i32| {
+            state(w, 0).memory.count = count;
+            state(w, 0).memory.manual.player = 1;
+            w.update_switches();
+            out(w, 0, 0)
+        };
+        // Empty: off. Part full: the activation, the ternary held from output 0 (off).
+        assert_eq!(set(&mut w, 0), sig(0., 0, 1));
+        assert_eq!(set(&mut w, 2), sig(0.5, 0, 1));
+        // Full: on; the count stays without ResetWhenFull.
+        assert_eq!(set(&mut w, 4), sig(1., 1, 1));
+        // Back below full: the held ternary keeps it on until it reaches 0.
+        assert_eq!(set(&mut w, 3), sig(0.75, 1, 1));
+        assert_eq!(set(&mut w, 0), sig(0., 0, 1));
+        assert_eq!(set(&mut w, 9), sig(1., 1, 1));
+        assert_eq!(state(&mut w, 0).memory.refresh, 0);
+        // ResetWhenFull: full starts a refresh of 6 ticks, then it empties (player -1).
+        state(&mut w, 0).reset_when_full = true;
+        w.update_switches();
+        assert_eq!(state(&mut w, 0).memory.refresh, PROJECTILE_RESET_TICKS);
+        for _ in 0..PROJECTILE_RESET_TICKS {
+            w.update_switches();
+            assert_eq!(out(&w, 0, 0), sig(1., 1, 1));
+        }
+        assert_eq!(state(&mut w, 0).memory.count, 0);
+        assert_eq!(state(&mut w, 0).memory.manual.player, -1);
+        w.update_switches();
+        assert_eq!(out(&w, 0, 0), sig(0., 0, -1));
+        // A paint sensor computes the same way but does not start a refresh itself.
+        let mut w = world(vec![logic(8, 1)]);
+        state(&mut w, 0).bullets_required = 1;
+        state(&mut w, 0).reset_when_full = true;
+        assert_eq!(set(&mut w, 1), sig(1., 1, 1));
+        assert_eq!(state(&mut w, 0).memory.refresh, 0);
+        // Inverted, an empty sensor is on.
+        state(&mut w, 0).inverted = true;
+        assert_eq!(set(&mut w, 0).ternary, 1);
     }
 
     #[test]
