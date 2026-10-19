@@ -51,7 +51,7 @@ fn d506_the_native_trigger_music_plays_and_mutes() {
     let mut vm = Vm::default();
     let mut world = LevelWorld::from_things(&music_level());
     world.bind_objects(&mut vm);
-    world.add_class_defaults(&vm);
+    world.add_class_defaults(&mut vm);
     assert_eq!(world.things[1].script_classes[0], "TriggerMusic");
     let mut host = Bindings::defaulting(world);
     let mut scripts = LevelScripts::new(&vm, &host.world);

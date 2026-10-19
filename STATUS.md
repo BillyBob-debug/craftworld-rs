@@ -6623,3 +6623,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D505 the launch pads in native Rust (2026-10-19)
 - level1 Part 6 (`docs/level1-play.md`): `Launcher` is a native port; without the
   overlay Rookie Test's 19 launch pads set their sprite lights as the script does.
+
+## D506 the music triggers in native Rust (2026-10-19)
+- level1 Part 7 (`docs/level1-play.md`): `TriggerMusic` is a native port; without the
+  overlay Rookie Test's 9 music triggers start the interactive music as the script does.

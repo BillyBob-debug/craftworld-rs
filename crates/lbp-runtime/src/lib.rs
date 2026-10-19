@@ -1126,12 +1126,16 @@ impl LevelWorld {
     }
 
     /// Gives every scripted Thing whose class is loaded the fields of its class and
-    /// superclasses that the instance does not store, at their type defaults. The stored
-    /// layout only carries serialized fields: a superclass field such as
+    /// superclasses that the instance does not store, at their `.init__` values. The
+    /// stored layout only carries serialized fields: a superclass field such as
     /// `Tweakable.IsTweaking` (read by `Trigger_Speech_Bubble.Update`) is never stored but
     /// still exists on the instance (INFERRED, the way `instantiate` builds script objects).
-    pub fn add_class_defaults(&mut self, vm: &Vm) {
+    ///
+    /// D514: fields the class's `.init__` sets take that value, so stored fields override
+    /// the class's initialisers, as the level's instance does (tsb-spec, "Fields").
+    pub fn add_class_defaults(&mut self, vm: &mut Vm) {
         self.classes_resolved = true;
+        let mut scratch = Bindings::defaulting(LevelWorld::default());
         for t in &mut self.things {
             let Some((guid, class)) = t.script_guid.and_then(|g| Some((g, vm.class_by_guid(g)?)))
             else {
@@ -1155,9 +1159,10 @@ impl LevelWorld {
             {
                 self.score_board_scripts.insert(guid);
             }
-            let Ok(defaults) = vm.field_defaults(class) else {
+            let Ok(mut defaults) = vm.field_defaults(class) else {
                 continue;
             };
+            defaults.extend(class_init(vm, &mut scratch, class));
             let members = t.members.get_or_insert_with(BTreeMap::new);
             for (name, v) in defaults {
                 members.entry(name).or_insert(v);
@@ -2652,6 +2657,29 @@ impl World for LevelWorld {
 
 /// Gooey objects made ahead for `Gooey.CreateGooey__i`.
 pub const GOOEY_POOL: usize = 16;
+
+/// Instructions for one class's `.init__` in [`class_init`].
+const INIT_BUDGET: u64 = 100_000;
+
+/// D514: the members a Thing script class's `.init__` sets, run on a stand-in Thing 0 of
+/// `scratch` (an otherwise empty world: field initialisers are constants and new objects).
+/// Empty when the class has no `.init__` or it faults or yields.
+fn class_init(
+    vm: &mut Vm,
+    scratch: &mut Bindings<LevelWorld>,
+    class: ClassId,
+) -> BTreeMap<String, Value> {
+    if !vm.has_code(class, ".init__") {
+        return BTreeMap::new();
+    }
+    scratch.world.things = vec![ThingState::default()];
+    let mut budget = INIT_BUDGET;
+    let this = [(0, Value::Thing(Some(0)))];
+    match vm.start_registers(scratch, class, ".init__", &this, &mut budget) {
+        Ok(Step::Done(_)) => scratch.world.things[0].members.take().unwrap_or_default(),
+        _ => BTreeMap::new(),
+    }
+}
 
 /// Runs `function` (`.init__`, `.ctor__`) on a heap object with it as `this` in register 0;
 /// a fault comes back as text with its site.

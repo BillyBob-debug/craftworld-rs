@@ -52,7 +52,7 @@ fn d510_the_native_scoreboard_finishes_the_level_when_everyone_is_in() {
     let a = world.add_player([0.; 3], (0., 0.));
     let b = world.add_player([0.; 3], (0., 0.));
     world.bind_objects(&mut vm);
-    world.add_class_defaults(&vm);
+    world.add_class_defaults(&mut vm);
     assert_eq!(world.things[1].script_classes[0], "Score_Board");
     let mut host = Bindings::defaulting(world);
     let mut scripts = LevelScripts::new(&vm, &host.world);

@@ -2918,7 +2918,7 @@ fn run() -> Result<(), String> {
         runs.insert("play".into(), play_level(&mut vm, world, opts).json);
     }
     if let (false, Some(mut world)) = (entries.is_empty(), last_world) {
-        world.add_class_defaults(&vm);
+        world.add_class_defaults(&mut vm);
         world.progression_flags = flags;
         let mut host = Bindings::new(world);
         let found = instances(&vm, &host.world);

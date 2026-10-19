@@ -4,15 +4,16 @@
 1. docs/level1-play.md, sections "Part 5" (native speech bubble, the script trace) and
    "Part 6" (native Launcher); Parts 7-11: TriggerMusic, PostItNote,
    TutorialMonitor, WorldMooCamera, Score_Board; Part 12: the route's call trace;
-   Part 13: the bubble in that trace; Part 14: class defaults for native runs
+   Part 13: the bubble in that trace; Part 14: class defaults for native runs;
+   Part 15: the VM runs `.init__`
 2. crates/lbp-runtime/src/native_script.rs (the D417 registry), native_bubble.rs and
    native_launcher.rs (the smallest port, a template for the next ones)
 
 ## State
-- PRs 155 (D504), 228-234 (D505-D511) and 235 (D512, the bubble in the trace) merged.
-  PR for D513 (branch `level1-native-defaults`, worktree `E:\Projects\wt-d324`): native
-  ports give their class defaults to the Thing; for the coordinator.
-- Decision numbers: D504-599, next free D514.
+- PRs 155 (D504), 228-235 (D505-D512) and 236 (D513, native class defaults) merged.
+  PR for D514 (branch `level1-vm-init`, worktree `E:\Projects\wt-d324`): the VM runs
+  Thing script classes' `.init__` for unstored members; for the coordinator.
+- Decision numbers: D504-599, next free D515.
 
 ## Facts
 - Route run: `--level-guid 0001e786 --level-scripts --play-sackboy --qa-hide-ui
@@ -24,8 +25,8 @@
   --game-dir "game-data/a1-disc;game-data/a1-update-0133"` (the d133 edat snapshot needs
   the overlay). Lines open 63/419/882, close 120/600/1150, same as with the overlay.
 - Trace check: the route with the overlay, once plain and once with `--native-scripts`,
-  traced with the D417 trace (lbp_script_vm::trace). Known difference: 21
-  `OnCreate__ set HasUpdateWorkToDo` (VM skips `.init__` on Thing scripts).
+  traced with the D417 trace (lbp_script_vm::trace). The 21 tick-0 `Update__` runs
+  agree since D514.
 - D511 call trace: add `--level-scripts-calls local-analysis/level1/p12/<new>.json` to the
   route run; compare with a short script (Counter of site, kind, name).
 - Rookie Test classes: PostItNote 165, Trigger_Speech_Bubble 21, Launcher 19,
@@ -44,7 +45,8 @@
    D507), TutorialMonitor (done, D508), WorldMooCamera (done, D509), Score_Board
    (done, D510). Route traced natively with and without the overlay (D511, Part 12).
    Bubble port in the trace (D512, Part 13). Class defaults without the script (D513,
-   Part 14). Next: the 21 tick-0 `Update__` runs, if the VM learns to run `.init__`.
+   Part 14). The VM runs `.init__` (D514, Part 15). Next: Score_Board's per-frame
+   `ScoreboardGooey` path, which the port leaves out (12,022 VM events, Part 12).
 2. The route past x -385: a game reference (RPCS3 F12 frames past line 2) or jumps there.
 3. The camera at x -938 (a frame at tick 1600 looks through a front wall).
 4. Sackboy pushed into a wall turns to the camera and plays `stand`, not a push.

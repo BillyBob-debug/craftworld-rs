@@ -365,3 +365,18 @@ error (`IsTweaking` 533, the three VoIP flags 524 each, `NeedsMoveControllerFixu
 the rest) now return the values the VM reads. The event count is unchanged (260,495), as
 the port used the same values as its fallbacks. The 21 tick-0 runs from the VM skipping
 `.init__` remain (Part 5).
+
+## Part 15: the VM runs the classes' `.init__` (D514, 2026-10-19)
+
+The VM started a scripted Thing's unstored members at their type defaults: it never ran
+the class's `.init__` (Part 5), so `HasUpdateWorkToDo` began false and the 21 bubbles
+skipped the first loop turn's `Update__`. `add_class_defaults` (now `&mut Vm`) runs each
+loaded class's `.init__` on a stand-in Thing in an empty world and gives the Thing the
+members it sets, then the type defaults for the rest; stored members still win, as the
+level's instance overrides the initialisers (tsb-spec, "Fields"). All nine Rookie Test
+classes' `.init__` run without a fault.
+
+OBSERVED (the Part 4 route with the overlay, `calls-vminit2`): the bubble events go from
+165,476 to 165,644 (native 165,728) and the bubble differences in the Part 12 comparison
+reduce to the `GetDescendentWithPTrigger` calls (Part 13). The other classes' events are
+unchanged, the parity set passes and Sackboy ends at x -384.6 as before.

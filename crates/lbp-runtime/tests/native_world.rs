@@ -42,7 +42,7 @@ fn d509_the_native_world_counts_down_and_keeps_the_multiplier() {
     let mut vm = Vm::default();
     let mut world = LevelWorld::from_things(&world_level());
     world.bind_objects(&mut vm);
-    world.add_class_defaults(&vm);
+    world.add_class_defaults(&mut vm);
     assert_eq!(world.things[0].script_classes[0], "WorldMooCamera");
     assert_eq!(world.things[0].script_classes[1], "World");
     let mut host = Bindings::defaulting(world);

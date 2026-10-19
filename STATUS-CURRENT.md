@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D513 class defaults for native runs (2026-10-19)
+## Latest: D514 the VM runs scripts' .init__ for Thing members (2026-10-19)
+- The VM gives scripted Things the members their class `.init__` sets before the stored
+  ones; the bubbles' 21 tick-0 `Update__` runs now match native (docs/level1-play.md P15).
+
+## D513 class defaults for native runs (2026-10-19)
 - level1 Part 14 (`docs/level1-play.md`): native ports give their class defaults, so
   reads of members the level does not store return the VM's values, not errors.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D507 the post-it notes in native Rust (2026-10-19)
 - level1 Part 8 (`docs/level1-play.md`): `PostItNote` and its three unlock notes are
   native ports; without the overlay a note keeps its text, an unlock note sets its flag.
-
-## D506 the music triggers in native Rust (2026-10-19)
-- level1 Part 7 (`docs/level1-play.md`): `TriggerMusic` is a native port; without the
-  overlay Rookie Test's 9 music triggers start the interactive music as the script does.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

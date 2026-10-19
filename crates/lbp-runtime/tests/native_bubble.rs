@@ -67,7 +67,7 @@ fn d504_the_native_bubble_opens_closes_and_pulses_without_the_script() {
     let mut vm = Vm::default();
     let mut world = LevelWorld::from_things(&bubble_level());
     world.bind_objects(&mut vm);
-    world.add_class_defaults(&vm);
+    world.add_class_defaults(&mut vm);
     // The class's names and its `.init__` values for the fields the level does not store.
     assert_eq!(world.things[1].script_classes[0], "Trigger_Speech_Bubble");
     // D513: the port's defaults fill the members, so reads of them find a value.

@@ -56,7 +56,7 @@ fn d505_the_native_launcher_sets_its_light() {
     let mut vm = Vm::default();
     let mut world = LevelWorld::from_things(&launcher_level());
     world.bind_objects(&mut vm);
-    world.add_class_defaults(&vm);
+    world.add_class_defaults(&mut vm);
     assert_eq!(world.things[1].script_classes[0], "Launcher");
     let mut host = Bindings::defaulting(world);
     let mut scripts = LevelScripts::new(&vm, &host.world);
