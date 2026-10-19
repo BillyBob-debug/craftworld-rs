@@ -409,3 +409,23 @@ fn d1005_entering_the_pod_restores_its_view() {
     let music = h.world.media.music.clone().expect("no music set");
     assert_eq!(music.pair_volumes, [1., 0., 0., 1., 1., 0.]);
 }
+
+/// D1006: `Video.IsVideoPlaying__` answers true from the intro video's start until
+/// `UpdateVideo` finishes it (FOUND 0x6793ec: the video manager's slot is in use).
+#[test]
+fn d1006_the_intro_video_is_playing() {
+    use lbp_script_vm::natives::World;
+    let mut h = host();
+    h.world.media.video_lengths.insert(139230, 1200);
+    let playing = |h: &mut Bindings<LevelWorld>| h.world.state_query("Video.IsVideoPlaying__");
+    assert_eq!(playing(&mut h), Ok(Value::Bool(false)));
+    run(&mut h, "OnCreate__", &[]);
+    frame(&mut h, true);
+    h.world.media.tick();
+    assert_eq!(playing(&mut h), Ok(Value::Bool(true)));
+    while member(&mut h, "State") == Value::Int(1) {
+        frame(&mut h, false);
+        h.world.media.tick();
+    }
+    assert_eq!(playing(&mut h), Ok(Value::Bool(false)));
+}
