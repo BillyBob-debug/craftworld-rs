@@ -149,6 +149,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 143: a group's lock (2026-10-19, D396)](level-scripts/part-143.md)
 - [Part 144: voice-over timing (2026-10-19, D397)](level-scripts/part-144.md)
 - [Part 145: the native intro's voice-over (2026-10-19, D398)](level-scripts/part-145.md)
+- [Part 146: the unlock voice-overs (2026-10-19, D399)](level-scripts/part-146.md)
 
 ## Next
 
