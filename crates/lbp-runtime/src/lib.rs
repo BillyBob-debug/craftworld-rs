@@ -1445,6 +1445,8 @@ impl LevelWorld {
         // D370: the menu frames that have transitioned out go before the next frame.
         self.gooey.prune_transitioned_out(self.pworld.frame);
         self.pworld.frame = self.pworld.frame.wrapping_add(1);
+        // D397: the line that plays has one tick less to go.
+        self.media.tick();
         self.pworld.sim_frame = self.pworld.sim_frame.wrapping_add(1);
         // D340: the info bubble's page counts its frames from when it is first up.
         let up = self.story_open() && self.pod.search.default_result.is_some();
@@ -2320,8 +2322,9 @@ impl World for LevelWorld {
     /// false. Nothing here opens the start menu, and no player has a Popit to take a
     /// photo with.
     ///
-    /// D271: `Audio.IsVoiceOverPlaying__` is false: no line ever starts
-    /// ([`LevelWorld::media`]), and false is the game's answer while none plays (FOUND).
+    /// D397: `Audio.IsVoiceOverPlaying__` is true while a started line has ticks left
+    /// ([`MediaState::voice_over_playing`]); with no voice-over bank no line starts
+    /// and it is false, the game's answer while none plays (FOUND, D271).
     /// `Profile.HasPlayedLBP1AndUnlockedPod__` and `...UnlockedMoon__` are false
     /// (INFERRED: a profile without save data of the first game, as the fresh profile
     /// of the progression flags).
@@ -2331,6 +2334,8 @@ impl World for LevelWorld {
     /// the retail game, and no user message being sent.
     fn state_query(&mut self, native: &str) -> Result<Value, String> {
         Ok(match native {
+            "Audio.IsVoiceOverPlaying__" => Value::Bool(self.media.voice_over_playing()),
+            "Audio.RequestVoiceOver.started" => Value::Bool(self.media.last_started),
             "GameMessagingManager.Messaging_ShouldFilterMessageStrings__" => {
                 Value::Bool(self.level_slot_id.0 != 2)
             }
@@ -2353,7 +2358,6 @@ impl World for LevelWorld {
             "ModalOverlay.IsPartyLeaderOverlayActive__"
             | "Game.IsStartMenuOpen__"
             | "Pod.IsTakingPhoto__Q5Thing"
-            | "Audio.IsVoiceOverPlaying__"
             | "Profile.HasPlayedLBP1AndUnlockedPod__"
             | "Profile.HasPlayedLBP1AndUnlockedMoon__" => Value::Bool(false),
             "Game.IsVcrPaused__" | "Game.IsPSNDemoBuild__" => Value::Bool(false),
