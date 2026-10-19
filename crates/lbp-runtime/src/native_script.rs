@@ -82,6 +82,7 @@ pub const NATIVE_SCRIPTS: &[&dyn NativeScript] = &[
     &crate::PLANETS_WORLD_PORT,
     &crate::native_bubble::TriggerSpeechBubbleScript,
     &crate::native_launcher::LauncherScript,
+    &crate::native_music::TriggerMusicScript,
 ];
 
 /// The native port of the script with this GUID.

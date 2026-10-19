@@ -6591,3 +6591,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1011 clearing a pending link (2026-10-19)
 - Part 158 (`docs/level-scripts/part-158.md`): clearing a pending link opens its target
   (0x19aa7c), played or not; `UnlockBadge` no longer opens a slot.
+
+## D1012 the unlock line's stop (2026-10-19)
+- Part 159 (`docs/level-scripts/part-159.md`): the Story state keeps whether its unlock
+  line started and stops it when it closes (`_StartedVO`).
