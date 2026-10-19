@@ -449,10 +449,11 @@ pub struct LevelWorld {
     /// `Game.GotoScoreboard__b` requests, with the flag passed. The game ends the level
     /// on it; nothing here does.
     pub scoreboard_requests: Vec<bool>,
-    /// The script SlotID objects `Game.GetLevelSlotID__` and `GetPrimaryLevelSlotID__`
-    /// hand out (see [`add_engine_objects`]).
+    /// The script SlotID objects `Game.GetLevelSlotID__`, `GetPrimaryLevelSlotID__` and
+    /// `GetPreviousLevelSlotID__` hand out (see [`add_engine_objects`]).
     pub level_slot: Option<ObjectId>,
     pub primary_level_slot: Option<ObjectId>,
+    pub previous_level_slot: Option<ObjectId>,
     /// The SlotID object (0, 0) that `Slot.GetSlotGroup__Q6SlotID` hands out for a slot
     /// the game's slot database does not have (see [`add_engine_objects`]).
     pub no_group_slot: Option<ObjectId>,
@@ -467,6 +468,10 @@ pub struct LevelWorld {
     /// INFERRED: (0, 0), an empty slot (see [`add_engine_objects`]).
     pub level_slot_id: (i32, i32),
     pub primary_level_slot_id: (i32, i32),
+    /// D1007: Type and SlotNumber of the level played before this one (FOUND: the game
+    /// state keeps it at +0x1a8/+0x1ac; loading a different slot moves the current slot
+    /// there). INFERRED: (0, 0), no previous level, unless the caller sets it.
+    pub previous_level_slot_id: (i32, i32),
     /// The translation tables that are loaded, in the order they are searched
     /// (`LAMS.IsInLams__i`, `LAMS.Translate__i`). Empty unless the caller hands tables
     /// in: then no key is in LAMS. Which tables the game has loaded while a level plays
@@ -1798,6 +1803,9 @@ impl World for LevelWorld {
             Value::Object(Some(o)) if Some(*o) == self.primary_level_slot => {
                 Ok(self.primary_level_slot_id)
             }
+            Value::Object(Some(o)) if Some(*o) == self.previous_level_slot => {
+                Ok(self.previous_level_slot_id)
+            }
             // D384: the Story results' SlotIDs and the pending links' ends.
             other => self
                 .slot_of(other)
@@ -1909,6 +1917,16 @@ impl World for LevelWorld {
         match kind {
             // Through `Thing` or a script class of a Thing (`World.World`).
             MemberKind::Native => return self.native_member(base, class, field),
+            // D1007: a SlotID object the world made, read by a native port (the scripts
+            // read it in the VM).
+            MemberKind::RefPtr if class == "SlotID" => {
+                let (kind, number) = self.slot_id(base)?;
+                return match field {
+                    "Type" => Ok(Value::Int(kind)),
+                    "SlotNumber" => Ok(Value::Int(number)),
+                    _ => Err(format!("SlotID has no member {field}")),
+                };
+            }
             MemberKind::RefPtr => {
                 let (thing, part) = {
                     let p = self.part_of(base)?;
@@ -2093,6 +2111,20 @@ impl World for LevelWorld {
         p.global_settings_thing_uids[k] = uid;
         p.global_settings_thing_priority[k] = if uid != 0 { priority } else { 0 };
         Ok(())
+    }
+    /// D1007: the previous level's SlotID object, made ahead ([`add_engine_objects`]).
+    fn previous_level_slot_id(&mut self) -> Result<Value, String> {
+        self.previous_level_slot
+            .map(|o| Value::Object(Some(o)))
+            .ok_or_else(|| "no SlotID object (class not loaded)".into())
+    }
+    /// D1007 (FOUND 0x1aa8ec -> 0x1a6cd8): whether the previous slot names a level. Type 0
+    /// (made by the developers) needs a SlotNumber; types 10 and above never do.
+    /// INFERRED: types 1 to 9 (a jump table not decoded) need a SlotNumber too, and the
+    /// final check of a type-0 slot (0x349bc, not read) passes.
+    fn previous_level_valid(&mut self) -> bool {
+        let (kind, number) = self.previous_level_slot_id;
+        (0..10).contains(&kind) && number != 0
     }
     /// The SlotID object made ahead ([`add_engine_objects`]).
     fn level_slot_id(&mut self, primary: bool) -> Result<Value, String> {
@@ -2722,11 +2754,12 @@ pub fn add_engine_objects(
     // file, and is not known here. A caller that knows the slot sets
     // `LevelWorld::level_slot_id` / `primary_level_slot_id` before this runs.
     if let Some(class) = vm.class_by_name("SlotID") {
-        for primary in [false, true] {
-            let (kind, number) = if primary {
-                host.world.primary_level_slot_id
-            } else {
-                host.world.level_slot_id
+        // D1007: and the previous level's (`GetPreviousLevelSlotID__`).
+        for which in 0..3 {
+            let (kind, number) = match which {
+                0 => host.world.level_slot_id,
+                1 => host.world.primary_level_slot_id,
+                _ => host.world.previous_level_slot_id,
             };
             match vm.instantiate(class) {
                 Ok(o) => {
@@ -2734,10 +2767,10 @@ pub fn add_engine_objects(
                         fields.insert("Type".into(), Value::Int(kind));
                         fields.insert("SlotNumber".into(), Value::Int(number));
                     }
-                    if primary {
-                        host.world.primary_level_slot = Some(o);
-                    } else {
-                        host.world.level_slot = Some(o);
+                    match which {
+                        0 => host.world.level_slot = Some(o),
+                        1 => host.world.primary_level_slot = Some(o),
+                        _ => host.world.previous_level_slot = Some(o),
                     }
                 }
                 Err(f) => faults.push(format!("SlotID {f:?}")),

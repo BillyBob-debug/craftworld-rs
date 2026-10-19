@@ -157,6 +157,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 151: the Pod's music state (2026-10-19, D1004)](level-scripts/part-151.md)
 - [Part 152: entering the Pod (2026-10-19, D1005)](level-scripts/part-152.md)
 - [Part 153: whether a video plays (2026-10-19, D1006)](level-scripts/part-153.md)
+- [Part 154: the previous level (2026-10-19, D1007)](level-scripts/part-154.md)
 
 ## Next
 

@@ -427,6 +427,14 @@ pub trait World {
     fn level_slot_id(&mut self, _primary: bool) -> Result<Value, String> {
         Err(not_available("level slots"))
     }
+    /// D1007: the script `SlotID` object of the level played before this one.
+    fn previous_level_slot_id(&mut self) -> Result<Value, String> {
+        Err(not_available("level slots"))
+    }
+    /// D1007: whether the previous level's slot names a level.
+    fn previous_level_valid(&mut self) -> bool {
+        false
+    }
     /// The first descendant of the Thing, depth first, whose PRenderMesh shows the mesh
     /// with this GUID.
     fn find_mesh_descendant(&mut self, _thing: u32, _mesh: u32) -> Result<Option<u32>, String> {
@@ -2269,6 +2277,20 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     // same from the game state's primary slot.
     ("Game", "GetPrimaryLevelSlotID__", |w, _| {
         w.level_slot_id(true)
+    }),
+    // FOUND (01.33, 0x602324 -> 0x16ca90). Declared static `SlotID GetPreviousLevelSlotID()`:
+    // a new SlotID from the game state's previous slot (+0x1a8/+0x1ac), which loading a
+    // different slot sets to the current one. The world hands out one object made ahead
+    // (D1007). INFERRED: the default slot it answers for a type-2 slot in one state of the
+    // game (0x16c788) is not modelled.
+    ("Game", "GetPreviousLevelSlotID__", |w, _| {
+        w.previous_level_slot_id()
+    }),
+    // FOUND (01.33, 0x5f87ac -> 0x1aa8ec -> 0x1a6cd8). Declared static
+    // `bool IsPreviousLevelValid()`: whether the previous slot names a level (see the
+    // world, D1007).
+    ("Game", "IsPreviousLevelValid__", |w, _| {
+        Ok(Value::Bool(w.previous_level_valid()))
     }),
     // FOUND (0x5f86bc -> 0x18cf18). Declared static `bool IsVcrPaused()`: with a level
     // loaded, the PWorld's IsPaused byte. INFERRED: what that byte holds in play (see the
@@ -4126,8 +4148,9 @@ mod tests {
         assert_eq!(pressed, Ok(Value::Bool(false)));
         assert_eq!(w.0[7].pad.unwrap().now, START_BUTTON);
         // The table: 249 natives before these six; D274 added two, D295 four, D319 one, D360 one
-        // (host-only), D381 one, D384 three.
-        assert_eq!(bound().count(), 268);
+        // (host-only), D381 one, D384 three, D1007
+        // two.
+        assert_eq!(bound().count(), 270);
     }
 
     #[test]
@@ -4187,8 +4210,9 @@ mod tests {
         assert!(call("Math", "ModAngleToWithinPI__f", &[Value::Int(1)]).is_err());
         assert_eq!(mod_angle_to_within_pi(0.25), wrap(0.25));
         // The table: 255 natives before these two; D295 added four, D319 one, D360 one, D381 one,
-        // D384 three.
-        assert_eq!(bound().count(), 268);
+        // D384 three, D1007
+        // two.
+        assert_eq!(bound().count(), 270);
     }
 
     #[test]
@@ -4324,8 +4348,9 @@ mod tests {
         );
         assert_eq!(w.0, 3);
         // The table: 238 natives before these eleven; D273 added six, D274 two, D295 four, D319
-        // one, D360 one, D381 one, D384 three.
-        assert_eq!(bound().count(), 268);
+        // one, D360 one, D381 one, D384 three, D1007
+        // two.
+        assert_eq!(bound().count(), 270);
     }
 
     #[test]

@@ -6539,3 +6539,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D398 the native intro's voice-over (2026-10-19)
 - Part 145 (`docs/level-scripts/part-145.md`): the native Pod intro asks for its
   voice-over line and waits for it, as the game's script does.
+
+## D399 the unlock voice-overs (2026-10-19)
+- Part 146 (`docs/level-scripts/part-146.md`): a finished unlock cluster in the native
+  Pod asks for the game's line for the level or theme it unlocked.
