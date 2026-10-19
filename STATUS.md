@@ -6579,3 +6579,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1008 the viewer's level slots (2026-10-19)
 - Part 155 (`docs/level-scripts/part-155.md`): a launched level gets its story slot,
   and back in the Pod it is the previous level `OnEnterPod__` reads.
+
+## D1009 the Pod's music files (2026-10-19)
+- Part 156 (`docs/level-scripts/part-156.md`): the Pod's music bank is not on the LBP2
+  disc (part 151 measured LBP1's); its `.mus` settings are read.

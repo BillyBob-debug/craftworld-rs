@@ -475,6 +475,12 @@ pub struct LevelWorld {
     /// state keeps it at +0x1a8/+0x1ac; loading a different slot moves the current slot
     /// there). INFERRED: (0, 0), no previous level, unless the caller sets it.
     pub previous_level_slot_id: (i32, i32),
+    /// D1017: the planets world's `LocalViewType` as its `OnExitPod__` kept it when the
+    /// player left the Pod ([`LevelScripts::pod_computer_exit`]), handed back to the Pod
+    /// on its next entry. INFERRED: the game keeps the Pod's world while a level plays;
+    /// the viewer reads the Pod again, so the session carries the member. None: never
+    /// left.
+    pub pod_view_type: Option<i32>,
     /// The translation tables that are loaded, in the order they are searched
     /// (`LAMS.IsInLams__i`, `LAMS.Translate__i`). Empty unless the caller hands tables
     /// in: then no key is in LAMS. Which tables the game has loaded while a level plays
@@ -3771,6 +3777,13 @@ pub const POD_COMPUTER_PER_FRAME: &str = "PerFrameUpdate__b";
 /// Pod becomes the current level ([`LevelScripts::pod_computer_enter`]).
 pub const POD_COMPUTER_ENTER: &str = "OnEnterPod__";
 
+/// The export of the engine's PodComputer script object that the engine calls when the
+/// Pod stops being the current level ([`LevelScripts::pod_computer_exit`]).
+pub const POD_COMPUTER_EXIT: &str = "OnExitPod__";
+
+/// D1017: the planets world's member that keeps its view type while the Pod is left.
+const LOCAL_VIEW: &str = "LocalViewType";
+
 /// The per-tick entry for a class, if it has one other than [`UPDATE`].
 pub fn frame_entry(vm: &Vm, class: ClassId) -> Option<&'static FrameEntry> {
     let name = vm.class_name(class);
@@ -4137,9 +4150,69 @@ impl LevelScripts {
             return report;
         };
         self.pod_computer_entered = true;
+        // D1017: the view type the Pod's world kept when the player left it.
+        if let (Some(kind), Some(thing)) = (host.world.pod_view_type, host.world.world) {
+            let this = Value::Thing(Some(thing));
+            let kept = Value::Int(kind);
+            let set = host.set_member(
+                MemberKind::Thing,
+                &this,
+                PLANETS_WORLD_CLASS,
+                LOCAL_VIEW,
+                kept,
+            );
+            if let Err(e) = set {
+                report.thread_faults.push(format!("PlanetsWorld {e}"));
+            }
+        }
         if let Err(e) = run_on_object_with(vm, host, class, object, POD_COMPUTER_ENTER, &[], budget)
         {
             report.thread_faults.push(format!("PodComputer {e}"));
+        }
+        report
+    }
+
+    /// D1017: the engine's call of `OnExitPod__()` on its PodComputer script object when
+    /// the Pod stops being the current level, in the planets level only. The function
+    /// ends the computer's level operation, if one runs, and calls the planets world's
+    /// `OnExitPod__`, which keeps its view type in `LocalViewType`; that member is then
+    /// kept in [`LevelWorld::pod_view_type`] for the Pod's next entry.
+    ///
+    /// FOUND in the 01.33 executable: the export's wrapper 0x624bfc is reached through
+    /// 0x504b1c and 0x8946ec from 0x403f0c, slot 4 of the pod computer's vtable 0xd73d40,
+    /// which the pod mode switch 0x401c30 calls on the old object when the mode changes
+    /// (see [`LevelScripts::pod_computer_enter`]). FOUND in the script listing
+    /// (16e6e8c9): `AbortLevelOperation__`, `GetWorld__`, the world's `OnExitPod__`.
+    /// INFERRED: a level launched from the Pod is that change. A call that faults or
+    /// yields is reported in [`StepReport::thread_faults`].
+    pub fn pod_computer_exit(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut Bindings<LevelWorld>,
+        budget: u64,
+    ) -> StepReport {
+        let mut report = StepReport::default();
+        if !self.is_planets_level(vm, &host.world) {
+            return report;
+        }
+        let (Some(object), Some(thing)) = (host.world.pod_computer, host.world.world) else {
+            return report;
+        };
+        let Some(class) = vm.class_of(object) else {
+            return report;
+        };
+        if let Err(e) = run_on_object_with(vm, host, class, object, POD_COMPUTER_EXIT, &[], budget)
+        {
+            report.thread_faults.push(format!("PodComputer {e}"));
+        }
+        let this = Value::Thing(Some(thing));
+        let kept = host.get_member(MemberKind::Thing, &this, PLANETS_WORLD_CLASS, LOCAL_VIEW);
+        match kept {
+            Ok(Value::Int(kind)) => host.world.pod_view_type = Some(kind),
+            Ok(v) => report
+                .thread_faults
+                .push(format!("PlanetsWorld {LOCAL_VIEW} is {v:?}")),
+            Err(e) => report.thread_faults.push(format!("PlanetsWorld {e}")),
         }
         report
     }
