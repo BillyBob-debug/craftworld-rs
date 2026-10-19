@@ -346,8 +346,34 @@ modelled:
 - The input scale is read as 1, and stick movers see no stick.
 - The mirror flag and the +0x220 angle are not modelled. The cone is a half-angle about
   the body's up axis.
-- Followers with followKey (keyed things) wait on the tag search and are not built.
+- Followers with followKey (keyed things) follow tags since D1111 (Part 13).
 - The follower follows the play-mode Sackboy. 1/mass is left out as in D1109.
 
 Test: `d1110_movers_reach_their_velocity_and_followers_stop_short_of_their_target`
 (lbp-sim sandbox).
+
+## Part 13: keyed followers follow tags (D1111)
+
+With followKey set, 0x1c3e04 asks FUN_000ceb8c(world, key) for the tags of that key. It
+reads a map at world+0x3a4+0x1c (falling back to world+0x328, 0xceb58) through
+FUN_000ceac0: 0x18-byte entries matched on two ints, read here as the tag's colour and
+name (INFERRED). Each key holds a list of 12-byte entries (x, ?, thing) sorted by x; the
+search binary-searches [x - max - r, x + max + r]. For each tag it needs
+min_range < distance < best (best starts at max_range; distance in x, y), the relation
+filter 0xf9a64, a thing whose root (+0x5c) is not the follower's own, and the cone test.
+It keeps the nearest. 0xf9a64 is a game-mode filter on the relation (0..4); in normal play
+0, 1, 3 and 4 pass and 2 fails. It is not the key match.
+
+lbp-sim: `build_scene` gives each (colour, name) a key number and lists every SWITCH_KEY
+as a `SceneTag`. A tag with no position of its own (a tag placed on a microchip or a
+part has only SWITCH_KEY) sits where its nearest positioned parent is. A tag on a body
+is kept in that body's frame; `spawn_scene` puts the tags of a body on it as `TagMarks`,
+and loose tags on one entity. `tag_spots` turns them back into world points each tick,
+and `drive_moves` sends a keyed follower to the nearest matching tag it sees that is not
+on its own body. INFERRED or not modelled:
+- Two followers' bodies count as "own" only when they are the same body; the game
+  compares the things' roots (+0x5c).
+- The relation filter is read as "pass" (normal play).
+- A keyed follower with no matching tag in range brakes.
+
+Test: `d1111_keyed_followers_find_tags_with_their_colour_and_name` (lbp-sim sandbox).

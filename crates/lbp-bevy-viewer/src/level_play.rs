@@ -2173,11 +2173,20 @@ fn drive_spins(
 }
 
 /// D1110: every mover and follower pushes its body; a follower follows the play-mode
-/// Sackboy.
+/// Sackboy, or (D1111) the tags with its key.
+#[allow(clippy::type_complexity)]
 fn drive_moves(
     play: NonSend<Play>,
     mut commands: Commands,
     sackboy: Query<&lbp_sim::avian2d::prelude::Position, With<SackboyBody>>,
+    marks: Query<(
+        Entity,
+        &lbp_sim::TagMarks,
+        Option<(
+            &lbp_sim::avian2d::prelude::Position,
+            &lbp_sim::avian2d::prelude::Rotation,
+        )>,
+    )>,
     mut q: Query<(
         Entity,
         &lbp_sim::MoveTweaks,
@@ -2188,7 +2197,8 @@ fn drive_moves(
 ) {
     let world = &play.host.world;
     let player = sackboy.iter().next().map(|p| p.0);
-    lbp_sim::drive_moves(&mut commands, &mut q, player, |t| {
+    let tags = lbp_sim::tag_spots(marks.iter());
+    lbp_sim::drive_moves(&mut commands, &mut q, player, &tags, |t| {
         world.tweak_activation(t.thing, t.behavior)
     });
 }
