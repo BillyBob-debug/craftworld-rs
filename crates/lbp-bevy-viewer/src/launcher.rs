@@ -260,8 +260,9 @@ fn guess_update() -> Option<String> {
 fn copy_complete() -> bool {
     let disc = disc_dir();
     disc.join("PS3_GAME").is_dir()
-        && iso::KEPT_AUDIO
+        && iso::KEPT
             .iter()
+            .flat_map(|k| k.iter())
             .all(|p| disc.join(p.trim_start_matches('/')).is_file())
 }
 

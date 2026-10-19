@@ -197,6 +197,48 @@ fn d398_pod_introduction_waits_for_its_voice_over() {
     assert_eq!(h.world.progression_flags, 3);
 }
 
+/// D1003: with the intro video's length known (here longer than the line), the
+/// introduction waits for it too, ending on the frame after its 1200 ticks: the pod computer's handle stays set while
+/// `UpdateVideo` answers true and is -1 once it answers false.
+#[test]
+fn d1003_pod_introduction_waits_for_its_video() {
+    let mut h = host();
+    h.world
+        .media
+        .voice_over_lengths
+        .insert("pod_1st_time".into(), 960);
+    h.world.media.video_lengths.insert(139230, 1200);
+    run(&mut h, "OnCreate__", &[]);
+    frame(&mut h, true);
+    h.world.media.tick();
+    assert_eq!(member(&mut h, "IntroVideo"), Value::Int(0));
+    let mut frames = 1;
+    while member(&mut h, "State") == Value::Int(1) {
+        frame(&mut h, false);
+        h.world.media.tick();
+        frames += 1;
+        assert!(frames < 2000, "the introduction never ended");
+    }
+    assert_eq!(frames, 1201);
+    assert_eq!(member(&mut h, "IntroVideo"), Value::Int(-1));
+    assert!(h.world.media.video.is_none());
+    assert_eq!(h.world.progression_flags, 3);
+}
+
+/// D1003: a Bink header's length in ticks (the Pod intro's numbers, FOUND).
+#[test]
+fn d1003_bink_ticks() {
+    let mut head = vec![0u8; lbp_runtime::BINK_HEADER];
+    head[..4].copy_from_slice(b"BIKi");
+    for (o, v) in [(8, 378u32), (0x1c, 2997), (0x20, 100)] {
+        head[o..o + 4].copy_from_slice(&v.to_le_bytes());
+    }
+    assert_eq!(lbp_runtime::bink_ticks(&head), Ok(379));
+    assert!(lbp_runtime::bink_ticks(&head[..8]).is_err());
+    head[0] = b'X';
+    assert!(lbp_runtime::bink_ticks(&head).is_err());
+}
+
 /// The view table's Story row and the blend speeds (FOUND, `PlanetsView`).
 #[test]
 fn d356_planets_views() {

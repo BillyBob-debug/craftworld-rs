@@ -6523,3 +6523,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D394 the line shader's constant and the active test (2026-10-19)
 - Part 141 (`docs/level-scripts/part-141.md`): the link shader's constant is read and
   only one badge class can make a link active; links stay drawn pending.
+
+## D395 the active link look (2026-10-19)
+- Part 142 (`docs/level-scripts/part-142.md`): a link to a locked level is drawn white
+  with the active texture band; pending (green) once the level unlocks.

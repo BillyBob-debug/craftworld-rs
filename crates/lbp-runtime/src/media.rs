@@ -5,7 +5,8 @@
 //! that a later video or audio system can take it from here; the script is told what
 //! the game tells it when nothing started. D397: a voice-over line whose length the
 //! game's voice-over bank gives "plays" silently for that long, so the scripts that wait
-//! on it wait as long as the game's.
+//! on it wait as long as the game's. D1003: so does a video whose length its Bink file
+//! gives ([`MediaState::video_lengths`]).
 use crate::LevelWorld;
 use lbp_script_vm::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -68,6 +69,17 @@ pub struct MediaState {
     pub voice_overs_heard: BTreeSet<String>,
     /// D397: whether the last `RequestVoiceOver` started its line.
     pub last_started: bool,
+    /// D1003: each video's length in ticks at 30 Hz by its GUID ([`bink_ticks`]); empty
+    /// when no video file was read, and then no video starts.
+    pub video_lengths: BTreeMap<u32, u32>,
+    /// D1003: the video that plays: its handle, GUID and ticks left.
+    pub video: Option<(i32, u32, u32)>,
+    /// D1003: the handle the next started video gets.
+    pub next_video_handle: i32,
+    /// D1003: the last `StartVideo`'s answer (the video's handle, or -1).
+    pub last_video_handle: i32,
+    /// D1003: the last `UpdateVideo`'s answer.
+    pub last_video_update: bool,
 }
 
 /// Most requests [`MediaState::videos`] and [`MediaState::voice_overs`] keep each.
@@ -89,8 +101,41 @@ impl MediaState {
         self.voice_over.as_ref().is_some_and(|(_, left)| *left > 0)
     }
 
-    /// D397: one tick of the line that plays; it ends when none is left.
+    /// D1003: whether the video with this handle has ticks left.
+    pub fn video_playing(&self, handle: i32) -> bool {
+        self.video
+            .is_some_and(|(h, _, left)| h == handle && handle >= 0 && left > 0)
+    }
+
+    /// D1003 (FOUND 0x67c620): the video starts when its file was read, and gets a
+    /// handle; else the answer is -1. INFERRED: one video plays at a time, as the pod
+    /// computer keeps one handle, so a new one replaces it.
+    fn start_video(&mut self, guid: u32) -> i32 {
+        let Some(&ticks) = self.video_lengths.get(&guid) else {
+            return -1;
+        };
+        let handle = self.next_video_handle;
+        self.next_video_handle = self.next_video_handle.wrapping_add(1).max(0);
+        self.video = Some((handle, guid, ticks));
+        handle
+    }
+
+    /// D1003 (FOUND 0x67c22c): no video with that handle, false; else true while it
+    /// plays, and once it has ended it is finished (0x67a25c) and the answer is false.
+    fn update_video(&mut self, handle: i32) -> bool {
+        let playing = self.video_playing(handle);
+        if !playing && self.video.is_some_and(|(h, ..)| h == handle) {
+            self.video = None;
+        }
+        playing
+    }
+
+    /// D397: one tick of the line that plays; it ends when none is left. D1003: and of
+    /// the video that plays (it stays until `UpdateVideo` finishes it).
     pub fn tick(&mut self) {
+        if let Some((_, _, left)) = &mut self.video {
+            *left = left.saturating_sub(1);
+        }
         if let Some((_, left)) = &mut self.voice_over {
             *left = left.saturating_sub(1);
             if *left == 0 {
@@ -117,6 +162,29 @@ impl MediaState {
         self.voice_over = Some((name.clone(), ticks));
         true
     }
+}
+
+/// D1003 (FOUND, the USA disc): the videos whose length is read, by GUID and path under
+/// `USRDIR`; loose and not encrypted on the disc. 139230 is the Pod's introduction.
+pub const VIDEO_FILES: [(u32, &str); 1] = [(139230, "gamedata/videos/lbp2/lbp2_podintro.bik")];
+/// D1003: the bytes [`bink_ticks`] reads.
+pub const BINK_HEADER: usize = 0x24;
+
+/// D1003: a Bink video's length in ticks at 30 Hz (rounded up) from its header (`BIK`
+/// and a version letter, then little-endian u32s: the file size less 8, the frame count,
+/// the largest frame, the frame count again, the width, the height, and the frame rate's
+/// numerator and denominator at 0x1c and 0x20). FOUND, the Pod intro's on the USA disc:
+/// `BIKi`, 378 frames, 640x360, 2997/100 fps, so 379 ticks.
+pub fn bink_ticks(head: &[u8]) -> Result<u32, String> {
+    if head.len() < BINK_HEADER || &head[..3] != b"BIK" {
+        return Err("Bink: not a Bink header".into());
+    }
+    let u = |o: usize| u32::from_le_bytes(head[o..o + 4].try_into().unwrap()) as u64;
+    let (frames, num, den) = (u(8), u(0x1c), u(0x20));
+    if num == 0 || den == 0 {
+        return Err("Bink: no frame rate".into());
+    }
+    Ok((frames * 30 * den).div_ceil(num) as u32)
 }
 
 /// D397: the game's voice-over bank, `gamedata/audio/voiceover.fsb` on the disc (an FMOD
@@ -184,16 +252,36 @@ impl LevelWorld {
         let flag = |i: usize| matches!(args.get(i), Some(Value::Bool(true)));
         let media = &mut self.media;
         match name {
-            "StartVideo" if media.videos.len() < MAX_MEDIA_REQUESTS => {
-                media.videos.push(VideoRequest {
-                    thing,
-                    guid: guid_of(args.get(1)),
-                    flag: flag(2),
-                    frame,
-                });
+            "StartVideo" => {
+                let guid = guid_of(args.get(1));
+                media.last_video_handle = media.start_video(guid);
+                if media.videos.len() < MAX_MEDIA_REQUESTS {
+                    let flag = flag(2);
+                    media.videos.push(VideoRequest {
+                        thing,
+                        guid,
+                        flag,
+                        frame,
+                    });
+                } else {
+                    media.videos_dropped += 1;
+                }
             }
-            "StartVideo" => media.videos_dropped += 1,
-            "StopVideo" => media.video_stops += 1,
+            "UpdateVideo" => {
+                let handle = match args.first() {
+                    Some(Value::Int(h)) => *h,
+                    _ => -1,
+                };
+                media.last_video_update = media.update_video(handle);
+            }
+            "StopVideo" => {
+                media.video_stops += 1;
+                if let (Some(Value::Int(h)), Some((v, ..))) = (args.first(), media.video) {
+                    if *h == v {
+                        media.video = None;
+                    }
+                }
+            }
             "RequestVoiceOver" => {
                 let name = name_of(args.first());
                 media.last_started = media.request_voice_over(name.as_deref(), flag(1), flag(2));

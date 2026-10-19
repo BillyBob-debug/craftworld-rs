@@ -2336,6 +2336,8 @@ impl World for LevelWorld {
         Ok(match native {
             "Audio.IsVoiceOverPlaying__" => Value::Bool(self.media.voice_over_playing()),
             "Audio.RequestVoiceOver.started" => Value::Bool(self.media.last_started),
+            "Video.StartVideo.handle" => Value::Int(self.media.last_video_handle),
+            "Video.UpdateVideo.playing" => Value::Bool(self.media.last_video_update),
             "GameMessagingManager.Messaging_ShouldFilterMessageStrings__" => {
                 Value::Bool(self.level_slot_id.0 != 2)
             }

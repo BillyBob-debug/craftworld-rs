@@ -1,6 +1,7 @@
 //! D600: reads the player's LBP2 ISO (ISO 9660, as RPCS3 boots it) and copies the files the
 //! viewer reads (PARAM.SFO, the FARCs, the MAP and the loose game data) into the launcher's
-//! own folder, leaving out videos, audio and the extras' packages. The ISO is only read.
+//! own folder, leaving out videos, audio and the extras' packages (but for the few files in
+//! [`KEPT`]). The ISO is only read.
 use std::{
     fs::File,
     io::{Read, Seek, SeekFrom, Write},
@@ -17,6 +18,11 @@ const SKIPPED: &[&str] = &["BIK", "MP4", "FSB", "MP3", "PKG", "PUP"];
 /// Audio the viewer does read: the voice-over bank, whose headers time the Pod's voice-over
 /// waits (D397). Loose and unencrypted on the disc, about 19 MB.
 pub const KEPT_AUDIO: &[&str] = &["/PS3_GAME/USRDIR/GAMEDATA/AUDIO/VOICEOVER.FSB"];
+/// D1003: video the viewer does read: the Pod intro's, whose Bink header times the intro's
+/// wait for it (`lbp_runtime::VIDEO_FILES`). Loose and unencrypted on the disc, about 11 MB.
+pub const KEPT_VIDEO: &[&str] = &["/PS3_GAME/USRDIR/GAMEDATA/VIDEOS/LBP2/LBP2_PODINTRO.BIK"];
+/// D1003: every file copied although its kind or folder is left out.
+pub const KEPT: [&[&str]; 2] = [KEPT_AUDIO, KEPT_VIDEO];
 /// The disc this version reads (USA, 01.00 on the disc; other regions come later).
 pub const TITLE_ID: &str = "BCUS98245";
 
@@ -104,11 +110,12 @@ pub fn wanted(entries: &[Entry]) -> Vec<&Entry> {
     entries
         .iter()
         .filter(|e| e.path.starts_with("/PS3_GAME/"))
-        .filter(|e| !e.path.starts_with("/PS3_GAME/USRDIR/GAMEDATA/VIDEOS/"))
         .filter(|e| {
             let upper = e.path.to_ascii_uppercase();
             let ext = upper.rsplit_once('.').map(|(_, x)| x);
-            KEPT_AUDIO.contains(&upper.as_str()) || !ext.is_some_and(|x| SKIPPED.contains(&x))
+            KEPT.iter().any(|k| k.contains(&upper.as_str()))
+                || !(e.path.starts_with("/PS3_GAME/USRDIR/GAMEDATA/VIDEOS/")
+                    || ext.is_some_and(|x| SKIPPED.contains(&x)))
         })
         .collect()
 }
@@ -190,6 +197,23 @@ mod tests {
 
     /// A tiny image: root at sector 18 with PS3_GAME (sector 19) holding PARAM.SFO and a
     /// video, written to a temporary file and listed back.
+    /// D1003: the Pod intro's video is kept; the other videos are not.
+    #[test]
+    fn keeps_the_pod_intro_video() {
+        let entry = |path: &str| Entry {
+            path: path.into(),
+            lba: 0,
+            size: 0,
+        };
+        let entries = [
+            entry("/PS3_GAME/USRDIR/GAMEDATA/VIDEOS/LBP2/LBP2_PODINTRO.BIK"),
+            entry("/PS3_GAME/USRDIR/GAMEDATA/VIDEOS/LBP2/OTHER.BIK"),
+            entry("/PS3_GAME/USRDIR/GAMEDATA/VIDEOS/LBP2/NOTES.TXT"),
+        ];
+        let kept: Vec<&str> = wanted(&entries).iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(kept, [KEPT_VIDEO[0]]);
+    }
+
     #[test]
     fn lists_and_filters_a_small_image() {
         let mut img = vec![0u8; 25 * SECTOR as usize];

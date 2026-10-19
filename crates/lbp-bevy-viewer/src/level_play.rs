@@ -249,6 +249,38 @@ fn voice_over_lengths(game: &str) -> std::collections::BTreeMap<String, u32> {
     Default::default()
 }
 
+/// D1003: the videos' lengths (`lbp_runtime::VIDEO_FILES`) from the first game folder
+/// that has each, read from its Bink header as [`voice_over_lengths`] finds the bank;
+/// none, and so that video does not start, without one.
+fn video_lengths(game: &str) -> std::collections::BTreeMap<u32, u32> {
+    use std::io::Read;
+    let mut lengths = std::collections::BTreeMap::new();
+    for (guid, file) in lbp_runtime::VIDEO_FILES {
+        let paths = game.split(';').map(Path::new).flat_map(|dir| {
+            ["USRDIR", "PS3_GAME/USRDIR"].map(|usrdir| dir.join(usrdir).join(file))
+        });
+        for path in paths {
+            let Ok(f) = std::fs::File::open(&path) else {
+                continue;
+            };
+            let mut head = Vec::new();
+            if f.take(lbp_runtime::BINK_HEADER as u64)
+                .read_to_end(&mut head)
+                .is_ok()
+            {
+                match lbp_runtime::bink_ticks(&head) {
+                    Ok(ticks) => {
+                        lengths.insert(guid, ticks);
+                        break;
+                    }
+                    Err(e) => println!("Video {}: {e}", path.display()),
+                }
+            }
+        }
+    }
+    lengths
+}
+
 /// D364: a level read by [`WorldSource::read`]: the scripts on a VM (and on a second VM
 /// for the shell level, when asked), the level's world and its identity, and the header.
 struct LevelRead {
@@ -347,6 +379,7 @@ impl WorldSource {
         world.add_class_defaults(&vm);
         world.progression_flags = self.flags;
         world.media.voice_over_lengths = voice_over_lengths(&self.game);
+        world.media.video_lengths = video_lengths(&self.game);
         // Unbound natives return their type's default and are counted (rscript-plan stage 1).
         let mut host = Bindings::defaulting(world);
         let mut faults = lbp_runtime::add_engine_objects(&mut vm, &mut host, BUDGET_PER_CALL);
