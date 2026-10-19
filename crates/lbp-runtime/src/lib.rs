@@ -2676,6 +2676,27 @@ fn run_on_object_with(
     }
 }
 
+/// D1018: an entry of the planets world's native port, as the native pod computer
+/// calls it; a fault or a yield is reported in [`StepReport::thread_faults`].
+fn native_world_call(
+    host: &mut Bindings<LevelWorld>,
+    thing: u32,
+    function: &str,
+    report: &mut StepReport,
+) {
+    match start_native(&PLANETS_WORLD_PORT, host, thing, function, &[]) {
+        None | Some(Ok(NativeStep::Done(_))) => {}
+        Some(Ok(NativeStep::Yielded)) => {
+            report
+                .thread_faults
+                .push(format!("PlanetsWorld {function} yielded"));
+        }
+        Some(Err(e)) => report
+            .thread_faults
+            .push(format!("PlanetsWorld {function}: {e}")),
+    }
+}
+
 /// Makes the engine-owned script objects natives hand out: [`GOOEY_POOL`] Gooey objects
 /// (`.init__`) and the PodComputer (`.init__`, then `.ctor__`). INFERRED: the engine holds
 /// one PodComputer and creates Gooeys on demand. The PodComputer is registered before its
@@ -4048,6 +4069,28 @@ impl LevelScripts {
             .is_some_and(|c| vm.class_name(c) == PLANETS_WORLD_CLASS)
     }
 
+    /// D1018: the world Thing when it runs the planets world's native port (its class
+    /// is not loaded, or [`Runner::force_native`]).
+    fn native_planets_world(&self, world: &LevelWorld) -> Option<u32> {
+        let thing = world.world?;
+        let i = self
+            .instances
+            .binary_search_by_key(&thing, |i| i.thing)
+            .ok()?;
+        let inst = &self.instances[i];
+        let native = inst.class.is_none() || self.runner.force_native;
+        (native && Some(inst.guid) == PLANETS_WORLD_PORT.guid()).then_some(thing)
+    }
+
+    /// The pod computer's script object and class, in the planets level only.
+    fn scripted_pod_computer(&self, vm: &Vm, world: &LevelWorld) -> Option<(ObjectId, ClassId)> {
+        if !self.is_planets_level(vm, world) {
+            return None;
+        }
+        let object = world.pod_computer?;
+        Some((object, vm.class_of(object)?))
+    }
+
     /// The engine's per-frame call of `PerFrameUpdate__b(false)` on its PodComputer
     /// script object ([`LevelWorld::pod_computer`]), in the planets level only; nothing
     /// happens without that object or when its class has no such function.
@@ -4133,6 +4176,9 @@ impl LevelScripts {
     /// INFERRED: the level's first tick stands for its becoming current, before the
     /// first `PerFrameUpdate__b`. A call that faults or yields is reported in
     /// [`StepReport::thread_faults`].
+    ///
+    /// D1018: without the game's scripts the native pod computer does the same: the
+    /// planets world's native port gets `OnEnterPod__` (the moon branch is not reached).
     pub fn pod_computer_enter(
         &mut self,
         vm: &mut Vm,
@@ -4140,15 +4186,14 @@ impl LevelScripts {
         budget: u64,
     ) -> StepReport {
         let mut report = StepReport::default();
-        if self.pod_computer_entered || !self.is_planets_level(vm, &host.world) {
+        if self.pod_computer_entered {
             return report;
         }
-        let Some(object) = host.world.pod_computer else {
+        let scripted = self.scripted_pod_computer(vm, &host.world);
+        let native = self.native_planets_world(&host.world);
+        if scripted.is_none() && native.is_none() {
             return report;
-        };
-        let Some(class) = vm.class_of(object) else {
-            return report;
-        };
+        }
         self.pod_computer_entered = true;
         // D1017: the view type the Pod's world kept when the player left it.
         if let (Some(kind), Some(thing)) = (host.world.pod_view_type, host.world.world) {
@@ -4165,9 +4210,16 @@ impl LevelScripts {
                 report.thread_faults.push(format!("PlanetsWorld {e}"));
             }
         }
-        if let Err(e) = run_on_object_with(vm, host, class, object, POD_COMPUTER_ENTER, &[], budget)
-        {
-            report.thread_faults.push(format!("PodComputer {e}"));
+        match (scripted, native) {
+            (Some((object, class)), _) => {
+                let call =
+                    run_on_object_with(vm, host, class, object, POD_COMPUTER_ENTER, &[], budget);
+                if let Err(e) = call {
+                    report.thread_faults.push(format!("PodComputer {e}"));
+                }
+            }
+            (None, Some(thing)) => native_world_call(host, thing, POD_COMPUTER_ENTER, &mut report),
+            (None, None) => {}
         }
         report
     }
@@ -4185,6 +4237,11 @@ impl LevelScripts {
     /// (16e6e8c9): `AbortLevelOperation__`, `GetWorld__`, the world's `OnExitPod__`.
     /// INFERRED: a level launched from the Pod is that change. A call that faults or
     /// yields is reported in [`StepReport::thread_faults`].
+    ///
+    /// D1018: without the game's scripts the native pod computer does the same: the
+    /// planets world's native port gets `OnExitPod__`. The native computer has no level
+    /// operations (the scripts start them only for My Levels' delete, copy and move), so
+    /// there is nothing to abort.
     pub fn pod_computer_exit(
         &mut self,
         vm: &mut Vm,
@@ -4192,18 +4249,22 @@ impl LevelScripts {
         budget: u64,
     ) -> StepReport {
         let mut report = StepReport::default();
-        if !self.is_planets_level(vm, &host.world) {
-            return report;
-        }
-        let (Some(object), Some(thing)) = (host.world.pod_computer, host.world.world) else {
+        let Some(thing) = host.world.world else {
             return report;
         };
-        let Some(class) = vm.class_of(object) else {
-            return report;
-        };
-        if let Err(e) = run_on_object_with(vm, host, class, object, POD_COMPUTER_EXIT, &[], budget)
-        {
-            report.thread_faults.push(format!("PodComputer {e}"));
+        match (
+            self.scripted_pod_computer(vm, &host.world),
+            self.native_planets_world(&host.world),
+        ) {
+            (Some((object, class)), _) => {
+                let call =
+                    run_on_object_with(vm, host, class, object, POD_COMPUTER_EXIT, &[], budget);
+                if let Err(e) = call {
+                    report.thread_faults.push(format!("PodComputer {e}"));
+                }
+            }
+            (None, Some(_)) => native_world_call(host, thing, POD_COMPUTER_EXIT, &mut report),
+            (None, None) => return report,
         }
         let this = Value::Thing(Some(thing));
         let kept = host.get_member(MemberKind::Thing, &this, PLANETS_WORLD_CLASS, LOCAL_VIEW);

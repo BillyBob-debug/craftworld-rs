@@ -168,6 +168,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 162: no push without links (2026-10-19, D1015)](level-scripts/part-162.md)
 - [Part 163: the pod computer enters the Pod (2026-10-19, D1016)](level-scripts/part-163.md)
 - [Part 164: the pod computer leaves the Pod (2026-10-19, D1017)](level-scripts/part-164.md)
+- [Part 165: the native pod computer and the Pod (2026-10-19, D1018)](level-scripts/part-165.md)
 
 ## Next
 
