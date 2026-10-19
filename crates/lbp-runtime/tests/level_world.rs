@@ -5327,6 +5327,11 @@ fn d295_puter(frame: Vec<u64>) -> Script {
 /// A level whose world Thing (0) carries `PlanetsWorld` when `planets`, with the Lamp of
 /// [`level`] (`Update__` writes 1) and the pod computer of [`d295_puter`].
 fn d295_level(planets: bool, frame: Vec<u64>) -> (Vm, Bindings<LevelWorld>, LevelScripts) {
+    d295_level_with(planets, d295_puter(frame))
+}
+
+/// [`d295_level`] with the pod computer `puter`.
+fn d295_level_with(planets: bool, puter: Script) -> (Vm, Bindings<LevelWorld>, LevelScripts) {
     const WORLD: u32 = 0x2d09;
     let write_1 = vec![
         u64::from(0x03u8) | 4 << 16 | 1 << 32, // r4 = 1
@@ -5338,7 +5343,7 @@ fn d295_level(planets: bool, frame: Vec<u64>) -> (Vm, Bindings<LevelWorld>, Leve
         d274_class("Lamp", lbp_runtime::UPDATE, 16, write_1),
         Some(GUID),
     );
-    vm.load(d295_puter(frame), Some(BASE));
+    vm.load(puter, Some(BASE));
     vm.load(
         d274_class(lbp_runtime::PLANETS_WORLD_CLASS, "Unused", 16, vec![]),
         Some(WORLD),
@@ -5395,6 +5400,43 @@ fn d295_the_pod_computer_steps_once_a_tick_in_the_planets_level_only() {
         assert_eq!((t.done, t.pod_computer_frames, t.video_updates), (1, 0, 1));
     }
     assert_eq!(host.world.written, ["Int(1)", "Int(7)", "Int(1)", "Int(7)"]);
+}
+
+/// D1016: the pod computer's `OnEnterPod__` (here it writes 9) is called once, on the
+/// planets level's first tick before its first step, and not in another level.
+#[test]
+fn d1016_the_pod_computer_enters_the_pod_on_the_first_tick() {
+    let write_arg = vec![
+        i(0xa2, 0, 0, 4, 0), // WRITE r4
+        i(0xa5, 0, 0, 0, 0), // RETURN
+    ];
+    assert_eq!(lbp_runtime::POD_COMPUTER_ENTER, "OnEnterPod__");
+    let puter = || {
+        let mut s = d295_puter(write_arg.clone());
+        s.strings_a.push(lbp_runtime::POD_COMPUTER_ENTER.into());
+        let begin = s.bytecode.len() as u32;
+        s.bytecode.extend([
+            u64::from(0x03u8) | 4 << 16 | 9 << 32, // r4 = 9
+            i(0xa2, 0, 0, 4, 0),                   // WRITE r4
+            i(0xa5, 0, 0, 0, 0),                   // RETURN
+        ]);
+        s.function_defs
+            .push(function(0, s.strings_a.len() as u32 - 1, begin, begin + 3));
+        s
+    };
+    for planets in [true, false] {
+        let (mut vm, mut host, mut level) = d295_level_with(planets, puter());
+        for _ in 0..2 {
+            let t = level.tick_level(&mut vm, &mut host, 1000);
+            assert!(t.thread_faults.is_empty());
+        }
+        let entered = host.world.written.iter().filter(|w| *w == "Int(9)").count();
+        assert_eq!(entered, usize::from(planets));
+        if planets {
+            assert_eq!(host.world.written[..2], ["Int(9)", "Bool(false)"]);
+        }
+        assert_eq!(level.pod_computer_entered, planets);
+    }
 }
 
 #[test]

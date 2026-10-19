@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1015 no push without links (2026-10-19)
+## Latest: D1016 the pod computer enters the Pod (2026-10-19)
+- Part 163 (`docs/level-scripts/part-163.md`): the pod computer's `OnEnterPod__` runs on
+  each entry to the Pod; no script restores the launching group's search.
+
+## D1015 no push without links (2026-10-19)
 - Part 162 (`docs/level-scripts/part-162.md`): with no pending link the unlock thread
   ends at once and pushes no group (corrects D1014).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1009 the Pod's music files (2026-10-19)
 - Part 156 (`docs/level-scripts/part-156.md`): the Pod's music bank is not on the LBP2
   disc (part 151 measured LBP1's); its `.mus` settings are read.
-
-## D1008 the viewer's level slots (2026-10-19)
-- Part 155 (`docs/level-scripts/part-155.md`): a launched level gets its story slot,
-  and back in the Pod it is the previous level `OnEnterPod__` reads.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
