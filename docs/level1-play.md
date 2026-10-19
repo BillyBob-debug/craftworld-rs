@@ -237,4 +237,30 @@ value (`VideoHandle` -1, `CurrentVolume` 1, `FadeOutTime` 60, `FadeInTime` 15).
 Test: `native_tutorial::d508_the_native_tutorial_monitor_plays_its_video` (synthetic
 Things, no script loaded).
 
-Not yet: WorldMooCamera, Score_Board.
+## Part 10: the world script in native Rust (D509, 2026-10-19)
+
+Before: without the decrypted overlay Rookie Test's world Thing ran no script, so no
+level time limit counted down, collected fluff fed no score multiplier and a score or
+time limit never went to the scoreboard.
+
+After: `WorldMooCamera` (g00004d20, the world script of 220 story levels) is a port in
+the D417 registry (`crates/lbp-runtime/src/native_world.rs`). It has only stubs of its
+own, so the port is its base `World` (g00002d28). From the 01.33 listing: `OnCreate__`
+resets the multiplier timers and counter, then runs `Update__` once a frame until
+`OnDestroy__`. In play mode `Update__` calls `Game.GotoScoreboard(true)` once the score
+reaches `ScoreLimit` or `Timer` reaches `TimeLimit` (30 frames a second, paused during a
+cut-scene movie), with the countdown sound each second of the last 10 and the game-over
+sound at 0. Each frame the multiplier timers count down and a timer reaching 0 gives the
+bonuses (bonus bank x counter / 5 added to the score); a button press keeps the pie chart
+up. `OnCollectFluff` feeds the co-op multiplier (counter + 1, 30 frames, cap 495) and
+answers 0 during a scoreboard challenge. The getters, setters, `Kick`,
+`SetCurrentChallenge` and `ShouldShowPieChart` (mode 0 and a challenge or a score in the
+last 600 frames) are ported too. Left out: the `Bonus` popups and the `VCRDisplay`
+(script objects with no port), `BaseWorld`'s `OnCreate`/`Update` (as in the Pod port), a
+`Race_Start` challenge's own fluff handling, `NotifyDeath`, the direct-control prompt
+list and reverb names (script arrays), and the create-mode UI and rendering.
+
+Test: `native_world::d509_the_native_world_counts_down_and_keeps_the_multiplier`
+(synthetic Things, no script loaded).
+
+Not yet: Score_Board.
