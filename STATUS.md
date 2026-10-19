@@ -6519,3 +6519,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D393 a short link's strip (2026-10-19)
 - Part 140 (`docs/level-scripts/part-140.md`): a link shorter than its arrowhead
   shows the arrowhead's texture as the game does.
+
+## D394 the line shader's constant and the active test (2026-10-19)
+- Part 141 (`docs/level-scripts/part-141.md`): the link shader's constant is read and
+  only one badge class can make a link active; links stay drawn pending.
