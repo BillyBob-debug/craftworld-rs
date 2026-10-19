@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1012 the unlock line's stop (2026-10-19)
+## Latest: D1013 the level-created dialogue (2026-10-19)
+- Part 160 (`docs/level-scripts/part-160.md`): the planets world's state update clears
+  the level-created dialogue's want; its line needs a My Levels search, not ported.
+
+## D1012 the unlock line's stop (2026-10-19)
 - Part 159 (`docs/level-scripts/part-159.md`): the Story state keeps whether its unlock
   line started and stops it when it closes (`_StartedVO`).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1006 whether a video plays (2026-10-19)
 - Part 153 (`docs/level-scripts/part-153.md`): `Video.IsVideoPlaying__` answers true
   while the video slot is in use, so the Pod sees the intro video.
-
-## D1005 entering the Pod (2026-10-19)
-- Part 152 (`docs/level-scripts/part-152.md`): `OnEnterPod__` is native; it restores the
-  view kept on leaving and resets the interactive music.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

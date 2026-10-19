@@ -1024,7 +1024,7 @@ impl PlanetsWorldScript {
     /// thread (`Host::level_unlocking_tick`).
     fn update_state(host: &mut dyn Host, this: u32) -> Result<(), String> {
         site(host, PLANETS_WORLD, "UpdateState__");
-        // The pod computer object is fetched and not used (none without the scripts).
+        // The pod computer object; its only use is `GetMyLevelsState__` below.
         let _ = call(host, "PodComputer", "GetPodComputer__", &[]);
         let state = int(host, this, "State");
         let running = match state {
@@ -1055,8 +1055,25 @@ impl PlanetsWorldScript {
         if as_int(&call(host, "Game", "GetNumPendingLinks__", &[])?) > 0 {
             return Self::set_state(host, this, 2);
         }
-        // `WantLevelCreatedDialogue` is only set by `OnEnterPod__` (D1005, D1007).
-        Ok(())
+        // D1013 (FOUND, script bc1d8f3a `UpdateState__`): `WantLevelCreatedDialogue` (set
+        // by `OnEnterPod__`, D1007) waits for `CanStartEndOfLevelSequence__`; then the pod
+        // computer's `GetMyLevelsState__` (script 16e6e8c9: the topmost search on its
+        // stack whose details are `SearchDetailsMyLevels`) says the line
+        // `pod_after_saved_1st_level` through its `StartVO__`, and the want is cleared
+        // whether or not that state is up. The port has no My Levels search (its stack
+        // holds the main menu, Story and a group), so only the clear is made.
+        if !as_bool(&get_member(host, this, "WantLevelCreatedDialogue")?) {
+            return Ok(());
+        }
+        if !as_bool(&call(
+            host,
+            "PlanetsWorld",
+            "CanStartEndOfLevelSequence__",
+            &[],
+        )?) {
+            return Ok(());
+        }
+        set_member(host, this, "WantLevelCreatedDialogue", Value::Bool(false))
     }
 
     fn set_state(host: &mut dyn Host, this: u32, s: i32) -> Result<(), String> {

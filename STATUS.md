@@ -6563,3 +6563,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1004 the Pod's music state (2026-10-19)
 - Part 151 (`docs/level-scripts/part-151.md`): `UpdateInteractiveMusic__` is ported and
   the world keeps the music it sets, so it is set once; nothing plays yet.
+
+## D1005 entering the Pod (2026-10-19)
+- Part 152 (`docs/level-scripts/part-152.md`): `OnEnterPod__` is native; it restores the
+  view kept on leaving and resets the interactive music.

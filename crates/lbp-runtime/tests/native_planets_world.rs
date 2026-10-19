@@ -454,3 +454,26 @@ fn d1007_the_level_created_dialogue_follows_the_previous_level() {
         );
     }
 }
+
+/// D1013: the next state update after entering the Pod clears the level-created
+/// dialogue's want; with no My Levels search up no line is asked for.
+#[test]
+fn d1013_the_level_created_dialogue_is_cleared() {
+    let mut h = host();
+    h.world.progression_flags = 3;
+    h.world.previous_level_slot_id = (2, 5);
+    run(&mut h, "OnCreate__", &[]);
+    frame(&mut h, true);
+    run(&mut h, "OnEnterPod__", &[]);
+    assert_eq!(
+        member(&mut h, "WantLevelCreatedDialogue"),
+        Value::Bool(true)
+    );
+    let requests = h.world.media.voice_overs.len();
+    frame(&mut h, false);
+    assert_eq!(
+        member(&mut h, "WantLevelCreatedDialogue"),
+        Value::Bool(false)
+    );
+    assert_eq!(h.world.media.voice_overs.len(), requests);
+}
