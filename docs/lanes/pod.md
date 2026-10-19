@@ -1,29 +1,28 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-144.md` (143 for a group's lock, 142 for the active look, 141
-   for the active test, 140 for a short link, 139 for a link's texture, 138 for links
-   between groups, 137 for which links are wide, 136 for a link's width and look, 135 for
-   a level badge's radius, 134 for a badge's radius, 133 for drawing the links, 132 for
-   the links' growth, 131 for the scripted unlock sequence, 130 for the unlock sequence
-   played, 129 for the return, 128 for the finish, 127 for the unlock sequence, 126 for
-   the pod introduction, 125 for the warning popup, 124 for the start checkpoint, 123 for
-   the spawn hold, 122 for the player texts, 121 for the cursor, 120 for Back, 119 for the
-   pushes, 118 for Story back, 117 for closed menus, 116 for the slide-in, 115 for the
-   cursor's flight, 114 for the launch warnings, 113 for Sackboy, 112 for the entrance
-   camera, 111 for the switch, 110 for the hand-off, 109 for Cross on a level, 108 for the
-   cursor, 107 for the group zoom, 106 for choosing a group, 105 for Back, 104 for the pod
-   computer's stack and main menu)
+1. `docs/level-scripts/part-145.md` (144 for voice-over timing, 143 for a group's lock,
+   142 for the active look, 141 for the active test, 140 for a short link, 139 for a
+   link's texture, 138 for links between groups, 137 for which links are wide, 136 for a
+   link's width and look, 135 for a level badge's radius, 134 for a badge's radius, 133
+   for drawing the links, 132 for the links' growth, 131 for the scripted unlock sequence,
+   130 for the unlock sequence played, 129 for the return, 128 for the finish, 127 for the
+   unlock sequence, 126 for the pod introduction, 125 for the warning popup, 124 for the
+   start checkpoint, 123 for the spawn hold, 122 for the player texts, 121 for the cursor,
+   120 for Back, 119 for the pushes, 118 for Story back, 117 for closed menus, 116 for the
+   slide-in, 115 for the cursor's flight, 114 for the launch warnings, 113 for Sackboy,
+   112 for the entrance camera, 111 for the switch, 110 for the hand-off, 109 for Cross on
+   a level, 108 for the cursor, 107 for the group zoom, 106 for choosing a group, 105 for
+   Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 204 (D396, with part 143's census) merged. PR 205 for D397
-  (branch `pod-d397`, worktree `E:\Projects\wt-d324`): voice-over timing (lines play
-  silently for their bank length); handed to the coordinator for merge once rust and
-  python are green.
+- PRs 153 (D353) through 205 (D397) merged. PR for D398 (branch `pod-d398`, worktree
+  `E:\Projects\wt-d324`): the native intro's voice-over request; handed to the
+  coordinator for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D398.
+  Decision numbers: D348-D399, next free D399.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -113,6 +112,6 @@
    radius, 0.08 from the settings block's default (D388), to measure in RPCS3 during an
    unlock; badge kind 2 comes from loaded data, D393). It, the
    intro and `OnEnterPod__` wait on voice-over, which plays silently for each line's
-   length when a game dir holds `voiceover.fsb` (D397; the launcher does not copy it
-   yet, and the native intro's requests are not ported). The interactive music
-   needs the .fev.
+   length when a game dir holds `voiceover.fsb` (D397; the launcher copies it from PR
+   206; the native intro requests its line too, D398, but not its video). The
+   interactive music needs the .fev.

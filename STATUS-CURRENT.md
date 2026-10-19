@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D397 voice-over timing (2026-10-19)
+## Latest: D398 the native intro's voice-over (2026-10-19)
+- Part 145 (`docs/level-scripts/part-145.md`): the native Pod intro asks for its
+  voice-over line and waits for it, as the game's script does.
+
+## D397 voice-over timing (2026-10-19)
 - Part 144 (`docs/level-scripts/part-144.md`): voice-over lines play silently for
   their length from the disc's bank, so the Pod's scripts wait as the game does.
 

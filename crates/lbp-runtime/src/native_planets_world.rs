@@ -933,16 +933,32 @@ impl PlanetsWorldScript {
             set_member(host, this, "IntroStep", Value::Int(0))?;
             set_member(host, this, "IntroZoom", Value::Float(0.))?;
             set_member(host, this, "IntroRunning", Value::Bool(true))?;
+            // D398 (FOUND, `PodIntroductionThread.Run__` before its zoom loop): the line
+            // `pod_1st_time`, or `pod_1st_time_alt` when the player has LBP1's Pod,
+            // interrupt and replay both set. The video request before it is not ported.
+            let alt = call(host, "Profile", "HasPlayedLBP1AndUnlockedPod__", &[])?;
+            let line = if as_bool(&alt) {
+                "pod_1st_time_alt"
+            } else {
+                "pod_1st_time"
+            };
+            let args = [
+                Value::Str(line.into()),
+                Value::Bool(true),
+                Value::Bool(true),
+            ];
+            call(host, "Audio", "RequestVoiceOver__Q7StringAbb", &args)?;
         }
         Ok(())
     }
 
     /// One tick of `PodIntroductionThread`, resumed before the world's update: the zoom
     /// steps by 1/450 to 1, then the thread waits while a voice-over or the pod
-    /// computer's video plays (neither does here: the video handle is -1) and sets the
+    /// computer's video plays (the video handle is -1 here; the line plays for its bank
+    /// length, D397) and sets the
     /// progression flags 3 (8188 when LBP1's Moon is unlocked and this is not a demo or
-    /// kiosk build, 8064 in the PSN demo). Whether it is still running. The video and
-    /// voice-over requests the thread makes first are not ported.
+    /// kiosk build, 8064 in the PSN demo). Whether it is still running. The thread's
+    /// voice-over line is requested when it starts (D398); its video request is not ported.
     fn intro_tick(host: &mut dyn Host, this: u32) -> Result<bool, String> {
         if !get_member(host, this, "IntroRunning").is_ok_and(|v| as_bool(&v)) {
             return Ok(false);

@@ -24,8 +24,7 @@ length, so the scripts wait as long as the game does.
 
 - A line counts as heard once it starts. The heard set lives on the runtime for the
   session and is carried across level switches; the profile's own copy is not read.
-- The native intro's own voice-over requests (`native_planets_world.rs`) are not
-  ported; its waits still pass at once.
+- The native intro's own voice-over request is ported in part 145 (D398).
 
 ### Code
 
