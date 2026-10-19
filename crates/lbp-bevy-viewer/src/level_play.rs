@@ -364,10 +364,12 @@ impl WorldSource {
 
     /// The read level's world bound to its VM and its scripts set up: the objects built,
     /// the class defaults, the progression flags, the engine objects (their faults, at
-    /// most [`MAX_FAULT_LINES`]) and the scripted Things. Prints the header.
+    /// most [`MAX_FAULT_LINES`]) and the scripted Things. Prints the header. D1008:
+    /// `slots`, the level's slot and the previous level's (Type, SlotNumber), when known.
     fn start(
         &self,
         read: LevelRead,
+        slots: Option<((i32, i32), (i32, i32))>,
     ) -> (Vm, Bindings<LevelWorld>, LevelScripts, Vec<String>, String) {
         let LevelRead {
             mut vm,
@@ -378,6 +380,10 @@ impl WorldSource {
         let built = world.bind_objects(&mut vm);
         world.add_class_defaults(&vm);
         world.progression_flags = self.flags;
+        if let Some((slot, previous)) = slots {
+            world.level_slot_id = slot;
+            world.previous_level_slot_id = previous;
+        }
         world.media.voice_over_lengths = voice_over_lengths(&self.game);
         world.media.video_lengths = video_lengths(&self.game);
         // Unbound natives return their type's default and are counted (rscript-plan stage 1).
@@ -434,6 +440,21 @@ struct Switch {
 enum SwitchTo {
     Level((i32, i32)),
     Pod,
+}
+
+/// D1008: the slot of the level a switch loads and the previous level's, from the
+/// current pair. The Pod's slot is not known: INFERRED (0, 0), as at the start. FOUND
+/// (0x1ab508): loading a different slot makes the current one the previous (which the
+/// Pod's `OnEnterPod__` reads, D1007); reloading the same slot keeps the previous one.
+fn next_slots(
+    (current, previous): ((i32, i32), (i32, i32)),
+    to: SwitchTo,
+) -> ((i32, i32), (i32, i32)) {
+    let slot = match to {
+        SwitchTo::Level(slot) => slot,
+        SwitchTo::Pod => (0, 0),
+    };
+    (slot, if slot == current { previous } else { current })
 }
 
 /// The shell level's VM, world and identity, read beside the Pod level.
@@ -944,7 +965,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         .join()
         .map_err(|_| "level scripts thread panicked".to_string())??;
     let loaded = read.loaded;
-    let (vm, mut host, scripts, mut faults, header) = from.start(read);
+    let (vm, mut host, scripts, mut faults, header) = from.start(read, None);
     let menu_assets = menu_assets.map(|(assets, line)| {
         println!("{line}");
         assets
@@ -1804,7 +1825,9 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
     };
     let identity = read.identity.clone();
     let loaded = read.loaded;
-    let (mut vm, mut host, scripts, mut faults, header) = p.from.start(read);
+    let w = &p.host.world;
+    let slots = next_slots((w.level_slot_id, w.previous_level_slot_id), to);
+    let (mut vm, mut host, scripts, mut faults, header) = p.from.start(read, Some(slots));
     // D381: the profile's state goes with the session (the game keeps one profile).
     host.world.progression_flags = p.host.world.progression_flags;
     host.world.story_progress = std::mem::take(&mut p.host.world.story_progress);
@@ -4615,6 +4638,18 @@ mod tests {
         assert_eq!(
             wanted_lens(None, &mut follow, Some(VIEWER_LENS), PLANETS_SCALE),
             None
+        );
+    }
+
+    /// D1008: a story level gets its slot, and back in the Pod it is the previous one.
+    #[test]
+    fn d1008_a_switch_moves_the_slot_to_the_previous() {
+        let launched = next_slots(((0, 0), (0, 0)), SwitchTo::Level((0, 12)));
+        assert_eq!(launched, ((0, 12), (0, 0)));
+        assert_eq!(next_slots(launched, SwitchTo::Pod), ((0, 0), (0, 12)));
+        assert_eq!(
+            next_slots(((0, 12), (0, 3)), SwitchTo::Level((0, 12))),
+            ((0, 12), (0, 3))
         );
     }
 }
