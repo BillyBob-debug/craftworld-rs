@@ -20,7 +20,8 @@
 ## State
 - PRs 153 (D353) through 204 (D396, with part 143's census) merged. PR 205 for D397
   (branch `pod-d397`, worktree `E:\Projects\wt-d324`): voice-over timing (lines play
-  silently for their bank length); handed to the coordinator for merge once rust and python are green.
+  silently for their bank length); handed to the coordinator for merge once rust and
+  python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
   Decision numbers: D348-D399, next free D398.
 
