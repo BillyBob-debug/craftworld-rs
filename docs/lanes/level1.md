@@ -8,7 +8,7 @@
 
 ## State
 - PR 155 (D504, native `Trigger_Speech_Bubble`) merged. PR for D505 (branch
-  `pod-d1019`, worktree `E:\Projects\wt-d324`): native `Launcher`; handed to the
+  `level1-launcher`, worktree `E:\Projects\wt-d324`): native `Launcher`; handed to the
   coordinator for merge once rust and python are green.
 - Decision numbers: D504-599, next free D506.
 
