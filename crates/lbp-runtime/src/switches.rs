@@ -17,9 +17,9 @@
 //!   game calls the script function `SwitchPerformReaction__b` or
 //!   `SwitchPerformReaction__bf` on the target's own script.
 //!
-//! The logic types are computed, and so are the tag sensor and the player sensor
-//! (`sensors.rs`); the other types whose signal comes from the world (physics, the pads)
-//! keep the signal the level file stores.
+//! The logic types are computed, and so are the tag sensor, the player sensor and the
+//! impact sensor (`sensors.rs`); the other types whose signal comes from the world
+//! (physics, the pads) keep the signal the level file stores.
 //!
 //! Not modelled:
 //! - The dirty flags. The game re-runs the event-driven switch types only when something
@@ -37,7 +37,7 @@
 //! - Switch types 0x24/0x25 standing in for their microchip's switch in the ordering.
 //! - The other object kinds a signal is applied to (lights, emitters, movers and so on).
 //! - The activating player the game records on the target before the dispatch.
-use crate::sensors::{player_sensor, tag_sensor};
+use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
 use crate::{InputWire, LevelWorld, SwitchState, ThingState};
 use lbp_script_vm::natives::SwitchInput;
 use std::collections::BTreeSet;
@@ -457,6 +457,7 @@ pub fn compute_output(
         // The player sensor, 0x119910, and the tag sensor, 0x118d5c, FOUND.
         3 => standard(player_sensor(cx)),
         4 => standard(tag_sensor(cx)),
+        18 => standard(impact_sensor(cx)),
         // PRESSURE, SACKBOT_*, INACTIVE, DEATH, CUTSCENE_CAM_ACTIVE and the later types
         // whose signal is not made in the pass, 0x11bf08, FOUND: {0.0, 0, -1}.
         7 | 11..=13 | 26 | 31 | 33 | 46..=53 | 56 | 58..=64 => off(),
@@ -1763,7 +1764,7 @@ mod tests {
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
         // The other sensors keep the stored signal, also when inverted.
-        for ty in [0, 6, 18, 30, 38, 41, 54, 65] {
+        for ty in [0, 6, 30, 38, 41, 54, 65] {
             let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
             let s = t.switch.as_mut().unwrap();
             (s.switch_type, s.inverted) = (ty, true);

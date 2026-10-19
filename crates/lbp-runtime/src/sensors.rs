@@ -1,4 +1,5 @@
-//! The tag sensor and the player sensor of the switch pass (docs/level-scripts.md part 15).
+//! The tag sensor, the player sensor and the impact sensor of the switch pass
+//! (docs/level-scripts.md part 15, docs/logic.md Part 15).
 //!
 //! FOUND in the 01.33 executable (tag sensor 0x118d5c, player sensor 0x119910, their
 //! ternary rule 0x11873c, the tag map 0xceac0 / 0xd5c1c, the tag's signal 0x12f6f4, the
@@ -21,6 +22,10 @@
 //! - A tag skipped by a Thing flag in one game state (the meaning of both not settled).
 //! - Players out of play and DetectUnspawnedPlayers on a player sensor (players waiting
 //!   at a checkpoint): the world has neither state.
+//! - The impact sensor: IncludeRigidConnectors (PSwitch+0xca, the whole rigid group's
+//!   contacts), the collision mask and shape overlap tests of a touching contact, the
+//!   game-state check of its tag filter, creatures counting as players and the tag's
+//!   own player. See [`impact_sensor`].
 use crate::switches::{clamp, held_ternary, wired, SwitchContext, SIGNAL_OFF};
 use crate::{LevelWorld, SwitchState, TagRecord};
 use lbp_script_vm::natives::SwitchInput;
@@ -310,10 +315,93 @@ pub(crate) fn player_sensor(cx: &SwitchContext<'_>) -> SwitchInput {
     }
 }
 
+/// The impact sensor (switch type 18).
+///
+/// FOUND (0x11c2a8 → 0x11ae80, per contact 0x900f54):
+/// - The body is the sensor's proxy ([`LevelWorld::sensor_proxy`]), or its parent when
+///   the proxy has no shape (0x11b47c); with neither, off. Nothing is stored and there is
+///   no end-of-update step (table 0x124b0c entry 18): it is worked out from this tick's
+///   contacts ([`LevelWorld::contacts`]).
+/// - A contact counts when it carried an impulse (0x90103c, no tolerance), or, with
+///   IncludeTouching set, when it only touches (0x9011e8). A contact with the body
+///   itself does not count (0x900fb0).
+/// - Who counts: with the tag filter (PSwitch+0xc9, read as RequireAll) any object
+///   carrying a tag of the sensor's key; otherwise PlayerMode 2 any object and other
+///   modes only players' Sackboys, and PlayerMode 0 only the first player's (0x11b6d8,
+///   0x900fc0, 0x900fcc).
+/// - The signal: activation 1.0 and ternary 1 (0x11873c, threshold 0.25) when one
+///   counts, with the player of the first one that is a player's; else off.
+///
+/// INFERRED: a tag counts when it is the other Thing or a child of it (the game compares
+/// the other Thing's u16 +0x7a with the tag's id); creatures do not count as players.
+pub(crate) fn impact_sensor(cx: &SwitchContext<'_>) -> SwitchInput {
+    let (s, w) = (cx.switch, cx.world);
+    let shaped = |t: u32| {
+        w.things
+            .get(t as usize)
+            .is_some_and(|t| t.parts.contains(&"SHAPE"))
+    };
+    let proxy = w.sensor_proxy(cx.thing);
+    let body = if shaped(proxy) {
+        proxy
+    } else {
+        match w.things.get(proxy as usize).and_then(|t| t.parent) {
+            Some(p) => p,
+            None => return SIGNAL_OFF,
+        }
+    };
+    let leader = w.player_records.first().map(|r| r.number);
+    let player_of = |t: u32| w.players.iter().find(|p| p.thing == t).map(|p| p.number);
+    let tagged = |t: u32| {
+        let has = |t: u32| w.things.get(t as usize).and_then(|t| t.switch_key) == Some(s.key);
+        has(t)
+            || w.things
+                .iter()
+                .any(|c| c.parent == Some(t) && c.switch_key == Some(s.key))
+    };
+    let mut hit: Option<i32> = None;
+    for c in &w.contacts {
+        let other = match (c.a == body, c.b == body) {
+            (true, false) => c.b,
+            (false, true) => c.a,
+            _ => continue,
+        };
+        if !c.force && s.include_touching == 0 {
+            continue;
+        }
+        let player = player_of(other);
+        let passes = if s.require_all {
+            tagged(other)
+        } else {
+            match s.player_mode {
+                0 => player.is_some() && player == leader,
+                2 => true,
+                _ => player.is_some(),
+            }
+        };
+        if !passes {
+            continue;
+        }
+        let player = player.unwrap_or(-1);
+        hit = Some(match hit {
+            Some(p) if p != -1 => p,
+            _ => player,
+        });
+    }
+    match hit {
+        Some(player) => SwitchInput {
+            activation: 1.,
+            ternary: 1,
+            player,
+        },
+        None => SIGNAL_OFF,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SwitchOutputState, TagKey, ThingState};
+    use crate::{Contact, SwitchOutputState, TagKey, ThingState};
 
     fn sig(activation: f32, ternary: i32, player: i32) -> SwitchInput {
         SwitchInput {
@@ -598,6 +686,88 @@ mod tests {
         (w.things[1].world_matrix, w.things[2].world_matrix) = (None, None);
         w.refresh_tags();
         assert!(w.tags.is_empty());
+    }
+
+    /// A world with an impact sensor (Thing 0, with a shape), a box (Thing 1, a shape),
+    /// and a tag of [`KEY`] on the box (Thing 2).
+    fn impact_world() -> LevelWorld {
+        let mut sensor = switch(18, 0., 0., &[]);
+        sensor.parts = vec!["SHAPE"];
+        let shape = ThingState {
+            parts: vec!["SHAPE"],
+            ..Default::default()
+        };
+        let mut t = tag(0., 0.);
+        t.parent = Some(1);
+        let mut w = world(vec![sensor, shape, t]);
+        state(&mut w, 0).key = KEY;
+        w
+    }
+
+    fn hit(a: u32, b: u32, force: bool) -> Contact {
+        Contact { a, b, force }
+    }
+
+    #[test]
+    fn impact_sensor_counts_hits_by_player_mode() {
+        let mut w = impact_world();
+        let p = w.add_player([0., 0., 0.], (0., 0.));
+        let sackboy = p;
+        // No contacts: off.
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        // Mode 1 (players only): the box does not count, Sackboy does, either way round.
+        state(&mut w, 0).player_mode = 1;
+        w.contacts = vec![hit(0, 1, true)];
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        w.contacts = vec![hit(sackboy, 0, true)];
+        assert_eq!(pass(&mut w, 0), sig(1., 1, 0));
+        // Mode 2: any object, and the player of the first player hit.
+        state(&mut w, 0).player_mode = 2;
+        w.contacts = vec![hit(0, 1, true)];
+        assert_eq!(pass(&mut w, 0), sig(1., 1, -1));
+        w.contacts = vec![hit(0, 1, true), hit(0, sackboy, true)];
+        assert_eq!(pass(&mut w, 0), sig(1., 1, 0));
+        // Mode 0: only the first player's Sackboy.
+        state(&mut w, 0).player_mode = 0;
+        let q = w.add_player([0., 0., 0.], (0., 0.));
+        let second = q;
+        w.contacts = vec![hit(0, second, true)];
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        w.contacts = vec![hit(0, sackboy, true)];
+        assert_eq!(pass(&mut w, 0), sig(1., 1, 0));
+        // Nothing is stored: the next tick without contacts is off; inverted, on.
+        w.contacts.clear();
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        state(&mut w, 0).inverted = true;
+        assert_eq!(pass(&mut w, 0), sig(1., 1, -1));
+    }
+
+    #[test]
+    fn impact_sensor_touching_tags_and_body() {
+        let mut w = impact_world();
+        state(&mut w, 0).player_mode = 2;
+        // Touching only counts with IncludeTouching.
+        w.contacts = vec![hit(0, 1, false)];
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        state(&mut w, 0).include_touching = 1;
+        assert_eq!(pass(&mut w, 0), sig(1., 1, -1));
+        // A contact of the body with itself, or of two other bodies, never counts.
+        w.contacts = vec![hit(0, 0, true), hit(1, 2, true)];
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        // Tag filter: the box carries a tag of the key; another key does not count.
+        state(&mut w, 0).require_all = true;
+        w.contacts = vec![hit(0, 1, true)];
+        assert_eq!(pass(&mut w, 0), sig(1., 1, -1));
+        state(&mut w, 0).key = TagKey { colour: 3, name: 0 };
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        // A sensor Thing with no shape uses its parent's contacts; with no parent, off.
+        let mut w = impact_world();
+        state(&mut w, 0).player_mode = 2;
+        w.things[0].parts.clear();
+        w.contacts = vec![hit(1, 2, true)];
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        w.things[0].parent = Some(1);
+        assert_eq!(pass(&mut w, 0), sig(1., 1, -1));
     }
 
     #[test]
