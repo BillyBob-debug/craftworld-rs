@@ -452,18 +452,9 @@ pub fn add_badge(
     let earth = scene.meshes.get(pod.mesh).and_then(|m| m.bounds);
     let local = badge_matrix(badge.location, lbp_runtime::EARTH_RADIUS, badge.angle)
         .ok_or("the badge's location is not a direction")?;
-    // The planet's turn (part 82) takes the point into the Thing's frame, whose rotation
-    // is not the Earth model's (the model is placed by a bone): the badge takes the
-    // Thing's rotation and scale, and the Earth model's centre.
-    let (_, _, translation) = Mat4::from_cols_array(&pod.world).to_scale_rotation_translation();
-    let thing = scene
-        .positions
-        .get(globe)
-        .copied()
-        .flatten()
-        .ok_or("the Pod's Earth Thing has no POS")?;
-    let (scale, rotation, _) = Mat4::from_cols_array(&thing).to_scale_rotation_translation();
-    let world = Mat4::from_scale_rotation_translation(scale, rotation, translation) * local;
+    let frame = planet_frame(scene, globe)?;
+    let translation = frame.w_axis.truncate();
+    let world = frame * local;
     let mut push = |source: u32, mesh: lbp_preview::GroupedMesh, world: Mat4| {
         let payload = ScenePayload::Model(Box::new(mesh));
         scene.meshes.push(level_scene::SceneMesh {
@@ -504,6 +495,120 @@ pub fn add_badge(
         at: world.w_axis.truncate(),
         overlays,
     })
+}
+
+/// The Pod Earth's planet space in level units: the planet's turn (part 82) takes a
+/// point into the Thing's frame, whose rotation is not the Earth model's (the model is
+/// placed by a bone), so it is the Thing's rotation and scale about the Earth model's
+/// centre (D343).
+pub fn planet_frame(scene: &LevelScene, globe: usize) -> Result<Mat4, String> {
+    let pod = earth_item(scene, Some(globe)).ok_or("the Pod's Earth has no Earth model")?;
+    let (_, _, translation) = Mat4::from_cols_array(&pod.world).to_scale_rotation_translation();
+    let thing = scene
+        .positions
+        .get(globe)
+        .copied()
+        .flatten()
+        .ok_or("the Pod's Earth Thing has no POS")?;
+    let (scale, rotation, _) = Mat4::from_cols_array(&thing).to_scale_rotation_translation();
+    Ok(Mat4::from_scale_rotation_translation(
+        scale,
+        rotation,
+        translation,
+    ))
+}
+
+/// D386: the Pod Earth's planet frame at load ([`planet_frame`]), for the links.
+#[derive(Resource, Debug, Clone, Copy)]
+pub struct StoryFrame(pub Mat4);
+
+/// D386 (FOUND 0x426694-0x4268c8: 80 or 40 scaled by 0.4 at 0xda2698): a link's
+/// ribbon width in planet units.
+pub const LINK_WIDTH: f32 = 80. * 0.4;
+/// D386 (FOUND: 9 at 0xda2688 scaled by 0.4, subtracted in degrees at 0x4a201c): the
+/// arrowhead's length in degrees of arc (its width is twice the shaft's).
+pub const LINK_HEAD: f32 = 9. * 0.4;
+/// D386 (FOUND: the strip builder 0x4a1250 takes 10): degrees of arc a segment.
+pub const LINK_SEGMENT: f32 = 10.;
+/// D386 (INFERRED from 0xA0FFFFFF and the constants at 0xc648f0): the link's colour.
+pub const LINK_COLOUR: [f32; 4] = [0.094, 1., 0.0117, 160. / 255.];
+/// D386 (INFERRED: no lift was found; this keeps the ribbon off the Earth's surface).
+pub const LINK_LIFT: f32 = 2.;
+/// D386 (INFERRED: the render state 0x49d104, 0x49d3fc, 0x4b3964, 0x49e2d4, 0x49d328 was
+/// not traced): the ribbon follows the sphere at planet+0x1c while the Earth model's
+/// relief rises above it, so it is drawn over the Earth (MEASURED, the disc run: without
+/// this the relief hides it).
+pub const LINK_DEPTH_BIAS: f32 = 1e9;
+
+/// D386 (INFERRED): a level badge's angular radius at +0x210, in radians (FOUND
+/// 0x42676c: used as is). Only the groups' 0.27 was measured (D344); the game skips a
+/// link whose two radii reach across it, and the disc run's link spans 13.5 degrees
+/// (0.236), so a level's is under 0.118: this takes a third of a group's.
+pub const LEVEL_BADGE_ANGLE: f32 = GROUP_BADGE_ANGLE / 3.;
+
+/// D386: a link's ribbon in planet space.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Ribbon {
+    pub positions: Vec<[f32; 3]>,
+    pub normals: Vec<[f32; 3]>,
+    pub uvs: Vec<[f32; 2]>,
+    pub indices: Vec<u32>,
+}
+
+/// D386 (FOUND 0x426484, 0x4a1e40): the great-circle arc from badge `a`'s centre to
+/// badge `b`'s edge (`b` less its angular radius `rb`, radians), drawn over its first
+/// `progress` with an arrowhead at the end. None where the game draws nothing: progress
+/// 0, an angle under 0.01 radians, or radii `ra + rb` that reach across it. The start is
+/// not clipped (badge `a` covers it). PLACEHOLDER: the ribbon is flat (the game's
+/// texture was not traced).
+pub fn link_ribbon(
+    a: Vec3,
+    b: Vec3,
+    ra: f32,
+    rb: f32,
+    radius: f32,
+    progress: f32,
+) -> Option<Ribbon> {
+    let (a, b) = (a.try_normalize()?, b.try_normalize()?);
+    let theta = a.dot(b).clamp(-1., 1.).acos();
+    if progress <= 0. || theta < 0.01 || ra + rb >= theta {
+        return None;
+    }
+    let end = a.slerp(b, 1. - rb / theta);
+    let angle = a.angle_between(end).to_degrees();
+    if angle < 0.01 {
+        return None;
+    }
+    let side = a.cross(b).try_normalize()?;
+    let tip = progress.min(1.) * angle;
+    let neck = (tip - LINK_HEAD).max(0.);
+    let mut ribbon = Ribbon::default();
+    let mut strip = |from: f32, to: f32, w0: f32, w1: f32| {
+        let n = ((to - from) / LINK_SEGMENT).ceil().max(1.) as u32;
+        let base = ribbon.positions.len() as u32;
+        for k in 0..=n {
+            let t = k as f32 / n as f32;
+            let p = a.slerp(end, (from + (to - from) * t) / angle);
+            let c = p * (radius + LINK_LIFT);
+            let w = (w0 + (w1 - w0) * t) / 2.;
+            for (s, v) in [(-1., 0.), (1., 1.)] {
+                ribbon.positions.push((c + side * w * s).to_array());
+                ribbon.normals.push(p.to_array());
+                ribbon.uvs.push([t, v]);
+            }
+        }
+        for k in 0..n {
+            let i = base + 2 * k;
+            ribbon
+                .indices
+                .extend([i, i + 2, i + 1, i + 1, i + 2, i + 3]);
+        }
+    };
+    if neck > 0. {
+        strip(0., neck, LINK_WIDTH, LINK_WIDTH);
+    }
+    strip(neck, tip, 2. * LINK_WIDTH, 0.);
+    Some(ribbon)
 }
 
 /// D346: the overlays for the `Story badge` line: each slot drawn, or why not.
@@ -700,6 +805,25 @@ mod tests {
         // Underdamped: it overshoots, then settles on scale 1 and the spin.
         assert!(peak > 1.2 && peak < 1.6, "peak {peak}");
         assert!((g.scale.0 - 1.).abs() < 1e-3 && (g.spin.0 - 0.3).abs() < 1e-3);
+    }
+
+    #[test]
+    fn d386_link_ribbon_grows_along_the_arc() {
+        let (a, b) = (Vec3::Z, Vec3::X);
+        let r = LEVEL_BADGE_ANGLE;
+        assert!(link_ribbon(a, b, r, r, 1750., 0.).is_none());
+        assert!(link_ribbon(a, a, r, r, 1750., 1.).is_none());
+        assert!(link_ribbon(a, b, 0.8, 0.8, 1750., 1.).is_none());
+        let reach = |p: f32| {
+            let r = link_ribbon(a, b, LEVEL_BADGE_ANGLE, LEVEL_BADGE_ANGLE, 1750., p).unwrap();
+            let tip = Vec3::from(*r.positions.last().unwrap());
+            assert!((tip.length() - 1750. - LINK_LIFT).abs() < 1e-2);
+            assert!(r.indices.iter().all(|&i| (i as usize) < r.positions.len()));
+            tip.angle_between(a).to_degrees()
+        };
+        let end = 90. - LEVEL_BADGE_ANGLE.to_degrees();
+        assert!((reach(1.) - end).abs() < 1e-2);
+        assert!((reach(0.5) - end / 2.).abs() < 1e-2);
     }
 
     #[test]

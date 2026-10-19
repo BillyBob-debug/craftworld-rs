@@ -976,6 +976,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             follow_things,
             follow_story_world,
             grow_badge_overlays,
+            follow_links,
             follow_world,
             follow_menu,
         )
@@ -2195,6 +2196,111 @@ fn follow_level(
 /// 0x42a92c erases a card once its scale reaches 0, 0x4221d8 to 0x6fbaa0), so the next
 /// opening builds new cards, a first fill; hidden here means the card is gone, so the
 /// overlays vanish with it rather than shrink out one by one.
+/// D386: a pending link's ribbon on the Pod's Earth.
+#[derive(Component)]
+struct LinkRibbon;
+
+/// D386 (FOUND 0x426484: the planets' draw walks the link records and draws each one
+/// with progress above 0): while the Story search is up, each link of
+/// `LevelWorld.link_progress` as its ribbon ([`crate::story_world::link_ribbon`]) in the
+/// Earth's planet frame. The ribbons are rebuilt when the progress changes and placed
+/// each tick where the Story badge is drawn now (its global transform less its own
+/// place: the Earth's moves and the World Thing above it), so they turn with the Earth.
+#[allow(clippy::too_many_arguments)]
+fn follow_links(
+    play: NonSend<Play>,
+    v: Res<crate::Viewer>,
+    things: Option<Res<crate::thing_view::LevelThings>>,
+    frame: Option<Res<crate::story_world::StoryFrame>>,
+    items: Query<(&crate::thing_view::LevelThing, &GlobalTransform), Without<LinkRibbon>>,
+    mut drawn: Query<(Entity, &mut Transform), With<LinkRibbon>>,
+    mut commands: Commands,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<crate::dual::ViewerMaterial>>,
+    mut last: Local<Vec<(lbp_runtime::PendingLink, f32)>>,
+) {
+    use crate::story_world as sw;
+    let world = &play.host.world;
+    let (Some(things), Some(frame), Some(globe)) = (things, frame, v.level.pod) else {
+        return;
+    };
+    // The Earth now: the badge's (else another pasted Story item's) global transform
+    // less its own place.
+    let pasted = |card: bool| {
+        things.entities.get(&(globe as u32)).and_then(|list| {
+            list.iter().find_map(|&e| {
+                let (tag, g) = items.get(e).ok()?;
+                let item = &tag.item;
+                (item.alternate && sw::is_card(item) == card && !sw::is_overlay(item))
+                    .then(|| g.to_matrix() * item.world.inverse())
+            })
+        })
+    };
+    let Some(earth) = pasted(true).or_else(|| pasted(false)) else {
+        return;
+    };
+    let place = Transform::from_matrix(earth * frame.0);
+    let wanted: Vec<_> = if sw::story_open(world) {
+        world
+            .link_progress
+            .iter()
+            .copied()
+            .filter(|&(_, p)| p > 0.)
+            .collect()
+    } else {
+        Vec::new()
+    };
+    if *last == wanted {
+        for (_, mut t) in &mut drawn {
+            if *t != place {
+                *t = place;
+            }
+        }
+        return;
+    }
+    for (e, _) in &drawn {
+        commands.entity(e).despawn();
+    }
+    *last = wanted;
+    let [r, g, b, a] = sw::LINK_COLOUR;
+    for &(link, progress) in last.iter() {
+        let Some((from, to)) = world.link_dirs(link) else {
+            continue;
+        };
+        let Some(ribbon) = sw::link_ribbon(
+            Vec3::from(from),
+            Vec3::from(to),
+            sw::LEVEL_BADGE_ANGLE,
+            sw::LEVEL_BADGE_ANGLE,
+            lbp_runtime::EARTH_RADIUS,
+            progress,
+        ) else {
+            continue;
+        };
+        let mesh = Mesh::new(
+            bevy::render::render_resource::PrimitiveTopology::TriangleList,
+            bevy::asset::RenderAssetUsages::default(),
+        )
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, ribbon.positions)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_NORMAL, ribbon.normals)
+        .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, ribbon.uvs)
+        .with_inserted_indices(bevy::mesh::Indices::U32(ribbon.indices));
+        commands.spawn((
+            LinkRibbon,
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(crate::dual::material(StandardMaterial {
+                base_color: Color::srgba(r, g, b, a),
+                alpha_mode: AlphaMode::Blend,
+                unlit: true,
+                cull_mode: None,
+                depth_bias: sw::LINK_DEPTH_BIAS,
+                ..default()
+            }))),
+            place,
+        ));
+    }
+}
+
 /// D352 (part 99): the card itself shrinks out after closing (`story_world::CardScale`),
 /// the overlays with it, about the card's place.
 #[allow(clippy::type_complexity)]

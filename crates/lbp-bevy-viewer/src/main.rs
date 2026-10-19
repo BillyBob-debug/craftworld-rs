@@ -1597,6 +1597,10 @@ fn load(
                     }
                     Ok(m)
                 });
+                // D386: the planet frame the links are drawn in.
+                if let Ok(f) = story_world::planet_frame(&level.scene, globe) {
+                    commands.insert_resource(story_world::StoryFrame(f));
+                }
                 match merged {
                     Ok(m) => {
                         println!(
