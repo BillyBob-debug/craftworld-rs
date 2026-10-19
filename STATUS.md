@@ -6675,3 +6675,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1102 pistons with no input run the game's wave (2026-10-19)
 - Logic lane: unwired pistons move between base and base + range on the EBOOT's
   eased wave (0xc95ec); the 27 wired ones wait on the switch clock (docs/logic.md P4).
+
+## D1103 switched pistons run while their signal is on (2026-10-19)
+- Logic lane: each piston keeps the game clock (modStart/Delta/Scale); a switch sets
+  its rate, so an on/off piston runs while on and holds while off (docs/logic.md P5).
+

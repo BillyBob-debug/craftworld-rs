@@ -63,6 +63,22 @@ pub struct Frame {
 }
 
 impl Frame {
+    /// D1111: world point `p` in this frame.
+    pub fn local(&self, p: [f32; 2]) -> [f32; 2] {
+        let (s, c) = self.angle.sin_cos();
+        let d = [p[0] - self.position[0], p[1] - self.position[1]];
+        [c * d[0] + s * d[1], c * d[1] - s * d[0]]
+    }
+
+    /// D1111: the world point at `at` in this frame.
+    pub fn world(&self, at: [f32; 2]) -> [f32; 2] {
+        let (s, c) = self.angle.sin_cos();
+        [
+            self.position[0] + c * at[0] - s * at[1],
+            self.position[1] + s * at[0] + c * at[1],
+        ]
+    }
+
     /// Frame of a POS world matrix (column-major, translation at 12..14): translation xy
     /// and the angle of the x axis. Scale and shear stay in the collider points.
     pub fn of_matrix(m: &[f32; 16]) -> Option<Self> {
@@ -220,6 +236,9 @@ pub struct MoveTweak {
     pub flee: bool,
     /// allowUpDown: off drops the follower's push along its body's up axis.
     pub up_down: bool,
+    /// D1111: followKey: the follower follows the tags with this key ([`SceneTag`])
+    /// instead of the players.
+    pub key: Option<u32>,
 }
 
 /// D1110: `v` per unit length, or None for a zero vector.
@@ -414,7 +433,22 @@ pub struct PhysicsScene {
     pub bodies: Vec<SceneBody>,
     pub colliders: Vec<SceneCollider>,
     pub joints: Vec<SceneJoint>,
+    /// D1111: every tag (PSwitchKey) a follower can follow.
+    pub tags: Vec<SceneTag>,
     pub report: SceneReport,
+}
+
+/// D1111: a tag (PSwitchKey) where followers find it. `key` numbers the tag's colour and
+/// name, the pair the game's tag lists are keyed by (0xceac0, EBOOT 01.33); a follower
+/// with followKey follows the tags whose key is its own.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneTag {
+    pub thing: usize,
+    pub key: u32,
+    /// The body the tag rides on, with `at` in that body's frame; None: `at` is the
+    /// tag's world position.
+    pub body: Option<usize>,
+    pub at: [f32; 2],
 }
 
 impl PhysicsScene {
@@ -479,6 +513,18 @@ fn body_owner(things: &[ThingRecord], mut i: usize) -> (Option<usize>, Vec<usize
     }
     let top = found.pop();
     (top, found)
+}
+
+/// The position of a thing, or of its nearest parent that has one.
+fn placed(things: &[ThingRecord], mut i: usize) -> Option<&lbp_level::parts::Pos> {
+    for _ in 0..MAX_PARENT_DEPTH {
+        let t = things.get(i)?;
+        if let Some(pos) = &t.data.pos {
+            return Some(pos);
+        }
+        i = t.parent.filter(|&p| p != i)?;
+    }
+    None
 }
 
 fn is_world(t: &ThingRecord) -> bool {
@@ -748,11 +794,43 @@ fn build_scene_inner(
             });
         }
     }
+    // D1111: tags are keyed by colour and name.
+    let mut keys = BTreeMap::<(i32, String), u32>::new();
+    let mut key_of = |colour: i32, name: &str| -> u32 {
+        let n = keys.len() as u32;
+        *keys.entry((colour, name.to_owned())).or_insert(n)
+    };
     for (i, t) in things.iter().enumerate() {
-        // D1110: a follower of tagged things (followKey) waits on the tag search.
-        let Some(tw) = t.data.physics_tweak.as_ref().filter(|tw| {
-            matches!(tw.configuration, 6..=8) || (tw.configuration == 11 && !tw.follow_key)
-        }) else {
+        // A tag with no position of its own (one placed on a chip or a part) sits where
+        // its nearest positioned parent is.
+        let Some(k) = &t.data.switch_key else {
+            continue;
+        };
+        let Some(pos) = placed(things, i) else {
+            continue;
+        };
+        let world = [pos.world[12], pos.world[13]];
+        let body = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        let at = match body {
+            Some(b) => scene.bodies[b].frame.local(world),
+            None => world,
+        };
+        scene.tags.push(SceneTag {
+            thing: i,
+            key: key_of(k.colour_index, &k.name),
+            body,
+            at,
+        });
+    }
+    for (i, t) in things.iter().enumerate() {
+        let Some(tw) = t
+            .data
+            .physics_tweak
+            .as_ref()
+            .filter(|tw| matches!(tw.configuration, 6..=8 | 11))
+        else {
             continue;
         };
         let slot = body_owner(things, i)
@@ -773,6 +851,8 @@ fn build_scene_inner(
                 angle_range: tw.angle_range,
                 flee: tw.flee,
                 up_down: tw.allow_up_down,
+                key: (tw.configuration == 11 && tw.follow_key)
+                    .then(|| key_of(tw.color_index, &tw.name)),
             });
         }
     }

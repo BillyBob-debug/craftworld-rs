@@ -6,28 +6,33 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-12 (pistons: length, clock, saved mode, ends, speed mode;
-   winches; motors; gyroscopes and rotators)
+4. docs/logic.md Parts 4-13 (pistons; winches; motors; gyroscopes and rotators;
+   movers and followers; tags)
 
 ## State
 - Owner (2026-10-19): "i think we might need to work on getting the games logic and
   circuits accurate in order to go further". The level1 lane is paused for this one.
-- D1100 merged (PR 241), D1101 (PR 242, e3337c2), D1102 (PR 243, 447b32d), D1103 (PR 244,
-  8f435e8), D1104 (PR 245, 0b2d19a: each piston's saved mode and held flag).
-- Owner paused (2026-10-19 "pause for now") and resumed ("unpause") the same day.
-- D1105 merged (PR 246, e84bd7a), D1106 (PR 247, c632357), D1107 (PR 248, 67fd1db:
-  winches), D1108 (PR 249, 6c79cd5: motors), D1109 (PR 250, b351ff1: gyroscopes and
-  rotators). PR for D1110 (branch `logic-follower`, worktree `E:\Projects\wt-d324`):
-  movers and followers push their bodies.
-- Decision numbers: D1100-D1199, next free D1111.
+- Owner (2026-10-19, later): "would it not be better to just work on logic on its own as
+  a whole and then come back to trying to play levels". So the lane works on logic as a
+  whole: every switch, gate and output kind, checked against the EBOOT's rules and a
+  census across all levels, each with its own unit tests. The Rookie Test route is only a
+  check, rerun and recorded at the end of each PR, never a goal; no level-specific gaps
+  are chased. Playing levels comes back once the logic set is complete.
+- Merged: D1100 (PR 241) to D1109 (PR 250, b351ff1); D1110 (PR 251, da39db8: movers and
+  followers); PR 252 (849bf6a: follower rows in game units per tick).
+- D1111 (branch `logic-tag-follow`, worktree `E:\Projects\wt-d324`): keyed followers
+  follow tags; tags with no position take their parent's.
+- Decision numbers: D1100-D1199, next free D1112.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
   local-analysis/logic/ (a new name each run). Before D1100 Sackboy stopped at x -385;
   after it he stands at x 22,785 on tick 2012 (x 22,770 on tick 2005 after D1102;
   after D1103 x 22,059: he waits about 25 ticks longer near x -3,000, and the inputs end
-  at tick 1970; after D1104 x 25,657 on tick 2006; after D1105 x 25,645; after D1108 x 24,635 on
-  tick 2008: the wobble bolt on microchip 57 swings at once, Part 10).
+  at tick 1970; after D1104 x 25,657 on tick 2006; after D1105 x 25,645;
+  after D1108 x 24,635 on
+  tick 2008: the wobble bolt on microchip 57 swings at once, Part 10; after PR 252
+  x 25,657 on tick 2003; after D1111 x 24,464 on tick 2005).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -41,16 +46,18 @@
 - Row packer 0x95fb20 (Part 11): configuration 1 is the gyroscope (aims at world up),
   2 and 9 rotators, 3-5 aim along velocity / stick / target. Row: target turn speed
   +0x20, limits +0x24/+0x28 = ±accel × velRange, × activation × 1/mass (0x95fdc8).
-  Stop-in-time helper 0x1c21f4. Followers (11) and 6-8 via 0x957df4, unread.
+  Stop-in-time helper 0x1c21f4. Followers (11) and 6-8 via 0x957df4 (Part 12); tag
+  search 0x1c3e04 and map 0xceb8c (Part 13).
 
 ## Next
-1. Motors (docs/logic.md Part 10): the position term and strength cap of row 0x95f494,
-   the turn sign; check thing 58's swing in RPCS3 (Part 10). The type 4 / angle-wrap question at
-   0x962590. The switch type bucket in 0x900730.
-2. Followers of keyed things (followKey; the tag search in 0x1c3e04 and the key filter
-   0xf9a64), then configurations 3-5 and 12; the exact 0x1c21f4 speed (gyroscope and
-   follower), the mirror flag and the follower's +0x220 angle (docs/logic.md P11-P12).
-3. SWITCH_INPUT, MATERIAL_TWEAK (friction, restitution) and EMITTER.
-4. The 38 stored-signal switches; the sensors' cone and layer tests.
+Logic as a whole, one component kind per PR, each with a census across all levels, the
+EBOOT rule and unit tests:
+1. Switches and gates: the census of every switch type across all levels, then each
+   type's rule (AND, OR, XOR, NOT, toggle, timer, countdown, selector, randomiser,
+   the 38 stored-signal switches) in crates/lbp-runtime/src/switches.rs.
+2. Sensors: the cone and layer tests (player, tag, grab, impact, proximity).
+3. Outputs not yet modelled: configurations 3-5 and 12, the exact 0x1c21f4 speed, the
+   mirror flag and the follower's +0x220 angle; SWITCH_INPUT, MATERIAL_TWEAK, EMITTER.
+4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
+   the type 4 / angle-wrap question at 0x962590, the switch type bucket in 0x900730.
 5. Sequencers, controlinators, creatures.
-6. Extend the Rookie Test route past x 22,785 and see what stops it next.

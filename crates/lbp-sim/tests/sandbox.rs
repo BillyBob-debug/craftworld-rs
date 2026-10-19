@@ -3,7 +3,7 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use lbp_level::parts::{Body, Joint, JointParams, PhysicsTweak, Pos, Shape, ShapeColor};
+use lbp_level::parts::{Body, Joint, JointParams, PhysicsTweak, Pos, Shape, ShapeColor, SwitchKey};
 use lbp_level::serial::Descriptor;
 use lbp_level::thing::ThingRecord;
 use lbp_sim::scene::{
@@ -1100,4 +1100,93 @@ fn d1110_movers_reach_their_velocity_and_followers_stop_short_of_their_target() 
     }
     assert!((895. ..920.).contains(&x), "stopped at {x}");
     assert!(!follower.sees([3000., 0.], up) && !follower.sees([50., 0.], up));
+}
+
+#[test]
+fn d1111_keyed_followers_find_tags_with_their_colour_and_name() {
+    // A keyed follower box (Things 1, 2), a red "A" tag on a second box turned a quarter
+    // (Things 3, 4), a red "A" tag on the follower's own box (5), a loose red "A" tag (6),
+    // a blue "A" tag (7) and a red "A" tag with no position of its own under Thing 4 (8).
+    let tag = |colour: i32| SwitchKey {
+        colour_index: colour,
+        name: "A".into(),
+    };
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let mut things = vec![
+        floor(),
+        thing(
+            1,
+            matrix(0., 300., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(2, matrix(0., 300., 0., 0., 1., 1.), None, false),
+        thing(
+            3,
+            matrix(800., 300., 0., quarter, 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(4, matrix(800., 340., 0., 0., 1., 1.), None, false),
+        thing(5, matrix(10., 300., 0., 0., 1., 1.), None, false),
+        thing(6, matrix(-500., 300., 0., 0., 1., 1.), None, false),
+        thing(7, matrix(300., 300., 0., 0., 1., 1.), None, false),
+        thing(8, matrix(0., 0., 0., 0., 1., 1.), None, false),
+    ];
+    things[8].data.pos = None;
+    for (t, p) in [(2, 1), (4, 3), (5, 1), (8, 4)] {
+        things[t].parent = Some(p);
+    }
+    for (t, c) in [(4, 1), (5, 1), (6, 1), (7, 2), (8, 1)] {
+        things[t].data.switch_key = Some(tag(c));
+    }
+    things[2].data.physics_tweak = Some(PhysicsTweak {
+        configuration: 11,
+        color_index: 1,
+        name: "A".into(),
+        follow_key: true,
+        vel_range: 28.,
+        accel_strength: 0.125,
+        max_range: 2100.,
+        angle_range: 360.,
+        ..Default::default()
+    });
+    let scene = build_scene(&things);
+    let key = scene.bodies[0].moves[0].key.expect("keyed");
+    let red: Vec<_> = scene.tags.iter().filter(|g| g.key == key).collect();
+    assert_eq!(
+        red.iter().map(|g| g.thing).collect::<Vec<_>>(),
+        [4, 5, 6, 8]
+    );
+    assert_eq!(
+        (red[0].body, red[1].body, red[2].body),
+        (Some(1), Some(0), None)
+    );
+    // The tag on the turned box sits 40 along that box's x, back at (800, 340) in the world.
+    let at = red[0].at;
+    assert!((at[0] - 40.).abs() < 1e-3 && at[1].abs() < 1e-3, "{at:?}");
+    let world = scene.bodies[1].frame.world(at);
+    assert!((world[0] - 800.).abs() < 1e-3 && (world[1] - 340.).abs() < 1e-3);
+    // A tag with no position takes its parent's: the same spot on the same box.
+    assert_eq!(red[3].body, Some(1));
+    assert!((red[3].at[0] - 40.).abs() < 1e-3 && red[3].at[1].abs() < 1e-3);
+    // Spots: a body's tags move with it; loose tags keep their world point.
+    let mut w = World::new();
+    let (a, b) = (w.spawn_empty().id(), w.spawn_empty().id());
+    let on_body = lbp_sim::TagMarks(vec![(key, at)]);
+    let loose = lbp_sim::TagMarks(vec![(key, [-500., 300.])]);
+    let (p, r) = (
+        Position::new(Vec2::new(10., 3.)),
+        Rotation::radians(quarter),
+    );
+    let spots = lbp_sim::tag_spots([(a, &on_body, Some((&p, &r))), (b, &loose, None)]);
+    let s0 = spots[0].at;
+    assert!(
+        (s0[0] - 1000.).abs() < 1e-2 && (s0[1] - 340.).abs() < 1e-2,
+        "{s0:?}"
+    );
+    assert_eq!(
+        (spots[0].body, spots[1].body, spots[1].at),
+        (Some(a), None, [-500., 300.])
+    );
 }
