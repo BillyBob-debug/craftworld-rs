@@ -5,7 +5,9 @@
 //! D384 (part 131): with scripts loaded, the game's own thread runs in the VM instead;
 //! [`LevelWorld::unlock_query`] answers its natives.
 //!
-//! Not ported: the voice-overs (`PlayVO__`), `CanStartEndOfLevelSequence__` (always
+//! D399 (part 146): a finished cluster asks for its voice-over (`PlayVO__`).
+//!
+//! Not ported: `CanStartEndOfLevelSequence__` (always
 //! true here), the swap from a group search back to Story (the return opens Story), the
 //! cached-info updates, the push of the focus planet's group at the end, the link
 //! drawing and the state-2 camera. No audio plays; the sounds are counted.
@@ -366,10 +368,59 @@ impl LevelWorld {
             if !self.cluster_update(u, u.current) {
                 return true;
             }
+            self.play_unlock_voice_over(&u.clusters[u.current].links);
             u.current += 1;
         }
         self.pod.search.cursor_mode = Some(4);
         false
+    }
+}
+
+/// D399: `PendingLinkCluster.PlayVO__`'s line for a finished cluster's links (FOUND,
+/// script aff692cc): the first link to a level (`Type` 0) whose `SlotNumber` has a line
+/// decides; other levels are passed over. The second name is the one a profile that
+/// played the first game and unlocked its Moon hears.
+pub const UNLOCK_VOICE_OVERS: [(i32, &str, Option<&str>); 5] = [
+    (124819, "pod_unlock_level_2", Some("pod_unlock_level_2_alt")),
+    (124808, "pod_unlock_level_3", None),
+    (124821, "pod_unlock_level_4", None),
+    (124814, "pod_unlock_level_5", None),
+    (
+        127134,
+        "pod_complete_theme_1",
+        Some("pod_complete_theme_1_alt"),
+    ),
+];
+
+impl LevelWorld {
+    /// D399: `PlayVO__`. The four level lines go through the story state's `StartVO__`
+    /// and the theme line straight to `Audio.RequestVoiceOver`; both ask with interrupt
+    /// set and replay clear (FOUND, script 110fc2e8 for `StartVO__`). Not modelled: the
+    /// state keeps whether its line started (`_StartedVO`) and stops it when it closes.
+    fn play_unlock_voice_over(&mut self, links: &[PendingLink]) {
+        let line = links.iter().find_map(|l| {
+            (l.to.0 == 0)
+                .then(|| UNLOCK_VOICE_OVERS.iter().find(|v| v.0 == l.to.1))
+                .flatten()
+        });
+        let Some(&(_, name, alt)) = line else {
+            return;
+        };
+        let moon = matches!(
+            lbp_script_vm::natives::World::state_query(
+                self,
+                "Profile.HasPlayedLBP1AndUnlockedMoon__"
+            ),
+            Ok(Value::Bool(true))
+        );
+        let name = alt.filter(|_| moon).unwrap_or(name);
+        let args = [
+            Value::Str(name.into()),
+            Value::Bool(true),
+            Value::Bool(false),
+        ];
+        self.media_call("RequestVoiceOver", None, &args);
+        self.unlock_events.push(format!("voice-over {name}"));
     }
 }
 
@@ -583,6 +634,48 @@ mod tests {
         assert_eq!(w.pod.search.cursor_mode, Some(4));
         assert_eq!(w.sounds_played.get(UNLOCK_THEME), Some(&4));
         assert!(w.sounds_played.get(UNLOCK_BEEPS).is_some_and(|&n| n >= 3));
+    }
+
+    #[test]
+    fn d399_a_finished_cluster_asks_for_its_voice_over() {
+        let slot = |id: (i32, i32), location: [f32; 4]| SearchSlot {
+            id,
+            location,
+            ..Default::default()
+        };
+        let mut w = LevelWorld {
+            story_slots: vec![
+                slot((0, 1), [1., 0., 0., 0.]),
+                slot((0, 2), [0., 1., 0., 0.]),
+                slot((0, 124808), [0., 0.99, 0.1, 0.]),
+                slot((0, 124819), [0., 0.98, 0.15, 0.]),
+                slot((1, 124814), [0., 0., 1., 0.]),
+            ],
+            ..Default::default()
+        };
+        let link = |to| PendingLink { from: (0, 1), to };
+        w.story_progress.pending_links = vec![
+            link((0, 2)),
+            link((0, 124808)),
+            link((0, 124819)),
+            link((1, 124814)),
+        ];
+        for (_, name, _) in UNLOCK_VOICE_OVERS {
+            w.media.voice_over_lengths.insert(name.into(), 60);
+        }
+        w.pod.search.selected_planet = Some(1);
+        let mut ticks = 0;
+        while w.level_unlocking_tick() {
+            w.cursor_flight_step();
+            w.media.tick();
+            ticks += 1;
+            assert!(ticks < 4000);
+        }
+        let asked: Vec<_> = w.media.voice_overs.iter().map(|v| v.name.clone()).collect();
+        // The first level link with a line decides; a non-level slot asks for none.
+        assert_eq!(asked, [Some("pod_unlock_level_3".to_string())]);
+        assert_eq!(w.media.voice_overs[0].flags, [true, false]);
+        assert!(w.media.voice_overs_heard.contains("pod_unlock_level_3"));
     }
 
     #[test]

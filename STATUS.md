@@ -6507,3 +6507,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D390 which links are wide (2026-10-19)
 - Part 137 (`docs/level-scripts/part-137.md`): links between main-path, boss,
   cut-scene or DLC-hub slots are drawn wide and the rest narrow, as in the game.
+
+## D391 links between groups (2026-10-19)
+- Part 138 (`docs/level-scripts/part-138.md`): a link between two group badges is
+  drawn at the game's own third size, 48 wide.

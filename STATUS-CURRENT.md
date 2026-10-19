@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D398 the native intro's voice-over (2026-10-19)
+## Latest: D399 the unlock voice-overs (2026-10-19)
+- Part 146 (`docs/level-scripts/part-146.md`): a finished unlock cluster in the native
+  Pod asks for the game's line for the level or theme it unlocked.
+
+## D398 the native intro's voice-over (2026-10-19)
 - Part 145 (`docs/level-scripts/part-145.md`): the native Pod intro asks for its
   voice-over line and waits for it, as the game's script does.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D392 a link's texture (2026-10-19)
 - Part 139 (`docs/level-scripts/part-139.md`): links are drawn with the game's own
   line texture, a distance field that gives the shaft and the arrowhead their shape.
-
-## D391 links between groups (2026-10-19)
-- Part 138 (`docs/level-scripts/part-138.md`): a link between two group badges is
-  drawn at the game's own third size, 48 wide.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
