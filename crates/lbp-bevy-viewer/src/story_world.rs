@@ -532,6 +532,21 @@ pub const LINK_HEAD: f32 = 9. * 0.4;
 /// width and arrowhead (the byte +0x4c clear).
 pub const LINK_NARROW_WIDTH: f32 = 40. * 0.4;
 pub const LINK_NARROW_HEAD: f32 = 6. * 0.4;
+/// D391 (FOUND: 48 at 0xda269c, 7.2 at 0xda26a0, loaded at 0x4268c0 past the 0.4
+/// scale): a link's width and arrowhead between two group badges, wide or narrow.
+pub const LINK_GROUP_WIDTH: f32 = 48.;
+pub const LINK_GROUP_HEAD: f32 = 7.2;
+
+/// D390, D391: a link's width and arrowhead, the group pair first (0x426680).
+pub fn link_size(wide: bool, groups: bool) -> (f32, f32) {
+    if groups {
+        (LINK_GROUP_WIDTH, LINK_GROUP_HEAD)
+    } else if wide {
+        (LINK_WIDTH, LINK_HEAD)
+    } else {
+        (LINK_NARROW_WIDTH, LINK_NARROW_HEAD)
+    }
+}
 /// D386 (FOUND: the strip builder 0x4a1250 takes 10): degrees of arc a segment.
 pub const LINK_SEGMENT: f32 = 10.;
 /// D386 (INFERRED from 0xA0FFFFFF and the constants at 0xc648f0): the link's colour.
@@ -565,7 +580,7 @@ pub struct Ribbon {
 /// badge `b`'s edge (`b` less its angular radius `rb`, radians), drawn over its first
 /// `progress` with an arrowhead at the end. None where the game draws nothing: progress
 /// 0, an angle under 0.01 radians, or radii `ra + rb` that reach across it. The start is
-/// not clipped (badge `a` covers it). `wide` picks the width and head (D390).
+/// not clipped (badge `a` covers it). `size` is the width and head ([`link_size`]).
 /// PLACEHOLDER: the ribbon is flat (the game's
 /// texture was not traced).
 pub fn link_ribbon(
@@ -575,13 +590,8 @@ pub fn link_ribbon(
     rb: f32,
     radius: f32,
     progress: f32,
-    wide: bool,
+    (width, head): (f32, f32),
 ) -> Option<Ribbon> {
-    let (width, head) = if wide {
-        (LINK_WIDTH, LINK_HEAD)
-    } else {
-        (LINK_NARROW_WIDTH, LINK_NARROW_HEAD)
-    };
     let (a, b) = (a.try_normalize()?, b.try_normalize()?);
     let theta = a.dot(b).clamp(-1., 1.).acos();
     if progress <= 0. || theta < 0.01 || ra + rb >= theta {
@@ -824,12 +834,20 @@ mod tests {
     fn d386_link_ribbon_grows_along_the_arc() {
         let (a, b) = (Vec3::Z, Vec3::X);
         let r = LEVEL_BADGE_ANGLE;
-        assert!(link_ribbon(a, b, r, r, 1750., 0., true).is_none());
-        assert!(link_ribbon(a, a, r, r, 1750., 1., true).is_none());
-        assert!(link_ribbon(a, b, 0.8, 0.8, 1750., 1., true).is_none());
+        assert!(link_ribbon(a, b, r, r, 1750., 0., link_size(true, false)).is_none());
+        assert!(link_ribbon(a, a, r, r, 1750., 1., link_size(true, false)).is_none());
+        assert!(link_ribbon(a, b, 0.8, 0.8, 1750., 1., link_size(true, false)).is_none());
         let reach = |p: f32| {
-            let r =
-                link_ribbon(a, b, LEVEL_BADGE_ANGLE, LEVEL_BADGE_ANGLE, 1750., p, true).unwrap();
+            let r = link_ribbon(
+                a,
+                b,
+                LEVEL_BADGE_ANGLE,
+                LEVEL_BADGE_ANGLE,
+                1750.,
+                p,
+                link_size(true, false),
+            )
+            .unwrap();
             let tip = Vec3::from(*r.positions.last().unwrap());
             assert!((tip.length() - 1750. - LINK_LIFT).abs() < 1e-2);
             assert!(r.indices.iter().all(|&i| (i as usize) < r.positions.len()));
@@ -840,11 +858,14 @@ mod tests {
         assert!((reach(0.5) - end / 2.).abs() < 1e-2);
         // D390: a narrow link's shaft is half as wide.
         let shaft = |wide| {
-            let r = link_ribbon(a, b, r, r, 1750., 1., wide).unwrap();
+            let r = link_ribbon(a, b, r, r, 1750., 1., link_size(wide, false)).unwrap();
             Vec3::from(r.positions[0]).distance(Vec3::from(r.positions[1]))
         };
         assert!((shaft(true) - LINK_WIDTH).abs() < 1e-2);
         assert!((shaft(false) - LINK_NARROW_WIDTH).abs() < 1e-2);
+        // D391: two groups' link takes 48 and 7.2 either way.
+        assert_eq!(link_size(false, true), (48., 7.2));
+        assert_eq!(link_size(true, true), (48., 7.2));
     }
 
     #[test]

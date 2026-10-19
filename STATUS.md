@@ -6491,3 +6491,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D386 drawing the links (2026-10-18)
 - Part 133 (`docs/level-scripts/part-133.md`): pending links show on the Pod's Earth
   as growing green ribbons with arrowheads, as the game's link drawer builds them.
+
+## D387 a badge's radius (2026-10-19)
+- Part 134 (`docs/level-scripts/part-134.md`): a badge's angular radius comes from a
+  settings resource times a per-object factor; a level's needs a measurement.
