@@ -1126,6 +1126,25 @@ impl LevelWorld {
         visits
     }
 
+    /// D1101: the activation a PPhysicsTweak on `thing` sees (FOUND, 01.33, 0xcaf9c): 1 with
+    /// no switch output wired to its input; with `behavior` 0 (digital) 1 when the signal's
+    /// ternary is non-zero, else 0; with 1 (analog) the activation's magnitude; 1 otherwise.
+    pub fn tweak_activation(&self, thing: usize, behavior: i32) -> f32 {
+        let wire = self
+            .things
+            .get(thing)
+            .and_then(|t| t.inputs.first().copied().flatten());
+        let signal = wire.and_then(|w| {
+            let s = self.things.get(w.switch as usize)?.switch.as_ref()?;
+            Some(s.outputs.get(w.output)?.as_ref()?.signal)
+        });
+        match (signal, behavior) {
+            (Some(s), 0) => f32::from(u8::from(s.ternary != 0)),
+            (Some(s), 1) => s.activation.abs(),
+            _ => 1.,
+        }
+    }
+
     /// The whole pass without the script calls: every switch in [`Self::switch_order`],
     /// returning all the target visits. [`crate::LevelScripts::switch_reactions`] is the
     /// pass with the reactions called switch by switch.

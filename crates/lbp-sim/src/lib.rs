@@ -166,6 +166,26 @@ impl Plugin for SimPlugin {
     }
 }
 
+/// D1101: a body's anti-gravity tweakers, for [`follow_tweaks`].
+#[derive(Component, Debug, Clone)]
+pub struct AntiGravityTweaks(pub scene::AntiGravity);
+
+/// D1101: sets each tweaked body's gravity scale from the tweaks' current activations and
+/// wakes a body whose scale changed (a sleeping body would not feel the new gravity).
+pub fn follow_tweaks(
+    commands: &mut Commands,
+    q: &mut Query<(Entity, &AntiGravityTweaks, &mut GravityScale)>,
+    activation: impl Fn(&scene::AntiGravityTweak) -> f32,
+) {
+    for (e, tweaks, mut scale) in q.iter_mut() {
+        let s = tweaks.0.gravity_scale(&activation);
+        if s.to_bits() != scale.0.to_bits() {
+            scale.0 = s;
+            commands.queue(avian2d::dynamics::solver::islands::WakeBody(e));
+        }
+    }
+}
+
 /// A body that starts asleep (PBody.frozen != 0, INFERRED: a saved level is at rest). avian
 /// builds islands during the first step, so after it the body goes back to its stored pose
 /// with no velocity and its island is put to sleep; contacts and joints wake it.
@@ -254,9 +274,12 @@ pub fn spawn_scene(commands: &mut Commands, scene: &PhysicsScene) -> Spawned {
                 LinearVelocity(sv(b.velocity)),
                 AngularVelocity(b.angular_velocity),
             ));
-            if let Some(a) = b.anti_gravity {
+            if let Some(a) = &b.anti_gravity {
                 // FOUND (01.33, 0xc6308): gravity scale clamp(1 - Σ, 0, 1).
-                e.insert(GravityScale((1. - a.cancelled).clamp(0., 1.)));
+                e.insert((
+                    GravityScale(a.gravity_scale(|t| t.saved)),
+                    AntiGravityTweaks(a.clone()),
+                ));
             }
             if !b.fixed && b.frozen != 0 {
                 e.insert(StartAsleep {

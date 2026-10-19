@@ -1065,6 +1065,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             follow_fog,
             follow_water,
             follow_gravity,
+            follow_tweaks,
             follow_colour_correction,
             follow_things,
             follow_story_world,
@@ -2129,6 +2130,23 @@ fn follow_gravity(play: NonSend<Play>, gravity: Option<ResMut<lbp_sim::WorldGrav
         lbp_sim::gravity_per_tick(setting),
         gravity.scale()
     );
+}
+
+/// D1101: the anti-gravity tweakers follow their switch signals (FOUND, 0xcaf9c) once the
+/// tick's switch pass has run.
+fn follow_tweaks(
+    play: NonSend<Play>,
+    mut commands: Commands,
+    mut q: Query<(
+        Entity,
+        &lbp_sim::AntiGravityTweaks,
+        &mut lbp_sim::avian2d::prelude::GravityScale,
+    )>,
+) {
+    let world = &play.host.world;
+    lbp_sim::follow_tweaks(&mut commands, &mut q, |t| {
+        world.tweak_activation(t.thing, t.behavior)
+    });
 }
 
 /// D331: hands the colour correction in force to the final pass (`colour_grade.rs`): the

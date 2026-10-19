@@ -63,3 +63,27 @@ Dampening and buoyancy are kept but not applied. With that, the row stays up and
 same route inputs take Sackboy from x -385 to x 22,785 (tick 2012).
 
 Test: `d1100_an_anti_gravity_tweaker_holds_its_body_up` (lbp-sim sandbox, synthetic).
+
+## Part 3: tweakers follow their switch signals (D1101)
+
+Wiring in the Rookie Test (switch outputs whose target is a gadget): pistons 27 of 33
+(25 from microchip outputs, 2 from countdowns), one other joint, anti-gravity tweakers 3
+(one NOT, two microchips), movers (configuration 1) 22, and single tweaks of
+configurations 8 and 11. The other 166 anti-gravity tweakers have no input.
+
+What a tweak sees (EBOOT 01.33, 0xcaf9c, constants 1.0 at 0xd952c4 and 0.0 at 0xd952c8):
+- No input wired: 1, so an unwired tweaker is always on.
+- Input mode 0 (digital): 1 when the signal's ternary is non-zero, else 0.
+- Input mode 1 (analog): the magnitude of the signal's activation.
+- A flag at Thing +0x7f forces 0 (not identified; not modelled).
+The input mode sits at +0x10 of the part in memory; reading it as the stored `behavior`
+is INFERRED. Every tweak in the Rookie Test stores 0, so all of them are digital.
+
+The runtime gives this as `LevelWorld::tweak_activation`. Each body keeps its tweaks
+(`AntiGravity.tweaks`), and the viewer's `follow_tweaks` system, after the tick's switch
+pass, sets the gravity scale from the live activations and wakes a body whose scale
+changed. Before the first tick the saved lastKnownActivation stands in.
+
+Tests: `d1101_a_tweak_reads_its_input_digitally_or_by_magnitude` (lbp-runtime
+level_world) and `d1101_a_switched_off_anti_gravity_tweaker_lets_its_body_fall` (lbp-sim
+sandbox), both synthetic.
