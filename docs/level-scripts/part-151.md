@@ -8,8 +8,8 @@ keeps the music the script sets. Nothing plays yet.
 ### Found
 
 - The assets are plain on the USA disc: `GAMEDATA/AUDIO/PS3_MAIN.FEV` (1,031,978 bytes,
-  `FEV1`, version 0x35) and `I_POD.FSB` (14,787,392 bytes, FSB4 version 2), the Pod's
-  interactive music.
+  `FEV1`, version 0x35). (Corrected in part 156: `I_POD.FSB` is not on the LBP2 disc;
+  the size first given here was LBP1's.)
 - `.init__` sets `FSB` = 42103 and `SettingsFile` = 42108.
 - `UpdateInteractiveMusic__` (script g0000248b), in order:
   - In the attract loop (`Input.IsInAttractionLoop__i` of the local leader) it stops the

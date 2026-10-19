@@ -25,8 +25,9 @@ use crate::native_script::{
 pub const PLANETS_WORLD_SCRIPT: u32 = 0x16e0a;
 /// D1000: the video GUID the pod introduction asks the pod computer to start (FOUND).
 pub const INTRO_VIDEO: u32 = 139230;
-/// D1004 (FOUND, `.init__`): the Pod's interactive music, `FSB` (the bank, `I_POD.FSB`
-/// on the disc) and `SettingsFile`.
+/// D1004 (FOUND, `.init__`): the Pod's interactive music, `FSB` (the bank,
+/// `gamedata/audio/i_pod.fsb`, which the LBP2 disc's map names but does not ship, D1009)
+/// and `SettingsFile` (`i_pod.mus`, [`crate::parse_music_settings`]).
 pub const POD_MUSIC: u32 = 42103;
 pub const POD_MUSIC_SETTINGS: u32 = 42108;
 
