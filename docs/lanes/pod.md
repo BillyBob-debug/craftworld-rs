@@ -1,9 +1,9 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-151.md` (150 for the intro's video length, 149 for the
-   line shader, 148 for a key's kind, 147 for the intro's video request, 146
-   for the unlock voice-overs, 145 for the intro's voice-over, 144 for voice-over timing,
+1. `docs/level-scripts/part-152.md` (151 for the Pod's music, 150 for the intro's
+   video length, 149 for the line shader, 148 for a key's kind, 147 for the intro's
+   video request, 146 for the unlock voice-overs, 145 for the intro's voice-over, 144 for voice-over timing,
    143 for a group's lock, 142 for the active look, 141 for the active test, 140 for a
    short link, 139 for a link's texture, 138 for links between groups, 137 for which links
    are wide, 136 for a link's width and look, 135 for a level badge's radius, 134 for a
@@ -24,7 +24,7 @@
   `E:\Projects\wt-d324`): the native unlock voice-overs; handed to the coordinator for
   merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399 used; now D1000-D1099, next free D1005.
+  Decision numbers: D348-D399 used; now D1000-D1099, next free D1006.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -119,4 +119,5 @@
    and waits for the video's Bink length when the copy holds it, D1003;
    a finished native cluster requests its unlock line, D399). The
    interactive music's state is kept and the native world sets it as the script does
-   (D1004); playing it needs `PS3_MAIN.FEV` and `I_POD.FSB` read.
+   (D1004); playing it needs `PS3_MAIN.FEV` and `I_POD.FSB` read. `OnEnterPod__` is
+   native (D1005); the previous level and its level-created dialogue are open.

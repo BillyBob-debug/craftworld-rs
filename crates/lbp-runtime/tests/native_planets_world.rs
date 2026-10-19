@@ -370,3 +370,42 @@ fn d1004_music_pairs() {
     assert_eq!(music_pairs(28), [1., 1., 0., 1., 0., 0.]);
     assert_eq!(music_pairs(38), [0., 0., 0., 1., 0., 0.]);
 }
+
+/// D1005: entering the Pod restores the view kept on leaving it, with no blend, and resets
+/// the interactive music.
+#[test]
+fn d1005_entering_the_pod_restores_its_view() {
+    let mut h = host();
+    h.world.progression_flags = 3;
+    run(&mut h, "OnCreate__", &[]);
+    frame(&mut h, true);
+    h.world.pod_computer_in_use = true;
+    run(
+        &mut h,
+        "SetViewFromRemotePodComputer__i",
+        &[(4, Value::Int(6))],
+    );
+    for _ in 0..60 {
+        frame(&mut h, false);
+    }
+    run(&mut h, "OnExitPod__", &[]);
+    run(
+        &mut h,
+        "SetViewFromRemotePodComputer__i",
+        &[(4, Value::Int(1))],
+    );
+    frame(&mut h, false);
+    assert_eq!(run(&mut h, "OnEnterPod__", &[]), Value::Void);
+    assert_eq!(member(&mut h, "ViewType"), Value::Int(6));
+    assert_eq!(member(&mut h, "ViewTransition"), Value::Float(1.));
+    assert_eq!(member(&mut h, "State"), Value::Int(0));
+    assert_eq!(
+        member(&mut h, "WantLevelCreatedDialogue"),
+        Value::Bool(false)
+    );
+    assert_eq!(member(&mut h, "IMusicInit"), Value::Bool(true));
+    assert_eq!(member(&mut h, "IMusicPlaying"), Value::Bool(false));
+    assert!(!frame(&mut h, false), "the restored view does not blend");
+    let music = h.world.media.music.clone().expect("no music set");
+    assert_eq!(music.pair_volumes, [1., 0., 0., 1., 1., 0.]);
+}
