@@ -2274,6 +2274,7 @@ fn follow_links(
             sw::LEVEL_BADGE_ANGLE,
             lbp_runtime::EARTH_RADIUS,
             progress,
+            world.link_is_wide(link),
         ) else {
             continue;
         };
