@@ -22,7 +22,7 @@
   `E:\Projects\wt-d324`): the native unlock voice-overs; handed to the coordinator for
   merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, all used; ask the coordinator for the next range.
+  Decision numbers: D348-D399 used; now D1000-D1099, next free D1000.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;

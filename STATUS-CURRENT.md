@@ -43,10 +43,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Part 139 (`docs/level-scripts/part-139.md`): links are drawn with the game's own
   line texture, a distance field that gives the shaft and the arrowhead their shape.
 
-## D391 links between groups (2026-10-19)
-- Part 138 (`docs/level-scripts/part-138.md`): a link between two group badges is
-  drawn at the game's own third size, 48 wide.
-
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
   default, 0 Complete. Files `local-analysis/b177-{default,legacy}.json`.
