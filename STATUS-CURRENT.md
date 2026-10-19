@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D392 a link's texture (2026-10-19)
+## Latest: D393 a short link's strip (2026-10-19)
+- Part 140 (`docs/level-scripts/part-140.md`): a link shorter than its arrowhead
+  shows the arrowhead's texture as the game does.
+
+## D392 a link's texture (2026-10-19)
 - Part 139 (`docs/level-scripts/part-139.md`): links are drawn with the game's own
   line texture, a distance field that gives the shaft and the arrowhead their shape.
 
@@ -22,10 +26,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D390 which links are wide (2026-10-19)
 - Part 137 (`docs/level-scripts/part-137.md`): links between main-path, boss,
   cut-scene or DLC-hub slots are drawn wide and the rest narrow, as in the game.
-
-## D389 a link's width and look (2026-10-19)
-- Part 136 (`docs/level-scripts/part-136.md`): which links are drawn wide or narrow,
-  and how an active link's look differs from a pending one's.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

@@ -607,6 +607,13 @@ pub const LINK_DEPTH_BIAS: f32 = 1e9;
 /// radii (0.16), as the drawer needs.
 pub const LEVEL_BADGE_ANGLE: f32 = 0.08;
 
+/// D393 (FOUND 0x4a215c-0x4a21a8: `f4 = (-1 / (1 - f)) * 0.5 + 0.5 + 0.5`): the u at
+/// the start of a link no longer than its head, `f` being the neck's place along the arc
+/// (0 or less). 0.5, the head's own start, when the link is exactly a head long.
+pub fn link_short_u(f: f32) -> f32 {
+    1. - 0.5 / (1. - f)
+}
+
 /// D386: a link's ribbon in planet space.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct Ribbon {
@@ -623,8 +630,9 @@ pub struct Ribbon {
 /// not clipped (badge `a` covers it). `size` is the width and head ([`link_size`]).
 /// D392 (FOUND 0x4a2030, 0x4a20dc: the head strip's width is twice the shaft's, the same
 /// all along; the strip builder 0x4a1250 keeps one width): the arrow's shape is the
-/// texture's ([`LINK_TEXTURE`]), at the UVs above. INFERRED: a link shorter than its head
-/// (the third strip, 0x4a21ac, not read) shows the head's last part, up to the tip.
+/// texture's ([`LINK_TEXTURE`]), at the UVs above. D393 (FOUND 0x4a215c-0x4a21ac): a
+/// link no longer than its head is one head-wide strip from the start to the tip, its u
+/// from `1 - 0.5 / (1 - f)` to 1, `f` being `(tip - head) / angle` ([`link_short_u`]).
 pub fn link_ribbon(
     a: Vec3,
     b: Vec3,
@@ -673,8 +681,11 @@ pub fn link_ribbon(
         let u = [LINK_SHAFT_U; 2];
         strip(0., neck, width, u, LINK_SHAFT_V);
     }
-    let [u0, u1] = LINK_HEAD_U;
-    let u = [u1 - (u1 - u0) * ((tip - neck) / head).min(1.), u1];
+    let u = if neck > 0. {
+        LINK_HEAD_U
+    } else {
+        [link_short_u((tip - head) / angle), LINK_HEAD_U[1]]
+    };
     strip(neck, tip, 2. * width, u, LINK_HEAD_V);
     Some(ribbon)
 }
@@ -873,6 +884,17 @@ mod tests {
         // Underdamped: it overshoots, then settles on scale 1 and the spin.
         assert!(peak > 1.2 && peak < 1.6, "peak {peak}");
         assert!((g.scale.0 - 1.).abs() < 1e-3 && (g.spin.0 - 0.3).abs() < 1e-3);
+    }
+
+    #[test]
+    fn d393_short_link_u_starts_in_the_head() {
+        assert_eq!(link_short_u(0.), LINK_HEAD_U[0]);
+        assert!((link_short_u(-1.) - 0.75).abs() < 1e-6);
+        let (a, b) = (Vec3::Z, Vec3::X);
+        let r = link_ribbon(a, b, 0., 0., 1750., 0.01, (80., 9.)).unwrap();
+        let f = (0.9 - 9.) / 90.;
+        assert!((r.uvs[0][0] - link_short_u(f)).abs() < 1e-4);
+        assert_eq!(r.uvs.last().unwrap()[0], 1.);
     }
 
     #[test]
