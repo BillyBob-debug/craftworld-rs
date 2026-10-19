@@ -12,8 +12,8 @@
 //! D379: the pod introduction (`PodIntroductionThread`) is ported as the world's own
 //! state 1: its camera zoom over 451 ticks, then the progression flags. Not ported: the
 //! level unlocking cutscene thread (`LevelUnlockingThread`, null: state 2 ends on the
-//! next frame), the intro's video and voice-over requests, the "level created"
-//! voice-over and the interactive music.
+//! next frame; ported since D383), the intro's video and voice-over requests (made
+//! since D398 and D1000), the "level created" voice-over and the interactive music.
 use lbp_script_vm::{Host, MemberKind, Value};
 
 use crate::native_script::{
@@ -23,6 +23,8 @@ use crate::native_script::{
 
 /// The script GUID of `PlanetsWorld` (FOUND: the 01.33 patch's `planetsworld.ff` row).
 pub const PLANETS_WORLD_SCRIPT: u32 = 0x16e0a;
+/// D1000: the video GUID the pod introduction asks the pod computer to start (FOUND).
+pub const INTRO_VIDEO: u32 = 139230;
 
 const PLANETS_WORLD: &str = "PlanetsWorld";
 const DONE: NativeStep = NativeStep::Done(Value::Void);
@@ -935,7 +937,16 @@ impl PlanetsWorldScript {
             set_member(host, this, "IntroRunning", Value::Bool(true))?;
             // D398 (FOUND, `PodIntroductionThread.Run__` before its zoom loop): the line
             // `pod_1st_time`, or `pod_1st_time_alt` when the player has LBP1's Pod,
-            // interrupt and replay both set. The video request before it is not ported.
+            // interrupt and replay both set. D1000 (FOUND, the same): first the pod
+            // computer's `StartVideo__g` with the video 139230, which is
+            // `Video.StartVideo__Q5Thinggb(null, guid, false)` kept as its video handle
+            // (script 16e6e8c9); no video starts here, so the handle stays -1.
+            let video = [
+                Value::Thing(None),
+                Value::Int(INTRO_VIDEO as i32),
+                Value::Bool(false),
+            ];
+            call(host, "Video", "StartVideo__Q5Thinggb", &video)?;
             let alt = call(host, "Profile", "HasPlayedLBP1AndUnlockedPod__", &[])?;
             let line = if as_bool(&alt) {
                 "pod_1st_time_alt"
@@ -958,7 +969,7 @@ impl PlanetsWorldScript {
     /// length, D397) and sets the
     /// progression flags 3 (8188 when LBP1's Moon is unlocked and this is not a demo or
     /// kiosk build, 8064 in the PSN demo). Whether it is still running. The thread's
-    /// voice-over line is requested when it starts (D398); its video request is not ported.
+    /// voice-over line (D398) and its video (D1000) are requested when it starts.
     fn intro_tick(host: &mut dyn Host, this: u32) -> Result<bool, String> {
         if !get_member(host, this, "IntroRunning").is_ok_and(|v| as_bool(&v)) {
             return Ok(false);

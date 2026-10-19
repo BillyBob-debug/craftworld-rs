@@ -179,6 +179,13 @@ fn d398_pod_introduction_waits_for_its_voice_over() {
     assert_eq!(asked.len(), 1);
     assert_eq!(asked[0].name.as_deref(), Some("pod_1st_time"));
     assert_eq!(asked[0].flags, [true, true]);
+    // D1000: the video request comes first, with a null Thing and the flag clear.
+    let videos = &h.world.media.videos;
+    assert_eq!(videos.len(), 1);
+    assert_eq!(
+        (videos[0].thing, videos[0].guid, videos[0].flag),
+        (None, 139230, false)
+    );
     let mut frames = 1;
     while member(&mut h, "State") == Value::Int(1) {
         frame(&mut h, false);
