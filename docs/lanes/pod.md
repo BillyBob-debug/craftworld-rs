@@ -3,8 +3,8 @@
 ## Read first
 1. `docs/level-scripts/part-152.md` (151 for the Pod's music, 150 for the intro's
    video length, 149 for the line shader, 148 for a key's kind, 147 for the intro's
-   video request, 146 for the unlock voice-overs, 145 for the intro's voice-over, 144 for voice-over timing,
-   143 for a group's lock, 142 for the active look, 141 for the active test, 140 for a
+   video request, 146 for the unlock voice-overs, 145 for the intro's voice-over, 144
+   for voice-over timing, 143 for a group's lock, 142 for the active look, 141 for the active test, 140 for a
    short link, 139 for a link's texture, 138 for links between groups, 137 for which links
    are wide, 136 for a link's width and look, 135 for a level badge's radius, 134 for a
    badge's radius, 133 for drawing the links, 132 for the links' growth, 131 for the
