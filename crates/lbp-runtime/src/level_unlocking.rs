@@ -191,6 +191,12 @@ impl LevelWorld {
         })
     }
 
+    /// D391 (FOUND 0x426680-0x4268bc, the test of 0x420890): a link between two group
+    /// slots, each of `SlotID` type 3 or 4 (INFERRED: developer and local groups).
+    pub fn link_joins_groups(l: PendingLink) -> bool {
+        [l.from, l.to].iter().all(|id| matches!(id.0, 3 | 4))
+    }
+
     /// D386: the directions of a link's two ends (its slots' locations), for drawing.
     pub fn link_dirs(&self, l: PendingLink) -> Option<([f32; 3], [f32; 3])> {
         Some((self.slot_dir(l.from)?, self.slot_dir(l.to)?))
@@ -591,6 +597,12 @@ mod tests {
         assert!(w.link_is_wide(link(1, 2)));
         assert!(!w.link_is_wide(link(1, 3)));
         assert!(!w.link_is_wide(link(1, 9)), "an end that does not resolve");
+        let group = |a, b| PendingLink {
+            from: (a, 1),
+            to: (b, 2),
+        };
+        assert!(LevelWorld::link_joins_groups(group(3, 4)));
+        assert!(!LevelWorld::link_joins_groups(group(3, 0)));
     }
 
     #[test]

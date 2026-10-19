@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D390 which links are wide (2026-10-19)
+## Latest: D391 links between groups (2026-10-19)
+- Part 138 (`docs/level-scripts/part-138.md`): a link between two group badges is
+  drawn at the game's own third size, 48 wide.
+
+## D390 which links are wide (2026-10-19)
 - Part 137 (`docs/level-scripts/part-137.md`): links between main-path, boss,
   cut-scene or DLC-hub slots are drawn wide and the rest narrow, as in the game.
 
@@ -22,10 +26,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D388 a level badge's radius (2026-10-19)
 - Part 135 (`docs/level-scripts/part-135.md`): a level badge's radius defaults to
   0.08 in the game's settings block, and the viewer's link ends use it.
-
-## D387 a badge's radius (2026-10-19)
-- Part 134 (`docs/level-scripts/part-134.md`): a badge's angular radius comes from a
-  settings resource times a per-object factor; a level's needs a measurement.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
