@@ -19,8 +19,14 @@ from the toolkit oracle's `SlotType` (3 LOCAL_GROUP, 4 DEVELOPER_GROUP, 9 DLC_PA
 ### Inferred
 
 - A group with no slots in it keeps its own slot's `InitiallyLocked`; the loop's empty
-  case was not read. Whether a story level's `PrimaryLinkLevel` ever names a group was
-  not counted.
+  case was not read.
+
+### Measured (01.33 story list, `read_story_slot_list`)
+
+- 82 slots: 76 levels (type 0) and 6 developer groups (type 4); none of type 3 or 9.
+  63 are `InitiallyLocked`. Every level's `Group` is one of the six.
+- 43 levels have a `PrimaryLinkLevel`, all of type 0, so no story link targets a group:
+  the group case decides only a group's own lock, never a link's look.
 
 ### Next
 

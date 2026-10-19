@@ -17,9 +17,8 @@
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 201 (D395) merged. PR for D396 (branch `pod-d396`, worktree
-  `E:\Projects\wt-d324`): a group's lock (0x1a7efc's group case in `slot_unlocked`);
-  handed to the coordinator for merge once rust and python are green.
+- PRs 153 (D353) through 203 (D396) merged. A docs PR (branch `pod-d396b`) adds part
+  143's census: no story link targets a group.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
   Decision numbers: D348-D399, next free D397.
 
