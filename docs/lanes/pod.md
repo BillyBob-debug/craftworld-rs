@@ -107,7 +107,7 @@
 3. A finished level returns to the Pod (D382), whose native state 2 plays
    `LevelUnlockingThread` (D383), as does the scripted one (D384); the links grow with the
    game's timing (D385) and are drawn with the game's texture (D386, D392; open: the
-   line shader's program, 0x4123ac's state for the active set (D394), the level badges'
+   line shader's program, the active look, a locked target (D394), the level badges'
    radius, 0.08 from the settings block's default (D388), to measure in RPCS3 during an
    unlock; badge kind 2 comes from loaded data, D393). It, the
    intro and `OnEnterPod__` also wait on audio (none plays yet). The interactive music
