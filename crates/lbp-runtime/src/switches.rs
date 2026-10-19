@@ -1126,6 +1126,11 @@ impl LevelWorld {
         visits
     }
 
+    /// D1104: the signal on `thing`'s first input port, `None` when nothing is wired there.
+    pub fn input_signal(&self, thing: usize) -> Option<SwitchInput> {
+        wired(self, u32::try_from(thing).ok()?, 0).map(|(_, s)| s)
+    }
+
     /// D1101: the activation a PPhysicsTweak on `thing` sees (FOUND, 01.33, 0xcaf9c): 1 with
     /// no switch output wired to its input; with `behavior` 0 (digital) 1 when the signal's
     /// ternary is non-zero, else 0; with 1 (analog) the activation's magnitude; 1 otherwise.

@@ -799,6 +799,12 @@ pub struct JointParams {
     pub motion: [f32; 10],
     pub tweak_target_max_length: f32,
     pub tweak_target_min_length: f32,
+    /// D1104: FOUND (01.33, serializer 0xb41850) the bool at `+0x1cc`; the per-frame pass
+    /// 0xcfedc holds the piston (clock scale 0) while it is set.
+    pub held: bool,
+    /// D1104: FOUND (01.33, the serializer's last field, `+0xa0`) how a switch drives the
+    /// clock: 0 on/off, 1 direction, 2 one-shot, 3 analog speed, 4 speed (0xc9e80).
+    pub mode: i32,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -1185,9 +1191,9 @@ fn part_body(
             r.i32()?;
             let tweak_target_max_length = r.f32()?;
             let tweak_target_min_length = r.f32()?;
-            r.bool()?;
+            let held = r.bool()?;
             let hide_in_play_mode = r.bool()?;
-            r.i32()?;
+            let mode = r.i32()?;
             things.list[me].data.joint = Some(Joint {
                 a,
                 b,
@@ -1211,6 +1217,8 @@ fn part_body(
                     motion,
                     tweak_target_max_length,
                     tweak_target_min_length,
+                    held,
+                    mode,
                 },
             });
         }

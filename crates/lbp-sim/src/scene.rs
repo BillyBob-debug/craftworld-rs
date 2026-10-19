@@ -655,6 +655,48 @@ impl SceneJoint {
     }
 }
 
+impl SceneJoint {
+    /// D1104: FOUND (01.33, 0xc9790's branch at 0xc993c) the length of a piston at clock
+    /// `frame`: a wired one in mode 1 (direction) or 4 (speed) ramps, base + 2 × frame ×
+    /// range / time (the base for time < 1), with no phase, pattern or wave; every other
+    /// piston follows [`Self::free_length`].
+    pub fn length(&self, frame: f32, wired: bool) -> f32 {
+        let [range, time, ..] = self.params.motion;
+        match self.params.mode {
+            1 | 4 if wired && time >= 1. => self.min_length + 2. * frame * range / time,
+            1 | 4 if wired => self.min_length,
+            _ => self.free_length(frame),
+        }
+    }
+
+    /// D1104: the clock frames a wired mode 1 or 4 piston's ramp is kept within, 0 (the
+    /// base) to time / 2 (base + range). INFERRED: the game's ramp has no clamp in 0xc9790
+    /// or 0xcfedc, yet a direction piston stops at its ends; where that happens is not read.
+    pub fn ramp_frames(&self, wired: bool) -> Option<(f32, f32)> {
+        let time = self.params.motion[1];
+        (wired && matches!(self.params.mode, 1 | 4) && time >= 1.).then_some((0., time / 2.))
+    }
+}
+
+/// D1104: FOUND (01.33, the per-frame pass 0xcfedc, jump table 0xcffa4) the rate a wired
+/// piston's clock runs at, from its mode and the signal on its input (`ternary`,
+/// `activation`): held (`+0x1cc`) 0; mode 0 1 while the ternary is set, else 0; mode 1 the
+/// ternary (1 or -1), and with the ternary 0 -1 or 0 by the port test 0x900730 (read here
+/// as -1, INFERRED: an off switch sends the piston back); mode 2 1; mode 3 the activation;
+/// mode 4 (0xc9e80, not decoded) 1.
+pub fn piston_scale(mode: i32, held: bool, ternary: i32, activation: f32) -> f32 {
+    if held {
+        return 0.;
+    }
+    match mode {
+        0 => f32::from(u8::from(ternary != 0)),
+        1 if ternary != 0 => ternary as f32,
+        1 => -1.,
+        3 => activation,
+        _ => 1.,
+    }
+}
+
 /// D1103: a piston's clock (FOUND, 01.33): the retimed frame the length rule reads is
 /// `(now - start) × scale + start + delta`, the PJoint's modStartFrame, modDeltaFrames
 /// and modScale (`+0x144..+0x14c`, through the pointer at `+0x190`). A switch only
@@ -680,6 +722,14 @@ impl Default for PistonClock {
 impl PistonClock {
     pub fn frame(&self, now: f32) -> f32 {
         (now - self.start) * self.scale + self.start + self.delta
+    }
+
+    /// D1104: keeps the frame at `now` within `lo..=hi` by moving the delta, so a piston
+    /// at an end turns back at once when its rate changes sign (INFERRED, see
+    /// [`SceneJoint::ramp_frames`]).
+    pub fn clamp(&mut self, now: f32, lo: f32, hi: f32) {
+        let f = self.frame(now);
+        self.delta += f.clamp(lo, hi) - f;
     }
 
     /// 0xc7648: from `now` the clock runs at `scale`, without a jump.

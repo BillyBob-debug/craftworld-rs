@@ -822,3 +822,61 @@ fn d1103_a_switched_piston_clock_freezes_while_off_and_never_jumps() {
     c.set_scale(60., -1.);
     assert_eq!((c.frame(60.), c.frame(70.)), (40., 30.));
 }
+
+#[test]
+fn d1104_a_direction_piston_ramps_out_while_on_and_back_while_off() {
+    use lbp_sim::scene::{piston_scale, Endpoint, JointKind, PistonClock, SceneJoint};
+    let mut params = JointParams {
+        mode: 1,
+        ..Default::default()
+    };
+    params.motion[..2].copy_from_slice(&[300., 60.]);
+    let j = SceneJoint {
+        thing: 0,
+        kind: JointKind::Piston,
+        a: Endpoint::Static(0),
+        b: Endpoint::Static(1),
+        world_a: [0.; 2],
+        world_b: [0.; 2],
+        local_a: [0.; 2],
+        local_b: [0.; 2],
+        length: 500.,
+        min_length: 500.,
+        max_length: 500.,
+        params,
+    };
+    // Rate by mode: on 1, a negative signal -1, off -1 (mode 1); mode 0 holds while off.
+    assert_eq!(
+        (
+            piston_scale(1, false, 1, 0.),
+            piston_scale(1, false, -1, 0.)
+        ),
+        (1., -1.)
+    );
+    assert_eq!(piston_scale(1, false, 0, 0.), -1.);
+    assert_eq!(
+        (piston_scale(0, false, 0, 0.), piston_scale(1, true, 1, 0.)),
+        (0., 0.)
+    );
+    assert_eq!(piston_scale(3, false, 1, 0.25), 0.25);
+    // The ramp: base + 2 × frame × range / time, kept between frames 0 and time / 2.
+    let (lo, hi) = j.ramp_frames(true).unwrap();
+    assert_eq!((lo, hi, j.ramp_frames(false)), (0., 30., None));
+    let mut c = PistonClock::default();
+    let at = |c: &mut PistonClock, now: f32, s: f32| {
+        c.set_scale(now, s);
+        c.clamp(now, lo, hi);
+        j.length(c.frame(now), true)
+    };
+    // Off from the start: held at the base.
+    assert_eq!((at(&mut c, 0., -1.), at(&mut c, 10., -1.)), (500., 500.));
+    // On at 10: half way at 25, fully out (base + range) from 40 on.
+    assert_eq!(at(&mut c, 10., 1.), 500.);
+    assert_eq!(at(&mut c, 25., 1.), 650.);
+    assert_eq!((at(&mut c, 40., 1.), at(&mut c, 90., 1.)), (800., 800.));
+    // Off at 90: back at once, at the base 30 frames later.
+    assert_eq!(at(&mut c, 90., -1.), 800.);
+    assert_eq!((at(&mut c, 100., -1.), at(&mut c, 120., -1.)), (700., 500.));
+    // Unwired, the same joint follows its free-running wave instead.
+    assert_eq!(j.length(15., false), j.free_length(15.));
+}

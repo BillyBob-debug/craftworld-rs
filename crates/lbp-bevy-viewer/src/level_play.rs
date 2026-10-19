@@ -2164,7 +2164,9 @@ fn drive_pistons(
     let world = &play.host.world;
     let now = play.scripts.ticks as f32;
     lbp_sim::drive_pistons(&mut commands, &mut q, now, |j| {
-        world.tweak_activation(j.thing, 0)
+        world
+            .input_signal(j.thing)
+            .map(|s| (s.ternary, s.activation))
     });
 }
 
