@@ -87,3 +87,34 @@ changed. Before the first tick the saved lastKnownActivation stands in.
 Tests: `d1101_a_tweak_reads_its_input_digitally_or_by_magnitude` (lbp-runtime
 level_world) and `d1101_a_switched_off_anti_gravity_tweaker_lets_its_body_fall` (lbp-sim
 sandbox), both synthetic.
+
+## Part 4: pistons with no input run the game's wave (D1102)
+
+The Rookie Test's 33 pistons all store tweakTargetMin/MaxLength 0, so the old scene held
+each one at its rest length. What drives them is the motion block: animationRange (signed,
+31.5 to 1,858), animationTime (6 to 180 frames), animationPause (0 or 15) and pattern 0.
+
+What the game does (EBOOT 01.33, read with capstone; Ghidra shows nothing there):
+- The joint length function 0xc95ec (jump table 0xc9658) sends types 3, 4 and 9 to
+  0xc9790; other types return the base length at +0xf0.
+- PJoint offsets (serializer 0xb41850): animationRange +0xc8, Time +0xcc, Phase +0xd0,
+  Speed +0xd4, Pause +0xd8, modStartFrame +0x144, modDeltaFrames +0x148, modScale +0x14c,
+  tweakTargetMax +0x1c4, tweakTargetMin +0x1c8 (not read on this path).
+- No input on the Thing (+0x60 empty), or mode +0xa0 not 1, 2 or 4: free running on the
+  retimed frame t (pointer +0x190; read here as the tick count, INFERRED) plus the phase.
+  Pattern 0: base + range × (0.5 - 0.5 cos(π × wave)), the cosine INFERRED (0x88f64c).
+  Pattern 1: base + t × speed. Pattern 2: a sawtooth from base + range to base over time,
+  then base for the pause. Other patterns: base.
+- The wave 0xc79c8: 0 when time < 1; over a cycle of time + pause it holds 0 for
+  pause / 2, rises over time / 2, holds 1 for pause / 2 and falls over time / 2.
+- Wired (mode 1 or 4): base + 2 × t × range / time on a retimed clock, so a ramp after the
+  switch changes; mode 2 clamps t to time + pause then uses the same patterns. Who sets
+  the clock (+0x190) and the mode on a switch change is not read yet.
+- 0xcaf9c (the tweak activation) is not used by pistons; they only test for an input.
+
+lbp-sim now gives each piston a `PistonDrive`; the viewer's `drive_pistons` sets the
+prismatic joint's length every tick for the unwired ones (`SceneJoint::free_length`) and
+wakes both ends. Wired pistons (27 of 33 here) keep their rest length until the
+switch-driven clock is read. The base length is the stored length (INFERRED).
+
+Test: `d1102_an_unwired_piston_moves_out_and_back_on_its_wave` (lbp-sim sandbox).

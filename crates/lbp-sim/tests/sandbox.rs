@@ -769,3 +769,41 @@ fn d1101_a_switched_off_anti_gravity_tweaker_lets_its_body_fall() {
         0.25
     );
 }
+
+#[test]
+fn d1102_an_unwired_piston_moves_out_and_back_on_its_wave() {
+    use lbp_sim::scene::{piston_wave, SceneJoint};
+    // time 120, pause 20: hold 10, rise 60, hold 10, fall 60.
+    let w = |x| piston_wave(x, 120., 20.);
+    assert_eq!(
+        (w(0.), w(10.), w(40.), w(75.), w(110.), w(140.)),
+        (0., 0., 0.5, 1., 0.5, 0.)
+    );
+    assert_eq!(piston_wave(5., 0.5, 0.), 0.);
+    let mut params = JointParams::default();
+    params.motion[..5].copy_from_slice(&[315., 120., 0., 0.02, 20.]);
+    let mut j = SceneJoint {
+        thing: 0,
+        kind: JointKind::Piston,
+        a: Endpoint::Static(0),
+        b: Endpoint::Static(1),
+        world_a: [0.; 2],
+        world_b: [0.; 2],
+        local_a: [0.; 2],
+        local_b: [0.; 2],
+        length: 840.,
+        min_length: 840.,
+        max_length: 840.,
+        params,
+    };
+    // Eased: half way along the rise is half the range; the top is base + range.
+    assert_eq!((j.free_length(0.), j.free_length(70.)), (840., 1155.));
+    assert!((j.free_length(40.) - 997.5).abs() < 1e-3);
+    j.params.animation_pattern = 2;
+    assert_eq!(
+        (j.free_length(0.), j.free_length(60.), j.free_length(130.)),
+        (1155., 997.5, 840.)
+    );
+    j.params.animation_pattern = 7;
+    assert_eq!(j.free_length(40.), 840.);
+}
