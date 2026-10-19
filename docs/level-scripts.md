@@ -162,6 +162,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 156: the Pod's music files (2026-10-19, D1009)](level-scripts/part-156.md)
 - [Part 157: the planets' resting point (2026-10-19, D1010)](level-scripts/part-157.md)
 - [Part 158: clearing a pending link (2026-10-19, D1011)](level-scripts/part-158.md)
+- [Part 159: the unlock line's stop (2026-10-19, D1012)](level-scripts/part-159.md)
 
 ## Next
 
