@@ -6671,3 +6671,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1101 anti-gravity tweakers follow their switch signals (2026-10-19)
 - Logic lane: a tweak reads its wired switch (digital, or analog magnitude) as the
   EBOOT does; the 3 wired tweakers in the Rookie Test now switch (docs/logic.md P3).
+
+## D1102 pistons with no input run the game's wave (2026-10-19)
+- Logic lane: unwired pistons move between base and base + range on the EBOOT's
+  eased wave (0xc95ec); the 27 wired ones wait on the switch clock (docs/logic.md P4).

@@ -1043,3 +1043,61 @@ fn d1109_gyroscopes_right_their_body_and_rotators_turn_at_their_speed() {
     assert!((w - 0.20943 * 0.125).abs() < 1e-6, "{w}");
     assert!((rot.turn(0., w, 1.) - 0.03490659).abs() < 1e-6);
 }
+
+#[test]
+fn d1110_movers_reach_their_velocity_and_followers_stop_short_of_their_target() {
+    // A box carrying a mover (Thing 2) as saved in the Rookie Test: 35 up per tick.
+    let mut things = vec![
+        floor(),
+        thing(
+            1,
+            matrix(0., 300., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(2, matrix(0., 300., 0., 0., 1., 1.), None, false),
+    ];
+    things[2].parent = Some(1);
+    things[2].data.physics_tweak = Some(PhysicsTweak {
+        configuration: 8,
+        middle_vel: [0., 35., 0.],
+        vel_range: 28.,
+        accel_strength: 0.125,
+        decel_strength: 0.125,
+        ..Default::default()
+    });
+    let scene = build_scene(&things);
+    let mover = scene.bodies[0].moves[0];
+    let up = [0., 1.];
+    // From a sideways drift it gains accel Ã— range (3.5) a tick up and loses the drift.
+    let v = mover.push([2., 0.], up, None, 1.);
+    assert!(v[0].abs() < 1e-6 && (v[1] - 3.5).abs() < 1e-5, "{v:?}");
+    let mut v = [0f32, 0.];
+    for _ in 0..12 {
+        v = mover.push(v, up, None, 1.);
+    }
+    assert!((v[1] - 35.).abs() < 1e-4, "{v:?}");
+    assert_eq!(mover.push([1., 2.], up, None, 0.), [1., 2.]);
+    // A follower (configuration 11) with the census's numbers walks to 100 short of its
+    // target, never faster than its range, and ignores a target past max_range.
+    let follower = lbp_sim::scene::MoveTweak {
+        configuration: 11,
+        min_range: 100.,
+        max_range: 2100.,
+        angle_range: 360.,
+        up_down: true,
+        vel: [0., 0.],
+        ..mover
+    };
+    let target = [1000f32, 0.];
+    let (mut x, mut v) = (0f32, [0f32, 0.]);
+    for _ in 0..200 {
+        let d = [target[0] - x, 0.];
+        let d = follower.sees(d, up).then_some(d);
+        v = follower.push(v, up, d, 1.);
+        assert!(v[0].abs() <= 28. + 1e-4, "speed {v:?}");
+        x += v[0];
+    }
+    assert!((895. ..920.).contains(&x), "stopped at {x}");
+    assert!(!follower.sees([3000., 0.], up) && !follower.sees([50., 0.], up));
+}

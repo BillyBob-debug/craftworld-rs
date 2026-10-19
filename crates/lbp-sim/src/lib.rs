@@ -210,6 +210,43 @@ pub fn drive_spins(
     }
 }
 
+/// D1110: a body's movers and followers, for [`drive_moves`].
+#[derive(Component, Debug, Clone)]
+pub struct MoveTweaks(pub Vec<scene::MoveTweak>);
+
+/// D1110: each mover and follower moves its body's velocity towards its rows
+/// ([`scene::MoveTweak::push`], per tick, in order) with the tweak's current activation; a
+/// follower (configuration 11 without followKey) follows `player` when it sees it. Wakes a
+/// body whose velocity changed.
+pub fn drive_moves(
+    commands: &mut Commands,
+    q: &mut Query<(
+        Entity,
+        &MoveTweaks,
+        &Position,
+        &Rotation,
+        &mut LinearVelocity,
+    )>,
+    player: Option<Vec2>,
+    activation: impl Fn(&scene::MoveTweak) -> f32,
+) {
+    let hz = TICK_HZ as f32;
+    for (e, tweaks, pos, rot, mut v) in q.iter_mut() {
+        let up = [-rot.sin, rot.cos];
+        let before = [v.0.x / hz, v.0.y / hz];
+        let after = tweaks.0.iter().fold(before, |vel, t| {
+            let d = player
+                .map(|p| [p.x - pos.0.x, p.y - pos.0.y])
+                .filter(|&d| t.configuration == 11 && t.sees(d, up));
+            t.push(vel, up, d, activation(t))
+        });
+        if (after[0] - before[0]).abs() + (after[1] - before[1]).abs() > 1e-6 {
+            v.0 = Vec2::new(after[0], after[1]) * hz;
+            commands.queue(avian2d::dynamics::solver::islands::WakeBody(e));
+        }
+    }
+}
+
 /// D1102: a piston joint, kept so its length can follow the game's piston rule, with its
 /// clock (D1103).
 #[derive(Component, Debug, Clone)]
@@ -424,6 +461,9 @@ pub fn spawn_scene(commands: &mut Commands, scene: &PhysicsScene) -> Spawned {
             }
             if !b.spins.is_empty() {
                 e.insert(SpinTweaks(b.spins.clone()));
+            }
+            if !b.moves.is_empty() {
+                e.insert(MoveTweaks(b.moves.clone()));
             }
             if !b.fixed && b.frozen != 0 {
                 e.insert(StartAsleep {
