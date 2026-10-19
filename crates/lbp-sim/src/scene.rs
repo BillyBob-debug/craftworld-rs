@@ -94,6 +94,18 @@ pub struct SceneBody {
     pub frozen: i32,
     /// Static body: WORLD owner or a fixed material in the glue tree (see module rules).
     pub fixed: bool,
+    /// D1100: an anti-gravity tweaker glued to the body, if any.
+    pub anti_gravity: Option<AntiGravity>,
+}
+
+/// D1100: the PPhysicsTweaks with configuration 0 (anti-gravity tweakers) on a body's
+/// hierarchy, summed with the activation each was saved with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AntiGravity {
+    /// Σ PPhysicsTweak.gravity × lastKnownActivation: the share of gravity cancelled.
+    pub cancelled: f32,
+    /// Σ dampening × activation; kept, not applied yet (the SPU side is unread).
+    pub dampening: [f32; 3],
 }
 
 /// One SHAPE Thing as a collider.
@@ -354,6 +366,7 @@ fn build_scene_inner(
                             angular_velocity: pb.angular_velocity,
                             frozen: pb.frozen,
                             fixed: is_world(thing) || is_pickup(thing),
+                            anti_gravity: None,
                         });
                         scene.bodies.len() - 1
                     })
@@ -433,6 +446,32 @@ fn build_scene_inner(
     }
     scene.report.fixed_bodies = scene.bodies.iter().filter(|b| b.fixed).count();
     scene.report.nested_bodies = nested.len();
+    for (i, t) in things.iter().enumerate() {
+        let Some(tw) = t
+            .data
+            .physics_tweak
+            .as_ref()
+            .filter(|tw| tw.configuration == 0)
+        else {
+            continue;
+        };
+        let slot = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        // FOUND (01.33, 0xc5f1c): each tweak in the body's hierarchy adds gravity × its
+        // activation (and dampening × activation) to the body's totals.
+        if let Some(b) = slot {
+            let a = tw.last_known_activation;
+            let total = scene.bodies[b].anti_gravity.get_or_insert(AntiGravity {
+                cancelled: 0.,
+                dampening: [0.; 3],
+            });
+            total.cancelled += tw.gravity * a;
+            for (d, t) in total.dampening.iter_mut().zip(tw.dampening) {
+                *d += t * a;
+            }
+        }
+    }
     scene.add_joints(things);
     scene
 }

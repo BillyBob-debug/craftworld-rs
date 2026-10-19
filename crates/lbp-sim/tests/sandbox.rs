@@ -3,7 +3,7 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use lbp_level::parts::{Body, Joint, JointParams, Pos, Shape, ShapeColor};
+use lbp_level::parts::{Body, Joint, JointParams, PhysicsTweak, Pos, Shape, ShapeColor};
 use lbp_level::serial::Descriptor;
 use lbp_level::thing::ThingRecord;
 use lbp_sim::scene::{
@@ -220,6 +220,48 @@ fn box_falls_onto_the_floor_and_rests() {
     assert!(
         floor[0].abs() < 1e-3 && (floor[1] + 50.).abs() < 1e-3,
         "the floor does not move"
+    );
+}
+
+#[test]
+fn d1100_an_anti_gravity_tweaker_holds_its_body_up() {
+    // Two boxes; box 2 carries an anti-gravity tweaker (Thing 3) as saved in the Rookie Test.
+    let mut things = vec![
+        floor(),
+        thing(
+            1,
+            matrix(-300., 300., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(
+            2,
+            matrix(300., 300., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(3, matrix(300., 300., 0., 0., 1., 1.), None, false),
+    ];
+    things[3].parent = Some(2);
+    things[3].data.physics_tweak = Some(PhysicsTweak {
+        gravity: 1.,
+        dampening: [1., 1., 0.],
+        last_known_activation: 1.,
+        ..Default::default()
+    });
+    let scene = build_scene(&things);
+    assert!(scene.bodies[0].anti_gravity.is_none());
+    assert_eq!(scene.bodies[1].anti_gravity.map(|a| a.cancelled), Some(1.));
+    let out = run(&things, 60);
+    assert!(
+        (out[1].1[1] - 50.).abs() < 5.,
+        "the plain box falls: {:?}",
+        out[1]
+    );
+    assert!(
+        (out[2].1[1] - 300.).abs() < 1.,
+        "the tweaked box stays: {:?}",
+        out[2]
     );
 }
 

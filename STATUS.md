@@ -6631,3 +6631,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D507 the post-it notes in native Rust (2026-10-19)
 - level1 Part 8 (`docs/level1-play.md`): `PostItNote` and its three unlock notes are
   native ports; without the overlay a note keeps its text, an unlock note sets its flag.
+
+## D508 the tutorial monitors in native Rust (2026-10-19)
+- level1 Part 9 (`docs/level1-play.md`): `TutorialMonitor` is a native port; without the
+  overlay a switched-on monitor asks for its video (the game call is counted, unbound).

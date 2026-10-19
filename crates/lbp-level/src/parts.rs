@@ -340,6 +340,42 @@ pub struct PartData {
     /// drawn instead of the mesh's own. Older heads are read through and not kept.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub material_override: Option<MaterialOverride>,
+    /// PPhysicsTweak as stored (D1100): the mover, follower and anti-gravity settings.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub physics_tweak: Option<PhysicsTweak>,
+}
+
+/// PPhysicsTweak fields as stored (D1100; names from the toolkit, units UNVERIFIED). The
+/// configuration-specific tails (0xd, 0xe) are read through and not kept.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct PhysicsTweak {
+    pub gravity: f32,
+    pub buoyancy: f32,
+    pub dampening: [f32; 3],
+    pub input: [f32; 3],
+    pub middle_vel: [f32; 3],
+    pub vel_range: f32,
+    pub accel_strength: f32,
+    pub decel_strength: f32,
+    pub local_space: bool,
+    pub configuration: u32,
+    pub hide_in_play_mode: bool,
+    pub color_index: i32,
+    pub name: String,
+    pub team_filter: u8,
+    pub behavior: i32,
+    pub allow_in_out: bool,
+    pub allow_up_down: bool,
+    pub min_range: f32,
+    pub max_range: f32,
+    pub follow_key: bool,
+    pub angle_range: f32,
+    pub flee: bool,
+    pub maximum_mass: f32,
+    pub can_push: bool,
+    pub z_behavior: i32,
+    pub last_known_activation: f32,
+    pub waiting_to_move: bool,
 }
 
 /// PMaterialOverride as stored (D331): the region overrides in order and the mesh the
@@ -1195,7 +1231,10 @@ fn part_body(
                 infinite_spawns,
             });
         }
-        "PHYSICS_TWEAK" => physics_tweak(r, things)?,
+        "PHYSICS_TWEAK" => {
+            let tweak = physics_tweak(r, things)?;
+            things.list[me].data.physics_tweak = Some(tweak);
+        }
         "SWITCH_KEY" => {
             let key = SwitchKey {
                 colour_index: r.s32()?,
@@ -2629,37 +2668,45 @@ fn camera_tweak(r: &mut Reader) -> Result<()> {
     Ok(())
 }
 
-fn physics_tweak(r: &mut Reader, things: &mut Things) -> Result<()> {
+fn physics_tweak(r: &mut Reader, things: &mut Things) -> Result<PhysicsTweak> {
     let v = r.rev.version();
-    r.skip_f32(2)?;
-    r.v3()?;
-    r.v3()?;
-    r.v3()?;
-    r.skip_f32(3)?;
-    r.bool()?;
-    let configuration = r.u32()?;
+    let mut t = PhysicsTweak {
+        gravity: r.f32()?,
+        buoyancy: r.f32()?,
+        dampening: r.v3()?,
+        input: r.v3()?,
+        middle_vel: r.v3()?,
+        vel_range: r.f32()?,
+        accel_strength: r.f32()?,
+        decel_strength: r.f32()?,
+        local_space: r.bool()?,
+        configuration: r.u32()?,
+        ..Default::default()
+    };
+    let configuration = t.configuration;
     if v < 0x327 {
         thing_ref(r, things)?;
     }
-    r.bool()?;
-    r.i32()?;
-    r.wstr()?;
-    r.u8()?;
-    r.i32()?;
-    r.bool()?;
-    r.bool()?;
-    r.skip_f32(2)?;
-    r.bool()?;
+    t.hide_in_play_mode = r.bool()?;
+    t.color_index = r.i32()?;
+    t.name = r.wstring()?;
+    t.team_filter = r.u8()?;
+    t.behavior = r.i32()?;
+    t.allow_in_out = r.bool()?;
+    t.allow_up_down = r.bool()?;
+    t.min_range = r.f32()?;
+    t.max_range = r.f32()?;
+    t.follow_key = r.bool()?;
     if v > 0x381 {
-        r.f32()?;
+        t.angle_range = r.f32()?;
     }
-    r.bool()?;
+    t.flee = r.bool()?;
     if v > 0x36a {
-        r.f32()?;
-        r.bool()?;
-        r.s32()?;
-        r.f32()?;
-        r.bool()?;
+        t.maximum_mass = r.f32()?;
+        t.can_push = r.bool()?;
+        t.z_behavior = r.s32()?;
+        t.last_known_activation = r.f32()?;
+        t.waiting_to_move = r.bool()?;
     }
     if v > 0x3b8 && configuration == 0xd {
         r.resource(false)?;
@@ -2685,7 +2732,7 @@ fn physics_tweak(r: &mut Reader, things: &mut Things) -> Result<()> {
         r.skip_f32(2)?;
         r.bytes(4)?;
     }
-    Ok(())
+    Ok(t)
 }
 
 fn shape(r: &mut Reader, things: &mut Things) -> Result<Shape> {
