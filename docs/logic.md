@@ -274,3 +274,37 @@ and the route ends at x 24,635 (tick 2008) instead of 25,645. A control run with
 spin gives 25,645 again. Which is right needs RPCS3 (open).
 
 Test: `d1108_a_motor_turns_at_its_speed_on_its_clock` (lbp-sim sandbox).
+
+## Part 11: gyroscopes and rotators turn their bodies (D1109)
+
+Census of the Rookie Test's tweakers other than anti-gravity (by configuration): 1 ×56,
+11 ×35, 5 ×2, 9 ×2, 12 ×2, 8 ×1. Part 1 called configuration 1 the mover; the packer
+says otherwise. All 56 have velRange 0.756 or 0.209 (π/15), accel 1 or 0.124, decel 0.
+
+What the game does (EBOOT 01.33, SPU row packer 0x95fb20, configurations 1-5 and 9):
+- Each tweak becomes one turning row on its body: a target turn speed (+0x20, per tick)
+  and change limits (+0x24, +0x28), default ±accel × velRange.
+- Configuration 1 aims at world up (direction (0,1,0,0) at c463b0): the angle error is
+  wrapped to [-π, π] (0x960790), fed to 0x1c21f4 (a stop-in-time rule, shape INFERRED),
+  and the result is clamped to ±velRange × input scale (0x960858). So 1 is the
+  gyroscope. 3 aims along the body's velocity, 4 along controller stick slots 1 and 2,
+  5 at a found target (0x1c3e04); none of these is modelled.
+- Configuration 2 (target = slot 1 analog × velRange) and 9 (target = middleVel z as
+  stored, no velRange) are rotators; the limit on the slowing side is decel × velRange
+  (0x95fd4c).
+- Last (0x95fdc8): both limits × activation (0xcaf9c) × 1/mass. Gravity, buoyancy and
+  dampening are not read here. Input scale 0xcbed4 is 1 unless input mode is 2.
+- A flip flag (body matrix determinant < 0, XOR the byte at +0x224) negates the target;
+  not modelled.
+- Configurations 6-8 and 11 (the follower, 35 in the level with followKey set) go
+  through 0x957df4 and are next.
+
+lbp-sim (`SpinTweak`, `drive_spins`): per tick, in order, each gyroscope (1) and rotator
+(9) moves its body's turn speed towards its target by at most the limits × activation.
+The gyroscope's target is sign(e) × sqrt(2 × accel × velRange × |e|) clamped to
+±velRange (INFERRED shape). The 1/mass factor is left out (INFERRED: the solver turns
+the limit back into a speed change). The sign against avian's counter-clockwise angle is
+UNVERIFIED for rotators; the gyroscope is symmetric.
+
+Test: `d1109_gyroscopes_right_their_body_and_rotators_turn_at_their_speed` (lbp-sim
+sandbox).

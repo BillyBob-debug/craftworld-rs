@@ -6667,3 +6667,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1100 anti-gravity tweakers hold the Rookie Test walkway (2026-10-19)
 - Logic lane: tweakers are kept and configuration 0 cancels gravity as the EBOOT does;
   the walkway stays up and the route reaches x 22,785 (docs/logic.md P1-P2).
+
+## D1101 anti-gravity tweakers follow their switch signals (2026-10-19)
+- Logic lane: a tweak reads its wired switch (digital, or analog magnitude) as the
+  EBOOT does; the 3 wired tweakers in the Rookie Test now switch (docs/logic.md P3).
