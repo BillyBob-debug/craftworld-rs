@@ -362,9 +362,13 @@ impl LevelWorld {
                 self.story_progress.pending_links.len(),
                 u.clusters.len()
             ));
-            if !u.clusters.is_empty() {
-                return true;
+            // D1015 (FOUND, `Run__` 0064-0071): with no cluster the thread sets the
+            // cursor mode 4 and ends; only the end after the clusters pushes a group.
+            if u.clusters.is_empty() {
+                self.pod.search.cursor_mode = Some(4);
+                return false;
             }
+            return true;
         }
         if let Some(group) = u.group {
             return self.unlock_group_wait(group);
@@ -846,8 +850,9 @@ mod tests {
         assert_eq!(p.unlocked, [(0, 2)]);
     }
 
-    /// D1014: the default group under the cursor at the end is pushed; the thread waits
-    /// for the push, then moves the cursor to the group's default level.
+    /// D1014: a link into a group leaves the cursor on the group, whose search the end
+    /// asks for; the thread waits for the push, then moves the cursor to the group's
+    /// default level. D1015: with no links the thread ends without a push.
     #[test]
     fn d1014_the_end_pushes_the_group_under_the_cursor() {
         let slot = |id: (i32, i32), location: [f32; 4], group| SearchSlot {
@@ -859,20 +864,35 @@ mod tests {
         let mut w = LevelWorld {
             story_slots: vec![
                 slot((4, 27), [1., 0., 0., 0.], None),
-                slot((0, 1), [0., 1., 0., 0.], Some((4, 27))),
+                slot((0, 1), [1., 0.1, 0., 0.], Some((4, 27))),
+                slot((4, 28), [0., 1., 0., 0.], None),
+                slot((0, 2), [0., 1., 0.1, 0.], Some((4, 28))),
             ],
             ..Default::default()
         };
         w.pod.search.selected_planet = Some(1);
         w.pod.search.default_result = Some(0);
-        assert!(w.level_unlocking_tick(), "no links: the group is asked for");
-        assert_eq!(w.unlock_group_push, Some((4, 27)));
+        assert!(!w.level_unlocking_tick(), "no links: it ends");
+        assert_eq!(w.unlock_group_push, None);
+        assert_eq!(w.pod.search.cursor_mode, Some(4));
+        w.story_progress.pending_links = vec![PendingLink {
+            from: (0, 1),
+            to: (0, 2),
+        }];
+        let mut ticks = 0;
+        while w.unlock_group_push.is_none() {
+            assert!(w.level_unlocking_tick());
+            w.cursor_flight_step();
+            ticks += 1;
+            assert!(ticks < 2000);
+        }
+        assert_eq!(w.unlock_group_push, Some((4, 28)));
         assert_eq!(w.pod.search.cursor_mode, Some(2));
         assert!(w.level_unlocking_tick(), "waits for the push");
         w.unlock_group_push = None;
-        w.pod.search.group = Some((4, 27));
+        w.pod.search.group = Some((4, 28));
         assert!(!w.level_unlocking_tick());
-        assert_eq!(w.pod.search.cur_result, Some(1));
+        assert_eq!(w.pod.search.cur_result, Some(3));
         assert_eq!(w.pod.search.cursor_mode, Some(4));
     }
 }

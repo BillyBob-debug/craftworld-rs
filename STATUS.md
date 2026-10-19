@@ -6571,3 +6571,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1006 whether a video plays (2026-10-19)
 - Part 153 (`docs/level-scripts/part-153.md`): `Video.IsVideoPlaying__` answers true
   while the video slot is in use, so the Pod sees the intro video.
+
+## D1007 the previous level (2026-10-19)
+- Part 154 (`docs/level-scripts/part-154.md`): `Game.GetPreviousLevelSlotID__` and
+  `IsPreviousLevelValid__`; entering the Pod asks for the level-created dialogue.

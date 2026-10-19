@@ -6,8 +6,9 @@ clusters it pushes the search of the group under the cursor. The native thread
 
 ### Found
 
-- `Run__` 0192-0198 sets the cursor mode 4 after the last cluster, or at once when there
-  are none. With `IsTarsierDLCEnabled__` it pops the state first and skips that set.
+- `Run__` 0192-0198 sets the cursor mode 4 after the last cluster (with no cluster the
+  thread ends earlier, part 162). With `IsTarsierDLCEnabled__` it pops the state first
+  and skips that set.
 - 0199-0220: with a focus planet whose `GetCurResult__` has `GetType__` 1 and a
   `SlotID.Type` of 4 (a group), 0221-0241 make
   `SearchDetails(CreateGroup__Q6SlotIDb(slot, false))`, set the cursor mode 2 on it and
@@ -30,5 +31,5 @@ clusters it pushes the search of the group under the cursor. The native thread
   2) when the selected result is a group slot. The native pod computer's `push_group`
   takes it after the tick and pushes the group search over the top state.
 - The thread waits for the push, then flies the cursor to the group's default level
-  (`group_default_result`) and sets the cursor mode 4. With no pending links the Story
-  search's default group (4, 27) is pushed this way.
+  (`group_default_result`) and sets the cursor mode 4. (Corrected in part 162: with no
+  pending links nothing is pushed.)

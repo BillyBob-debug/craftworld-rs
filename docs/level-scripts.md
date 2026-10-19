@@ -165,6 +165,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 159: the unlock line's stop (2026-10-19, D1012)](level-scripts/part-159.md)
 - [Part 160: the level-created dialogue (2026-10-19, D1013)](level-scripts/part-160.md)
 - [Part 161: the unlock thread's group push (2026-10-19, D1014)](level-scripts/part-161.md)
+- [Part 162: no push without links (2026-10-19, D1015)](level-scripts/part-162.md)
 
 ## Next
 
