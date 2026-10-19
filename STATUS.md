@@ -6487,3 +6487,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D385 the links' growth (2026-10-18)
 - Part 132 (`docs/level-scripts/part-132.md`): pending links grow with the game's
   own timing and their progress is kept for drawing.
+
+## D386 drawing the links (2026-10-18)
+- Part 133 (`docs/level-scripts/part-133.md`): pending links show on the Pod's Earth
+  as growing green ribbons with arrowheads, as the game's link drawer builds them.

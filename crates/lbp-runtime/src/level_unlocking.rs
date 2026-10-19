@@ -177,6 +177,20 @@ impl LevelWorld {
         }
     }
 
+    /// D390 (FOUND 0x6ff5d8: the link record's byte +0x4c, 1 at 0x6ff700): a link is
+    /// drawn wide when both its slots resolve and each slot's `DeveloperLevelType` is 0, 5,
+    /// 7 or 8 (INFERRED names: main path, boss, cut scene, DLC hub).
+    pub fn link_is_wide(&self, l: PendingLink) -> bool {
+        [l.from, l.to].iter().all(|&id| {
+            self.slot_index(id).is_some_and(|i| {
+                matches!(
+                    self.story_slots[i].developer_level_type.unwrap_or(0),
+                    0 | 5 | 7 | 8
+                )
+            })
+        })
+    }
+
     /// D386: the directions of a link's two ends (its slots' locations), for drawing.
     pub fn link_dirs(&self, l: PendingLink) -> Option<([f32; 3], [f32; 3])> {
         Some((self.slot_dir(l.from)?, self.slot_dir(l.to)?))
@@ -563,6 +577,20 @@ mod tests {
         assert_eq!(w.pod.search.cursor_mode, Some(4));
         assert_eq!(w.sounds_played.get(UNLOCK_THEME), Some(&4));
         assert!(w.sounds_played.get(UNLOCK_BEEPS).is_some_and(|&n| n >= 3));
+    }
+
+    #[test]
+    fn d390_wide_links_join_main_path_slots() {
+        let mut w = world();
+        let link = |from, to| PendingLink {
+            from: (0, from),
+            to: (0, to),
+        };
+        w.story_slots[1].developer_level_type = Some(5);
+        w.story_slots[2].developer_level_type = Some(1);
+        assert!(w.link_is_wide(link(1, 2)));
+        assert!(!w.link_is_wide(link(1, 3)));
+        assert!(!w.link_is_wide(link(1, 9)), "an end that does not resolve");
     }
 
     #[test]
