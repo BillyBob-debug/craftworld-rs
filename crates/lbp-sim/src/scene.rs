@@ -631,7 +631,7 @@ impl SceneJoint {
     /// base and base + range over the wave; 1 base + (frame + phase) × speed; 2 a sawtooth
     /// from base + range back to base over `time`, then base for `pause`; else the base.
     /// INFERRED: the ease is a cosine (the call at 0x88f64c), the base length is the stored
-    /// length, and the game's retimed frame (`+0x190`) is the tick count.
+    /// length. `frame` is the piston's retimed clock ([`PistonClock::frame`]).
     pub fn free_length(&self, frame: f32) -> f32 {
         let base = self.min_length;
         let [range, time, phase, speed, pause, ..] = self.params.motion;
@@ -652,6 +652,44 @@ impl SceneJoint {
             }
             _ => base,
         }
+    }
+}
+
+/// D1103: a piston's clock (FOUND, 01.33): the retimed frame the length rule reads is
+/// `(now - start) × scale + start + delta`, the PJoint's modStartFrame, modDeltaFrames
+/// and modScale (`+0x144..+0x14c`, through the pointer at `+0x190`). A switch only
+/// changes the scale (0xc7648), keeping the frame continuous. The saved values (scale 0)
+/// are not used: play starts from the reset clock 0, 0, 1 (0xd0054, INFERRED for load).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct PistonClock {
+    pub start: f32,
+    pub delta: f32,
+    pub scale: f32,
+}
+
+impl Default for PistonClock {
+    fn default() -> Self {
+        Self {
+            start: 0.,
+            delta: 0.,
+            scale: 1.,
+        }
+    }
+}
+
+impl PistonClock {
+    pub fn frame(&self, now: f32) -> f32 {
+        (now - self.start) * self.scale + self.start + self.delta
+    }
+
+    /// 0xc7648: from `now` the clock runs at `scale`, without a jump.
+    pub fn set_scale(&mut self, now: f32, scale: f32) {
+        if scale == self.scale {
+            return;
+        }
+        self.delta += (self.scale - 1.) * (now - self.start);
+        self.start = now;
+        self.scale = scale;
     }
 }
 

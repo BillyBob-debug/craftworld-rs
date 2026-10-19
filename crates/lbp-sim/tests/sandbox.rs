@@ -807,3 +807,18 @@ fn d1102_an_unwired_piston_moves_out_and_back_on_its_wave() {
     j.params.animation_pattern = 7;
     assert_eq!(j.free_length(40.), 840.);
 }
+
+#[test]
+fn d1103_a_switched_piston_clock_freezes_while_off_and_never_jumps() {
+    use lbp_sim::scene::PistonClock;
+    let mut c = PistonClock::default();
+    assert_eq!(c.frame(30.), 30.);
+    // Off at 30: the frame holds; on again at 50 it carries on from there.
+    c.set_scale(30., 0.);
+    assert_eq!((c.frame(30.), c.frame(50.)), (30., 30.));
+    c.set_scale(50., 1.);
+    assert_eq!((c.frame(50.), c.frame(60.)), (30., 40.));
+    // Running backwards from 60 returns along the same frames.
+    c.set_scale(60., -1.);
+    assert_eq!((c.frame(60.), c.frame(70.)), (40., 30.));
+}

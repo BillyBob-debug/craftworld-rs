@@ -186,20 +186,27 @@ pub fn follow_tweaks(
     }
 }
 
-/// D1102: a piston joint, kept so its length can follow the game's piston rule.
+/// D1102: a piston joint, kept so its length can follow the game's piston rule, with its
+/// clock (D1103).
 #[derive(Component, Debug, Clone)]
-pub struct PistonDrive(pub scene::SceneJoint);
+pub struct PistonDrive {
+    pub joint: scene::SceneJoint,
+    pub clock: scene::PistonClock,
+}
 
-/// D1102: sets each piston's length from `length` (None leaves the joint as it is) and
-/// wakes both ends when it changed.
+/// D1103: at tick `now` sets each piston's clock scale from `scale` (1 for a piston with
+/// no input; a switched one 1 while its signal is on and 0 while off, 0xcfedc mode 0),
+/// then its length from the clock, waking both ends when it changed.
 pub fn drive_pistons(
     commands: &mut Commands,
-    q: &mut Query<(&PistonDrive, &mut PrismaticJoint)>,
-    length: impl Fn(&scene::SceneJoint) -> Option<f32>,
+    q: &mut Query<(&mut PistonDrive, &mut PrismaticJoint)>,
+    now: f32,
+    scale: impl Fn(&scene::SceneJoint) -> f32,
 ) {
-    for (drive, mut joint) in q.iter_mut() {
-        let Some(l) = length(&drive.0) else { continue };
-        let l = l * UNIT_SCALE;
+    for (mut drive, mut joint) in q.iter_mut() {
+        let s = scale(&drive.joint);
+        drive.clock.set_scale(now, s);
+        let l = drive.joint.free_length(drive.clock.frame(now)) * UNIT_SCALE;
         if joint.limits.is_some_and(|d| d.min == l && d.max == l) {
             continue;
         }
@@ -425,7 +432,10 @@ fn spawn_joint(
                     .with_slider_axis(axis)
                     .with_limits(j.min_length * UNIT_SCALE, j.max_length * UNIT_SCALE),
             )
-            .insert(PistonDrive(j.clone()))
+            .insert(PistonDrive {
+                joint: j.clone(),
+                clock: scene::PistonClock::default(),
+            })
         }
         scene::JointKind::Rod | scene::JointKind::Chain => {
             e.insert(distance(j.length, j.length, 0.))
