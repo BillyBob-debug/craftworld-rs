@@ -309,8 +309,8 @@ snapshot and only the disc and update (`scripts loaded 0`).
   and end them the same way (done or yielded), every tick.
 - The Launcher, PostItNote, TutorialMonitor and WorldMooCamera calls agree. TriggerMusic
   agrees but for the site (the port inlines `Play`) and reads `FSB` once, not seven times.
-- The speech bubble port marks no trace sites, so its calls are not in the native trace;
-  Part 5's recorder compared them.
+- The speech bubble port marked no trace sites, so its calls were not in the native
+  trace; Part 5's recorder compared them. Part 13 adds them.
 - Score_Board: the port read `Finishers` and wrote it back every frame and counted the
   avatars with nobody in. It now writes `Finishers` only on a change and counts the
   avatars only when someone is in, as the script's `len(Finishers) > 0 &&` does. The rest
@@ -319,3 +319,35 @@ snapshot and only the disc and update (`scripts loaded 0`).
 
 The route does not reach the scoreboard (it stops at x -385, Part 4), so the trace has no
 `Enter` on it; the test covers that part.
+
+## Part 13: the speech bubble in the call trace (D512, 2026-10-19)
+
+The bubble port (`native_bubble.rs`) now marks trace sites like the other ports: each
+call on `Trigger_Speech_Bubble`, `OnCreate__` and its resumes, and each `Update__`. Its
+calls join the Part 12 comparison.
+
+OBSERVED (the Part 4 route to tick 2000, the VM with the overlay against
+`--native-scripts` with the `d68` snapshot and no overlay): the VM makes 165,476 bubble
+events, the port 165,728. Both start, resume and end the same entries on the same Things
+every tick (76,029 ends each), and the per-tick calls of the bubble at Thing 1054 agree.
+
+Fixed on the way:
+- The port asked for part members by class name (`PPos`, `PTrigger`, `PYellowHead`); the
+  script names the member without the `P` (`Thing.Pos`) and the class with it. The host
+  took both, so only the trace changed.
+- `UpdateOffscreenTimer` read both screen resolutions every frame. The script's tests
+  short-circuit, so `HUD.GetYRes` runs only when the x test passes (236 calls, as the VM).
+- `OffscreenTimer`, `OutputEndSignalFrames` and the text's `DialogueLengthMs` are read
+  back after a write, as the script does, and only the text length is capped at 8 s.
+
+Left (INFERRED harmless, the values agree):
+- The port reads members the level does not store (`IsTweaking`, the VoIP flags,
+  `NeedsMoveControllerFixup`); without the script there are no class defaults, so the
+  host answers an error and the port uses its own default (false, 0), the VM's value.
+- 21 extra `Update__` runs on tick 0: the VM skips `.init__` (Part 5).
+- The VM's `is World` and `World.GetCurrentChallenge` against the port's direct read of
+  `World.CurrentChallenge` (503 each).
+- `PartList.HasPTrigger`, `GetFirstChild` and `GetNextSibling` appear only natively: the
+  VM runs them inside `Thing.GetDescendentWithPTrigger`, a site the trace filters out.
+- Reads within a frame come in a different order in a few places; the comparison ignores
+  order.

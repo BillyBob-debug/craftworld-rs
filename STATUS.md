@@ -6615,3 +6615,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1017 the pod computer leaves the Pod (2026-10-19)
 - Part 164 (`docs/level-scripts/part-164.md`): launching a level calls the pod computer's
   `OnExitPod__`; the Pod's view type is kept for the return.
+
+## D1018 the native pod computer enters and leaves the Pod (2026-10-19)
+- Part 165 (`docs/level-scripts/part-165.md`): without the game's scripts the native
+  planets world gets `OnEnterPod__` and `OnExitPod__`; the Pod's view type is kept.

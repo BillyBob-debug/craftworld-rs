@@ -19,7 +19,9 @@
 
 use lbp_script_vm::{Host, MemberKind, Value};
 
-use crate::native_script::{NativeResult, NativeScript, NativeStep as Step};
+use crate::native_script::{site, NativeResult, NativeScript, NativeStep as Step};
+
+const CLASS: &str = "Trigger_Speech_Bubble";
 
 /// The script GUID of `Trigger_Speech_Bubble` (FOUND: the 01.33 patch's type tables).
 pub const TRIGGER_SPEECH_BUBBLE_SCRIPT: u32 = 0x47f4;
@@ -28,7 +30,7 @@ pub struct TriggerSpeechBubbleScript;
 
 impl NativeScript for TriggerSpeechBubbleScript {
     fn class(&self) -> &'static str {
-        "Trigger_Speech_Bubble"
+        CLASS
     }
     fn guid(&self) -> Option<u32> {
         Some(TRIGGER_SPEECH_BUBBLE_SCRIPT)
@@ -173,6 +175,7 @@ fn defaults() -> Vec<(&'static str, Value)> {
 type R<T> = Result<T, String>;
 
 fn call(cx: &mut Ctx<'_>, function: &str, args: &[Value]) -> NativeResult {
+    site(cx.host, CLASS, function);
     let mut s = Bubble(cx);
     let done = |r: R<()>| r.map(|()| Step::Done(Value::Void));
     let arg_bool = |n: usize| args.get(n).is_some_and(truthy);
@@ -264,12 +267,15 @@ impl Bubble<'_, '_> {
     }
 
     /// A native part member of a Thing: `thing.Part.field = v`.
+    /// `t.<member>.<field> = v`: the script names the part member without its `P`
+    /// (`Thing.Trigger`), the part class with it (`PTrigger`).
     fn set_part(&mut self, t: u32, part: &str, field: &str, v: Value) -> R<()> {
+        let member = part.strip_prefix('P').unwrap_or(part);
         let base = Value::Thing(Some(t));
         let p = self
             .0
             .host
-            .get_member(MemberKind::Native, &base, "Thing", part)?;
+            .get_member(MemberKind::Native, &base, "Thing", member)?;
         self.0
             .host
             .set_member(MemberKind::RefPtr, &p, part, field, v)
@@ -438,12 +444,14 @@ impl Bubble<'_, '_> {
     }
 
     fn update_dialogue_length(&mut self) -> R<()> {
-        let ms = if self.dialogue_file_selected()? {
+        if self.dialogue_file_selected()? {
             let file = self.get("DialogueFile");
-            self.native("Audio", "TryGetProgrammerSoundLength__g", &[file])?
+            let ms = self.native("Audio", "TryGetProgrammerSoundLength__g", &[file])?;
+            self.set("DialogueLengthMs", ms)?;
         } else if self.voip_file_selected()? {
             let r = self.get("VoIPResource");
-            self.native("Audio", "TryGetVoIPLength__Q8Resource", &[r])?
+            let ms = self.native("Audio", "TryGetVoIPLength__Q8Resource", &[r])?;
+            self.set("DialogueLengthMs", ms)?;
         } else {
             let text = self.speech_text()?;
             let len = match self.native("String", "Length__Q6String", &[text])? {
@@ -451,9 +459,12 @@ impl Bubble<'_, '_> {
                 _ => 0,
             };
             let ms = (len.max(4) as f32 * 1.7 * 1000.0 / 30.0) as i32;
-            Value::Int(ms.min(8000))
-        };
-        self.set("DialogueLengthMs", ms)?;
+            // The script stores the text length, then reads it back to cap it at 8 s.
+            self.set("DialogueLengthMs", Value::Int(ms))?;
+            if self.int("DialogueLengthMs")? > 8000 {
+                self.set("DialogueLengthMs", Value::Int(8000))?;
+            }
+        }
         self.on_this("Thing", "UpdateScale__", &[])?;
         Ok(())
     }
@@ -532,6 +543,7 @@ impl Bubble<'_, '_> {
     // ---- entries ----------------------------------------------------------------------
 
     fn on_create(&mut self) -> R<Step> {
+        site(self.0.host, CLASS, "OnCreate__");
         let list = self.native("Audio", "GetDialogueList__", &[])?;
         self.set("DialogueListFile", list)?;
         for f in [
@@ -601,6 +613,7 @@ impl Bubble<'_, '_> {
 
     /// One turn of `OnCreate__`'s loop: `Update__` when there is work, then the yield.
     fn resume(&mut self) -> R<Step> {
+        site(self.0.host, CLASS, "OnCreate__");
         if self.flag("HasUpdateWorkToDo") {
             self.update()?;
         }
@@ -632,6 +645,7 @@ impl Bubble<'_, '_> {
     }
 
     fn update(&mut self) -> R<()> {
+        site(self.0.host, CLASS, "Update__");
         self.set("HasUpdateWorkToDo", Value::Bool(false))?;
         if self.flag("IsTweaking") {
             self.set("HasUpdateWorkToDo", Value::Bool(true))?;
@@ -651,9 +665,9 @@ impl Bubble<'_, '_> {
             }
             self.update_audio()?;
         }
-        let frames = self.int("OutputEndSignalFrames")?;
-        if frames > 0 {
+        if self.int("OutputEndSignalFrames")? > 0 {
             self.set("HasUpdateWorkToDo", Value::Bool(true))?;
+            let frames = self.int("OutputEndSignalFrames")?;
             self.set("OutputEndSignalFrames", Value::Int(frames - 1))?;
         }
         if self.voip_file_selected()? && self.flag("IsPlayingVoIP") {
@@ -767,7 +781,7 @@ impl Bubble<'_, '_> {
         let pos = self
             .0
             .host
-            .get_member(MemberKind::Native, &proxy, "Thing", "PPos")?;
+            .get_member(MemberKind::Native, &proxy, "Thing", "Pos")?;
         let m = self
             .0
             .host
@@ -784,19 +798,24 @@ impl Bubble<'_, '_> {
             Value::Int(n) => n,
             _ => 0,
         };
-        // The script evaluates all four tests (both resolutions are read every time).
-        let x = res(self.native("HUD", "GetXRes__", &[])?);
-        let y = res(self.native("HUD", "GetYRes__", &[])?);
-        let off = at[0] < -100.0
-            || at[0] > (x + 100) as f32
-            || at[1] < -100.0
-            || at[1] > (y + 100) as f32;
+        // The four tests short-circuit, so a resolution is read only when its test is
+        // reached (D512: on the route the VM skips `GetYRes__` once x is off-screen).
+        let mut off = at[0] < -100.0;
+        if !off {
+            let x = res(self.native("HUD", "GetXRes__", &[])?);
+            off = at[0] > (x + 100) as f32 || at[1] < -100.0;
+        }
+        if !off {
+            let y = res(self.native("HUD", "GetYRes__", &[])?);
+            off = at[1] > (y + 100) as f32;
+        }
         if !off {
             return self.set("OffscreenTimer", Value::Int(0));
         }
         let timer = self.int("OffscreenTimer")? + 1;
         self.set("OffscreenTimer", Value::Int(timer))?;
-        if timer > 60 && !self.is_non_divergent()? {
+        // The test reads the member back, as the script does.
+        if self.int("OffscreenTimer")? > 60 && !self.is_non_divergent()? {
             self.trigger_stop_message(false)?;
         }
         Ok(())
@@ -911,7 +930,7 @@ impl Bubble<'_, '_> {
                 let p = self
                     .0
                     .host
-                    .get_member(MemberKind::Native, &t, "Thing", "PYellowHead")?;
+                    .get_member(MemberKind::Native, &t, "Thing", "YellowHead")?;
                 let n = self.0.host.get_member(
                     MemberKind::RefPtr,
                     &p,
