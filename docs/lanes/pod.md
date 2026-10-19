@@ -1,25 +1,25 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-161.md` (160 for the level-created dialogue, 159 for the
-   unlock line's stop, 158 for clearing a pending link, 157 for the planets' resting
-   point, 156 for the Pod's music files, 155 for the viewer's level slots, 154 for the
-   previous level, 153 for whether a video plays, 152 for entering the Pod, 151 for the
-   Pod's music, 150 for the intro's video length, 149 for the line shader, 148 for a key's
-   kind, 147 for the intro's video request, 146 for the unlock voice-overs, 145 for the
-   intro's voice-over, 144 for voice-over timing, 143 for a group's lock, 142 for the
-   active look, 141 for the active test, 140 for a short link, 139 for a link's texture,
-   138 for links between groups, 137 for which links are wide, 136 for a link's width and
-   look, 135 for a level badge's radius, 134 for a badge's radius, 133 for drawing the
-   links, 132 for the links' growth, 131 for the scripted unlock sequence, 130 for the
-   unlock sequence played, 129 for the return, 128 for the finish, 127 for the unlock
-   sequence, 126 for the pod introduction, 125 for the warning popup, 124 for the start
-   checkpoint, 123 for the spawn hold, 122 for the player texts, 121 for the cursor, 120
-   for Back, 119 for the pushes, 118 for Story back, 117 for closed menus, 116 for the
-   slide-in, 115 for the cursor's flight, 114 for the launch warnings, 113 for Sackboy,
-   112 for the entrance camera, 111 for the switch, 110 for the hand-off, 109 for Cross on
-   a level, 108 for the cursor, 107 for the group zoom, 106 for choosing a group, 105 for
-   Back, 104 for the pod computer's stack and main menu)
+1. `docs/level-scripts/part-162.md` (161 for the unlock thread's group push, 160 for the
+   level-created dialogue, 159 for the unlock line's stop, 158 for clearing a pending
+   link, 157 for the planets' resting point, 156 for the Pod's music files, 155 for the
+   viewer's level slots, 154 for the previous level, 153 for whether a video plays, 152
+   for entering the Pod, 151 for the Pod's music, 150 for the intro's video length, 149
+   for the line shader, 148 for a key's kind, 147 for the intro's video request, 146 for
+   the unlock voice-overs, 145 for the intro's voice-over, 144 for voice-over timing, 143
+   for a group's lock, 142 for the active look, 141 for the active test, 140 for a short
+   link, 139 for a link's texture, 138 for links between groups, 137 for which links are
+   wide, 136 for a link's width and look, 135 for a level badge's radius, 134 for a
+   badge's radius, 133 for drawing the links, 132 for the links' growth, 131 for the
+   scripted unlock sequence, 130 for the unlock sequence played, 129 for the return, 128
+   for the finish, 127 for the unlock sequence, 126 for the pod introduction, 125 for the
+   warning popup, 124 for the start checkpoint, 123 for the spawn hold, 122 for the player
+   texts, 121 for the cursor, 120 for Back, 119 for the pushes, 118 for Story back, 117
+   for closed menus, 116 for the slide-in, 115 for the cursor's flight, 114 for the launch
+   warnings, 113 for Sackboy, 112 for the entrance camera, 111 for the switch, 110 for the
+   hand-off, 109 for Cross on a level, 108 for the cursor, 107 for the group zoom, 106 for
+   choosing a group, 105 for Back, 104 for the pod computer's stack and main menu)
 2. `crates/lbp-runtime/src/story_native.rs` (`PodStateSearch`),
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
@@ -28,7 +28,7 @@
   `E:\Projects\wt-d324`): the native unlock voice-overs; handed to the coordinator for
   merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399 used; now D1000-D1099, next free D1015.
+  Decision numbers: D348-D399 used; now D1000-D1099, next free D1016.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -112,9 +112,10 @@
    The cursor's height and blend have no reader and its drawing is script-side, D374.)
 2. The other entries' states as they unlock (the other searches need the network).
 3. A finished level returns to the Pod (D382), whose native state 2 plays
-   `LevelUnlockingThread` (D383; clearing a link opens its target, played or not, D1011),
-   as does the scripted one (D384); the links grow with the game's timing (D385) and are
-   drawn with the game's texture (D386, D392; open: the active band does not scroll in the
+   `LevelUnlockingThread` (D383; clearing a link opens its target, played or not, D1011;
+   after its clusters the thread pushes the group under the cursor, D1014, D1015), as does
+   the scripted one (D384); the links grow with the game's timing (D385) and are drawn
+   with the game's texture (D386, D392; open: the active band does not scroll in the
    shader, D1002; the level badges' radius, 0.08 from the settings block's default (D388),
    to measure in RPCS3 during an unlock; badge kind 2 is a user result's key, D1001). It,
    the intro and `OnEnterPod__` wait on voice-over, which plays silently for each line's
