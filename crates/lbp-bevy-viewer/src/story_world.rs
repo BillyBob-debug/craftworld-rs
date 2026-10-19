@@ -540,11 +540,13 @@ pub const LINK_LIFT: f32 = 2.;
 /// this the relief hides it).
 pub const LINK_DEPTH_BIAS: f32 = 1e9;
 
-/// D386 (INFERRED): a level badge's angular radius at +0x210, in radians (FOUND
-/// 0x42676c: used as is). Only the groups' 0.27 was measured (D344); the game skips a
-/// link whose two radii reach across it, and the disc run's link spans 13.5 degrees
-/// (0.236), so a level's is under 0.118: this takes a third of a group's.
-pub const LEVEL_BADGE_ANGLE: f32 = GROUP_BADGE_ANGLE / 3.;
+/// D388: a level badge's angular radius at +0x210, in radians (FOUND 0x42676c: used as
+/// is). Its target is `f(O) * k` (D387); `k` is the settings block's +0x1a0 or +0x1a4,
+/// both 0.08 at 0x16afd4 (FOUND, constant 0xd97560), and `f` is 1 for two badge classes
+/// (FOUND 0xa3f870). INFERRED: a level's badge is one of those and no loaded file
+/// changes the block. The disc run's link (13.5 degrees, 0.236) then clears its two
+/// radii (0.16), as the drawer needs.
+pub const LEVEL_BADGE_ANGLE: f32 = 0.08;
 
 /// D386: a link's ribbon in planet space.
 #[derive(Debug, Clone, Default, PartialEq)]

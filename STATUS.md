@@ -6479,3 +6479,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D383 the level unlocking sequence played (2026-10-18)
 - Part 130 (`docs/level-scripts/part-130.md`): back in the Pod after a finish, the
   native state 2 flies the cursor over the new link and unlocks the next level.
+
+## D384 the game's own unlock sequence (2026-10-18)
+- Part 131 (`docs/level-scripts/part-131.md`): with the scripts, the Pod's own
+  `LevelUnlockingThread` plays the new link and unlocks the next level.
