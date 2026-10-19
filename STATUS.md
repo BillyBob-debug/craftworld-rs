@@ -6515,3 +6515,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D392 a link's texture (2026-10-19)
 - Part 139 (`docs/level-scripts/part-139.md`): links are drawn with the game's own
   line texture, a distance field that gives the shaft and the arrowhead their shape.
+
+## D393 a short link's strip (2026-10-19)
+- Part 140 (`docs/level-scripts/part-140.md`): a link shorter than its arrowhead
+  shows the arrowhead's texture as the game does.

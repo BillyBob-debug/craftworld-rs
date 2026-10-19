@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1000 the native intro's video request (2026-10-19)
+## Latest: D1001 where a key's kind 2 comes from (2026-10-19)
+- Part 148 (`docs/level-scripts/part-148.md`): a search key of kind 2 is a user's
+  result; Story slots only give kind 1, so the Pod is unchanged.
+
+## D1000 the native intro's video request (2026-10-19)
 - Part 147 (`docs/level-scripts/part-147.md`): the native Pod intro asks for its video
   as the game's script does; no video plays yet, so its wait is unchanged.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D394 the line shader's constant and the active test (2026-10-19)
 - Part 141 (`docs/level-scripts/part-141.md`): the link shader's constant is read and
   only one badge class can make a link active; links stay drawn pending.
-
-## D393 a short link's strip (2026-10-19)
-- Part 140 (`docs/level-scripts/part-140.md`): a link shorter than its arrowhead
-  shows the arrowhead's texture as the game does.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

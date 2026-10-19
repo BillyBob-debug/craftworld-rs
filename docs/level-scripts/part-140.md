@@ -19,8 +19,8 @@ short link's start as the game does.
   head` at its start to 0 at the neck, so its band repeats along the shaft; a pending
   one's u is 0.25 all along (0x4a2084).
 - 0x420890 is the key test of parts 134 and 138: kind 2 is a group whatever its word
-  (0x4208a4-0x4208b0). No code stores a literal 2 into a key's kind byte, so kind 2
-  comes from loaded data.
+  (0x4208a4-0x4208b0). Kind 2 is a user result's key (part 148 corrects an earlier
+  note here).
 
 ### Code
 
