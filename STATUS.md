@@ -6511,3 +6511,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D391 links between groups (2026-10-19)
 - Part 138 (`docs/level-scripts/part-138.md`): a link between two group badges is
   drawn at the game's own third size, 48 wide.
+
+## D392 a link's texture (2026-10-19)
+- Part 139 (`docs/level-scripts/part-139.md`): links are drawn with the game's own
+  line texture, a distance field that gives the shaft and the arrowhead their shape.
