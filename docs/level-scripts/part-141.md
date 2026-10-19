@@ -22,8 +22,8 @@ every link pending.
   factory 0x451a5c for type 1) returns itself (0xa3f96c).
 - For that class +0x84 starts at 1 (0x451954, 0x451d04) or a byte of the element's data
   (0x451b34), and its refresh (0x450998, store 0x450a14) sets it from 0x1a7efc (stub
-  0x89616c) for the key at +0x7c. +0x50 is set from +0x54 at the refresh (0x450b08); nothing in
-  the class code sets bit 4 (0x450c0c-0x451264 set 1, 2 and 8 to 0x400).
+  0x89616c) for the key at +0x7c. +0x50 is set from +0x54 at the refresh (0x450b08);
+  nothing in the class code sets bit 4 (0x450c0c-0x451264 set 1, 2 and 8 to 0x400).
 - 0x1a7efc gives 0 to 3. A key of type 4 or 9 joins its children's: 3 if all are 3, 1
   if any is 1, 2 if mixed, 0 only if all are 0. A level's key finds its slot (0x1a6cd8)
   and a record (0x199c9c, table +0x280, stride 0x80): 0 (0x1a8270-0x1a82b4) when the
