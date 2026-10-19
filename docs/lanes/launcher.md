@@ -14,9 +14,14 @@
   (pre-release, target 9ce8441, zip attached):
   https://github.com/chilladept/craftworld-rs/releases/tag/preview-2026-10-19
   `gh release create --target` needs the full commit SHA (a short one gives HTTP 422).
-- D602 (branch `launcher-voiceover`): Set up also copies the disc's loose, unencrypted
-  GAMEDATA/AUDIO/VOICEOVER.FSB (~19 MB) for the Story lane's D397 voice-over timing; older
-  copies lack it, so the menu asks for Set up again. Not in the posted release.
+- D602 merged (PR 206, a4a4aa7): Set up also copies the disc's loose, unencrypted
+  GAMEDATA/AUDIO/VOICEOVER.FSB (~19 MB) for D397 voice-over timing; PR 212 keeps the intro
+  video GAMEDATA/VIDEOS/LBP2/LBP2_PODINTRO.BIK. Older copies need Set up again.
+- Second friends zip 2026-10-19 from main f01f988: craftworld-rs-preview-2026-10-19b.zip
+  (40,555,343 bytes, SHA-256 f734588bb585ed3975f74644b1219c8221bea7136ab0b4c40bad865f32543b05).
+  README.txt adds "press Set up again once". Tag `preview-2026-10-19b` (today's plain tag
+  was taken). `gh release create` was blocked by the PC permission check; the owner posts it
+  or allows it (notes draft: see Next 1).
 - Decision numbers D600-D699; next free D603.
 
 ## Facts
@@ -32,9 +37,14 @@
   not PS 5.1 Compress-Archive). Contents: one folder holding lbp-bevy-viewer.exe (the name
   the README uses), LICENSE-MIT, LICENSE-APACHE, THIRD-PARTY-NOTICES.md, README.txt. Lives
   in ignored local-analysis/friends-build/; never committed.
+- 2026-10-19b smoke test (f01f988): `--launcher-setup` ended "Ready in 12s"; the disc copy
+  holds VOICEOVER.FSB and LBP2_PODINTRO.BIK.
 - 2026-10-19 smoke test: `--launcher-setup` with the real ISO + update ended "Ready in 17s";
   the update folder given as the ISO gives the D601 "goes in the second box" message, exit 1.
   The exe has no user paths or email strings.
 
 ## Next
-1. On the PC: run Set up from the GUI against the real ISO once (headless already passes).
+1. Post the release: `gh release create preview-2026-10-19b <zip> --repo chilladept/craftworld-rs
+   --target f01f98886118381a5dd99f77bd1538cc8734c1d5 --prerelease --title "craftworld-rs preview 2026-10-19b"`
+   with notes (new since preview-2026-10-19, Set up again, needs ISO + 01.33, README links, SHA).
+2. On the PC: run Set up from the GUI against the real ISO once (headless already passes).
