@@ -551,6 +551,46 @@ pub fn link_size(wide: bool, groups: bool) -> (f32, f32) {
 pub const LINK_SEGMENT: f32 = 10.;
 /// D386 (INFERRED from 0xA0FFFFFF and the constants at 0xc648f0): the link's colour.
 pub const LINK_COLOUR: [f32; 4] = [0.094, 1., 0.0117, 160. / 255.];
+/// D392 (FOUND: the planets' constructor loads it into +0x250 at 0x42621c, TOC 0xda2678;
+/// the drawer binds it at 0x426548): gamedata/texture_library/ui/fatline/lines_sdf.tex.
+pub const LINK_TEXTURE: u32 = 0x40ba;
+/// D392: the links' texture as an image ([`LINK_TEXTURE`]).
+#[derive(Resource, Debug, Clone)]
+pub struct LinkTexture(pub Handle<Image>);
+
+/// D392 (FOUND, the decoded texture: a distance field in red, 0 outside the line and
+/// rising to about 0.33 on its middle; the shaft's band is v 0 to 0.125, the arrowhead's
+/// 0.5 to 0.75): the red channel's edge, at [`LINK_EDGE`] give or take
+/// [`LINK_EDGE_SOFTNESS`]. PLACEHOLDER: the game's line shader (bound at 0x426548, its
+/// constant 0x64f6da0a set to (0, 1, 0, a global) at 0x42656c) was not read, so the edge
+/// is half the band's peak.
+pub const LINK_EDGE: f32 = 0.16;
+pub const LINK_EDGE_SOFTNESS: f32 = 0.04;
+/// D392: the links' texture as white with the distance field's coverage in alpha
+/// ([`LINK_EDGE`]), for the link colour to tint.
+pub fn link_coverage(rgba: &[u8]) -> Vec<u8> {
+    let (lo, hi) = (
+        LINK_EDGE - LINK_EDGE_SOFTNESS,
+        LINK_EDGE + LINK_EDGE_SOFTNESS,
+    );
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let t = ((p[0] as f32 / 255. - lo) / (hi - lo)).clamp(0., 1.);
+            [255, 255, 255, (t * t * (3. - 2. * t) * 255.).round() as u8]
+        })
+        .collect()
+}
+/// D392 (FOUND 0x4a1ef8, 0x4a2008, the flag read at 0x4a1ee0): a pending link's v across
+/// the shaft and across the head (an active one's are 0.125 to 0.25 and 0.75 to 1).
+pub const LINK_SHAFT_V: [f32; 2] = [0., 0.125];
+pub const LINK_HEAD_V: [f32; 2] = [0.5, 0.75];
+/// D392 (FOUND 0x4a20c4: u0 = u1 = 0.25 at -0x5d30; 0x4a2108: u0 = 0.5 at -0x5d8c, u1 =
+/// 1): the shaft's u, the same all along, and the head's, from its neck to its tip.
+pub const LINK_SHAFT_U: f32 = 0.25;
+pub const LINK_HEAD_U: [f32; 2] = [0.5, 1.];
+
 /// D386 (INFERRED: no lift was found; this keeps the ribbon off the Earth's surface).
 pub const LINK_LIFT: f32 = 2.;
 /// D386 (INFERRED: the render state 0x49d104, 0x49d3fc, 0x4b3964, 0x49e2d4, 0x49d328 was
@@ -581,8 +621,10 @@ pub struct Ribbon {
 /// `progress` with an arrowhead at the end. None where the game draws nothing: progress
 /// 0, an angle under 0.01 radians, or radii `ra + rb` that reach across it. The start is
 /// not clipped (badge `a` covers it). `size` is the width and head ([`link_size`]).
-/// PLACEHOLDER: the ribbon is flat (the game's
-/// texture was not traced).
+/// D392 (FOUND 0x4a2030, 0x4a20dc: the head strip's width is twice the shaft's, the same
+/// all along; the strip builder 0x4a1250 keeps one width): the arrow's shape is the
+/// texture's ([`LINK_TEXTURE`]), at the UVs above. INFERRED: a link shorter than its head
+/// (the third strip, 0x4a21ac, not read) shows the head's last part, up to the tip.
 pub fn link_ribbon(
     a: Vec3,
     b: Vec3,
@@ -606,18 +648,18 @@ pub fn link_ribbon(
     let tip = progress.min(1.) * angle;
     let neck = (tip - head).max(0.);
     let mut ribbon = Ribbon::default();
-    let mut strip = |from: f32, to: f32, w0: f32, w1: f32| {
+    let mut strip = |from: f32, to: f32, w: f32, u: [f32; 2], v: [f32; 2]| {
         let n = ((to - from) / LINK_SEGMENT).ceil().max(1.) as u32;
         let base = ribbon.positions.len() as u32;
         for k in 0..=n {
             let t = k as f32 / n as f32;
             let p = a.slerp(end, (from + (to - from) * t) / angle);
             let c = p * (radius + LINK_LIFT);
-            let w = (w0 + (w1 - w0) * t) / 2.;
-            for (s, v) in [(-1., 0.), (1., 1.)] {
-                ribbon.positions.push((c + side * w * s).to_array());
+            let u = u[0] + (u[1] - u[0]) * t;
+            for (s, v) in [(-1., v[0]), (1., v[1])] {
+                ribbon.positions.push((c + side * w / 2. * s).to_array());
                 ribbon.normals.push(p.to_array());
-                ribbon.uvs.push([t, v]);
+                ribbon.uvs.push([u, v]);
             }
         }
         for k in 0..n {
@@ -628,9 +670,12 @@ pub fn link_ribbon(
         }
     };
     if neck > 0. {
-        strip(0., neck, width, width);
+        let u = [LINK_SHAFT_U; 2];
+        strip(0., neck, width, u, LINK_SHAFT_V);
     }
-    strip(neck, tip, 2. * width, 0.);
+    let [u0, u1] = LINK_HEAD_U;
+    let u = [u1 - (u1 - u0) * ((tip - neck) / head).min(1.), u1];
+    strip(neck, tip, 2. * width, u, LINK_HEAD_V);
     Some(ribbon)
 }
 
@@ -831,6 +876,14 @@ mod tests {
     }
 
     #[test]
+    fn d392_link_coverage_is_the_red_edge() {
+        let c = link_coverage(&[0, 0, 0, 255, 41, 0, 41, 255, 84, 0, 84, 255]);
+        assert_eq!(c[..4], [255, 255, 255, 0]);
+        assert!((c[7] as i32 - 128).abs() < 8, "{}", c[7]);
+        assert_eq!(c[11], 255);
+    }
+
+    #[test]
     fn d386_link_ribbon_grows_along_the_arc() {
         let (a, b) = (Vec3::Z, Vec3::X);
         let r = LEVEL_BADGE_ANGLE;
@@ -848,8 +901,10 @@ mod tests {
                 link_size(true, false),
             )
             .unwrap();
-            let tip = Vec3::from(*r.positions.last().unwrap());
+            let n = r.positions.len();
+            let tip = (Vec3::from(r.positions[n - 1]) + Vec3::from(r.positions[n - 2])) / 2.;
             assert!((tip.length() - 1750. - LINK_LIFT).abs() < 1e-2);
+            assert_eq!(r.uvs[n - 1], [1., LINK_HEAD_V[1]]);
             assert!(r.indices.iter().all(|&i| (i as usize) < r.positions.len()));
             tip.angle_between(a).to_degrees()
         };

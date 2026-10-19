@@ -123,6 +123,8 @@ struct LevelLoaded {
     /// D331: the Story default group's planet decorations level, loaded with the
     /// scripted Pod (`story_world`); none elsewhere.
     story_world: Option<Result<StoryWorld, String>>,
+    /// D392: the links' texture (`story_world::LINK_TEXTURE`), decoded with it.
+    link_texture: Option<Result<lbp_texture::Texture, String>>,
 }
 /// D278: the mask of the Pod tent's dissolve (`pod_dissolve::TRANSITION_MASK`) as an
 /// image, with a word on how the load went; there while the shell layer has a script
@@ -591,9 +593,14 @@ impl Viewer {
                             );
                             Ok((scene, badge))
                         });
+                        let link_texture = story_world.is_some().then(|| {
+                            let guid = story_world::LINK_TEXTURE;
+                            decode_texture(&catalog, &source, guid, &worker)
+                        });
                         Ok(LevelLoaded {
                             scene,
                             story_world,
+                            link_texture,
                             identity,
                             shell,
                             shell_feet,
@@ -1600,6 +1607,30 @@ fn load(
                 // D386: the planet frame the links are drawn in.
                 if let Ok(f) = story_world::planet_frame(&level.scene, globe) {
                     commands.insert_resource(story_world::StoryFrame(f));
+                }
+                // D392: the links' texture; without it they are drawn flat.
+                let texture = level.link_texture.take();
+                let texture = texture.unwrap_or_else(|| Err("not asked for".into()));
+                match texture.and_then(|t| {
+                    let (w, h) = (t.header.width, t.header.height);
+                    let wrap = lbp_preview::TextureWrapping::uniform(false);
+                    let rgba = story_world::link_coverage(&t.rgba);
+                    adapter::linear_image(w, h, rgba, wrap).map(|i| (i, w, h))
+                }) {
+                    Ok((image, w, h)) => {
+                        println!(
+                            "Story links: texture {:08x} loaded, {w} x {h} (D392)",
+                            story_world::LINK_TEXTURE
+                        );
+                        commands.insert_resource(story_world::LinkTexture(images.add(image)));
+                    }
+                    Err(e) => {
+                        println!(
+                            "Story links: texture {:08x} not loaded ({e}); drawn flat (D392)",
+                            story_world::LINK_TEXTURE
+                        );
+                        commands.remove_resource::<story_world::LinkTexture>();
+                    }
                 }
                 match merged {
                     Ok(m) => {
