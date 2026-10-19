@@ -20,7 +20,7 @@ use lbp_resource::translation::TranslationTable;
 use lbp_script_vm::natives::{
     Bindings, CameraFromToUp, PadState, PlayerRecord, ResourceKind, SwitchInput, World, GS_GRAVITY,
     GS_LIGHTING, GS_WATER_BITS, GS_WATER_LEVEL, GS_WATER_MURKINESS, GS_WATER_TINT,
-    GS_WATER_WAVE_MAGNITUDE, SCORE_BOARD_SCRIPT,
+    GS_WATER_WAVE_MAGNITUDE,
 };
 use lbp_script_vm::{ClassId, Host, MemberKind, ObjectId, Step, Task, Value, Vm};
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,6 +39,7 @@ mod native_launcher;
 mod native_music;
 mod native_planets_world;
 mod native_postit;
+mod native_scoreboard;
 mod native_script;
 mod native_tutorial;
 mod native_world;
@@ -61,6 +62,7 @@ pub use native_launcher::*;
 pub use native_music::*;
 pub use native_planets_world::*;
 pub use native_postit::*;
+pub use native_scoreboard::*;
 pub use native_script::*;
 pub use native_tutorial::*;
 pub use native_world::*;

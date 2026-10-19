@@ -340,7 +340,11 @@ fn score_earned(host: &mut dyn Host, thing: u32) -> Result<f32, String> {
 
 /// `SetCurrentChallenge__Q5Thing` (its "challenge already in progress" assert does not
 /// stop it).
-fn set_current_challenge(host: &mut dyn Host, thing: u32, challenge: Value) -> Result<(), String> {
+pub(crate) fn set_current_challenge(
+    host: &mut dyn Host,
+    thing: u32,
+    challenge: Value,
+) -> Result<(), String> {
     if is_score_board(host, challenge.clone())? {
         reset_all_multiplier_timers(host, thing)?;
         give_all_bonuses(host, thing)?;

@@ -2,16 +2,16 @@
 
 ## Read first
 1. docs/level1-play.md, sections "Part 5" (native speech bubble, the script trace) and
-   "Part 6" (native Launcher); Parts 7-10: TriggerMusic, PostItNote,
-   TutorialMonitor, WorldMooCamera
+   "Part 6" (native Launcher); Parts 7-11: TriggerMusic, PostItNote,
+   TutorialMonitor, WorldMooCamera, Score_Board
 2. crates/lbp-runtime/src/native_script.rs (the D417 registry), native_bubble.rs and
    native_launcher.rs (the smallest port, a template for the next ones)
 
 ## State
-- PRs 155 (D504), 228-230 (D505-D507) and 231 (D508, native `TutorialMonitor`) merged.
-  PR for D509 (branch `level1-moocam`, worktree `E:\Projects\wt-d324`): native
-  `WorldMooCamera` (World's code); handed to the coordinator for merge once green.
-- Decision numbers: D504-599, next free D510.
+- PRs 155 (D504), 228-231 (D505-D508) and 232 (D509, native `WorldMooCamera`) merged.
+  PR for D510 (branch `level1-scoreboard`, worktree `E:\Projects\wt-d324`): native
+  `Score_Board`; handed to the coordinator for merge once green.
+- Decision numbers: D504-599, next free D511.
 
 ## Facts
 - Route run: `--level-guid 0001e786 --level-scripts --play-sackboy --qa-hide-ui
@@ -39,7 +39,8 @@
 1. Native classes for the other Rookie Test scripts, one per PR, each checked with the
    trace: Launcher (done, D505), TriggerMusic (done, D506), PostItNote(+Unlock*) (done,
    D507), TutorialMonitor (done, D508), WorldMooCamera (done, D509), Score_Board
-   (this lane's, per the coordinator; read popit.md and docs/ui-research.md first).
+   (done, D510). Next: run the route with `--native-scripts` and no overlay to the
+   scoreboard and compare its calls with the trace.
 2. The route past x -385: a game reference (RPCS3 F12 frames past line 2) or jumps there.
 3. The camera at x -938 (a frame at tick 1600 looks through a front wall).
 4. Sackboy pushed into a wall turns to the camera and plays `stand`, not a push.

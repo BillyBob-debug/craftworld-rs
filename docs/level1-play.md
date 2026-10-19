@@ -263,4 +263,32 @@ list and reverb names (script arrays), and the create-mode UI and rendering.
 Test: `native_world::d509_the_native_world_counts_down_and_keeps_the_multiplier`
 (synthetic Things, no script loaded).
 
-Not yet: Score_Board.
+## Part 11: the scoreboard in native Rust (D510, 2026-10-19)
+
+Before: without the decrypted overlay Rookie Test's scoreboard ran no script, so walking
+into it at the end of the level did nothing: no score lock and no end of the level.
+
+After: `Score_Board` (g00002d4f) is a port in the D417 registry
+(`crates/lbp-runtime/src/native_scoreboard.rs`). From the 01.33 listing: in play mode
+`Enter` adds the Sackboy's player number to `Finishers` and `Leave` removes it. Once a
+frame (`DuringGameUpdate`, the `OnCreate` coroutine's loop) the disconnected finishers are
+dropped and, when every Sackboy is in, the scoreboard takes the world's challenge (it
+waits while another scoreboard holds it), adds a Vita cross-play score to the party
+leader's, locks the score and sets `Finished` and `ActivationFrame`. `OnDestroy` clears
+the posted score, undoes the pie-chart flags and ends the camera override; its
+`AddToDeleteList(null)` (the script passes null, not the `MagicWall`) is kept. `Kick`
+clears `Finished`. `Finishers` (a script array) is kept as a bit mask of player numbers
+in the same member.
+
+After `Finished` the game runs a presentation of screens (high scores, completion, aced,
+items, versus pie chart). The port runs only its game calls and stops (INFERRED, an
+owner decision): `Score_Board.PostScore`, `TrophyWinner` for each `IsWinner` player with
+no `MagicWall`, `Game.SetLevelCompleted` and `Score_Board.EnterEndLevelFlow`, the call the
+presentation ends with. Left out: the screens, the Gooey, waits, confetti, zoom, the
+activate sound, the `MagicWall` and checkpoint walk, `Race_Start.AbortRace` (no port),
+rendering and the create-mode tweak UI.
+
+Test: `d510_the_native_scoreboard_finishes_the_level_when_everyone_is_in` in
+`tests/native_scoreboard.rs` (synthetic Things, no script loaded).
+
+All nine Rookie Test script classes now have native ports.

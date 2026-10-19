@@ -89,6 +89,7 @@ pub const NATIVE_SCRIPTS: &[&dyn NativeScript] = &[
     &crate::native_postit::POST_IT_NOTE_UNLOCK_COSTUME,
     &crate::native_tutorial::TutorialMonitorScript,
     &crate::native_world::WorldMooCameraScript,
+    &crate::native_scoreboard::ScoreBoardScript,
 ];
 
 /// The native port of the script with this GUID.
