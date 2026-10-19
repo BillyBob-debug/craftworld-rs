@@ -4573,6 +4573,23 @@ fn apply_lighting(
 fn panel(mut contexts: EguiContexts, mut v: ResMut<Viewer>, mut orbit: ResMut<Orbit>) -> Result {
     let ctx = contexts.ctx_mut()?;
     if v.hide_ui {
+        // Game modes hide the panels, so a failed load would otherwise leave an empty window
+        // with the reason only in the log.
+        if v.status.starts_with("Load failed") {
+            egui::Window::new("The game files didn't load")
+                .anchor(egui::Align2::CENTER_CENTER, [0., 0.])
+                .collapsible(false)
+                .resizable(false)
+                .show(ctx, |ui| {
+                    ui.label(&v.status);
+                    ui.add_space(6.);
+                    ui.label(
+                        "Close this window, press Set up again in the launcher, and try once \
+                         more. If it still fails, see Troubleshooting in the README on GitHub \
+                         (github.com/chilladept/craftworld-rs).",
+                    );
+                });
+        }
         return Ok(());
     }
     if !v.synthetic {

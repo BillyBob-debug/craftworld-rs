@@ -131,10 +131,8 @@ pub fn extract(
     let mut f = File::open(iso).map_err(|e| format!("Open the ISO: {e}"))?;
     let entries = list(&mut f)?;
     let sfo = param_sfo(&mut f, &entries)?;
-    if !contains(&sfo, TITLE_ID.as_bytes()) {
-        return Err(format!(
-            "That ISO isn't LittleBigPlanet 2 {TITLE_ID} (USA). Other regions come later."
-        ));
+    if let Some(problem) = super::title_problem(&sfo, "That ISO") {
+        return Err(problem);
     }
     let files = wanted(&entries);
     total.store(files.iter().map(|e| e.size).sum(), Ordering::Relaxed);
@@ -165,7 +163,8 @@ pub fn extract(
     Ok(())
 }
 
-pub fn contains(hay: &[u8], needle: &[u8]) -> bool {
+#[cfg(test)]
+fn contains(hay: &[u8], needle: &[u8]) -> bool {
     hay.windows(needle.len()).any(|w| w == needle)
 }
 

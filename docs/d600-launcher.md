@@ -39,3 +39,24 @@ fallback (Story lane). No key is added to the repository.
 From the ISO plus the RPCS3 install only (no decrypted overlay): the Pod, Popit, Rookie
 Test and the Moon render Sackboy in place; the explorer opens. Packaging: `local-analysis/friends-build/`
 (ignored), not published.
+
+## D601: plain-words setup errors (2026-10-19)
+
+A friend reported "assets failed to load". Likely first-run causes, each now caught by Set up
+with a message that names the problem and the fix (README "If something goes wrong" lists them):
+
+- Wrong thing in the disc box: a .zip/.7z/.rar, a .pkg, a .rap/.edat/.sfo, the update folder,
+  a folder without PS3_GAME, a quoted path pasted from "Copy as path" (quotes now stripped).
+- A disc folder instead of an ISO (RPCS3 boots both): now accepted and read in place, no copy.
+- Another region: the PARAM.SFO title id is named ("That ISO is BCES..., not the USA ...").
+- An encrypted disc dump: the ISO 9660 tables read fine but the files are scrambled, so the
+  old Set up said Ready and every mode loaded nothing. Set up now checks every `.farc` under
+  PS3_GAME/USRDIR ends in the `FARC` tag and stops with "contents are scrambled" otherwise.
+- Update box: empty, a file, USRDIR picked (now accepted), wrong title, not 01.33.
+- Game modes run with `--qa-hide-ui`, which hid "Load failed" entirely: the viewer now shows
+  a centred "The game files didn't load" window with the reason in hidden-UI modes.
+
+Tests: `disc_box_explains_wrong_picks`, `title_check_names_the_other_disc` and the extended
+`update_folder_is_found_from_rpcs3_or_its_dev_hdd0` (launcher.rs). Not tested on the PC
+against the real ISO in this change (cloud thread); the FARC tag check assumes every
+retail `.farc` ends in `FARC`, as lbp-archive already requires.

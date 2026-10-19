@@ -1,15 +1,16 @@
-# Lane state: friends' launcher (2026-10-18, seeded from handoff-pc-2026-10-17-launcher-part1.md)
+# Lane state: friends' launcher (2026-10-19)
 
 ## Read first
-1. docs/d600-launcher.md
-2. crates/lbp-bevy-viewer/src/launcher.rs (MODES table, start_setup, launch)
-3. crates/lbp-bevy-viewer/src/launcher/iso.rs
-4. STATUS-CURRENT.md
+1. docs/d600-launcher.md (D600, D601)
+2. crates/lbp-bevy-viewer/src/launcher.rs (MODES, disc_input, archive_problem, start_setup)
+3. README.md "Play it" and "If something goes wrong"
 
 ## State
-- PR 139 (branch `launcher`, worktree E:\Projects\wt-launcher): green, handed to the
-  coordinator for merge.
-- Decision numbers D600-D699; D600 used.
+- PR 139 (D600) merged; Story button on (PR 153).
+- D601 (branch `launcher-first-run-help`, cloud thread): plain-words setup errors, disc
+  folder accepted, FARC-tag check for encrypted dumps, "didn't load" window in game modes,
+  README guide for non-programmers. Handed to the coordinator for merge.
+- Decision numbers D600-D699; next free D602.
 
 ## Facts
 - Owner rule (2026-10-18, standing): the app needs only the user's fully updated USA ISO
@@ -17,16 +18,12 @@
   add keys; encrypted-only data (patch.edat scripts) gets built-in fallbacks.
 - Launcher: no args or `--launcher` opens it; `--launcher-setup ISO UPDATE` is headless.
   Data in %LOCALAPPDATA%/craftworld-rs (disc/ copy 1.2 GB, inventory.json, launcher.txt).
-- Modes open: Pod, Popit (D411 fallback camera from the Popit lane; planets not placed),
-  Rookie Test (no --level-scripts), Moon, explorer. Story is `later: true` until the Story
-  lane has a script-free fallback; then set its args (Pod args + the Story QA flags or a
-  menu route) and `later: false`.
-- Zip: E:\Projects\LBP2 Rust Rewrite\local-analysis\friends-build\craftworld-rs-preview-
-  2026-10-18.zip (38 MB, stripped via CARGO_PROFILE_RELEASE_STRIP=true). Not published:
-  a GitHub release waits for the owner's word in the thread.
-- Window captures without focus: scratchpad winshot.ps1 used PrintWindow on the launcher
-  (works with --no-activate); viewer modes use --qa-hide-ui --qa-capture under local-analysis.
+  A disc folder (holding PS3_GAME) is read in place, not copied.
+- Every README error-table row matches a launcher/viewer message; change both together.
+- Zip: local-analysis/friends-build/craftworld-rs-preview-2026-10-18.zip predates D601.
+  No GitHub release yet: the README links the Releases page for when one is posted.
+  Rebuild, re-zip and any release wait for the owner's word.
 
 ## Next
-1. Story button when its fallback lands; rebuild and re-zip.
-2. Optional: a GitHub release only after the owner says so.
+1. Owner's go: rebuild the zip with D601 and (if asked) publish a release.
+2. On the PC: run Set up against the real ISO once to confirm the FARC check passes.
