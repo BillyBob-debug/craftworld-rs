@@ -292,3 +292,30 @@ Test: `d510_the_native_scoreboard_finishes_the_level_when_everyone_is_in` in
 `tests/native_scoreboard.rs` (synthetic Things, no script loaded).
 
 All nine Rookie Test script classes now have native ports.
+
+## Part 12: the route traced with every script native (D511, 2026-10-19)
+
+`--level-scripts-calls PATH` (development, with `--level-scripts-hold-at`) keeps the D417
+call trace of the level's scripts during a viewer run and writes the ported classes'
+events to PATH on the hold tick (`native_script::ported_events`, as the `level_scripts`
+example's `--trace`).
+
+OBSERVED (the Part 4 route to tick 2000, three runs): with the VM and the decrypted
+overlay; with `--native-scripts` and the overlay; and with `--native-scripts`, the `d68`
+snapshot and only the disc and update (`scripts loaded 0`).
+- The two native runs write the same trace, event for event: without the overlay the
+  level runs as with it (174,798 events before the scoreboard fix below, 170,796 after).
+- The VM run and the native runs start and resume the same entries on the same Things
+  and end them the same way (done or yielded), every tick.
+- The Launcher, PostItNote, TutorialMonitor and WorldMooCamera calls agree. TriggerMusic
+  agrees but for the site (the port inlines `Play`) and reads `FSB` once, not seven times.
+- The speech bubble port marks no trace sites, so its calls are not in the native trace;
+  Part 5's recorder compared them.
+- Score_Board: the port read `Finishers` and wrote it back every frame and counted the
+  avatars with nobody in. It now writes `Finishers` only on a change and counts the
+  avatars only when someone is in, as the script's `len(Finishers) > 0 &&` does. The rest
+  is the left-out presentation (`Screens`, `ScoreboardGooey`, `Gooey.PerFrameUpdate`)
+  and the array kept as a bit mask.
+
+The route does not reach the scoreboard (it stops at x -385, Part 4), so the trace has no
+`Enter` on it; the test covers that part.

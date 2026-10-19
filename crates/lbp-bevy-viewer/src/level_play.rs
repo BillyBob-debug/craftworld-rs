@@ -131,6 +131,9 @@ struct Play {
     /// D353 `--level-scripts-trace PATH` (development): a JSON line per tick
     /// ([`crate::story_fallback::Trace`]).
     trace: Option<crate::story_fallback::Trace>,
+    /// D511 `--level-scripts-calls PATH` (development, with `--level-scripts-hold-at`):
+    /// the D417 call trace of the ported scripts, written to PATH on the hold tick.
+    calls: Option<String>,
     /// D353 `--story` without the game's scripts: the Story screen run natively
     /// ([`crate::story_fallback::Fallback`]).
     story: Option<crate::story_fallback::Fallback>,
@@ -881,6 +884,10 @@ pub fn install(app: &mut App) -> Result<(), String> {
     let move_at = move_list(&all)?;
     let cross_at = tick_option(&all, "--level-scripts-cross-at")?;
     let finish_at = tick_option(&all, "--level-scripts-finish-at")?;
+    let calls = value(&all, "--level-scripts-calls");
+    if calls.is_some() && hold_at.is_none() {
+        return Err("--level-scripts-calls needs --level-scripts-hold-at".into());
+    }
     let trace = value(&all, "--level-scripts-trace")
         .map(|path| crate::story_fallback::Trace::create(&path))
         .transpose()?;
@@ -976,6 +983,12 @@ pub fn install(app: &mut App) -> Result<(), String> {
     }
     // Part 28: the shell level's world, set up the same way, and the session's start.
     let shell = shell.map(|read| start_shell(&from, read, &mut host, &mut faults));
+    if calls.is_some() {
+        host.trace = Some(lbp_script_vm::trace::Trace {
+            max_events: 20_000_000,
+            ..Default::default()
+        });
+    }
     app.insert_non_send(Play {
         vm,
         host,
@@ -1018,6 +1031,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
         cross_at,
         fallback_camera: (loaded == 0 && shell_present).then_some(POD_REST_CAMERA),
         trace,
+        calls,
         story: (loaded == 0 && shell_present).then(|| crate::story_fallback::Fallback {
             story_at_start: story,
             ..Default::default()
@@ -1350,6 +1364,9 @@ fn step(
         if pod.held != held {
             pod.held = held;
         }
+    }
+    if held {
+        write_calls(p);
     }
     if capture.0 != (p.hold_at.is_some() && !held) {
         capture.0 = p.hold_at.is_some() && !held;
@@ -1794,6 +1811,25 @@ fn step(
     note(p, &r);
     p.totals.absorb(r);
     print_messages(p);
+}
+
+/// D511: the ported scripts' events of the call trace, written once (`--level-scripts-calls`).
+fn write_calls(p: &mut Play) {
+    let (Some(path), Some(trace)) = (p.calls.take(), p.host.trace.take()) else {
+        return;
+    };
+    let guid = |t: u32| p.host.world.things.get(t as usize)?.script_guid;
+    let events = lbp_runtime::ported_events(&trace.events, guid, None);
+    let text = lbp_script_vm::trace::events_json(&events, trace.dropped);
+    match std::fs::write(&path, text) {
+        Ok(()) => println!(
+            "calls: {} events of {} ({} dropped) to {path} (D511)",
+            events.len(),
+            trace.events.len(),
+            trace.dropped
+        ),
+        Err(e) => println!("calls not written ({path}): {e}"),
+    }
 }
 
 /// The shell level's faults, in the same list as the level's.
