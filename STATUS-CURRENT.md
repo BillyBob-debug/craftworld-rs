@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1009 the Pod's music files (2026-10-19)
+## Latest: D1010 the planets' resting point (2026-10-19)
+- Part 157 (`docs/level-scripts/part-157.md`): with nothing selected the game turns the
+  planets toward the planet's +0x190 (its position, inferred); comments only.
+
+## D1009 the Pod's music files (2026-10-19)
 - Part 156 (`docs/level-scripts/part-156.md`): the Pod's music bank is not on the LBP2
   disc (part 151 measured LBP1's); its `.mus` settings are read.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1003 the intro waits for its video (2026-10-19)
 - Part 150 (`docs/level-scripts/part-150.md`): the Pod intro video's Bink header gives
   379 ticks; the native intro now waits for it as the game does. The launcher keeps it.
-
-## D1002 the line shader's programs (2026-10-19)
-- Part 149 (`docs/level-scripts/part-149.md`): the game's UI shaders take no time,
-  so a link's active band does not move; the viewer already draws it so.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
