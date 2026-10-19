@@ -230,3 +230,30 @@ fn d381_a_finished_level_links_to_the_next_and_the_pod_unlocks_it() {
     assert!(h.world.slot_unlocked((0, 124819)));
     assert_eq!(h.world.finish_story_level((0, 124806)), None);
 }
+
+/// D396 (part 143): a group is locked while every slot in it is, and opens with the
+/// first of them.
+#[test]
+fn d396_a_group_is_locked_while_all_its_slots_are() {
+    use lbp_runtime::SearchSlot;
+    let mut h = host();
+    let (group, pack) = ((4, 7), (9, 8));
+    let slot = |id, group, locked| SearchSlot {
+        id,
+        group,
+        initially_locked: locked,
+        ..Default::default()
+    };
+    h.world.story_slots = vec![
+        slot(group, None, false),
+        slot((0, 1), Some(group), true),
+        slot((0, 2), Some(group), true),
+        slot(pack, None, true),
+    ];
+    assert!(!h.world.slot_unlocked(group));
+    assert!(!h.world.slot_unlocked(pack));
+    h.world.story_progress.unlocked.push((0, 2));
+    assert!(h.world.slot_unlocked(group));
+    h.world.story_slots[3].initially_locked = false;
+    assert!(h.world.slot_unlocked(pack));
+}
