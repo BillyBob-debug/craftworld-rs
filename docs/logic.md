@@ -59,7 +59,7 @@ What the game does (EBOOT 01.33, Ghidra):
 lbp-sim now does the same for configuration 0: each body's gravity scale is
 `clamp(1 - Σ gravity × lastKnownActivation, 0, 1)` over the tweaks on its hierarchy,
 with the saved activation standing in until switch signals reach tweakers (item 2).
-Dampening and buoyancy are kept but not applied. With that, the row stays up and the same route
-inputs take Sackboy from x -385 to x 22,785 (tick 2012).
+Dampening and buoyancy are kept but not applied. With that, the row stays up and the
+same route inputs take Sackboy from x -385 to x 22,785 (tick 2012).
 
 Test: `d1100_an_anti_gravity_tweaker_holds_its_body_up` (lbp-sim sandbox, synthetic).
