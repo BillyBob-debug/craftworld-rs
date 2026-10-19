@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1008 the viewer's level slots (2026-10-19)
+## Latest: D1009 the Pod's music files (2026-10-19)
+- Part 156 (`docs/level-scripts/part-156.md`): the Pod's music bank is not on the LBP2
+  disc (part 151 measured LBP1's); its `.mus` settings are read.
+
+## D1008 the viewer's level slots (2026-10-19)
 - Part 155 (`docs/level-scripts/part-155.md`): a launched level gets its story slot,
   and back in the Pod it is the previous level `OnEnterPod__` reads.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1002 the line shader's programs (2026-10-19)
 - Part 149 (`docs/level-scripts/part-149.md`): the game's UI shaders take no time,
   so a link's active band does not move; the viewer already draws it so.
-
-## D1001 where a key's kind 2 comes from (2026-10-19)
-- Part 148 (`docs/level-scripts/part-148.md`): a search key of kind 2 is a user's
-  result; Story slots only give kind 1, so the Pod is unchanged.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

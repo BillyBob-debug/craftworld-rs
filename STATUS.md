@@ -6547,3 +6547,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1000 the native intro's video request (2026-10-19)
 - Part 147 (`docs/level-scripts/part-147.md`): the native Pod intro asks for its video
   as the game's script does; no video plays yet, so its wait is unchanged.
+
+## D1001 where a key's kind 2 comes from (2026-10-19)
+- Part 148 (`docs/level-scripts/part-148.md`): a search key of kind 2 is a user's
+  result; Story slots only give kind 1, so the Pod is unchanged.

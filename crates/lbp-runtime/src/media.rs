@@ -95,7 +95,8 @@ pub const MUSIC_PAIRS: usize = 6;
 /// stereo pairs' volumes since.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct InteractiveMusic {
-    /// The music bank's GUID (the Pod's is 42103, `I_POD.FSB` on the disc).
+    /// The music bank's GUID (the Pod's is 42103, `i_pod.fsb`, not on the LBP2 disc:
+    /// D1009).
     pub guid: u32,
     /// The settings GUID (the Pod's is 42108).
     pub settings: u32,
@@ -386,6 +387,90 @@ impl LevelWorld {
     }
 }
 
+/// D1009: one stereo pair ("stem") of an interactive music's settings.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MusicStem {
+    /// The slider the pair follows (the Pod's are 0 to 5, one each).
+    pub slider_index: i32,
+    pub fade: f32,
+    /// Seconds to fade in and out.
+    pub fade_in: f32,
+    pub fade_out: f32,
+    /// How much of the pair goes to the front and the rear speakers.
+    pub forward_send: f32,
+    pub rear_send: f32,
+    pub trigger: bool,
+}
+
+/// D1009: an interactive music's settings file (`.mus`, the Pod's is GUID 42108,
+/// `gamedata/audio/i_pod.mus`, replaced by the 01.33 update).
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MusicSettings {
+    pub master_volume: f32,
+    pub copyrighted: bool,
+    /// One per stereo pair, in order.
+    pub stems: Vec<MusicStem>,
+}
+
+/// D1009 (FOUND, the 01.33 `i_pod.mus`): the settings are text after a `MUSt` line, one
+/// `Key<TAB>Value` per line. `StereoPairs N` is followed by N blocks, each opened by a
+/// `[i]` line, whose keys are indented one tab further. Keys this does not use (the
+/// translated tags) are skipped.
+pub fn parse_music_settings(text: &str) -> Result<MusicSettings, String> {
+    let mut lines = text.lines();
+    if lines.next().map(str::trim) != Some("MUSt") {
+        return Err("music settings: no MUSt line".into());
+    }
+    let mut out = MusicSettings::default();
+    let mut pairs = None;
+    for line in lines {
+        let mut words = line.split_whitespace();
+        let Some(key) = words.next() else { continue };
+        let value = words.next().unwrap_or("");
+        let float = || {
+            value
+                .parse::<f32>()
+                .map_err(|e| format!("music settings: {key} {value:?}: {e}"))
+        };
+        if key.starts_with('[') {
+            out.stems.push(MusicStem::default());
+            continue;
+        }
+        let stem = out.stems.last_mut();
+        match (key, stem) {
+            ("MasterVolume", _) => out.master_volume = float()?,
+            ("IsCopyrighted", _) => out.copyrighted = value == "true",
+            ("StereoPairs", _) => {
+                pairs = Some(
+                    value
+                        .parse::<usize>()
+                        .map_err(|e| format!("music settings: StereoPairs: {e}"))?,
+                )
+            }
+            ("SliderIndex", Some(s)) => {
+                s.slider_index = value
+                    .parse()
+                    .map_err(|e| format!("music settings: SliderIndex: {e}"))?
+            }
+            ("Fade", Some(s)) => s.fade = float()?,
+            ("FadeIn", Some(s)) => s.fade_in = float()?,
+            ("FadeOut", Some(s)) => s.fade_out = float()?,
+            ("ForwardSend", Some(s)) => s.forward_send = float()?,
+            ("RearSend", Some(s)) => s.rear_send = float()?,
+            ("Trigger", Some(s)) => s.trigger = value == "true",
+            _ => {}
+        }
+    }
+    match pairs {
+        Some(n) if n == out.stems.len() => Ok(out),
+        Some(n) => Err(format!(
+            "music settings: {n} stereo pairs, {} blocks",
+            out.stems.len()
+        )),
+        None => Err("music settings: no StereoPairs".into()),
+    }
+}
+
 /// The value of `--flags` of the `level_scripts` example and of the viewer's
 /// `--level-scripts-flags`: bit masks for [`LevelWorld::progression_flags`], separated
 /// by commas and ORed together. A mask is decimal, or hexadecimal after `0x`.
@@ -571,5 +656,36 @@ mod tests {
         assert!(parse_progression_flags("").is_err());
         assert!(parse_progression_flags("-1").is_err());
         assert!(parse_progression_flags("two").is_err());
+    }
+
+    /// D1009: the settings' layout, with made-up values.
+    #[test]
+    fn d1009_music_settings() {
+        let text = "MUSt
+MasterVolume	0.5
+TrackTranslatedTag	\"\"
+IsCopyrighted	false
+            StereoPairs	2
+	[0]	
+		SliderIndex	0
+		FadeIn	2
+		RearSend	0.25
+            	[1]	
+		SliderIndex	1
+		Trigger	true
+";
+        let m = parse_music_settings(text).unwrap();
+        assert_eq!(m.master_volume, 0.5);
+        assert_eq!(m.stems.len(), 2);
+        assert_eq!((m.stems[0].fade_in, m.stems[0].rear_send), (2., 0.25));
+        assert!(m.stems[1].trigger && m.stems[1].slider_index == 1);
+        assert!(parse_music_settings(
+            "MUSt
+StereoPairs	3
+	[0]
+"
+        )
+        .is_err());
+        assert!(parse_music_settings("FSB4").is_err());
     }
 }
