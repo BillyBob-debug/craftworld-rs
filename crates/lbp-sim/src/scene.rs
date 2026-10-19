@@ -660,21 +660,18 @@ impl SceneJoint {
     /// `frame`: a wired one in mode 1 (direction) or 4 (speed) ramps, base + 2 × frame ×
     /// range / time (the base for time < 1), with no phase, pattern or wave; every other
     /// piston follows [`Self::free_length`].
+    /// D1105: FOUND (01.33, the solver loop 0x1c89d4, limit rows 0x960988 and 0x962590)
+    /// the joint is held between base and base + range (0xc7350 min, 0xc7330 max), so the
+    /// length is kept there while the clock runs on unbounded.
     pub fn length(&self, frame: f32, wired: bool) -> f32 {
+        let base = self.min_length;
         let [range, time, ..] = self.params.motion;
-        match self.params.mode {
-            1 | 4 if wired && time >= 1. => self.min_length + 2. * frame * range / time,
-            1 | 4 if wired => self.min_length,
+        let l = match self.params.mode {
+            1 | 4 if wired && time >= 1. => base + 2. * frame * range / time,
+            1 | 4 if wired => base,
             _ => self.free_length(frame),
-        }
-    }
-
-    /// D1104: the clock frames a wired mode 1 or 4 piston's ramp is kept within, 0 (the
-    /// base) to time / 2 (base + range). INFERRED: the game's ramp has no clamp in 0xc9790
-    /// or 0xcfedc, yet a direction piston stops at its ends; where that happens is not read.
-    pub fn ramp_frames(&self, wired: bool) -> Option<(f32, f32)> {
-        let time = self.params.motion[1];
-        (wired && matches!(self.params.mode, 1 | 4) && time >= 1.).then_some((0., time / 2.))
+        };
+        l.clamp(base.min(base + range), base.max(base + range))
     }
 }
 
@@ -722,14 +719,6 @@ impl Default for PistonClock {
 impl PistonClock {
     pub fn frame(&self, now: f32) -> f32 {
         (now - self.start) * self.scale + self.start + self.delta
-    }
-
-    /// D1104: keeps the frame at `now` within `lo..=hi` by moving the delta, so a piston
-    /// at an end turns back at once when its rate changes sign (INFERRED, see
-    /// [`SceneJoint::ramp_frames`]).
-    pub fn clamp(&mut self, now: f32, lo: f32, hi: f32) {
-        let f = self.frame(now);
-        self.delta += f.clamp(lo, hi) - f;
     }
 
     /// 0xc7648: from `now` the clock runs at `scale`, without a jump.

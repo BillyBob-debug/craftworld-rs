@@ -208,9 +208,6 @@ pub fn drive_pistons(
         let p = drive.joint.params;
         let s = input.map_or(1., |(t, a)| scene::piston_scale(p.mode, p.held, t, a));
         drive.clock.set_scale(now, s);
-        if let Some((lo, hi)) = drive.joint.ramp_frames(input.is_some()) {
-            drive.clock.clamp(now, lo, hi);
-        }
         let frame = drive.clock.frame(now);
         let l = drive.joint.length(frame, input.is_some()) * UNIT_SCALE;
         if joint.limits.is_some_and(|d| d.min == l && d.max == l) {

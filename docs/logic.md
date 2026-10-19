@@ -164,12 +164,32 @@ What a mode does (FOUND unless marked):
 - The length (0xc9790's branch at 0xc993c, wired and mode 1 or 4): base + 2 × frame ×
   range / time, the base for time < 1, with no phase, pattern or wave. Other modes use
   the Part 4 rule on the clock.
-- Neither function clamps the frame, but a direction piston stops at its ends. The
-  runtime keeps the clock between 0 (the base) and time / 2 (base + range), moving its
-  delta so it turns back at once (INFERRED; where the game bounds it is not found).
+- Neither function clamps the frame; the ends are the solver's (Part 7).
 
-lbp-sim: `scene::piston_scale` gives the rate, `SceneJoint::length` the length,
-`SceneJoint::ramp_frames` and `PistonClock::clamp` the ends; the viewer passes the
-signal on each piston's input (`LevelWorld::input_signal`).
+lbp-sim: `scene::piston_scale` gives the rate, `SceneJoint::length` the length; the
+viewer passes the signal on each piston's input (`LevelWorld::input_signal`).
 
 Test: `d1104_a_direction_piston_ramps_out_while_on_and_back_while_off` (lbp-sim sandbox).
+
+## Part 7: a piston's ends are a joint limit, not a clock clamp (D1105)
+
+What the game does (EBOOT 01.33, FOUND unless marked):
+- Only three places write a piston clock: the mode 2 restart 0xc7574 (called from
+  0x11f28c), SetScale 0xc7648 and the reset at 0xd0054. Nothing bounds the frame, so a
+  direction piston's clock runs on past either end while its rate holds.
+- The constraint solver loop 0x1c89d4 gives joint types 3 and 4 a limit row (0x960988,
+  0x962590) between min and max of base and base + range (0xc7350, 0xc7330; base
+  `+0xf0`, range `+0xc8`). The measured length is tested against both at 0x960d84 and
+  0x960d8c, so the joint stops at its ends whatever the ramp asks for.
+- So a direction piston left on for long stays out, and when switched off it waits
+  until its clock has run back to frame time / 2 before it moves. Type 9 (angular) has
+  its own limit row (0x95f494, INFERRED).
+- The port test 0x900730 gives 0 for an ordinary switch output, so an off switch runs a
+  direction piston back at -1 (INFERRED: the switch's type bucket is not mapped).
+
+lbp-sim: `SceneJoint::length` keeps every piston's length between base and base + range
+and the clock is no longer clamped (the D1104 `ramp_frames` and `PistonClock::clamp` are
+gone).
+
+Test: `d1104_a_direction_piston_ramps_out_while_on_and_back_while_off` (lbp-sim sandbox,
+updated for the limit).

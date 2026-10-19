@@ -859,24 +859,22 @@ fn d1104_a_direction_piston_ramps_out_while_on_and_back_while_off() {
         (0., 0.)
     );
     assert_eq!(piston_scale(3, false, 1, 0.25), 0.25);
-    // The ramp: base + 2 × frame × range / time, kept between frames 0 and time / 2.
-    let (lo, hi) = j.ramp_frames(true).unwrap();
-    assert_eq!((lo, hi, j.ramp_frames(false)), (0., 30., None));
+    // The ramp: base + 2 × frame × range / time; D1105: the length is held between base
+    // and base + range while the clock runs on.
     let mut c = PistonClock::default();
     let at = |c: &mut PistonClock, now: f32, s: f32| {
         c.set_scale(now, s);
-        c.clamp(now, lo, hi);
         j.length(c.frame(now), true)
     };
-    // Off from the start: held at the base.
+    // Off from the start: held at the base while the clock runs below 0.
     assert_eq!((at(&mut c, 0., -1.), at(&mut c, 10., -1.)), (500., 500.));
-    // On at 10: half way at 25, fully out (base + range) from 40 on.
-    assert_eq!(at(&mut c, 10., 1.), 500.);
-    assert_eq!(at(&mut c, 25., 1.), 650.);
-    assert_eq!((at(&mut c, 40., 1.), at(&mut c, 90., 1.)), (800., 800.));
-    // Off at 90: back at once, at the base 30 frames later.
-    assert_eq!(at(&mut c, 90., -1.), 800.);
-    assert_eq!((at(&mut c, 100., -1.), at(&mut c, 120., -1.)), (700., 500.));
+    // On at 10 (frame -10): still at the base at 20, half way at 35, out from 50 on.
+    assert_eq!((at(&mut c, 10., 1.), at(&mut c, 20., 1.)), (500., 500.));
+    assert_eq!(at(&mut c, 35., 1.), 650.);
+    assert_eq!((at(&mut c, 50., 1.), at(&mut c, 90., 1.)), (800., 800.));
+    // Off at 90 (frame 70): out until frame 30 (tick 130), at the base by tick 160.
+    assert_eq!((at(&mut c, 90., -1.), at(&mut c, 130., -1.)), (800., 800.));
+    assert_eq!((at(&mut c, 145., -1.), at(&mut c, 160., -1.)), (650., 500.));
     // Unwired, the same joint follows its free-running wave instead.
     assert_eq!(j.length(15., false), j.free_length(15.));
 }
