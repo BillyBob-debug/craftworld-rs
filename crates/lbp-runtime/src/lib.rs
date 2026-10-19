@@ -3767,6 +3767,10 @@ pub const POD_COMPUTER_UPDATE_VIDEO: &str = "UpdateVideo__";
 /// frame with one bool ([`LevelScripts::pod_computer_frame`]).
 pub const POD_COMPUTER_PER_FRAME: &str = "PerFrameUpdate__b";
 
+/// The export of the engine's PodComputer script object that the engine calls when the
+/// Pod becomes the current level ([`LevelScripts::pod_computer_enter`]).
+pub const POD_COMPUTER_ENTER: &str = "OnEnterPod__";
+
 /// The per-tick entry for a class, if it has one other than [`UPDATE`].
 pub fn frame_entry(vm: &Vm, class: ClassId) -> Option<&'static FrameEntry> {
     let name = vm.class_name(class);
@@ -3955,6 +3959,9 @@ pub struct LevelScripts {
     /// D319: the pod computer's per-frame draw faulted or yielded: it is not called again
     /// ([`LevelScripts::pod_computer_draw`]).
     pub pod_computer_draw_stopped: bool,
+    /// D1016: the pod computer's `OnEnterPod__` was called for this level
+    /// ([`LevelScripts::pod_computer_enter`]).
+    pub pod_computer_entered: bool,
 }
 
 impl LevelScripts {
@@ -3969,6 +3976,7 @@ impl LevelScripts {
             video_update_stopped: false,
             pod_computer_frame_stopped: false,
             pod_computer_draw_stopped: false,
+            pod_computer_entered: false,
         }
     }
 
@@ -4089,6 +4097,50 @@ impl LevelScripts {
             }
         }
         self.start_threads(vm, host, budget, &mut report);
+        report
+    }
+
+    /// D1016: the engine's call of `OnEnterPod__()` on its PodComputer script object
+    /// ([`LevelWorld::pod_computer`]) when the Pod becomes the current level, in the
+    /// planets level only and once for it.
+    ///
+    /// FOUND in the 01.33 executable: the export's wrapper 0x624c88 is reached through
+    /// 0x5044a0 and 0x89445c from 0x3fb800, slot 3 of the pod computer's vtable 0xd73d40
+    /// (`OnExitPod__` likewise from slot 4, 0x403f0c). 0x401c30 switches the pod mode
+    /// (0 no pod, 1 the pod computer, 2 the other pod object): it calls the old object's
+    /// slot 4 and the new one's slot 3 when the mode changes. Its callers are 0x1ab508
+    /// (a level becomes the current one, in its pod branch), the level swap 0x25fdb0 and
+    /// 0x1a7580, all behind the level's "is a pod" byte; the object's creation does not
+    /// call it. So it runs on the Pod's first load and on every return from a level.
+    /// FOUND in the script listing (16e6e8c9): the function calls the planets world's
+    /// `OnEnterPod__`; when the previous level's slot is of type 2 and the moon is
+    /// selected it calls `SelectMoonLevel__` (not reached: the port answers
+    /// `IsMoonSelected__` false); the demo branches are off in the full game.
+    ///
+    /// INFERRED: the level's first tick stands for its becoming current, before the
+    /// first `PerFrameUpdate__b`. A call that faults or yields is reported in
+    /// [`StepReport::thread_faults`].
+    pub fn pod_computer_enter(
+        &mut self,
+        vm: &mut Vm,
+        host: &mut Bindings<LevelWorld>,
+        budget: u64,
+    ) -> StepReport {
+        let mut report = StepReport::default();
+        if self.pod_computer_entered || !self.is_planets_level(vm, &host.world) {
+            return report;
+        }
+        let Some(object) = host.world.pod_computer else {
+            return report;
+        };
+        let Some(class) = vm.class_of(object) else {
+            return report;
+        };
+        self.pod_computer_entered = true;
+        if let Err(e) = run_on_object_with(vm, host, class, object, POD_COMPUTER_ENTER, &[], budget)
+        {
+            report.thread_faults.push(format!("PodComputer {e}"));
+        }
         report
     }
 
@@ -4660,7 +4712,8 @@ impl LevelScripts {
     ) -> StepReport {
         let frame_tick = self.ticks;
         trace_tick(host, self.ticks + 1);
-        let mut report = self.pod_computer_frame(vm, host, budget);
+        let mut report = self.pod_computer_enter(vm, host, budget);
+        report.absorb(self.pod_computer_frame(vm, host, budget));
         let (things, busy) = self.tick_entries(vm, host, budget, Entries::WithoutPlanets);
         report.absorb(things);
         report.absorb(self.trigger_events(vm, host, budget));

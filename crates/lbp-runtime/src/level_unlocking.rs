@@ -556,6 +556,9 @@ impl LevelWorld {
                 }
                 Value::Void
             }
+            // D1016, INFERRED: the port has no moon (My Levels) search, so the moon is
+            // never the selected planet and `OnEnterPod__` skips `SelectMoonLevel__`.
+            ("PodComputer", "IsMoonSelected__") => Value::Bool(false),
             // D383: no end-of-level sequence waits.
             ("PlanetsWorld", "CanStartEndOfLevelSequence__") => Value::Bool(true),
             // D383's rule: the target is a Story slot and the search is up.
