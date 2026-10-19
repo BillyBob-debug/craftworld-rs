@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1016 the pod computer enters the Pod (2026-10-19)
+## Latest: D1017 the pod computer leaves the Pod (2026-10-19)
+- Part 164 (`docs/level-scripts/part-164.md`): launching a level calls the pod computer's
+  `OnExitPod__`; the Pod's view type is kept for the return.
+
+## D1016 the pod computer enters the Pod (2026-10-19)
 - Part 163 (`docs/level-scripts/part-163.md`): the pod computer's `OnEnterPod__` runs on
   each entry to the Pod; no script restores the launching group's search.
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1010 the planets' resting point (2026-10-19)
 - Part 157 (`docs/level-scripts/part-157.md`): with nothing selected the game turns the
   planets toward the planet's +0x190 (its position, inferred); comments only.
-
-## D1009 the Pod's music files (2026-10-19)
-- Part 156 (`docs/level-scripts/part-156.md`): the Pod's music bank is not on the LBP2
-  disc (part 151 measured LBP1's); its `.mus` settings are read.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

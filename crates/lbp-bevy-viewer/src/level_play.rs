@@ -1833,6 +1833,13 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
             return;
         }
     };
+    // D1017: leaving the Pod calls its computer's `OnExitPod__`.
+    let exit = p
+        .scripts
+        .pod_computer_exit(&mut p.vm, &mut p.host, BUDGET_PER_CALL);
+    for f in &exit.thread_faults {
+        println!("Leaving the Pod: {f}");
+    }
     let identity = read.identity.clone();
     let loaded = read.loaded;
     let w = &p.host.world;
@@ -1841,6 +1848,7 @@ fn switch_level(mut play: NonSendMut<Play>, mut v: ResMut<crate::Viewer>, mut co
     // D381: the profile's state goes with the session (the game keeps one profile).
     host.world.progression_flags = p.host.world.progression_flags;
     host.world.story_progress = std::mem::take(&mut p.host.world.story_progress);
+    host.world.pod_view_type = p.host.world.pod_view_type;
     let heard = &mut p.host.world.media.voice_overs_heard;
     host.world.media.voice_overs_heard = std::mem::take(heard);
     // D384: the pending links as SlotLink objects, for `LevelUnlockingThread`.

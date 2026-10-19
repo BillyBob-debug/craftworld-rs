@@ -5439,6 +5439,62 @@ fn d1016_the_pod_computer_enters_the_pod_on_the_first_tick() {
     }
 }
 
+/// D1017: leaving the Pod calls the pod computer's `OnExitPod__` (here it writes 5) and
+/// keeps the planets world's `LocalViewType`; the next entry hands it back before
+/// `OnEnterPod__`. Another level neither calls it nor keeps anything.
+#[test]
+fn d1017_leaving_the_pod_keeps_its_view_type() {
+    let write_arg = vec![
+        i(0xa2, 0, 0, 4, 0), // WRITE r4
+        i(0xa5, 0, 0, 0, 0), // RETURN
+    ];
+    assert_eq!(lbp_runtime::POD_COMPUTER_EXIT, "OnExitPod__");
+    let puter = || {
+        let mut s = d295_puter(write_arg.clone());
+        s.strings_a.push(lbp_runtime::POD_COMPUTER_EXIT.into());
+        let begin = s.bytecode.len() as u32;
+        s.bytecode.extend([
+            u64::from(0x03u8) | 4 << 16 | 5 << 32, // r4 = 5
+            i(0xa2, 0, 0, 4, 0),                   // WRITE r4
+            i(0xa5, 0, 0, 0, 0),                   // RETURN
+        ]);
+        s.function_defs
+            .push(function(0, s.strings_a.len() as u32 - 1, begin, begin + 3));
+        s
+    };
+    let view = |host: &mut Bindings<LevelWorld>| {
+        let world = Value::Thing(Some(0));
+        host.get_member(MemberKind::Thing, &world, "PlanetsWorld", "LocalViewType")
+    };
+    for planets in [true, false] {
+        let (mut vm, mut host, mut level) = d295_level_with(planets, puter());
+        let world = Value::Thing(Some(0));
+        let kept = Value::Int(3);
+        host.set_member(
+            MemberKind::Thing,
+            &world,
+            "PlanetsWorld",
+            "LocalViewType",
+            kept,
+        )
+        .unwrap();
+        let t = level.pod_computer_exit(&mut vm, &mut host, 1000);
+        assert!(t.thread_faults.is_empty());
+        assert_eq!(
+            host.world.written,
+            if planets { vec!["Int(5)"] } else { vec![] }
+        );
+        assert_eq!(host.world.pod_view_type, planets.then_some(3));
+    }
+    // Back in the Pod: the kept view type is the world's before its first step.
+    let (mut vm, mut host, mut level) = d295_level_with(true, puter());
+    host.world.pod_view_type = Some(3);
+    assert!(view(&mut host).is_err());
+    let t = level.tick_level(&mut vm, &mut host, 1000);
+    assert!(t.thread_faults.is_empty());
+    assert_eq!(view(&mut host), Ok(Value::Int(3)));
+}
+
 #[test]
 fn d295_a_pod_computer_step_that_faults_is_not_made_again() {
     let assert_false = vec![

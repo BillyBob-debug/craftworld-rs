@@ -167,6 +167,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 161: the unlock thread's group push (2026-10-19, D1014)](level-scripts/part-161.md)
 - [Part 162: no push without links (2026-10-19, D1015)](level-scripts/part-162.md)
 - [Part 163: the pod computer enters the Pod (2026-10-19, D1016)](level-scripts/part-163.md)
+- [Part 164: the pod computer leaves the Pod (2026-10-19, D1017)](level-scripts/part-164.md)
 
 ## Next
 
