@@ -6,22 +6,24 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-6 (pistons: the length rule, the clock, the saved mode)
+4. docs/logic.md Parts 4-7 (pistons: the length rule, the clock, the saved mode, ends)
 
 ## State
 - Owner (2026-10-19): "i think we might need to work on getting the games logic and
   circuits accurate in order to go further". The level1 lane is paused for this one.
 - D1100 merged (PR 241), D1101 (PR 242, e3337c2), D1102 (PR 243, 447b32d), D1103 (PR 244,
-  8f435e8). PR for D1104 (branch `logic-piston-modes`, worktree `E:\Projects\wt-d324`):
-  each piston's saved mode and held flag; direction pistons ramp out and back.
-- Decision numbers: D1100-D1199, next free D1105.
+  8f435e8), D1104 (PR 245, 0b2d19a: each piston's saved mode and held flag).
+- Owner paused (2026-10-19 "pause for now") and resumed ("unpause") the same day.
+  PR for D1105 (branch `logic-piston-ends`, worktree `E:\Projects\wt-d324`): a piston's
+  ends are the solver's length limit; its clock runs on unbounded.
+- Decision numbers: D1100-D1199, next free D1106.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
   local-analysis/logic/ (a new name each run). Before D1100 Sackboy stopped at x -385;
   after it he stands at x 22,785 on tick 2012 (x 22,770 on tick 2005 after D1102;
   after D1103 x 22,059: he waits about 25 ticks longer near x -3,000, and the inputs end
-  at tick 1970; after D1104 x 25,657 on tick 2006).
+  at tick 1970; after D1104 x 25,657 on tick 2006; after D1105 x 25,645).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -36,8 +38,8 @@
   needs SPU disassembly or RPCS3 memory reads of a moving body.
 
 ## Next
-1. Where the game stops a direction piston at its ends (Part 6, INFERRED clamp); the
-   port test 0x900730; mode 4 (0xc9e80). Motors and winches (same clock, likely).
+1. Mode 4 (0xc9e80); the switch type bucket in 0x900730 (jump table 0x900778). Motors
+   and winches (same clock, likely); the angular limit row 0x95f494 for type 9.
 2. Movers and rotators (configurations 1 and 11): read the SPU job or measure a body
    in RPCS3, then apply them.
 3. SWITCH_INPUT, MATERIAL_TWEAK (friction, restitution) and EMITTER.
