@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1105 a piston's ends are a joint limit (2026-10-19)
+## Latest: D1106 speed pistons servo to their signal (2026-10-19)
+- Logic lane: a mode 4 piston runs its clock toward the analog signal's fraction of
+  its range, full speed until within a tenth (0xc9e80; docs/logic.md P8).
+
+## D1105 a piston's ends are a joint limit (2026-10-19)
 - Logic lane: the game never clamps a piston's clock; the solver holds its length
   between base and base + range, so a long-on piston waits before it returns (P7).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D515 why the Rookie Test route stops at x -385 (2026-10-19)
 - Bumping the column at x -2940 wakes the whole frozen walkway row, which falls to the
   floor; we skip the tweakers and switches that hold it (docs/level1-play.md P16).
-
-## D514 the VM runs scripts' .init__ for Thing members (2026-10-19)
-- The VM gives scripted Things the members their class `.init__` sets before the stored
-  ones; the bubbles' 21 tick-0 `Update__` runs now match native (docs/level1-play.md P15).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

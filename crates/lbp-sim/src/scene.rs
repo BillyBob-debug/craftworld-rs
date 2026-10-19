@@ -680,7 +680,7 @@ impl SceneJoint {
 /// `activation`): held (`+0x1cc`) 0; mode 0 1 while the ternary is set, else 0; mode 1 the
 /// ternary (1 or -1), and with the ternary 0 -1 or 0 by the port test 0x900730 (read here
 /// as -1, INFERRED: an off switch sends the piston back); mode 2 1; mode 3 the activation;
-/// mode 4 (0xc9e80, not decoded) 1.
+/// mode 4 (speed) is a servo on the length ([`SceneJoint::servo_scale`], D1106).
 pub fn piston_scale(mode: i32, held: bool, ternary: i32, activation: f32) -> f32 {
     if held {
         return 0.;
@@ -691,6 +691,38 @@ pub fn piston_scale(mode: i32, held: bool, ternary: i32, activation: f32) -> f32
         1 => -1.,
         3 => activation,
         _ => 1.,
+    }
+}
+
+impl SceneJoint {
+    /// D1106: FOUND (01.33, 0xc9e80, called from 0xcfedc's mode 4 case at 0xd00c8) the
+    /// clock rate of a wired speed piston: the target s = max(`activation`, 0), flipped to
+    /// 1 - s when the range is negative and the pattern is not 2, is a fraction of the way
+    /// from the short end to the long end (0xc7350 min, 0xc7330 max of base and base +
+    /// range); the error e = s - (length - min) / (max - min) gives the rate 1 above 0.1,
+    /// -1 below -0.1, else 10 × e. The game measures the joint's length (0xc9d38); `length`
+    /// here is the commanded one (INFERRED stand-in).
+    pub fn servo_scale(&self, activation: f32, length: f32) -> f32 {
+        let base = self.min_length;
+        let range = self.params.motion[0];
+        let (lo, hi) = (base.min(base + range), base.max(base + range));
+        let mut s = activation.max(0.);
+        if range < 0. && self.params.animation_pattern != 2 {
+            s = 1. - s;
+        }
+        let frac = if hi > lo {
+            (length - lo) / (hi - lo)
+        } else {
+            0.
+        };
+        let e = s - frac;
+        if e > 0.1 {
+            1.
+        } else if e < -0.1 {
+            -1.
+        } else {
+            10. * e
+        }
     }
 }
 
