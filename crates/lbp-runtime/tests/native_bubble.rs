@@ -70,6 +70,11 @@ fn d504_the_native_bubble_opens_closes_and_pulses_without_the_script() {
     world.add_class_defaults(&vm);
     // The class's names and its `.init__` values for the fields the level does not store.
     assert_eq!(world.things[1].script_classes[0], "Trigger_Speech_Bubble");
+    // D513: the port's defaults fill the members, so reads of them find a value.
+    let members = world.things[1].members.as_ref().unwrap();
+    assert_eq!(members["IsTweaking"], Value::Bool(false));
+    assert_eq!(members["CurrVoiceIndex"], Value::Int(-1));
+    assert_eq!(members["TestSpeech"], Value::Object(None));
     let mut host = Bindings::defaulting(world);
     let mut scripts = LevelScripts::new(&vm, &host.world);
     let inst = scripts.instances[0];

@@ -4,15 +4,15 @@
 1. docs/level1-play.md, sections "Part 5" (native speech bubble, the script trace) and
    "Part 6" (native Launcher); Parts 7-11: TriggerMusic, PostItNote,
    TutorialMonitor, WorldMooCamera, Score_Board; Part 12: the route's call trace;
-   Part 13: the bubble in that trace
+   Part 13: the bubble in that trace; Part 14: class defaults for native runs
 2. crates/lbp-runtime/src/native_script.rs (the D417 registry), native_bubble.rs and
    native_launcher.rs (the smallest port, a template for the next ones)
 
 ## State
-- PRs 155 (D504), 228-233 (D505-D510) and 234 (D511, the route's call trace) merged.
-  PR for D512 (branch `level1-bubble-trace`, worktree `E:\Projects\wt-d324`): trace
-  sites in the bubble port, its member reads matched to the VM; for the coordinator.
-- Decision numbers: D504-599, next free D513.
+- PRs 155 (D504), 228-234 (D505-D511) and 235 (D512, the bubble in the trace) merged.
+  PR for D513 (branch `level1-native-defaults`, worktree `E:\Projects\wt-d324`): native
+  ports give their class defaults to the Thing; for the coordinator.
+- Decision numbers: D504-599, next free D514.
 
 ## Facts
 - Route run: `--level-guid 0001e786 --level-scripts --play-sackboy --qa-hide-ui
@@ -43,8 +43,8 @@
    trace: Launcher (done, D505), TriggerMusic (done, D506), PostItNote(+Unlock*) (done,
    D507), TutorialMonitor (done, D508), WorldMooCamera (done, D509), Score_Board
    (done, D510). Route traced natively with and without the overlay (D511, Part 12).
-   Bubble port in the trace (D512, Part 13). Next: class defaults for native runs
-   without a script, so reads of unstored members return the VM's value, not an error.
+   Bubble port in the trace (D512, Part 13). Class defaults without the script (D513,
+   Part 14). Next: the 21 tick-0 `Update__` runs, if the VM learns to run `.init__`.
 2. The route past x -385: a game reference (RPCS3 F12 frames past line 2) or jumps there.
 3. The camera at x -938 (a frame at tick 1600 looks through a front wall).
 4. Sackboy pushed into a wall turns to the camera and plays `stand`, not a push.

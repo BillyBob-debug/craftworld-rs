@@ -1140,6 +1140,10 @@ impl LevelWorld {
                 if let Some(n) = t.script_guid.and_then(native_script) {
                     let chain = std::iter::once(n.class()).chain(n.superclasses().iter().copied());
                     t.script_classes = chain.map(str::to_owned).collect();
+                    let members = t.members.get_or_insert_with(BTreeMap::new);
+                    for (name, v) in n.defaults() {
+                        members.entry(name.to_owned()).or_insert(v);
+                    }
                 }
                 continue;
             };

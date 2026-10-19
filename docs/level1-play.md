@@ -351,3 +351,17 @@ Left (INFERRED harmless, the values agree):
   VM runs them inside `Thing.GetDescendentWithPTrigger`, a site the trace filters out.
 - Reads within a frame come in a different order in a few places; the comparison ignores
   order.
+
+## Part 14: class defaults for native runs (D513, 2026-10-19)
+
+With `--native-scripts` and no script loaded, a Thing had no class defaults, so a read
+of a member its level does not store (Part 13) answered an error. A native port now
+gives its class's `.init__` values (`NativeScript::defaults`, the bubble's `defaults()`
+list), and `add_class_defaults` adds the ones the Thing lacks. With the script loaded
+nothing changes: the VM's class defaults come first, as before.
+
+OBSERVED (the Part 13 route, native, no overlay): the 2,204 member reads that answered an
+error (`IsTweaking` 533, the three VoIP flags 524 each, `NeedsMoveControllerFixup` 66 and
+the rest) now return the values the VM reads. The event count is unchanged (260,495), as
+the port used the same values as its fallbacks. The 21 tick-0 runs from the VM skipping
+`.init__` remain (Part 5).
