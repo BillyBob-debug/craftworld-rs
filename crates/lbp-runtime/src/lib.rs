@@ -363,6 +363,9 @@ pub struct LevelWorld {
     /// D384: the SlotLink objects of the pending links (made with the Story results),
     /// and the SlotID objects made for a link's end that is not a Story slot.
     pub pending_link_objects: Vec<(PendingLink, ObjectId)>,
+    /// D385: each link's progress from `PodComputer.SetLinkProgress__Q8SlotLinkf` (the
+    /// script's or the native thread's), for the link's drawing.
+    pub link_progress: Vec<(PendingLink, f32)>,
     pub link_slot_ids: Vec<(ObjectId, (i32, i32))>,
     /// The video and voice-over requests of the scripts ([`MediaState`]). Nothing plays.
     pub media: MediaState,

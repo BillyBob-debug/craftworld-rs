@@ -21,8 +21,26 @@ pub const LINK_DELAY: i32 = 10;
 /// State 2: `gameplay/unlocking/unlock_beeps` on ticks 5, 20, 35, ... (FOUND).
 pub const BEEP_FIRST: i32 = 5;
 pub const BEEP_EVERY: i32 = 15;
-/// INFERRED: a link's progress per tick (the step was not read; one second a link).
-pub const LINK_STEP: f32 = 1. / 30.;
+/// D385: `PendingLink.Update__` (FOUND, the 01.33 listing): `Time` grows by
+/// `LINK_TIME_STEP` a tick up to `LINK_TIME_MAX * (pi^2 - (pi - a)^2) / pi^2`, `a` the
+/// link's angular separation, and `Progress` is `SmoothStep(0, that, Time)`.
+pub const LINK_TIME_STEP: f32 = 2.;
+pub const LINK_TIME_MAX: f32 = 120.;
+
+/// D385: the end of a link's `Time` for its angular separation `a` (radians).
+pub fn link_time_end(a: f32) -> f32 {
+    use std::f32::consts::PI;
+    LINK_TIME_MAX * (PI * PI - (PI - a) * (PI - a)) / (PI * PI)
+}
+
+/// `Math.SmoothStep__fff` (an equal pair of edges is a step).
+fn smooth_step(e0: f32, e1: f32, x: f32) -> f32 {
+    if e0 == e1 {
+        return if x < e0 { 0. } else { 1. };
+    }
+    let t = ((x - e0) / (e1 - e0)).clamp(0., 1.);
+    t * t * (3. - 2. * t)
+}
 /// State 3's hold before the cursor moves to the last target (FOUND).
 pub const HOLD_TICKS: i32 = 30;
 
@@ -43,6 +61,8 @@ pub struct PendingLinkCluster {
     pub state: u8,
     pub ticks: i32,
     pub progress: Vec<f32>,
+    /// Each link's `PendingLink.Time` (D385).
+    pub times: Vec<f32>,
     /// State 2 made the group the results' default (one tick before the unlock).
     pub defaulted: bool,
 }
@@ -126,6 +146,7 @@ impl LevelWorld {
             {
                 clusters[k].links.push(link);
                 clusters[k].progress.push(0.);
+                clusters[k].times.push(0.);
                 clusters[k].average_dir = self.average_dir(&clusters[k].links);
                 continue;
             }
@@ -137,10 +158,33 @@ impl LevelWorld {
                 state: 0,
                 ticks: 0,
                 progress: vec![0.],
+                times: vec![0.],
                 defaulted: false,
             });
         }
         clusters
+    }
+
+    /// D385: `PodComputer.GetLinkAngularSeparation__Q8SlotLink` (FOUND 0x42c870: a
+    /// function, INFERRED acos, of the dot of the two badges' directions; 0 without
+    /// them).
+    pub fn link_separation(&self, l: PendingLink) -> f32 {
+        match (self.slot_dir(l.from), self.slot_dir(l.to)) {
+            (Some(a), Some(b)) => (a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
+                .clamp(-1., 1.)
+                .acos(),
+            _ => 0.,
+        }
+    }
+
+    /// D385: `PodComputer.SetLinkProgress__Q8SlotLinkf`, kept for the link's drawing
+    /// (FOUND 0x42c7c4: clamped to 0..1 in the planets' link record).
+    pub fn set_link_progress(&mut self, l: PendingLink, progress: f32) {
+        let progress = progress.clamp(0., 1.);
+        match self.link_progress.iter_mut().find(|(x, _)| *x == l) {
+            Some((_, p)) => *p = progress,
+            None => self.link_progress.push((l, progress)),
+        }
     }
 
     fn count_sound(&mut self, name: &str) {
@@ -203,13 +247,17 @@ impl LevelWorld {
             2 => {
                 let last = c.progress.len() - 1;
                 if c.progress[last] < 1. {
+                    // FOUND: the links below `Tick / 10` update, then `Tick` grows.
+                    let live = usize::try_from(c.ticks / LINK_DELAY).unwrap_or(0);
+                    for j in 0..c.links.len().min(live) {
+                        let a = self.link_separation(c.links[j]);
+                        let end = link_time_end(a);
+                        c.times[j] = (c.times[j] + LINK_TIME_STEP).min(end);
+                        c.progress[j] = smooth_step(0., end, c.times[j]);
+                        self.set_link_progress(c.links[j], c.progress[j]);
+                    }
                     c.ticks += 1;
                     let t = c.ticks;
-                    for (j, p) in c.progress.iter_mut().enumerate() {
-                        if t >= LINK_DELAY * (j as i32 + 1) {
-                            *p = (*p + LINK_STEP).min(1.);
-                        }
-                    }
                     if t >= BEEP_FIRST && (t - BEEP_FIRST) % BEEP_EVERY == 0 {
                         self.count_sound(UNLOCK_BEEPS);
                     }
@@ -373,6 +421,16 @@ impl LevelWorld {
                 }
                 Value::Void
             }
+            ("PodComputer", "GetLinkAngularSeparation__Q8SlotLink") => {
+                let a = self.link_of(arg).map(|l| self.link_separation(l));
+                Value::Float(a.unwrap_or(0.))
+            }
+            ("PodComputer", "SetLinkProgress__Q8SlotLinkf") => {
+                if let (Some(l), Some(Value::Float(f))) = (self.link_of(arg), args.get(1)) {
+                    self.set_link_progress(l, *f);
+                }
+                Value::Void
+            }
             // D383: no end-of-level sequence waits.
             ("PlanetsWorld", "CanStartEndOfLevelSequence__") => Value::Bool(true),
             // D383's rule: the target is a Story slot and the search is up.
@@ -500,6 +558,17 @@ mod tests {
         assert_eq!(w.pod.search.cursor_mode, Some(4));
         assert_eq!(w.sounds_played.get(UNLOCK_THEME), Some(&4));
         assert!(w.sounds_played.get(UNLOCK_BEEPS).is_some_and(|&n| n >= 3));
+    }
+
+    #[test]
+    fn d385_link_growth() {
+        use std::f32::consts::PI;
+        assert_eq!(link_time_end(0.), 0.);
+        assert!((link_time_end(PI) - LINK_TIME_MAX).abs() < 1e-3);
+        assert!((link_time_end(PI / 2.) - 90.).abs() < 1e-3);
+        assert_eq!(smooth_step(0., 0., 0.), 1.);
+        assert_eq!(smooth_step(0., 90., 45.), 0.5);
+        assert_eq!(smooth_step(0., 90., 90.), 1.);
     }
 
     #[test]

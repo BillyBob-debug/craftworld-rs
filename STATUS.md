@@ -6467,3 +6467,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D380 the level unlocking sequence (2026-10-18)
 - Part 127 (`docs/level-scripts/part-127.md`): the Pod's unlock sequence read for a
   later port; it needs a level finish and audio, which the viewer lacks.
+
+## D381 finishing a story level (2026-10-18)
+- Part 128 (`docs/level-scripts/part-128.md`): a finished story level leaves a pending
+  link to the next one and the Pod's state 2 clears it; the return to the Pod is next.

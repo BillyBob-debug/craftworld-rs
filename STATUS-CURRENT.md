@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D384 the game's own unlock sequence (2026-10-18)
+## Latest: D385 the links' growth (2026-10-18)
+- Part 132 (`docs/level-scripts/part-132.md`): pending links grow with the game's
+  own timing and their progress is kept for drawing.
+
+## D384 the game's own unlock sequence (2026-10-18)
 - Part 131 (`docs/level-scripts/part-131.md`): with the scripts, the Pod's own
   `LevelUnlockingThread` plays the new link and unlocks the next level.
 
@@ -22,10 +26,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D382 back to the Pod after a finish (2026-10-18)
 - Part 129 (`docs/level-scripts/part-129.md`): a finished story level returns to the
   Pod with Sackboy, and the Pod's state 2 clears its link and unlocks the next level.
-
-## D381 finishing a story level (2026-10-18)
-- Part 128 (`docs/level-scripts/part-128.md`): a finished story level leaves a pending
-  link to the next one and the Pod's state 2 clears it; the return to the Pod is next.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
