@@ -1067,6 +1067,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             follow_gravity,
             follow_tweaks,
             drive_pistons,
+            drive_winches,
             follow_colour_correction,
             follow_things,
             follow_story_world,
@@ -2164,6 +2165,24 @@ fn drive_pistons(
     let world = &play.host.world;
     let now = play.scripts.ticks as f32;
     lbp_sim::drive_pistons(&mut commands, &mut q, now, |j| {
+        world
+            .input_signal(j.thing)
+            .map(|s| (s.ternary, s.activation))
+    });
+}
+
+/// D1107: winches run the piston rule too ([`lbp_sim::drive_winches`]).
+fn drive_winches(
+    play: NonSend<Play>,
+    mut commands: Commands,
+    mut q: Query<(
+        &mut lbp_sim::PistonDrive,
+        &mut lbp_sim::avian2d::prelude::DistanceJoint,
+    )>,
+) {
+    let world = &play.host.world;
+    let now = play.scripts.ticks as f32;
+    lbp_sim::drive_winches(&mut commands, &mut q, now, |j| {
         world
             .input_signal(j.thing)
             .map(|s| (s.ternary, s.activation))

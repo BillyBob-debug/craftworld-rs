@@ -6,7 +6,8 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-8 (pistons: length, clock, saved mode, ends, speed mode)
+4. docs/logic.md Parts 4-9 (pistons: length, clock, saved mode, ends, speed mode;
+   winches)
 
 ## State
 - Owner (2026-10-19): "i think we might need to work on getting the games logic and
@@ -14,9 +15,9 @@
 - D1100 merged (PR 241), D1101 (PR 242, e3337c2), D1102 (PR 243, 447b32d), D1103 (PR 244,
   8f435e8), D1104 (PR 245, 0b2d19a: each piston's saved mode and held flag).
 - Owner paused (2026-10-19 "pause for now") and resumed ("unpause") the same day.
-- D1105 merged (PR 246, e84bd7a). PR for D1106 (branch `logic-piston-speed`, worktree
-  `E:\Projects\wt-d324`): speed pistons servo to their signal.
-- Decision numbers: D1100-D1199, next free D1107.
+- D1105 merged (PR 246, e84bd7a), D1106 (PR 247, c632357). PR for D1107 (branch
+  `logic-winch`, worktree `E:\Projects\wt-d324`): winches run the piston rule.
+- Decision numbers: D1100-D1199, next free D1108.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -38,8 +39,9 @@
   needs SPU disassembly or RPCS3 memory reads of a moving body.
 
 ## Next
-1. Motors and winches (docs/logic.md Part 8): spin on pattern 1, angle limits, strength
-   `+0xc0`; how the scene builds them now. The switch type bucket in 0x900730.
+1. Motors (docs/logic.md Part 9): find where Speed `+0xd4` sets the turn rate, apply
+   the angle limits and strength cap. Check the type 4 / angle-wrap question at
+   0x962590. The switch type bucket in 0x900730.
 2. Movers and rotators (configurations 1 and 11): read the SPU job or measure a body
    in RPCS3, then apply them.
 3. SWITCH_INPUT, MATERIAL_TWEAK (friction, restitution) and EMITTER.

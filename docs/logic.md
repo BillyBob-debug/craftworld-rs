@@ -219,3 +219,27 @@ lbp-sim: `SceneJoint::servo_scale` gives the mode 4 rate, with the commanded len
 standing in for the measured one (INFERRED). The Rookie Test has no mode 4 piston.
 
 Test: `d1106_a_speed_piston_settles_at_its_signal_fraction` (lbp-sim sandbox).
+
+## Part 9: winches run the piston rule (D1107)
+
+What the game does (EBOOT 01.33, FOUND unless marked; TOC base r2 = 0xd9a0f8):
+- 0xc95ec sends types 3 (winch), 4 and 9 to the same length function 0xc9790, so a
+  winch's length follows the piston clock, modes and ramp (Parts 4-8).
+- The solver's type 3 case 0x1c98b4 builds its row with 0x960988 (strength 0xca760, lo
+  0xc7350, hi 0xc7330) and a stack flag of 1 (0x1c9964). Inside, the measured length is
+  compared with hi (0x960d84) and lo (0x960d8c); with the flag clear one bound of the row
+  is -FLT_MAX (0x9611ec), with it set 0. INFERRED: the set flag makes the row one-sided,
+  so the rope only pulls. The flag-clear caller at 0x1ca288 (lo = hi = `+0xf0`, strength
+  FLT_MAX) looks like a rod.
+- The type 4 case 0x1c9988 (only when `+0x28` is set and `+0x29` clear) goes through
+  0x962590, which wraps an angle by 2π before the builder 0x962b9c; the type names may
+  be off by one there (open).
+- Type 9 (0x1c9eac): range 2π or more (or pattern 1) is unbounded; pattern 0 limits
+  `+0xe0` ± range / 2; pattern 2 `+0xe0` to `+0xe0` + range; rows 0x95ae04 and 0x95f494
+  with the strength as a cap. No read of Speed `+0xd4` there, so the motor's turn rate
+  comes from elsewhere (open). Motors are not changed yet.
+
+lbp-sim: a CHAIN joint gets a `PistonDrive` and a distance joint held at 0 to the length
+(`drive_winches`, INFERRED one-sided); `PistonDrive::step` is shared with pistons.
+
+Test: `d1107_a_winch_follows_the_piston_rule` (lbp-sim sandbox).

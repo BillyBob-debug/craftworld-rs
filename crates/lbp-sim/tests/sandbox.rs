@@ -924,3 +924,38 @@ fn d1106_a_speed_piston_settles_at_its_signal_fraction() {
     j.params.motion[0] = -300.;
     assert_eq!(j.servo_scale(0., 500.), 0.);
 }
+
+#[test]
+fn d1107_a_winch_follows_the_piston_rule() {
+    use lbp_sim::scene::{Endpoint, JointKind, PistonClock, SceneJoint};
+    let mut params = JointParams {
+        mode: 1,
+        ..Default::default()
+    };
+    params.motion[..2].copy_from_slice(&[-200., 60.]);
+    let mut d = lbp_sim::PistonDrive {
+        joint: SceneJoint {
+            thing: 0,
+            kind: JointKind::Chain,
+            a: Endpoint::Static(0),
+            b: Endpoint::Static(1),
+            world_a: [0.; 2],
+            world_b: [0.; 2],
+            local_a: [0.; 2],
+            local_b: [0.; 2],
+            length: 400.,
+            min_length: 400.,
+            max_length: 400.,
+            params,
+        },
+        clock: PistonClock::default(),
+    };
+    let u = lbp_sim::UNIT_SCALE;
+    // Switched on (direction mode), it winds in over half its time and stops at 200.
+    assert!((d.step(15., Some((1, 1.))) / u - 300.).abs() < 1e-3);
+    assert!((d.step(60., Some((1, 1.))) / u - 200.).abs() < 1e-3);
+    // Switched off, the clock (run on to 200 meanwhile) counts back down and the rope
+    // pays out to its base length.
+    assert!((d.step(200., Some((0, 0.))) / u - 200.).abs() < 1e-3);
+    assert!((d.step(400., Some((0, 0.))) / u - 400.).abs() < 1e-3);
+}
