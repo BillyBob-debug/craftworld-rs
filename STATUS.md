@@ -6499,3 +6499,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D388 a level badge's radius (2026-10-19)
 - Part 135 (`docs/level-scripts/part-135.md`): a level badge's radius defaults to
   0.08 in the game's settings block, and the viewer's link ends use it.
+
+## D389 a link's width and look (2026-10-19)
+- Part 136 (`docs/level-scripts/part-136.md`): which links are drawn wide or narrow,
+  and how an active link's look differs from a pending one's.
