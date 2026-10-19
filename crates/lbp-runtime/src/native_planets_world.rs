@@ -985,6 +985,34 @@ impl PlanetsWorldScript {
         Ok(())
     }
 
+    /// D1005: `OnEnterPod__`. It clears the state, resets the interactive music
+    /// (`ResetPodInteractiveMusic__`), restores the view type kept by `OnExitPod__` and
+    /// snaps all three views to it. FOUND: `WantLevelCreatedDialogue` is set when the
+    /// previous level's slot is of type 2 and the previous level is valid. INFERRED: the
+    /// world keeps no previous level yet, so it is cleared.
+    pub fn on_enter_pod(host: &mut dyn Host, this: u32) -> Result<(), String> {
+        site(host, PLANETS_WORLD, "OnEnterPod__");
+        set_member(host, this, "State", Value::Int(0))?;
+        Self::reset_interactive_music(host, this)?;
+        set_member(host, this, "WantLevelCreatedDialogue", Value::Bool(false))?;
+        let kind = int(host, this, "LocalViewType");
+        set_member(host, this, "ViewType", Value::Int(kind))?;
+        set_member(host, this, "ViewTransition", Value::Float(1.))?;
+        let mut desired = PlanetsView::get(host, this, "DesiredView");
+        Self::set_planets_view(host, this, &mut desired, kind)?;
+        desired.put(host, this, "DesiredView")?;
+        desired.put(host, this, "CurrentView")?;
+        desired.put(host, this, "OldView")
+    }
+
+    /// D1005: `ResetPodInteractiveMusic__`: the pair volumes are set again next frame.
+    fn reset_interactive_music(host: &mut dyn Host, this: u32) -> Result<(), String> {
+        site(host, PLANETS_WORLD, "ResetPodInteractiveMusic__");
+        set_member(host, this, "IMusicInit", Value::Bool(true))?;
+        set_member(host, this, "IMusicEnabled", Value::Bool(false))?;
+        set_member(host, this, "IMusicPlaying", Value::Bool(false))
+    }
+
     /// `UpdateState__`: a cutscene state ends once its thread has finished. The pod
     /// introduction is the port's own (`IntroRunning`); D383: so is the level unlocking
     /// thread (`Host::level_unlocking_tick`).
@@ -1021,7 +1049,7 @@ impl PlanetsWorldScript {
         if as_int(&call(host, "Game", "GetNumPendingLinks__", &[])?) > 0 {
             return Self::set_state(host, this, 2);
         }
-        // `WantLevelCreatedDialogue` is only set by `OnEnterPod__` (not ported).
+        // `WantLevelCreatedDialogue` is only set by `OnEnterPod__` (D1005).
         Ok(())
     }
 
@@ -1419,6 +1447,10 @@ impl NativeScript for PlanetsWorldScript {
             "OnExitPod__" => {
                 let v = int(host, thing, "ViewType");
                 set_member(host, thing, "LocalViewType", Value::Int(v)).map(|()| DONE)
+            }
+            "OnEnterPod__" => Self::on_enter_pod(host, thing).map(|()| DONE),
+            "ResetPodInteractiveMusic__" => {
+                Self::reset_interactive_music(host, thing).map(|()| DONE)
             }
             "OnScriptReloaded__" => Ok(DONE),
             _ => return None,
