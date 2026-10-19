@@ -360,6 +360,9 @@ pub struct LevelWorld {
     pub level_unlocking: Option<LevelUnlocking>,
     pub unlock_events: Vec<String>,
     pub story_search_requested: bool,
+    /// D1014: the group the unlock thread's end asks the pod computer to push
+    /// (`PushState__` of a group search); taken by the native pod computer.
+    pub unlock_group_push: Option<(i32, i32)>,
     /// D384: the SlotLink objects of the pending links (made with the Story results),
     /// and the SlotID objects made for a link's end that is not a Story slot.
     pub pending_link_objects: Vec<(PendingLink, ObjectId)>,

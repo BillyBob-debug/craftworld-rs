@@ -1652,6 +1652,16 @@ fn step(
             );
         }
     }
+    // D1014: the unlock thread's end pushes the group under the cursor.
+    if let Some(slot) = p.host.world.unlock_group_push.take() {
+        if let Some(story) = p.story.as_mut() {
+            let e = story.puter.push_group(&mut p.host, slot);
+            println!(
+                "Unlock thread ended after tick {} on the group {slot:?}: the native pod computer: {e:?} (D1014)",
+                p.scripts.ticks
+            );
+        }
+    }
     // D361: the stick on the planet, after the tick (the engine's planet update).
     while p.move_at.first().is_some_and(|m| m.0 == p.scripts.ticks) {
         let (_, dir) = p.move_at.remove(0);
