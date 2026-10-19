@@ -94,6 +94,17 @@ pub struct SceneBody {
     pub frozen: i32,
     /// Static body: WORLD owner or a fixed material in the glue tree (see module rules).
     pub fixed: bool,
+    /// D1100: an anti-gravity tweaker glued to the body, if any.
+    pub anti_gravity: Option<AntiGravity>,
+}
+
+/// D1100: a PPhysicsTweak with configuration 0 (the anti-gravity tweaker) as it acts on its
+/// body with the activation it was saved with.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AntiGravity {
+    /// PPhysicsTweak.gravity × lastKnownActivation: the share of gravity cancelled.
+    pub cancelled: f32,
+    pub dampening: [f32; 3],
 }
 
 /// One SHAPE Thing as a collider.
@@ -354,6 +365,7 @@ fn build_scene_inner(
                             angular_velocity: pb.angular_velocity,
                             frozen: pb.frozen,
                             fixed: is_world(thing) || is_pickup(thing),
+                            anti_gravity: None,
                         });
                         scene.bodies.len() - 1
                     })
@@ -433,6 +445,25 @@ fn build_scene_inner(
     }
     scene.report.fixed_bodies = scene.bodies.iter().filter(|b| b.fixed).count();
     scene.report.nested_bodies = nested.len();
+    for (i, t) in things.iter().enumerate() {
+        let Some(tw) = t
+            .data
+            .physics_tweak
+            .as_ref()
+            .filter(|tw| tw.configuration == 0)
+        else {
+            continue;
+        };
+        let slot = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        if let Some(b) = slot {
+            scene.bodies[b].anti_gravity = Some(AntiGravity {
+                cancelled: tw.gravity * tw.last_known_activation,
+                dampening: tw.dampening,
+            });
+        }
+    }
     scene.add_joints(things);
     scene
 }
