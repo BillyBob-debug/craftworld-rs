@@ -169,12 +169,17 @@ impl LevelWorld {
     /// function, INFERRED acos, of the dot of the two badges' directions; 0 without
     /// them).
     pub fn link_separation(&self, l: PendingLink) -> f32 {
-        match (self.slot_dir(l.from), self.slot_dir(l.to)) {
-            (Some(a), Some(b)) => (a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
+        match self.link_dirs(l) {
+            Some((a, b)) => (a[0] * b[0] + a[1] * b[1] + a[2] * b[2])
                 .clamp(-1., 1.)
                 .acos(),
-            _ => 0.,
+            None => 0.,
         }
+    }
+
+    /// D386: the directions of a link's two ends (its slots' locations), for drawing.
+    pub fn link_dirs(&self, l: PendingLink) -> Option<([f32; 3], [f32; 3])> {
+        Some((self.slot_dir(l.from)?, self.slot_dir(l.to)?))
     }
 
     /// D385: `PodComputer.SetLinkProgress__Q8SlotLinkf`, kept for the link's drawing
