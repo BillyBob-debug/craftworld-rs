@@ -6691,3 +6691,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1106 speed pistons servo to their signal (2026-10-19)
 - Logic lane: a mode 4 piston runs its clock toward the analog signal's fraction of
   its range, full speed until within a tenth (0xc9e80; docs/logic.md P8).
+
+## D1107 winches run the piston rule (2026-10-19)
+- Logic lane: winches share the piston length function (0xc9790), so they wind and
+  pay out on the piston clock; the rope only pulls (INFERRED, 0x960988 flag; P9).

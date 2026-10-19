@@ -390,8 +390,9 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   OR 21 (4,089), selector 35 (2,869), toggle 17 (1,107), circuit node 40 (772), XOR 22
   (648), direction 20 (344), sign split 27 (130), random 19 (1,213).
 - Sensors computed from the world: tag 4 (16,953), player 3 (5,627), impact 18
-  (3,944; Part 15), camera finished 32 (2,760; Part 16).
-- Kept as stored (the world signal is not modelled yet): magic mouth 34 (1,426), projectile 39 (816),
+  (3,944; Part 15), camera finished 32 (2,760; Part 16), magic mouth 34 (1,426;
+  Part 17).
+- Kept as stored (the world signal is not modelled yet): projectile 39 (816),
   linear velocity 42 (771), grab 6 (666), control pad 38 (535), key remote 54 (497),
   button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123), angular velocity
   43 (122), 65 (77), lever 1 (74), sticker 5 (68), score 30 (51), paint 8 (51),
@@ -482,3 +483,22 @@ small copy of that manager.
   `CameraTweak` (camera type, hold time, time since used).
 - Tests: `camera_finished_fires_as_the_cutscene_ends`,
   `time_since_used_and_other_camera_types` in cutscene.rs.
+
+## Part 17: the magic mouth switch (D1115)
+
+The magic mouth (type 34, 1,426 placed) gets its signal from its script, but not by
+asking it. compute_output's case 0x11c874 takes the Thing's script part and reads the
+integer member `OutputEndSignalFrames` through the stub 0x89032c, which jumps to
+0x61fd88. The member's name is cached at TOC 0xdaa0c0+0x2e38, and the name string's
+address is at +0x2e3c.
+
+- Signal: {1.0, 1, -1} while the member is above 0 (1.0 from 0xd95f84), else off
+  (0x11bf08). Both go through the shared tail, so an inverted mouth is turned round.
+- The bubble script sets the member to 2 when its message stops and counts it down in
+  `Update__` (docs/level1-play.md), so the output is a 2-tick pulse.
+- Before: the runtime stored the script's `SwitchGetNewActivation__i` result as the
+  output. That skipped the inversion and kept the stored player. Type 34 now reads the
+  member in the switch pass. Other scripted switches still store the script's value.
+- INFERRED: with no script, or no such member, off.
+- lbp-runtime: `magic_mouth` in switches.rs reads `ThingState.members`.
+- Test: `magic_mouth_reads_its_end_signal_frames` in switches.rs.
