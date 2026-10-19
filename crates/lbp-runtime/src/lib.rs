@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 mod camera;
+mod cutscene;
 mod display;
 mod global_settings;
 mod gooey;
@@ -50,6 +51,7 @@ mod story_native;
 mod switches;
 pub mod transform;
 pub use camera::*;
+pub use cutscene::*;
 pub use display::*;
 pub use global_settings::*;
 pub use gooey::*;
@@ -108,6 +110,8 @@ pub struct ThingState {
     /// The Thing's input table by port: the switch output wired to each port, `None`
     /// for a port nothing is wired to (see [`LevelWorld::wire_inputs`]).
     pub inputs: Vec<Option<InputWire>>,
+    /// PCameraTweak, when the Thing has one ([`LevelWorld::cutscene_step`]).
+    pub camera_tweak: Option<CameraTweakState>,
     /// The game's "deactivated" byte (Thing+0x7f): while set, the switch pass forces the
     /// Thing's outputs off ([`LevelWorld::update_switch`]). FOUND: the game derives it
     /// from the microchip or circuit board holding the Thing
@@ -531,6 +535,8 @@ pub struct LevelWorld {
     /// The physics contacts of this tick, as the host's physics reports them: the impact
     /// sensor reads them ([`Contact`]). Empty unless the host fills it.
     pub contacts: Vec<Contact>,
+    /// The running cutscene, if any ([`LevelWorld::cutscene_step`]).
+    pub cutscene: Option<Cutscene>,
 }
 
 /// One contact between two Things' bodies this tick (the game's pair cache, world
@@ -803,6 +809,11 @@ impl LevelWorld {
                     shape_colour: t.data.shape.as_ref().map(|s| match s.color {
                         ShapeColor::Packed(c) => unpack_colour(c),
                         ShapeColor::Vector(v) => v,
+                    }),
+                    camera_tweak: t.data.camera_tweak.as_ref().map(|c| CameraTweakState {
+                        camera_type: c.camera_type,
+                        hold_time: c.hold_time,
+                        time_since_used: c.time_since_used,
                     }),
                     trigger: t.data.trigger.as_ref().map(|g| TriggerState {
                         trigger_type: g.trigger_type,
@@ -4564,6 +4575,7 @@ impl LevelScripts {
         self.script_activations(vm, host, budget, &mut report);
         host.world.prepare_switches();
         host.world.refresh_tags();
+        host.world.cutscene_step();
         for switch in host.world.switch_order().to_vec() {
             for v in host.world.update_switch(switch) {
                 let r = &mut report.reactions;

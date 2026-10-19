@@ -37,6 +37,7 @@
 //! - Switch types 0x24/0x25 standing in for their microchip's switch in the ordering.
 //! - The other object kinds a signal is applied to (lights, emitters, movers and so on).
 //! - The activating player the game records on the target before the dispatch.
+use crate::cutscene::camera_finished;
 use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
 use crate::{InputWire, LevelWorld, SwitchState, ThingState};
 use lbp_script_vm::natives::SwitchInput;
@@ -458,6 +459,8 @@ pub fn compute_output(
         3 => standard(player_sensor(cx)),
         4 => standard(tag_sensor(cx)),
         18 => standard(impact_sensor(cx)),
+        // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.
+        32 => standard(camera_finished(cx)),
         // PRESSURE, SACKBOT_*, INACTIVE, DEATH, CUTSCENE_CAM_ACTIVE and the later types
         // whose signal is not made in the pass, 0x11bf08, FOUND: {0.0, 0, -1}.
         7 | 11..=13 | 26 | 31 | 33 | 46..=53 | 56 | 58..=64 => off(),
@@ -1335,6 +1338,7 @@ impl LevelWorld {
     pub fn update_switches(&mut self) -> Vec<TargetVisit> {
         self.prepare_switches();
         self.refresh_tags();
+        self.cutscene_step();
         let order = self.switch_order().to_vec();
         order
             .into_iter()

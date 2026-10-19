@@ -6687,3 +6687,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1105 a piston's ends are a joint limit (2026-10-19)
 - Logic lane: the game never clamps a piston's clock; the solver holds its length
   between base and base + range, so a long-on piston waits before it returns (P7).
+
+## D1106 speed pistons servo to their signal (2026-10-19)
+- Logic lane: a mode 4 piston runs its clock toward the analog signal's fraction of
+  its range, full speed until within a tenth (0xc9e80; docs/logic.md P8).

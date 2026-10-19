@@ -390,9 +390,8 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   OR 21 (4,089), selector 35 (2,869), toggle 17 (1,107), circuit node 40 (772), XOR 22
   (648), direction 20 (344), sign split 27 (130), random 19 (1,213).
 - Sensors computed from the world: tag 4 (16,953), player 3 (5,627), impact 18
-  (3,944; Part 15).
-- Kept as stored (the world signal is not modelled yet): camera finished 32 (2,760),
-  magic mouth 34 (1,426), projectile 39 (816),
+  (3,944; Part 15), camera finished 32 (2,760; Part 16).
+- Kept as stored (the world signal is not modelled yet): magic mouth 34 (1,426), projectile 39 (816),
   linear velocity 42 (771), grab 6 (666), control pad 38 (535), key remote 54 (497),
   button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123), angular velocity
   43 (122), 65 (77), lever 1 (74), sticker 5 (68), score 30 (51), paint 8 (51),
@@ -455,3 +454,31 @@ jumps to the epilogue 0x124940).
   b, force }`). The host does not fill it yet, so impact switches read off for now.
 - Tests: `impact_sensor_counts_hits_by_player_mode`,
   `impact_sensor_touching_tags_and_body` in sensors.rs.
+
+## Part 16: the camera finished switch and the cutscene timer (D1114)
+
+Camera finished (type 32, 2,760 placed) sits on a cutscene camera. compute_output sends
+it to 0x11c854, which calls 0x10ee78. It reads the camera tweak and the cutscene
+manager (update 0x369130, start 0x368c40, switch 0x368680), so the runtime now keeps a
+small copy of that manager.
+
+- Cutscene camera: a camera tweak with cameraType 3 (PCameraTweak+0x30).
+- Time since used (PCameraTweak+0x5d): set to 0 while the camera's input is on or it is
+  the cutscene's camera, otherwise up by one a tick while below 10; 0xff never counts.
+- Start: with no cutscene, a cutscene camera with time above 9 and input on becomes the
+  cutscene's camera; ticks, ending and its time go to 0 (0x368c40, 0x368680, 0x549f8).
+- Hold: while the ending count (manager+0x18) is not above 0, ticks (+0x14) go up by
+  one; once cutSceneHoldTime (ticks; below 0 for ever) is below the ticks, ending = 3.
+  Each later tick takes one off; at 0 the cutscene ends.
+- Signal: off without a cutscene camera, off while it is the cutscene's camera with
+  ending not above 0, on ({1.0, 1, -1}) while time is at most 9, else off. So it fires
+  for the last ticks of the ending and 9 ticks after.
+- INFERRED: the input is the signal on the camera's port 0 (ternary not 0); the step runs
+  before the switch pass.
+- Not modelled: the trigger box of an unwired camera (0x56808), the transitions, a hold
+  from the camera's audio (0x55160), skipping, chained cameras (0x365470), single use
+  (+0x72) and the paused checks.
+- lbp-runtime: cutscene.rs (`cutscene_step`, `camera_finished`); lbp-level reads
+  `CameraTweak` (camera type, hold time, time since used).
+- Tests: `camera_finished_fires_as_the_cutscene_ends`,
+  `time_since_used_and_other_camera_types` in cutscene.rs.

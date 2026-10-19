@@ -343,6 +343,20 @@ pub struct PartData {
     /// PPhysicsTweak as stored (D1100): the mover, follower and anti-gravity settings.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub physics_tweak: Option<PhysicsTweak>,
+    /// PCameraTweak's cutscene fields as stored (D1114; the rest are read through).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub camera_tweak: Option<CameraTweak>,
+}
+
+/// PCameraTweak fields the cutscene manager reads (D1114, docs/logic.md Part 16).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct CameraTweak {
+    /// cameraType; 3 is a cutscene camera.
+    pub camera_type: i32,
+    /// cutSceneHoldTime, in ticks (below 0: held until ended otherwise).
+    pub hold_time: i32,
+    /// cutSceneTimeSinceUsed, as an unsigned byte (0xff: never used).
+    pub time_since_used: u8,
 }
 
 /// PPhysicsTweak fields as stored (D1100; names from the toolkit, units UNVERIFIED). The
@@ -1165,7 +1179,10 @@ fn part_body(
             own.backdrop_mesh = r.resource(false)?;
             things.list[me].data.level_settings = Some(own);
         }
-        "CAMERA_TWEAK" => camera_tweak(r)?,
+        "CAMERA_TWEAK" => {
+            let tweak = camera_tweak(r)?;
+            things.list[me].data.camera_tweak = Some(tweak);
+        }
         "JOINT" => {
             let a = thing_ref(r, things)?;
             let b = thing_ref(r, things)?;
@@ -2620,7 +2637,7 @@ fn level_settings(r: &mut Reader) -> Result<LevelSettings> {
     Ok(s)
 }
 
-fn camera_tweak(r: &mut Reader) -> Result<()> {
+fn camera_tweak(r: &mut Reader) -> Result<CameraTweak> {
     let v = r.rev.version();
     if v < 0x37e {
         r.v3()?;
@@ -2632,7 +2649,10 @@ fn camera_tweak(r: &mut Reader) -> Result<()> {
     }
     r.f32()?;
     r.i32()?;
-    r.s32()?;
+    let mut tweak = CameraTweak {
+        camera_type: r.s32()?,
+        ..Default::default()
+    };
     r.bool()?;
     r.bool()?;
     r.bool()?;
@@ -2641,9 +2661,9 @@ fn camera_tweak(r: &mut Reader) -> Result<()> {
         r.u8()?;
     }
     r.i8()?;
-    r.i32()?;
+    tweak.hold_time = r.i32()?;
     r.bool()?;
-    r.i8()?;
+    tweak.time_since_used = r.i8()? as u8;
     r.i32()?;
     if v < 0x35a {
         r.bool()?;
@@ -2673,7 +2693,7 @@ fn camera_tweak(r: &mut Reader) -> Result<()> {
             r.bool()?;
         }
     }
-    Ok(())
+    Ok(tweak)
 }
 
 fn physics_tweak(r: &mut Reader, things: &mut Things) -> Result<PhysicsTweak> {
