@@ -6503,3 +6503,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D389 a link's width and look (2026-10-19)
 - Part 136 (`docs/level-scripts/part-136.md`): which links are drawn wide or narrow,
   and how an active link's look differs from a pending one's.
+
+## D390 which links are wide (2026-10-19)
+- Part 137 (`docs/level-scripts/part-137.md`): links between main-path, boss,
+  cut-scene or DLC-hub slots are drawn wide and the rest narrow, as in the game.

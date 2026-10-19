@@ -1,8 +1,8 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-140.md` (139 for a link's texture, 138 for links between
-   groups, 137 for which links are wide, 136 for a link's width
+1. `docs/level-scripts/part-141.md` (140 for a short link, 139 for a link's texture,
+   138 for links between groups, 137 for which links are wide, 136 for a link's width
    and look, 135 for a level badge's radius, 134 for a badge's radius, 133 for drawing the
    links, 132 for the links' growth, 131 for the scripted unlock sequence, 130 for the
    unlock sequence played, 129 for the return, 128 for the finish, 127 for the unlock
@@ -17,11 +17,11 @@
    `pod_computer_native.rs`, `native_planets_world.rs` (the ports)
 
 ## State
-- PRs 153 (D353) through 198 (D392) merged. PR for D393 (branch `pod-d393`, worktree
-  `E:\Projects\wt-d324`): a short link's strip; handed to the coordinator for merge once
-  rust and python are green.
+- PRs 153 (D353) through 199 (D393) merged. PR for D394 (branch `pod-d394`, worktree
+  `E:\Projects\wt-d324`): the link shader and the active test; handed to the coordinator
+  for merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399, next free D394.
+  Decision numbers: D348-D399, next free D395.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -107,7 +107,7 @@
 3. A finished level returns to the Pod (D382), whose native state 2 plays
    `LevelUnlockingThread` (D383), as does the scripted one (D384); the links grow with the
    game's timing (D385) and are drawn with the game's texture (D386, D392; open: the
-   line shader's edge, the active set, the level badges'
+   line shader's program, the active look, a locked target (D394), the level badges'
    radius, 0.08 from the settings block's default (D388), to measure in RPCS3 during an
    unlock; badge kind 2 comes from loaded data, D393). It, the
    intro and `OnEnterPod__` also wait on audio (none plays yet). The interactive music
