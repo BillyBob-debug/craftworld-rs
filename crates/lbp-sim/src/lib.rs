@@ -194,10 +194,29 @@ pub struct PistonDrive {
     pub clock: scene::PistonClock,
 }
 
-/// D1103: at tick `now` sets each piston's clock rate, 1 with no input, else from the
-/// `signal` on its input (ternary, activation) by its mode ([`scene::piston_scale`],
-/// D1104; mode 4 [`scene::SceneJoint::servo_scale`], D1106), then its length from the
-/// clock, waking both ends when it changed.
+impl PistonDrive {
+    /// D1103: at tick `now` sets the clock rate, 1 with no input, else from the `input`
+    /// signal (ternary, activation) by mode ([`scene::piston_scale`], D1104; mode 4
+    /// [`scene::SceneJoint::servo_scale`], D1106), and returns the length (in sim units)
+    /// from the clock.
+    pub fn step(&mut self, now: f32, input: Option<(i32, f32)>) -> f32 {
+        let p = self.joint.params;
+        let s = match input {
+            None => 1.,
+            Some(_) if p.held => 0.,
+            Some((_, a)) if p.mode == 4 => {
+                let l = self.joint.length(self.clock.frame(now), true);
+                self.joint.servo_scale(a, l)
+            }
+            Some((t, a)) => scene::piston_scale(p.mode, p.held, t, a),
+        };
+        self.clock.set_scale(now, s);
+        self.joint.length(self.clock.frame(now), input.is_some()) * UNIT_SCALE
+    }
+}
+
+/// D1103: at tick `now` steps each piston ([`PistonDrive::step`]) with the `signal` on its
+/// input and holds its slider at the length, waking both ends when it changed.
 pub fn drive_pistons(
     commands: &mut Commands,
     q: &mut Query<(&mut PistonDrive, &mut PrismaticJoint)>,
@@ -206,26 +225,40 @@ pub fn drive_pistons(
 ) {
     for (mut drive, mut joint) in q.iter_mut() {
         let input = signal(&drive.joint);
-        let p = drive.joint.params;
-        let s = match input {
-            None => 1.,
-            Some(_) if p.held => 0.,
-            Some((_, a)) if p.mode == 4 => {
-                let l = drive.joint.length(drive.clock.frame(now), true);
-                drive.joint.servo_scale(a, l)
-            }
-            Some((t, a)) => scene::piston_scale(p.mode, p.held, t, a),
-        };
-        drive.clock.set_scale(now, s);
-        let frame = drive.clock.frame(now);
-        let l = drive.joint.length(frame, input.is_some()) * UNIT_SCALE;
+        let l = drive.step(now, input);
         if joint.limits.is_some_and(|d| d.min == l && d.max == l) {
             continue;
         }
         joint.limits = Some(DistanceLimit::new(l, l));
-        for e in [joint.body1, joint.body2] {
-            commands.queue(move |world: &mut World| wake_if_island(world, e));
+        wake_ends(commands, joint.body1, joint.body2);
+    }
+}
+
+/// D1107: winches (CHAIN, type 3) run the piston's clock and length rule (0xc95ec sends
+/// types 3, 4 and 9 to 0xc9790, the solver gives types 3 and 4 the same limit rows), so
+/// at tick `now` each one is stepped like a piston and its rope held to at most the length.
+/// The solver builds the winch row (0x960988) with a flag (set at 0x1c9964) that the piston
+/// and rod rows clear; INFERRED from that, the rope only pulls and goes slack when shorter.
+pub fn drive_winches(
+    commands: &mut Commands,
+    q: &mut Query<(&mut PistonDrive, &mut DistanceJoint)>,
+    now: f32,
+    signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32)>,
+) {
+    for (mut drive, mut joint) in q.iter_mut() {
+        let input = signal(&drive.joint);
+        let l = drive.step(now, input);
+        if joint.limits.min == 0. && joint.limits.max == l {
+            continue;
         }
+        joint.limits = DistanceLimit::new(0., l);
+        wake_ends(commands, joint.body1, joint.body2);
+    }
+}
+
+fn wake_ends(commands: &mut Commands, a: Entity, b: Entity) {
+    for e in [a, b] {
+        commands.queue(move |world: &mut World| wake_if_island(world, e));
     }
 }
 
@@ -449,8 +482,13 @@ fn spawn_joint(
                 clock: scene::PistonClock::default(),
             })
         }
-        scene::JointKind::Rod | scene::JointKind::Chain => {
-            e.insert(distance(j.length, j.length, 0.))
+        scene::JointKind::Rod => e.insert(distance(j.length, j.length, 0.)),
+        scene::JointKind::Chain => {
+            let l = j.length(0., false);
+            e.insert(distance(0., l, 0.)).insert(PistonDrive {
+                joint: j.clone(),
+                clock: scene::PistonClock::default(),
+            })
         }
         scene::JointKind::String => e.insert(distance(0., j.length, 0.)),
         scene::JointKind::Elastic => e.insert(distance(0., j.length, SPRING_COMPLIANCE)),

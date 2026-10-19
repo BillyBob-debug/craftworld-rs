@@ -6659,3 +6659,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D514 the VM runs scripts' .init__ for Thing members (2026-10-19)
 - The VM gives scripted Things the members their class `.init__` sets before the stored
   ones; the bubbles' 21 tick-0 `Update__` runs now match native (docs/level1-play.md P15).
+
+## D515 why the Rookie Test route stops at x -385 (2026-10-19)
+- Bumping the column at x -2940 wakes the whole frozen walkway row, which falls to the
+  floor; we skip the tweakers and switches that hold it (docs/level1-play.md P16).

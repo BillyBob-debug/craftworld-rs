@@ -536,7 +536,7 @@ pub enum JointKind {
     Elastic,
     /// SPRING (2): holds its length, compliant.
     Spring,
-    /// CHAIN (3, winch INFERRED): fixed length for now (animation not modelled).
+    /// CHAIN (3, winch INFERRED): its length follows the piston rule (D1107).
     Chain,
     /// PISTON (4): slides along the contact line between its min and max length.
     Piston,
