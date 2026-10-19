@@ -236,10 +236,41 @@ What the game does (EBOOT 01.33, FOUND unless marked; TOC base r2 = 0xd9a0f8):
   be off by one there (open).
 - Type 9 (0x1c9eac): range 2π or more (or pattern 1) is unbounded; pattern 0 limits
   `+0xe0` ± range / 2; pattern 2 `+0xe0` to `+0xe0` + range; rows 0x95ae04 and 0x95f494
-  with the strength as a cap. No read of Speed `+0xd4` there, so the motor's turn rate
-  comes from elsewhere (open). Motors are not changed yet.
+  with the strength as a cap. The turn rate is in Part 10.
 
 lbp-sim: a CHAIN joint gets a `PistonDrive` and a distance joint held at 0 to the length
 (`drive_winches`, INFERRED one-sided); `PistonDrive::step` is shared with pistons.
 
 Test: `d1107_a_winch_follows_the_piston_rule` (lbp-sim sandbox).
+
+## Part 10: motors turn on the piston clock (D1108)
+
+What the game does (EBOOT 01.33, FOUND unless marked):
+- 0xc99d0 (types 7 and up) returns a motor's target angle: the length rule 0xc95ec less
+  the base `+0xf0`, plus the centre `+0xe0`. It is not stored in a field.
+- The row builder 0x95f494 (called at 0x1ca050) calls 0xc99d0 at frame and frame + 1 and
+  drives the joint by that change per frame (wrapped by 2π); the error to the measured
+  angle 0xc9250 also feeds the row (INFERRED, clamps 0x95f91c-0x95f944). Strength from
+  0xca760 is the cap (f2); f1 is 0, or 5 × strength for pattern 2.
+- Pattern 1 (0x95f5f0 to 0x95fa44, 0xc7444, 0xc7370): Speed `+0xd4` × the clock rate
+  (`*(+0x190)+0x3c`), in radians per frame. Pattern 0 with time 1 or more:
+  range / (time × 0.5) × rate, a sweep of centre ± range / 2.
+- 0xc9af4 (from 0xcab7c) moves the centre by measure - target; INFERRED a sync when the
+  joint first runs, so only the angle's change drives the motor.
+
+lbp-sim: a MOTOR joint gets a `PistonDrive`; `PistonDrive::turn` steps the clock and
+returns (angle(frame + rate) - angle(frame)) × TICK_HZ in rad/s, with
+`SceneJoint::motor_angle` the length rule less the base, clamped to the range except for
+pattern 1 or a range of 2π or more. `drive_motors` sets the motor's target velocity each
+tick. This replaces `MOTOR_SPEED_SCALE` (1, unverified) with the found unit (× 30).
+Left out: the position term and the strength cap. The sign (game angle against avian's
+counter-clockwise) is UNVERIFIED.
+
+The Rookie Test has one MOTOR joint (thing 58: mode 1, pattern 0, range π, time 180,
+pause 30, so a wobble bolt), wired to microchip 57 (type 36), whose port is on from tick
+0. By the rule it swings its half turn in 90 frames and holds; before it crept at 0.017
+rad/s. Sackboy then drops at tick 1012 near x -1,977 (y 3,610) instead of staying up,
+and the route ends at x 24,635 (tick 2008) instead of 25,645. A control run with the old
+spin gives 25,645 again. Which is right needs RPCS3 (open).
+
+Test: `d1108_a_motor_turns_at_its_speed_on_its_clock` (lbp-sim sandbox).

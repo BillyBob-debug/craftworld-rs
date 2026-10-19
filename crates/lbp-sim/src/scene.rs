@@ -673,6 +673,24 @@ impl SceneJoint {
         };
         l.clamp(base.min(base + range), base.max(base + range))
     }
+
+    /// D1108: FOUND (01.33, 0xc99d0 for types 7 and up) a motor's target angle (radians)
+    /// at clock `frame` is the piston length rule less its base, plus a centre that is
+    /// synced to the measured angle when the joint first runs (0xc9af4, INFERRED), so only
+    /// its change matters. The motor row (0x95f494) is unbounded for pattern 1 or a range
+    /// of 2π or more, so the angle is clamped to the range only otherwise.
+    pub fn motor_angle(&self, frame: f32, wired: bool) -> f32 {
+        let base = self.min_length;
+        let range = self.params.motion[0];
+        let l = match self.params.mode {
+            1 | 4 if wired => self.length(frame, true),
+            _ => self.free_length(frame),
+        };
+        if self.params.animation_pattern == 1 || range.abs() >= std::f32::consts::TAU {
+            return l - base;
+        }
+        l.clamp(base.min(base + range), base.max(base + range)) - base
+    }
 }
 
 /// D1104: FOUND (01.33, the per-frame pass 0xcfedc, jump table 0xcffa4) the rate a wired
