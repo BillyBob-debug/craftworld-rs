@@ -6475,3 +6475,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D382 back to the Pod after a finish (2026-10-18)
 - Part 129 (`docs/level-scripts/part-129.md`): a finished story level returns to the
   Pod with Sackboy, and the Pod's state 2 clears its link and unlocks the next level.
+
+## D383 the level unlocking sequence played (2026-10-18)
+- Part 130 (`docs/level-scripts/part-130.md`): back in the Pod after a finish, the
+  native state 2 flies the cursor over the new link and unlocks the next level.

@@ -137,6 +137,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 131: the game's own unlock sequence (2026-10-18, D384)](level-scripts/part-131.md)
 - [Part 132: the links' growth (2026-10-18, D385)](level-scripts/part-132.md)
 - [Part 133: drawing the links (2026-10-18, D386)](level-scripts/part-133.md)
+- [Part 134: a badge's radius (2026-10-19, D387)](level-scripts/part-134.md)
 
 ## Next
 
