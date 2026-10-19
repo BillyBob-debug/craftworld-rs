@@ -230,18 +230,20 @@ pub fn drive_moves(
     player: Option<Vec2>,
     activation: impl Fn(&scene::MoveTweak) -> f32,
 ) {
+    // The rows are in game units per tick; the bodies move in sim units per second.
     let hz = TICK_HZ as f32;
+    let per_tick = 1. / (hz * UNIT_SCALE);
     for (e, tweaks, pos, rot, mut v) in q.iter_mut() {
         let up = [-rot.sin, rot.cos];
-        let before = [v.0.x / hz, v.0.y / hz];
+        let before = [v.0.x * per_tick, v.0.y * per_tick];
         let after = tweaks.0.iter().fold(before, |vel, t| {
             let d = player
-                .map(|p| [p.x - pos.0.x, p.y - pos.0.y])
+                .map(|p| [(p.x - pos.0.x) / UNIT_SCALE, (p.y - pos.0.y) / UNIT_SCALE])
                 .filter(|&d| t.configuration == 11 && t.sees(d, up));
             t.push(vel, up, d, activation(t))
         });
-        if (after[0] - before[0]).abs() + (after[1] - before[1]).abs() > 1e-6 {
-            v.0 = Vec2::new(after[0], after[1]) * hz;
+        if (after[0] - before[0]).abs() + (after[1] - before[1]).abs() > 1e-4 {
+            v.0 = Vec2::new(after[0], after[1]) / per_tick;
             commands.queue(avian2d::dynamics::solver::islands::WakeBody(e));
         }
     }
