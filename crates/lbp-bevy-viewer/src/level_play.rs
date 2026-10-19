@@ -1066,6 +1066,7 @@ pub fn install(app: &mut App) -> Result<(), String> {
             follow_water,
             follow_gravity,
             follow_tweaks,
+            drive_pistons,
             follow_colour_correction,
             follow_things,
             follow_story_world,
@@ -2146,6 +2147,27 @@ fn follow_tweaks(
     let world = &play.host.world;
     lbp_sim::follow_tweaks(&mut commands, &mut q, |t| {
         world.tweak_activation(t.thing, t.behavior)
+    });
+}
+
+/// D1102: pistons with no switch input run the game's free-running rule on the tick
+/// count; a wired piston keeps its rest length until the switch-driven rule is read.
+fn drive_pistons(
+    play: NonSend<Play>,
+    mut commands: Commands,
+    mut q: Query<(
+        &lbp_sim::PistonDrive,
+        &mut lbp_sim::avian2d::prelude::PrismaticJoint,
+    )>,
+) {
+    let world = &play.host.world;
+    let frame = play.scripts.ticks as f32;
+    lbp_sim::drive_pistons(&mut commands, &mut q, |j| {
+        let wired = world
+            .things
+            .get(j.thing)
+            .is_some_and(|t| t.inputs.iter().any(Option::is_some));
+        (!wired).then(|| j.free_length(frame))
     });
 }
 

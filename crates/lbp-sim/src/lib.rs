@@ -186,6 +186,38 @@ pub fn follow_tweaks(
     }
 }
 
+/// D1102: a piston joint, kept so its length can follow the game's piston rule.
+#[derive(Component, Debug, Clone)]
+pub struct PistonDrive(pub scene::SceneJoint);
+
+/// D1102: sets each piston's length from `length` (None leaves the joint as it is) and
+/// wakes both ends when it changed.
+pub fn drive_pistons(
+    commands: &mut Commands,
+    q: &mut Query<(&PistonDrive, &mut PrismaticJoint)>,
+    length: impl Fn(&scene::SceneJoint) -> Option<f32>,
+) {
+    for (drive, mut joint) in q.iter_mut() {
+        let Some(l) = length(&drive.0) else { continue };
+        let l = l * UNIT_SCALE;
+        if joint.limits.is_some_and(|d| d.min == l && d.max == l) {
+            continue;
+        }
+        joint.limits = Some(DistanceLimit::new(l, l));
+        for e in [joint.body1, joint.body2] {
+            commands.queue(move |world: &mut World| wake_if_island(world, e));
+        }
+    }
+}
+
+/// Wakes a body's island; a static anchor (no island) is left alone.
+fn wake_if_island(world: &mut World, e: Entity) {
+    use avian2d::dynamics::solver::islands::{BodyIslandNode, WakeBody};
+    if world.get::<BodyIslandNode>(e).is_some() {
+        let _ = WakeBody(e).apply(world);
+    }
+}
+
 /// A body that starts asleep (PBody.frozen != 0, INFERRED: a saved level is at rest). avian
 /// builds islands during the first step, so after it the body goes back to its stored pose
 /// with no velocity and its island is put to sleep; contacts and joints wake it.
@@ -393,6 +425,7 @@ fn spawn_joint(
                     .with_slider_axis(axis)
                     .with_limits(j.min_length * UNIT_SCALE, j.max_length * UNIT_SCALE),
             )
+            .insert(PistonDrive(j.clone()))
         }
         scene::JointKind::Rod | scene::JointKind::Chain => {
             e.insert(distance(j.length, j.length, 0.))

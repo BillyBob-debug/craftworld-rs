@@ -604,6 +604,57 @@ pub struct SceneJoint {
     pub params: lbp_level::parts::JointParams,
 }
 
+/// D1102: FOUND (01.33, FUN_000c79c8) the piston's there-and-back wave at time `x` in
+/// frames: 0 for `time` < 1; else over a cycle of `time + pause` frames it holds 0 for
+/// pause / 2, rises linearly to 1 over time / 2, holds 1 for pause, and falls over time / 2.
+pub fn piston_wave(x: f32, time: f32, pause: f32) -> f32 {
+    if time < 1. {
+        return 0.;
+    }
+    let (half, wait) = (time / 2., pause / 2.);
+    let m = x.rem_euclid(time + pause);
+    if m < wait {
+        0.
+    } else if m < wait + half {
+        (m - wait) / half
+    } else if m < pause + half {
+        1.
+    } else {
+        (1. - (m - pause - half) / half).max(0.)
+    }
+}
+
+impl SceneJoint {
+    /// D1102: FOUND (01.33, 0xc95ec, its free-running branch at 0xc9834) the length of a
+    /// piston with no switch input at `frame`, from its base length and motion settings
+    /// (range, time, phase, speed, pause), by animation pattern: 0 an eased move between
+    /// base and base + range over the wave; 1 base + (frame + phase) × speed; 2 a sawtooth
+    /// from base + range back to base over `time`, then base for `pause`; else the base.
+    /// INFERRED: the ease is a cosine (the call at 0x88f64c), the base length is the stored
+    /// length, and the game's retimed frame (`+0x190`) is the tick count.
+    pub fn free_length(&self, frame: f32) -> f32 {
+        let base = self.min_length;
+        let [range, time, phase, speed, pause, ..] = self.params.motion;
+        let t = frame + phase;
+        match self.params.animation_pattern {
+            0 => {
+                let s = piston_wave(t, time, pause);
+                base + range * (0.5 - 0.5 * (std::f32::consts::PI * s).cos())
+            }
+            1 => base + t * speed,
+            2 if time >= 1. => {
+                let u = t.rem_euclid(time + pause);
+                if u < time {
+                    base + range * (1. - u / time)
+                } else {
+                    base
+                }
+            }
+            _ => base,
+        }
+    }
+}
+
 /// World xy of a point given in a Thing's local frame (its POS matrix).
 fn world_point(t: &ThingRecord, p: [f32; 3]) -> Option<[f32; 2]> {
     let m = &t.data.pos.as_ref()?.world;
