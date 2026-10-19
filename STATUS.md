@@ -6707,3 +6707,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1110 movers and followers push their bodies (2026-10-19)
 - Logic lane: movers reach their set velocity and followers walk to Sackboy, stopping
   short by their range, on the game's two linear rows (0x957df4; docs/logic.md P12).
+
+## D1111 keyed followers follow tags (2026-10-19)
+- Logic lane: followers with followKey go to the nearest tag of their colour and name,
+  and tags placed on chips sit at their parent (0x1c3e04; docs/logic.md P13).

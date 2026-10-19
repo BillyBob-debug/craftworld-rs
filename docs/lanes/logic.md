@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-19 (pistons; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-21 (pistons; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -26,9 +26,10 @@
 - Merged: D1113 (PR 256, 1acd570) impact, D1114 (PR 257, e44851a) camera finished,
   D1115 (PR 258, 9c12aea) magic mouth, D1116 (PR 259, a2ad940) projectile and paint.
 - Merged: D1117 (PR 260, d94b874) the velocity switches.
-- D1118 (branch `logic-grab`, worktree `E:\Projects\wt-d324`): the grab switch
-  (docs/logic.md Part 20).
-- Decision numbers: D1100-D1199, next free D1119.
+- Merged: D1118 (PR 261, 4c34a07) the grab switch.
+- D1119 (branch `logic-pad`, worktree `E:\Projects\wt-d324`): the control pad
+  switch (docs/logic.md Part 21).
+- Decision numbers: D1100-D1199, next free D1120.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -45,10 +46,12 @@
   after D1115 x 24,464 on tick 2004, unchanged;
   after D1116 x 24,464 on tick 2004, unchanged;
   after D1117 x 24,464 on tick 2004, unchanged: nothing fills the bodies yet;
-  after D1118 x 24,464 on tick 2005, unchanged: nothing fills the grabs yet).
+  after D1118 x 24,464 on tick 2005, unchanged: nothing fills the grabs yet;
+  after D1119 x 24,464 on tick 2005, unchanged: nothing fills the pads yet).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
-  census-all-2.json adds the grab counts (Part 20).
+  census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
+  (Part 21).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -68,10 +71,10 @@
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
 EBOOT rule and unit tests:
-1. The switches kept as stored (Part 14), by count: control pad 38, key remote 54,
-   button 0, then the rest. The host must fill `PlayerState.grabbing` for the grab
-   switch (Part 20) and `ThingState.body` from avian2d for
-   the velocity switches (Part 19). The host must fill
+1. The switches kept as stored (Part 14), by count: key remote 54, button 0,
+   then the rest. The host must fill `PlayerState.grabbing` for the grab switch
+   (Part 20), `PlayerState.piloting` and `pad` for the control pad (Part 21) and
+   `ThingState.body` from avian2d for the velocity switches (Part 19). The host must fill
    `LevelWorld.contacts` from avian2d (Things by `lbp_sim::ThingIndex`) for the impact
    switch (Part 15) to see anything, and call `projectile_hit` for projectile and paint
    sensors (Part 18).
