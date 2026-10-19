@@ -6683,3 +6683,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1104 pistons follow their saved mode (2026-10-19)
 - Logic lane: each piston saves its mode; the 27 wired ones are direction pistons that
   ramp out while on and back while off; route reaches x 25,657 (docs/logic.md P6).
+
+## D1105 a piston's ends are a joint limit (2026-10-19)
+- Logic lane: the game never clamps a piston's clock; the solver holds its length
+  between base and base + range, so a long-on piston waits before it returns (P7).

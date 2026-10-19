@@ -528,6 +528,20 @@ pub struct LevelWorld {
     /// The world's tag map as the last switch pass left it
     /// ([`LevelWorld::refresh_tags`]): per key, the tags by ascending x.
     pub tags: BTreeMap<TagKey, Vec<TagRecord>>,
+    /// The physics contacts of this tick, as the host's physics reports them: the impact
+    /// sensor reads them ([`Contact`]). Empty unless the host fills it.
+    pub contacts: Vec<Contact>,
+}
+
+/// One contact between two Things' bodies this tick (the game's pair cache, world
+/// 0xdf5b28, 64-byte records). `force` is whether the contact carried an impulse (the
+/// record's two impulse vectors, +0x10 and +0x20, are not both zero; INFERRED: written
+/// by the physics solver); a contact without one is only touching.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Contact {
+    pub a: u32,
+    pub b: u32,
+    pub force: bool,
 }
 
 /// One recorded call kept with its arguments ([`LevelWorld::requests`]).

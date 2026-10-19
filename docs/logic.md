@@ -389,9 +389,10 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   (15,513), countdown 15 (7,090), NOT 23 (5,794), AND 14 (5,727), battery 28 (4,599),
   OR 21 (4,089), selector 35 (2,869), toggle 17 (1,107), circuit node 40 (772), XOR 22
   (648), direction 20 (344), sign split 27 (130), random 19 (1,213).
-- Sensors computed from the world: tag 4 (16,953), player 3 (5,627).
-- Kept as stored (the world signal is not modelled yet): impact 18 (3,944), camera
-  finished 32 (2,760), magic mouth 34 (1,426), projectile 39 (816),
+- Sensors computed from the world: tag 4 (16,953), player 3 (5,627), impact 18
+  (3,944; Part 15).
+- Kept as stored (the world signal is not modelled yet): camera finished 32 (2,760),
+  magic mouth 34 (1,426), projectile 39 (816),
   linear velocity 42 (771), grab 6 (666), control pad 38 (535), key remote 54 (497),
   button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123), angular velocity
   43 (122), 65 (77), lever 1 (74), sticker 5 (68), score 30 (51), paint 8 (51),
@@ -427,3 +428,30 @@ state is a seed (+0x1c), a phase (+0x24) and an on byte per output (SwitchOutput
   (one shorter when both off times are 0). Neither time is ever 0.
 - Tests: `random_dice`, `random_pick_patterns`, `random_switch_times`,
   `random_switch_inputs` in switches.rs.
+
+## Part 15: the impact switch (D1113)
+
+The impact sensor (type 18, 3,944 placed) is worked out each tick from that tick's
+physics contacts. compute_output (FUN_0011bd58) sends it to 0x11c2a8, which calls
+0x11ae80; nothing is stored and there is no end-of-update step (table 0x124b0c entry 18
+jumps to the epilogue 0x124940).
+
+- Body: the sensor's proxy (0x11b000), or its parent when the proxy has no shape
+  (0x11b47c); with neither, off (0x11b488).
+- Contacts: the world's pair cache (world 0xdf5b28, 64-byte records), visited by
+  0x900f54. A contact with the body itself is skipped (0x900fb0).
+- Impact: the record's two vectors at +0x10 and +0x20 are not both zero (0x90103c to
+  0x901090), with no tolerance. With IncludeTouching (+0x8c) a contact that only
+  touches also counts (0x9011e8). "ImpactTolerance" belongs to the sound part, not here.
+- Who counts: with the tag filter (+0xc9) only an object carrying a tag of the sensor's
+  key (+0x80; 0x11af34, 0x9010a0); otherwise by PlayerMode (+0x64): 0 the first player
+  only (0x900fc0 to 0x901124), 2 any object, others any player (0x11b6d8, 0x900fcc).
+- Signal: activation 1.0, ternary 1 (0x11873c, threshold DAT_00d961e8 = 0.25) with the
+  player of the first player hit; inverted (+0xc5) through the shared tail.
+- Not modelled: IncludeRigidConnectors (+0xca; on 0x11b0d0 to 0x11b478, off 0x11b584),
+  the mask and shape tests of a touching contact, the game-state check of the tag
+  filter, creatures as players and the tag's own player.
+- lbp-runtime: `impact_sensor` in sensors.rs reads `LevelWorld.contacts` (`Contact { a,
+  b, force }`). The host does not fill it yet, so impact switches read off for now.
+- Tests: `impact_sensor_counts_hits_by_player_mode`,
+  `impact_sensor_touching_tags_and_body` in sensors.rs.
