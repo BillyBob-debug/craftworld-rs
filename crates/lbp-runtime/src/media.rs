@@ -125,6 +125,14 @@ impl MediaState {
         self.voice_over.as_ref().is_some_and(|(_, left)| *left > 0)
     }
 
+    /// D1006 (FOUND 0x6793ec, `Video.IsVideoPlaying__`): the video manager's one slot
+    /// is in use (bit 0 of the word at +0x400), from `StartVideo` until the video is
+    /// finished or stopped, whatever its handle. INFERRED: the finish (0x67a25c ->
+    /// 0x679978) frees the slot, as `UpdateVideo` does here once the video has ended.
+    pub fn video_in_use(&self) -> bool {
+        self.video.is_some()
+    }
+
     /// D1003: whether the video with this handle has ticks left.
     pub fn video_playing(&self, handle: i32) -> bool {
         self.video

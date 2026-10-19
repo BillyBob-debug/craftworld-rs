@@ -2372,8 +2372,9 @@ impl World for LevelWorld {
             "Game.GetPartyLeadersPlayerNumber__" => {
                 Value::Int(self.player_records.first().map_or(-1, |r| r.number))
             }
+            // D1006 (FOUND 0x5f61e0 -> 0x6793ec): the video manager's one slot is in use.
+            "Video.IsVideoPlaying__" => Value::Bool(self.media.video_in_use()),
             "Game.IsNonInteractive__"
-            | "Video.IsVideoPlaying__"
             | "System.Is4to3__"
             | "Audio.UserMusicIsPaused__"
             | "Input.IsInAttractionLoop__i" => Value::Bool(false),

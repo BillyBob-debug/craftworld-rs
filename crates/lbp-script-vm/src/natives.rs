@@ -1921,6 +1921,9 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     ("Game", "GetNumAvatars__", |w, _| {
         w.state_query("Game.GetNumAvatars__")
     }),
+    // FOUND (01.33, 0x5f61e0 -> 0x679534 -> 0x6793ec). Declared static
+    // `bool IsVideoPlaying()`: the video manager's word at +0x400 is non-zero (bit 0: its
+    // one video slot is in use). It takes no handle. The world answers (D1006).
     ("Video", "IsVideoPlaying__", |w, _| {
         w.state_query("Video.IsVideoPlaying__")
     }),
