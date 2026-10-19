@@ -6595,3 +6595,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1012 the unlock line's stop (2026-10-19)
 - Part 159 (`docs/level-scripts/part-159.md`): the Story state keeps whether its unlock
   line started and stops it when it closes (`_StartedVO`).
+
+## D1013 the level-created dialogue (2026-10-19)
+- Part 160 (`docs/level-scripts/part-160.md`): the planets world's state update clears
+  the level-created dialogue's want; its line needs a My Levels search, not ported.
