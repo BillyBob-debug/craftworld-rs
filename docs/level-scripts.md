@@ -153,6 +153,7 @@ One file per part in `docs/level-scripts/`. A new part goes in its own
 - [Part 147: the native intro's video request (2026-10-19, D1000)](level-scripts/part-147.md)
 - [Part 148: where a key's kind 2 comes from (2026-10-19, D1001)](level-scripts/part-148.md)
 - [Part 149: the line shader's programs (2026-10-19, D1002)](level-scripts/part-149.md)
+- [Part 150: the intro's video length (2026-10-19, D1003)](level-scripts/part-150.md)
 
 ## Next
 

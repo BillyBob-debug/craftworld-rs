@@ -940,13 +940,16 @@ impl PlanetsWorldScript {
             // interrupt and replay both set. D1000 (FOUND, the same): first the pod
             // computer's `StartVideo__g` with the video 139230, which is
             // `Video.StartVideo__Q5Thinggb(null, guid, false)` kept as its video handle
-            // (script 16e6e8c9); no video starts here, so the handle stays -1.
+            // (script 16e6e8c9). D1003: it starts when its Bink file was read, else the
+            // handle is -1.
             let video = [
                 Value::Thing(None),
                 Value::Int(INTRO_VIDEO as i32),
                 Value::Bool(false),
             ];
-            call(host, "Video", "StartVideo__Q5Thinggb", &video)?;
+            let handle = call(host, "Video", "StartVideo__Q5Thinggb", &video)?;
+            let handle = if let Value::Int(h) = handle { h } else { -1 };
+            set_member(host, this, "IntroVideo", Value::Int(handle))?;
             let alt = call(host, "Profile", "HasPlayedLBP1AndUnlockedPod__", &[])?;
             let line = if as_bool(&alt) {
                 "pod_1st_time_alt"
@@ -965,8 +968,9 @@ impl PlanetsWorldScript {
 
     /// One tick of `PodIntroductionThread`, resumed before the world's update: the zoom
     /// steps by 1/450 to 1, then the thread waits while a voice-over or the pod
-    /// computer's video plays (the video handle is -1 here; the line plays for its bank
-    /// length, D397) and sets the
+    /// computer's video plays (the line plays for its bank length, D397; the video for
+    /// its Bink file's, D1003: the pod computer's `UpdateVideo__` each tick, which sets
+    /// the handle to -1 once `Video.UpdateVideo__ib` answers false) and sets the
     /// progression flags 3 (8188 when LBP1's Moon is unlocked and this is not a demo or
     /// kiosk build, 8064 in the PSN demo). Whether it is still running. The thread's
     /// voice-over line (D398) and its video (D1000) are requested when it starts.
@@ -984,7 +988,15 @@ impl PlanetsWorldScript {
         let ask = |host: &mut dyn Host, class, function| {
             call(host, class, function, &[]).is_ok_and(|v| as_bool(&v))
         };
-        if ask(host, "Audio", "IsVoiceOverPlaying__") {
+        let video = int(host, this, "IntroVideo");
+        if video != -1 {
+            let args = [Value::Int(video), Value::Bool(false)];
+            let playing = call(host, "Video", "UpdateVideo__ib", &args)?;
+            if !as_bool(&playing) {
+                set_member(host, this, "IntroVideo", Value::Int(-1))?;
+            }
+        }
+        if ask(host, "Audio", "IsVoiceOverPlaying__") || int(host, this, "IntroVideo") != -1 {
             return Ok(true);
         }
         let set = |host: &mut dyn Host, mask: i32| {

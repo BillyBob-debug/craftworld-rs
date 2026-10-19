@@ -3074,25 +3074,36 @@ const TABLE: &[(&str, &str, NativeFn)] = &[
     // `s32 StartVideo(Thing, guid, bool)` on Video. Two script functions call it, both
     // of the pod computer, and keep the answer as the pod computer's video handle; the
     // scripts that wait for a video wait while that handle is not -1. The core tries to
-    // start the video: started, it returns the video's handle; not started, -1. Here no
-    // video starts, so the answer is always the game's -1.
+    // start the video: started, it returns the video's handle; not started, -1. D1003:
+    // the world says whether it started (`Video.StartVideo.handle`); a world without that
+    // answer started none, so the game's -1.
     ("Video", "StartVideo__Q5Thinggb", |w, c| {
         let t = thing(param(c, 0)?)?;
         guid(param(c, 1)?)?;
         boolean(param(c, 2)?)?;
         w.engine_call("StartVideo", t, c.params)?;
-        Ok(Value::Int(NO_VIDEO))
+        Ok(match w.state_query("Video.StartVideo.handle") {
+            Ok(Value::Int(h)) => Value::Int(h),
+            _ => Value::Int(NO_VIDEO),
+        })
     }),
     // FOUND (01.33, 0x5fb5cc -> 0x7566ec -> 0x67c22c, 0x679438). Declared static
     // `bool UpdateVideo(s32, bool)` on Video. One script function calls it, with the pod
     // computer's video handle, and sets that handle to -1 on false. The core looks for
     // the video with the handle: none, false; else it steps the video and returns false
-    // once it has ended. No video has a handle here (`StartVideo` hands none out), so
-    // the answer is the game's false for every handle.
-    ("Video", "UpdateVideo__ib", |_, c| {
-        int(param(c, 0)?)?;
+    // once it has ended. D1003: -1 is no video's handle, so false without asking; any
+    // other the world answers (`Video.UpdateVideo.playing`), false when it can't.
+    ("Video", "UpdateVideo__ib", |w, c| {
+        let handle = int(param(c, 0)?)?;
         boolean(param(c, 1)?)?;
-        Ok(Value::Bool(false))
+        if handle == NO_VIDEO {
+            return Ok(Value::Bool(false));
+        }
+        w.engine_call("UpdateVideo", None, c.params)?;
+        Ok(match w.state_query("Video.UpdateVideo.playing") {
+            Ok(Value::Bool(b)) => Value::Bool(b),
+            _ => Value::Bool(false),
+        })
     }),
     // FOUND (01.33, 0x5f5434 -> 0x67a3d8). Declared static `void StopVideo(s32)` on
     // Video: stops the video with that handle, if there is one. Recorded only.
@@ -4200,14 +4211,12 @@ mod tests {
         assert!(call("Profile", "IsLBP2GameProgressionFlagSet__i", &mask).is_err());
         assert!(call("Profile", "HasPlayedLBP1AndUnlockedPod__", &[]).is_err());
         assert!(call("Profile", "HasPlayedLBP1AndUnlockedMoon__", &[]).is_err());
-        // No world is asked: no video has a handle.
-        for handle in [-1, 0, 7] {
-            let args = [Value::Int(handle), Value::Bool(false)];
-            assert_eq!(
-                call("Video", "UpdateVideo__ib", &args),
-                Ok(Value::Bool(false))
-            );
-        }
+        // No world is asked for -1, which is no video's handle.
+        let args = [Value::Int(NO_VIDEO), Value::Bool(false)];
+        assert_eq!(
+            call("Video", "UpdateVideo__ib", &args),
+            Ok(Value::Bool(false))
+        );
         assert!(call("Video", "UpdateVideo__ib", &[Value::Int(0), Value::Int(0)]).is_err());
 
         /// A world with a flag word and a list of the calls it was handed.
@@ -4249,6 +4258,12 @@ mod tests {
             go("Video", "StopVideo__i", &[Value::Int(-1)]),
             Ok(Value::Void)
         );
+        // D1003: another handle the world answers for (a world without that answer, false).
+        let update = [Value::Int(5), Value::Bool(false)];
+        assert_eq!(
+            go("Video", "UpdateVideo__ib", &update),
+            Ok(Value::Bool(false))
+        );
         let request = "RequestVoiceOver__Q7StringAbb";
         assert_eq!(go("Audio", request, &line), Ok(Value::Bool(false)));
         let null_line = [Value::Object(None), Value::Bool(false), Value::Bool(false)];
@@ -4286,8 +4301,12 @@ mod tests {
             w.1,
             [
                 "StartVideo None 3",
+                "query Video.StartVideo.handle",
                 "StartVideo Some(4) 3",
+                "query Video.StartVideo.handle",
                 "StopVideo None 1",
+                "UpdateVideo None 2",
+                "query Video.UpdateVideo.playing",
                 "RequestVoiceOver None 3",
                 "query Audio.RequestVoiceOver.started",
                 "RequestVoiceOver None 3",

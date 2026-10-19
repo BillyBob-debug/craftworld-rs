@@ -1,7 +1,8 @@
 # Lane state: pod / Story (2026-10-18)
 
 ## Read first
-1. `docs/level-scripts/part-149.md` (148 for a key's kind, 147 for the intro's video, 146
+1. `docs/level-scripts/part-150.md` (149 for the line shader, 148 for a key's kind, 147
+   for the intro's video request, 146
    for the unlock voice-overs, 145 for the intro's voice-over, 144 for voice-over timing,
    143 for a group's lock, 142 for the active look, 141 for the active test, 140 for a
    short link, 139 for a link's texture, 138 for links between groups, 137 for which links
@@ -23,7 +24,7 @@
   `E:\Projects\wt-d324`): the native unlock voice-overs; handed to the coordinator for
   merge once rust and python are green.
 - The lane owns the Pod/Popit native scripts too (Popit lane stopped, 2026-10-18).
-  Decision numbers: D348-D399 used; now D1000-D1099, next free D1003.
+  Decision numbers: D348-D399 used; now D1000-D1099, next free D1004.
 
 ## Facts
 - Build (PowerShell): `cd E:\Projects\wt-d324; . ./scripts/use-local-rust.ps1 | Out-Null;
@@ -114,6 +115,7 @@
    unlock; badge kind 2 is a user result's key, D1001). It, the
    intro and `OnEnterPod__` wait on voice-over, which plays silently for each line's
    length when a game dir holds `voiceover.fsb` (D397; the launcher copies it from PR
-   206; the native intro requests its line too, D398, and its video, D1000;
+   206; the native intro requests its line too, D398, and its video, D1000,
+   and waits for the video's Bink length when the copy holds it, D1003;
    a finished native cluster requests its unlock line, D399). The
    interactive music needs the .fev.
