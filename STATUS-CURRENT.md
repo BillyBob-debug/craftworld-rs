@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1116 the projectile and paint switches (2026-10-19)
+## Latest: D1117 the velocity switches (2026-10-19)
+- Logic lane: linear (771) and angular (122) velocity sensors follow the EBOOT rule:
+  body motion over the scale, seven modes, local frame (docs/logic.md Part 19).
+
+## D1116 the projectile and paint switches (2026-10-19)
 - Logic lane: projectile (816) and paint (51) sensors output hits / required with
   the game's held ternary and empty 6 ticks after full (docs/logic.md Part 18).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1110 movers and followers push their bodies (2026-10-19)
 - Logic lane: movers reach their set velocity and followers walk to Sackboy, stopping
   short by their range, on the game's two linear rows (0x957df4; docs/logic.md P12).
-
-## D1109 gyroscopes and rotators turn their bodies (2026-10-19)
-- Logic lane: gyroscope tweakers turn their body upright at the game's stop-in-time
-  rate and rotators spin at their stored speed (packer 0x95fb20; docs/logic.md P11).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

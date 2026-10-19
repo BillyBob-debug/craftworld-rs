@@ -50,6 +50,7 @@ mod sensors;
 mod story_native;
 mod switches;
 pub mod transform;
+pub mod velocity;
 pub use camera::*;
 pub use cutscene::*;
 pub use display::*;
@@ -141,6 +142,9 @@ pub struct ThingState {
     pub anim_loop: Option<bool>,
     /// PSwitchKey, when the Thing has one: the tag a tag sensor finds it by.
     pub switch_key: Option<TagKey>,
+    /// The motion of the Thing's physics body, as the host's physics reports it: the
+    /// velocity sensors read it ([`velocity::BodyMotion`]). None unless the host fills it.
+    pub body: Option<velocity::BodyMotion>,
 }
 
 /// What a tag sensor matches a tag by: the colour index and the name.

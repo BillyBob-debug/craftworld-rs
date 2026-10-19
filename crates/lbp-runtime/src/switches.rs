@@ -18,7 +18,7 @@
 //!   `SwitchPerformReaction__bf` on the target's own script.
 //!
 //! The logic types are computed, and so are the tag sensor, the player sensor and the
-//! impact sensor (`sensors.rs`); the other types whose signal comes from the world
+//! impact sensor (`sensors.rs`) and the velocity sensors (`velocity.rs`); the other types whose signal comes from the world
 //! (physics, the pads) keep the signal the level file stores.
 //!
 //! Not modelled:
@@ -39,6 +39,7 @@
 //! - The activating player the game records on the target before the dispatch.
 use crate::cutscene::camera_finished;
 use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
+use crate::velocity::velocity_sensor;
 use crate::{InputWire, LevelWorld, SwitchState, ThingState};
 use lbp_script_vm::natives::SwitchInput;
 use lbp_script_vm::Value;
@@ -473,6 +474,8 @@ pub fn compute_output(
         3 => standard(player_sensor(cx)),
         4 => standard(tag_sensor(cx)),
         18 => standard(impact_sensor(cx)),
+        // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
+        42 | 43 => standard(velocity_sensor(cx)),
         // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.
         32 => standard(camera_finished(cx)),
         // MAGIC_MOUTH, 0x11c874, FOUND: the script's OutputEndSignalFrames.
