@@ -129,7 +129,8 @@
 //!   contents (`ScriptObject`).
 //! - MATERIAL_TWEAK (PMaterialTweak): hideInPlayMode bool, restitution f32, frictionScale
 //!   f32, grabbability i8, grabFilter i8 (> 0x3bc), stickiness i8, noAutoDestruct bool,
-//!   disablePhysicsAudio bool, hasShadow bool (> 0x3ec); (two u8 below 0x343).
+//!   disablePhysicsAudio bool, hasShadow bool (> 0x3ec); (two u8 below 0x343). Kept
+//!   as `PartData::material_tweak` (D1133).
 //! - MATERIAL_OVERRIDE (PMaterialOverride, v >= 0x360 only): array(RegionOverride: region
 //!   i32, materialPlan desc, material res, uvScale v3), mesh res. Below 0x360 stops.
 //! - SWITCH_INPUT (PSwitchInput): dataSource ref Thing, updateType i32, lethalType i32,
@@ -331,6 +332,9 @@ pub struct PartData {
     /// PMicrochip as stored: the circuit-board Thing (rscript-plan stage 3).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub microchip: Option<Microchip>,
+    /// PMaterialTweak as stored (D1133).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub material_tweak: Option<MaterialTweak>,
     /// PSwitchInput as stored (D1132): the adapter a switch drives on a non-logic Thing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub switch_input: Option<SwitchInput>,
@@ -457,6 +461,21 @@ pub struct SwitchInput {
     pub lethal_activation_frame: i32,
     pub lethal_inverted: bool,
     pub behavior: i32,
+}
+
+/// PMaterialTweak fields as stored (D1133, docs/logic.md Part 35).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct MaterialTweak {
+    pub hide_in_play_mode: bool,
+    pub restitution: f32,
+    pub friction_scale: f32,
+    pub grabbability: i8,
+    pub grab_filter: i8,
+    pub stickiness: i8,
+    pub no_auto_destruct: bool,
+    pub disable_physics_audio: bool,
+    /// None below 0x3ed, where it is not stored.
+    pub has_shadow: Option<bool>,
 }
 
 /// SwitchSignal as stored: activation f32, ternary s32, player i32 (-1 = no player).
@@ -1385,27 +1404,32 @@ fn part_body(
             things.list[me].data.script = Some(part);
         }
         "MATERIAL_TWEAK" => {
-            r.bool()?;
-            r.skip_f32(2)?;
+            let mut t = MaterialTweak {
+                hide_in_play_mode: r.bool()?,
+                restitution: r.f32()?,
+                friction_scale: r.f32()?,
+                ..Default::default()
+            };
             if v < 0x343 {
                 r.bytes(2)?;
             }
             if v > 0x342 {
-                r.i8()?;
+                t.grabbability = r.i8()?;
             }
             if v > 0x3bc {
-                r.i8()?;
+                t.grab_filter = r.i8()?;
             }
             if v > 0x342 {
-                r.i8()?;
+                t.stickiness = r.i8()?;
             }
-            r.bool()?;
+            t.no_auto_destruct = r.bool()?;
             if v > 0x356 {
-                r.bool()?;
+                t.disable_physics_audio = r.bool()?;
             }
             if v > 0x3ec {
-                r.bool()?;
+                t.has_shadow = Some(r.bool()?);
             }
+            things.list[me].data.material_tweak = Some(t);
         }
         "NPC" => {
             r.bool()?;

@@ -994,3 +994,37 @@ dataSource or the activation float, and no code compares updateType with 0, 8 or
 - Tests: `lethal_input_follows_its_port_and_inverts`,
   `latest_lethal_input_wins_and_unwired_is_always_on`,
   `destroy_input_asks_on_the_edge_only` in switch_input.rs.
+
+## Part 35: the material tweaker (D1133)
+
+PMaterialTweak (part bit 0x22) sets the physics material of its Thing's rigid group.
+
+- Offsets (reader 0xb585a4): +0x0c restitution, +0x10 frictionScale, +0x14
+  hideInPlayMode, +0x15 stickiness (low 7 bits; bit 7 a separate flag, 0xadb84),
+  +0x16 grabbability, +0x17 grabFilter, +0x18 noAutoDestruct, +0x1a
+  disablePhysicsAudio, +0x1b hasShadow; +0x19 caches the on state.
+- Kind: 0x3ed2c gives a Thing with a tweak kind 0x4d, or 0x9f when its stickiness is 3.
+  0x11ddf0's entry for 0x4d (0x11e394) only recomputes the body (0xadd84 -> 0xadc64 ->
+  0xfb258); the signal value is not used there. Kind 0x9f has no entry.
+- On (0xadbac): off on a deactivated Thing (+0x7f); on with no wired input; otherwise on
+  while the wired output's value is nonzero (INFERRED: port 0, the activation).
+- The body (0xfb258, over the group from 0x3dae4): the kind 0x4d tweaks that are on give
+  the mean restitution (body+0x74, shape byte v * 255) and mean friction scale
+  (body+0x78),
+  the largest grabbability (+0xc8), grab filter (+0xc7) and stickiness (+0xc9), and the
+  OR of noAutoDestruct (+0xc0 flag 0x40), disablePhysicsAudio (flag 0x100) and
+  hasShadow. With none on, the body keeps its material's restitution and stickiness and
+  friction scale 1.0.
+- Census (census-all-24.json): 8,827 tweaks, 8,825 with a parent, 588 with an input
+  wired, 8,302 on at load. Grabbability 0 x6,291, 1 x53, 2 x2,366, 3 x117; stickiness
+  0 x7,702, 1 x855, 2 x195, 3 x75; grab filter nonzero 16; friction scale not 1.0
+  4,376; restitution not 0 472; noAutoDestruct 3,046; physics audio off 2,741; shadow off
+  1; none hidden in play mode.
+- Not modelled: kind 0x9f (stickiness 3 writes friction and restitution times 100 and
+  flag 0x8000 to a child's body), the meaning of grabbability, grab filter and flag 0x40,
+  the load fixup for stickiness 3 (0x350c10), and hideInPlayMode (no reader found).
+- lbp-runtime: material_tweak.rs, `LevelWorld::tweak_on` and `body_material`. INFERRED:
+  the rigid group is the Things with the same root of the parent chain.
+- Tests: `group_tweaks_average_and_take_the_largest`,
+  `wired_tweak_follows_its_input_and_deactivation`,
+  `stickiness_three_is_kept_apart_and_bit_7_is_dropped`.

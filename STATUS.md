@@ -6763,3 +6763,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1124 the wormhole switch (2026-10-19)
 - Logic lane: wormhole switches (123) read their wormhole's one-tick "ended" byte
   (0x11d104; docs/logic.md Part 26); the wormhole itself is not run yet.
+
+## D1125 the pocket item pedestal switch (2026-10-19)
+- Logic lane: pocket item pedestal switches (77) read their per-output value arrays
+  (0x11d164; docs/logic.md Part 27); the registry that fills them is not modelled.

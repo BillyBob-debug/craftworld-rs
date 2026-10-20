@@ -113,7 +113,7 @@ impl LevelWorld {
     }
 
     /// The Thing at the top of `thing`'s parent chain.
-    fn group_root(&self, thing: u32) -> u32 {
+    pub(crate) fn group_root(&self, thing: u32) -> u32 {
         let mut t = thing;
         for _ in 0..self.things.len() {
             match self.things.get(t as usize).and_then(|s| s.parent) {

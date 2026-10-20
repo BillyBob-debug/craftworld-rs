@@ -280,7 +280,7 @@ impl BlendPose {
 
     /// Adds `w` times the difference `pose` minus `reference` (both from `rig`'s
     /// animation): translation and morph deltas add, scale ratios multiply, and the local
-    /// rotation delta `referenceâ»Â¹ Â· pose` is applied after the bone's rotation. The
+    /// rotation delta `reference⁻¹ · pose` is applied after the bone's rotation. The
     /// game's own composition (`0x1eafc0`) is not traced: INFERRED.
     pub fn add(&mut self, rig: &Rig, pose: &Pose, reference: &Pose, w: f32) {
         if w <= 0. || !w.is_finite() {
