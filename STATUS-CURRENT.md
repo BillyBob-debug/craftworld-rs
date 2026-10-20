@@ -16,39 +16,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
   Thing's grandparent: its link's driver, or in mode 8 the attached player (0x11d378,
   0x6a0134; docs/logic.md Part 38).
 
-## D1135 the sequencer (2026-10-20)
-- Logic lane: sequencers (1,736) move their play head by tempo and behavior and
-  switch the Things on their board on under the head (0xf5008, 0x409dc;
-  docs/logic.md Part 37).
-
-## D1134 the emitter (2026-10-20)
-- Logic lane: emitters (3,881) emit on their clock at the input's speed, or once
-  per switch for behavior 1, within their at-once and total limits (0x9bee4,
-  0x9baf8; docs/logic.md Part 36).
-
-## D1133 the material tweaker (2026-10-20)
-- Logic lane: material tweaks (8,827) that are on give their group's body the mean
-  restitution and friction and the largest grab and stickiness values (0xfb258;
-  docs/logic.md Part 35).
-
-## D1132 switch inputs (2026-10-19)
-- Logic lane: switch inputs (15,521) take their switch's signal: lethal inputs set
-  the group's lethal type, destroy inputs ask for a destroy on the edge
-  (0x11ddf0; docs/logic.md Part 34).
-
-## D1131 switch type 55 (2026-10-19)
-- Logic lane: type 55 switches (11) read the pad with the player -1, outputs 7
-  to 19 negated when inverted (0x11d098; docs/logic.md Part 33). Every placed
-  switch type now has a rule.
-
-## D1130 the movinator pad (2026-10-19)
-- Logic lane: movinator pads (50) run the control pad's rule, with outputs 10 to
-  24 negated when inverted (0x11d378; docs/logic.md Part 32).
-
-## D1129 the score switch (2026-10-19)
-- Logic lane: score switches (51) read the players' score over their target, the
-  sum or, in versus, the best (0x11ab74; docs/logic.md Part 31).
-
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
   default, 0 Complete. Files `local-analysis/b177-{default,legacy}.json`.
