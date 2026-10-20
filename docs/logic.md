@@ -397,9 +397,8 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   motion recorder 45 (142; Part 24), angle 41 (126; Part 25), wormhole 57 (123;
   Part 26), pocket item pedestal 65 (77; Part 27), lever 1 (74; Part 28),
   three-way switch 2 (7; Part 29), sticker 5 (68; Part 30, its manual value),
-  score 30 (51; Part 31).
-- Kept as stored (the world signal is not modelled yet):
-  movinator pad 44 (50), 55 (11).
+  score 30 (51; Part 31), movinator pad 44 (50; Part 32, the control pad's rule).
+- Kept as stored (the world signal is not modelled yet): 55 (11).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
 - The names come from docs/runtime-evidence/logic.md A4; types 55, 57 and 65 are past
@@ -913,3 +912,24 @@ is 0x11c834, which calls 0x11ab74 and stores through the shared tail 0x11c2c4.
 - lbp-runtime: `score_switch` in score.rs reads `LevelWorld.player_records`.
 - Tests: `score_switch_sums_or_takes_the_best_score`,
   `score_switch_is_not_clamped_and_inverts` in score.rs.
+
+## Part 32: the movinator pad (D1130)
+
+Switch type 44 (50 placed, 25 outputs each) runs the control pad's handler (Part 21).
+compute_output's table 0x11be00 entry 44 is 0x11d378, the same as entry 38.
+
+- Each output's activation is 0x6a1004 and its player 0x6a0728 on the driver's pad,
+  as for the control pad. With no driver, or a pad that is not live: 0.0 (r2+0x57e8 of
+  the callee's TOC) and the player -1.
+- The ternary is 0x11873c's jump for types 38 and 44 (0x118830): outputs 6 and 9 are 1
+  above 0, else 0; the others take the pad's dead-zone rule.
+- Inverted: outputs 10 to 24 are negated (table 0x11bfd4 entry 44 is 0x11c24c, which
+  checks output - 10 against 14), the others take the standard tail.
+- Census (census-all-20.json): 50 movinator pads, none inverted, all with 25 outputs
+  and a parent; 13 also carry POS and RENDER_MESH. Wired outputs: 0 (35), 9 (24), and
+  one each of 3, 8, 18 and 19. All 1,250 outputs store {0, 0, -1}, the no-driver
+  signal.
+- Not modelled: 0x6a1004's values for outputs 18 to 24 (0.0 here) and the button
+  prompts set after it for type 44 (0x11d448).
+- lbp-runtime: `pad_sensor` serves both types; `negated` in pad.rs gives the range.
+- Test: `movinator_pad_reads_the_pad_and_negates_to_24` in pad.rs.

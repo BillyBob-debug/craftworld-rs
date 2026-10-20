@@ -442,6 +442,41 @@ impl Switches {
                 }
                 continue;
             }
+            if s.switch_type == 44 {
+                // The movinator pad: the control pad's handler (0x11d378); no driver.
+                count("movinator".into(), true);
+                count("movinator inverted".into(), s.inverted);
+                count(format!("movinator outputs={}", s.outputs.len()), true);
+                count("movinator without a parent".into(), t.parent.is_none());
+                for p in &t.parts {
+                    count(format!("movinator part {p}"), true);
+                }
+                for (o, out) in s.outputs.iter().enumerate() {
+                    let Some(out) = out.as_ref() else { continue };
+                    let st = out.stored;
+                    let want = if s.inverted && !(10..=24).contains(&o) {
+                        (1., 1)
+                    } else {
+                        (0., 0)
+                    };
+                    count(
+                        format!("movinator output {o:02} wired"),
+                        !out.targets.is_empty(),
+                    );
+                    count(
+                        format!(
+                            "movinator stored {} {} {}",
+                            st.activation, st.ternary, st.player
+                        ),
+                        true,
+                    );
+                    count(
+                        "movinator output matches no driver".into(),
+                        (st.activation - want.0).abs() < 1e-3 && st.ternary == want.1,
+                    );
+                }
+                continue;
+            }
             if s.switch_type == 1 || s.switch_type == 2 {
                 let k = if s.switch_type == 1 {
                     "lever"

@@ -46,7 +46,7 @@ use crate::cutscene::camera_finished;
 use crate::grab::grab_sensor;
 use crate::lever::{lever, trinary};
 use crate::motion::motion_recorder;
-use crate::pad::pad_sensor;
+use crate::pad::{negated, pad_sensor};
 use crate::pedestal::pedestal_sensor;
 use crate::remote::key_remote;
 use crate::score::score_switch;
@@ -506,8 +506,9 @@ pub fn compute_output(
         6 => standard(grab_sensor(cx)),
         // CONTROL_PAD, 0x11d378 → 0x6a1004, FOUND (pad.rs); outputs 10 to 17 negated
         // when inverted (0x11c228).
-        38 if (10..=17).contains(&output) => Some((pad_sensor(cx, output), Invert::Negate)),
-        38 => standard(pad_sensor(cx, output)),
+        // MOVINATOR_PAD, the same handler (pad.rs); outputs 10 to 24 negated (0x11c24c).
+        38 | 44 if negated(s.switch_type, output) => Some((pad_sensor(cx, output), Invert::Negate)),
+        38 | 44 => standard(pad_sensor(cx, output)),
         54 => standard(key_remote(cx)),
         // BUTTON, 0x11caac → 0x11a998, FOUND (button.rs).
         0 => standard(button(cx)),
@@ -1511,11 +1512,11 @@ mod tests {
     }
 
     /// A switch Thing with one output per entry: (stored signal, targets). Its type is the
-    /// movinator pad's (44), which keeps the stored signal.
+    /// type 55's, which keeps the stored signal.
     fn switch(outputs: &[(SwitchInput, &[(u32, i32)])]) -> ThingState {
         ThingState {
             switch: Some(SwitchState {
-                switch_type: 44,
+                switch_type: 55,
                 outputs: outputs
                     .iter()
                     .map(|(s, targets)| {
@@ -1935,15 +1936,13 @@ mod tests {
             w.update_switches();
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
-        // The other sensors keep the stored signal, also when inverted.
-        for ty in [44, 55] {
-            let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
-            let s = t.switch.as_mut().unwrap();
-            (s.switch_type, s.inverted) = (ty, true);
-            let mut w = world(vec![t]);
-            assert!(w.update_switches().is_empty());
-            assert_eq!(out(&w, 0, 0), sig(0.5, 1, 2), "{ty}");
-        }
+        // Type 55 keeps the stored signal, also when inverted.
+        let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
+        let s = t.switch.as_mut().unwrap();
+        (s.switch_type, s.inverted) = (55, true);
+        let mut w = world(vec![t]);
+        assert!(w.update_switches().is_empty());
+        assert_eq!(out(&w, 0, 0), sig(0.5, 1, 2));
     }
 
     #[test]
