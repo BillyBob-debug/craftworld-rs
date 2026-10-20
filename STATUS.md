@@ -6817,3 +6817,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Logic lane: control pads (546) read the driver of the controlinator (596) on their
   Thing's grandparent: its link's driver, or in mode 8 the attached player (0x11d378,
   0x6a0134; docs/logic.md Part 38).
+
+## D1137 the creature (2026-10-20)
+- Logic lane: a creature that is not a player dies from the strongest lethal type it
+  touches or from crushing, dying then dead after a per-type time (0x81824, 0x7d6ec;
+  docs/logic.md Part 39). Enemy pieces (3,484) are stored; the brain is NOT FOUND.
