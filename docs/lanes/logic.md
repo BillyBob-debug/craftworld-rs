@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-45 (pistons; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-46 (pistons; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -51,9 +51,10 @@
 - Merged: D1140 (PR 283, 4ee668f) a destroyed controlinator kills its driver.
 - Merged: D1141 (PR 284, 4976a39) the tag and player sensors' cone and layer tests.
 - Merged: D1142 (PR 285, 3e5b6eb) the grab and impact sensors have no cone or layer test.
-- D1143 (branch `logic-d1143`, worktree `E:\Projects\wt-d324`): the chip-table angle of a
-  Thing without a PPos; the cursor chip and the editor's cone drawing (Part 45).
-- Decision numbers: D1100-D1199, next free D1144.
+- Merged: D1143 (PR 286, f32c181) the chip-table angle of a Thing without a PPos.
+- D1144 (branch `logic-d1144`, worktree `E:\Projects\wt-d324`): turning tweaks 3, 4 and
+  5 aim along velocity, stick and target; configuration 12 is a layer switch (Part 46).
+- Decision numbers: D1100-D1199, next free D1145.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -116,7 +117,8 @@
   census-all-28.json the creatures and enemies (Part 39),
   census-all-29.json the controlinator seats (Part 40),
   census-all-30.json the checkpoint lives (Part 41),
-  census-all-31.json the chip-table cone walks and cursor chips (Part 45).
+  census-all-31.json the chip-table cone walks and cursor chips (Part 45),
+  census-all-32.json the PPhysicsTweak configurations (Part 46).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -128,7 +130,8 @@
   (gravity scale clamp(1 - Σ gravity × activation, 0, 1) at 0xc6308); SPU packer 0x1c7ed0
   (configurations 1-5 and 9 via 0x95fb20; 6-8 and 11 via 0x957df4).
 - Row packer 0x95fb20 (Part 11): configuration 1 is the gyroscope (aims at world up),
-  2 and 9 rotators, 3-5 aim along velocity / stick / target. Row: target turn speed
+  2 and 9 rotators, 3-5 aim along velocity / stick / target (dead zone x² + y² < 0.1,
+  Part 46). Row: target turn speed
   +0x20, limits +0x24/+0x28 = ±accel × velRange, × activation × 1/mass (0x95fdc8).
   Stop-in-time helper 0x1c21f4. Followers (11) and 6-8 via 0x957df4 (Part 12); tag
   search 0x1c3e04 and map 0xceb8c (Part 13).
@@ -156,11 +159,13 @@ EBOOT rule and unit tests:
    `LevelWorld.contacts` from avian2d (Things by `lbp_sim::ThingIndex`) for the impact
    switch (Part 15) to see anything, with `impulse` for the button (Part 23), and call
    `projectile_hit` for projectile and paint sensors (Part 18).
-2. Sensors: the cone of a sensor under a cursor chip (runtime cursor record, Part 45);
-   the cone direction's callers 0x114de4 and 0x115088. Grab and impact have no cone or
-   layer test (Part 44), tag and player do (Part 43), chip tables since D1143.
-3. Outputs not yet modelled: configurations 3-5 and 12, the exact 0x1c21f4 speed, the
-   mirror flag and the follower's +0x220 angle; the sackbot input, the
+2. Sensors: the cone of a sensor under a cursor chip (runtime cursor record, Part 45).
+   The cone direction's callers 0x114de4 and 0x115088 are editor drawing only (D1144
+   read). Grab and impact have no cone or layer test (Part 44), tag and player do
+   (Part 43), chip tables since D1143.
+3. Outputs not yet modelled: configuration 12's layer move (0xce1f8, Part 46), stick
+   slots for configuration 4, configuration 5's lead, the exact 0x1c21f4 speed and which
+   wrapped term is its error, the flip and the +0x220 angle; the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,

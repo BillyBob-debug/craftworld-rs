@@ -189,20 +189,46 @@ pub struct SpinTweaks(pub Vec<scene::SpinTweak>);
 
 /// D1109: each gyroscope and rotator moves its body's turn speed towards its target
 /// ([`scene::SpinTweak::turn`], per tick, in order) with the tweak's current activation,
-/// and wakes a body whose speed changed.
+/// and wakes a body whose speed changed. D1144: configurations 3 and 5 aim along the
+/// body's velocity or at the nearest target they see ([`scene::SpinTweak::aim`]): with
+/// followKey a tag in `tags` with its key not on its own body, else `player`.
+#[allow(clippy::type_complexity)]
 pub fn drive_spins(
     commands: &mut Commands,
-    q: &mut Query<(Entity, &SpinTweaks, &Rotation, &mut AngularVelocity)>,
+    q: &mut Query<(
+        Entity,
+        &SpinTweaks,
+        &Position,
+        &Rotation,
+        &LinearVelocity,
+        &mut AngularVelocity,
+    )>,
+    player: Option<Vec2>,
+    tags: &[TagSpot],
     activation: impl Fn(&scene::SpinTweak) -> f32,
 ) {
     let hz = TICK_HZ as f32;
-    for (e, tweaks, rot, mut w) in q.iter_mut() {
+    let per_tick = 1. / (hz * UNIT_SCALE);
+    for (e, tweaks, pos, rot, v, mut w) in q.iter_mut() {
         let angle = rot.as_radians();
+        let up = [-rot.sin, rot.cos];
+        let vel = [v.0.x * per_tick, v.0.y * per_tick];
+        let me = [pos.0.x / UNIT_SCALE, pos.0.y / UNIT_SCALE];
         let before = w.0 / hz;
-        let after = tweaks
-            .0
-            .iter()
-            .fold(before, |v, t| t.turn(angle, v, activation(t)));
+        let after = tweaks.0.iter().fold(before, |s, t| {
+            let d = match t.key {
+                Some(k) => tags
+                    .iter()
+                    .filter(|g| g.key == k && g.body != Some(e))
+                    .map(|g| [g.at[0] - me[0], g.at[1] - me[1]])
+                    .filter(|&d| t.sees(d, up))
+                    .min_by(|a, b| a[0].hypot(a[1]).total_cmp(&b[0].hypot(b[1]))),
+                None => player
+                    .map(|p| [p.x / UNIT_SCALE - me[0], p.y / UNIT_SCALE - me[1]])
+                    .filter(|&d| t.sees(d, up)),
+            };
+            t.turn_along(angle, s, activation(t), t.aim(vel, d))
+        });
         if (after - before).abs() > 1e-6 {
             w.0 = after * hz;
             commands.queue(avian2d::dynamics::solver::islands::WakeBody(e));

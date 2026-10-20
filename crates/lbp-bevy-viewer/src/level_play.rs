@@ -2155,19 +2155,34 @@ fn follow_tweaks(
 }
 
 /// D1109: gyroscopes and rotators turn their bodies ([`lbp_sim::drive_spins`]) with
-/// their switch activation (FOUND, 0xcaf9c).
+/// their switch activation (FOUND, 0xcaf9c). D1144: a tweak aiming at a target looks for
+/// the play-mode Sackboy, or the tags with its key.
+#[allow(clippy::type_complexity)]
 fn drive_spins(
     play: NonSend<Play>,
     mut commands: Commands,
+    sackboy: Query<&lbp_sim::avian2d::prelude::Position, With<SackboyBody>>,
+    marks: Query<(
+        Entity,
+        &lbp_sim::TagMarks,
+        Option<(
+            &lbp_sim::avian2d::prelude::Position,
+            &lbp_sim::avian2d::prelude::Rotation,
+        )>,
+    )>,
     mut q: Query<(
         Entity,
         &lbp_sim::SpinTweaks,
+        &lbp_sim::avian2d::prelude::Position,
         &lbp_sim::avian2d::prelude::Rotation,
+        &lbp_sim::avian2d::prelude::LinearVelocity,
         &mut lbp_sim::avian2d::prelude::AngularVelocity,
     )>,
 ) {
     let world = &play.host.world;
-    lbp_sim::drive_spins(&mut commands, &mut q, |t| {
+    let player = sackboy.iter().next().map(|p| p.0);
+    let tags = lbp_sim::tag_spots(marks.iter());
+    lbp_sim::drive_spins(&mut commands, &mut q, player, &tags, |t| {
         world.tweak_activation(t.thing, t.behavior)
     });
 }
