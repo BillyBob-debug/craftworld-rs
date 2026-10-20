@@ -16,8 +16,13 @@
 //!   is no end-of-update step (table 0x124b0c entry 6 is the epilogue 0x124940).
 //!   Inverted through the shared tail (table 0x11bfd4 entry 6 is the standard 0x11c16c).
 //!
-//! INFERRED: modes 2 and 3 read as mode 1 (mode 2 adds a test 0x1d31c0 that was not
-//! decoded; mode 3's held object is taken to be the grab target); the local player is the
+//! - No cone and no layer test (D1142, docs/logic.md Part 44): AngleRange (PSwitch+0x7c)
+//!   is never read and none of the cone or layer helpers is called. Mode 2's extra test
+//!   0x1d31c0 compares the tag filter of the Thing the player grabs with the other
+//!   Thing's id, an identity check, not a spatial one.
+//!
+//! INFERRED: modes 2 and 3 read as mode 1 (mode 2's identity test is not modelled;
+//! mode 3's held object is taken to be the grab target); the local player is the
 //! first player record's, as the leader of the player sensor; a player carries a tag when
 //! his Sackboy's Thing or a child of it has the key. Not modelled: creatures that grab
 //! (the scan of world+0x114 for creatures of kind 0xc), the joint walk when PSwitch+0xcc
@@ -168,6 +173,15 @@ mod tests {
             switch_key: Some(key),
             ..Default::default()
         });
+        assert_eq!(out(&mut w), on(0));
+    }
+
+    #[test]
+    fn grab_switch_has_no_cone() {
+        // D1142: AngleRange is never read; a grab from any side counts.
+        let mut w = world();
+        set(&mut w, |s| s.angle_range = 5.);
+        w.players[0].grabbing = Some(0);
         assert_eq!(out(&mut w), on(0));
     }
 }

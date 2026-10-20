@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-40 (pistons; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-44 (pistons; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -49,9 +49,10 @@
 - Merged: D1138 (PR 281, 9fb266e) getting in and out of a controlinator.
 - Merged: D1139 (PR 282, 5593712) player death and checkpoint lives.
 - Merged: D1140 (PR 283, 4ee668f) a destroyed controlinator kills its driver.
-- D1141 (branch `logic-d1141`, worktree `E:\Projects\wt-d324`): the tag and player
-  sensors' cone and layer tests (Part 43).
-- Decision numbers: D1100-D1199, next free D1142.
+- Merged: D1141 (PR 284, 4976a39) the tag and player sensors' cone and layer tests.
+- D1142 (branch `logic-d1142`, worktree `E:\Projects\wt-d324`): the grab and impact
+  sensors have no cone or layer test (Part 44).
+- Decision numbers: D1100-D1199, next free D1143.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -153,9 +154,9 @@ EBOOT rule and unit tests:
    `LevelWorld.contacts` from avian2d (Things by `lbp_sim::ThingIndex`) for the impact
    switch (Part 15) to see anything, with `impulse` for the button (Part 23), and call
    `projectile_hit` for projectile and paint sensors (Part 18).
-2. Sensors: the cone and layer tests of the grab, impact and proximity switches
-   (tag and player since D1141, Part 43); the cursor direction (0x1d3594) and the
-   chip-table angle (0x1104ec) of the cone.
+2. Sensors: the cone of a sensor on a cursor (0x1d3594) and the chip-table angle of a
+   Thing without a PPos (0x1104ec); the cone direction's callers 0x114de4 and 0x115088.
+   Grab and impact have no cone or layer test (Part 44), tag and player do (Part 43).
 3. Outputs not yet modelled: configurations 3-5 and 12, the exact 0x1c21f4 speed, the
    mirror flag and the follower's +0x220 angle; the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
