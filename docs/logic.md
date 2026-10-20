@@ -394,9 +394,9 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   Part 17), projectile 39 (816) and paint 8 (51; Part 18), linear velocity 42 (771)
   and angular velocity 43 (122; Part 19), grab 6 (666; Part 20), control
   pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23),
-  motion recorder 45 (142; Part 24).
+  motion recorder 45 (142; Part 24), angle 41 (126; Part 25).
 - Kept as stored (the world signal is not modelled yet):
-  angle 41 (126), 57 (123),
+  57 (123),
   65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
   (11), trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
@@ -706,3 +706,34 @@ table 0x11be00 entry 45 is 0x11d4d0, which branches on the output index; the sto
 - lbp-runtime: `motion_recorder` in motion.rs.
 - Tests: `motion_recorder_reads_its_word`,
   `motion_recorder_inverts_through_the_standard_tail` in motion.rs.
+
+## Part 25: the angle sensor switch (D1123)
+
+The angle sensor (type 41, 126 placed) turns on as the object it sits on turns back to
+upright. compute_output's table 0x11be00 entry 41 is 0x11cd3c; the store 0x11bf18
+inverts the result through the standard tail (table 0x11bfd4 entry 41 is 0x11c16c).
+There is no end step (0x124934 sends types above 0x27 past table 0x124b0c). The output
+index is not read, so every output gets the same signal; the player is always -1.
+
+- The object is the switch Thing's parent (Thing+0x5c), else the Thing. 0x1141f4 takes
+  its world matrix's Y axis (m[4..6]), turned by the shortest arc that takes its Z axis
+  (made unit length) onto +z (0x113fb0), and makes its x, y part unit length: b. For an
+  object in the level plane b is (m[4], m[5]) made unit length.
+- b is turned by PSwitch+0xdc radians, the other way when the matrix is mirrored
+  (det < 0); angle = atan2(-b.x, b.y), the turn about z, counterclockwise positive.
+- r = angle / (angleRange (PSwitch+0x7c) / 180.0 × π). By bulletsRequired
+  (PSwitch+0xcc): 1 (0x11d940) 1 + r when r < 0, else 0; 2 (0x11d9c8) 1 - r when
+  r > 0, else 0; any other value 1 - |r|. The activation is that kept to [0, 1], the
+  ternary 1 when it is above 0, else 0.
+- A switch Thing that belongs to a creature (0x3c594, unless Thing+0x78 has 0x100) uses
+  b = (sin φ, cos φ) of the creature's facing (creature+0x140 → +0x84) instead.
+- Census (census-all-8.json): 126 sensors, 8 inverted, all with one output and
+  bulletsRequired 0; output 0 is wired in all 126 and stores on in 17; every sensor has
+  a parent. Ranges: 7.5 (58), 45 (26), 30 (11), 90 (9), 15 (5), 12.5 (4), 2.5 (3),
+  0.5, 112.5 and 67.5 (2 each), 1, 5, 22.5 and 60 (1 each).
+- Not modelled: PSwitch+0xdc (not in the serialized field order found so far, so 0
+  here, which also makes the mirror test change nothing) and the creature case (no
+  facing angle in our state). Without a world matrix the output is off here.
+- lbp-runtime: `angle_sensor` in angle.rs.
+- Tests: `angle_sensor_reads_its_objects_turn`, `angle_sensor_modes_and_inversion` in
+  angle.rs.

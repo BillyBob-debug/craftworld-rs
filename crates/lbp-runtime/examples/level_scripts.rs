@@ -383,6 +383,22 @@ impl Switches {
                 }
                 continue;
             }
+            if s.switch_type == 41 {
+                count("angle".into(), true);
+                count("angle inverted".into(), s.inverted);
+                count(format!("angle outputs={}", s.outputs.len()), true);
+                count(format!("angle mode={}", s.bullets_required), true);
+                count(format!("angle range={}", s.angle_range), true);
+                count("angle without a parent".into(), t.parent.is_none());
+                for (o, out) in s.outputs.iter().enumerate() {
+                    let out = out.as_ref();
+                    let wired = out.is_some_and(|o| !o.targets.is_empty());
+                    count(format!("angle output {o} wired"), wired);
+                    let on = out.is_some_and(|o| o.stored.ternary != 0);
+                    count(format!("angle output {o} stored on"), on);
+                }
+                continue;
+            }
             if s.switch_type == 45 {
                 let state = s.bullets_required;
                 count("motion recorder".into(), true);
