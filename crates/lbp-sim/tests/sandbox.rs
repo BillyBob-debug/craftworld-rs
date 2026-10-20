@@ -1496,3 +1496,47 @@ fn d1149_turn_speed_speeds_up_eases_in_and_lands_in_a_tick() {
     }
     assert!(angle.abs() < 1e-3 && w.abs() < 1e-3, "{angle} {w}");
 }
+
+#[test]
+fn d1150_followers_ease_in_with_the_turn_shaper() {
+    // A follower (configuration 11) with accel 0.125 and range 28 keeping 100 from a
+    // target 1000 away: full acceleration (3.5 a tick) from rest, never past its range,
+    // then the shaper eases it in so it stops at 900 without overshooting.
+    let follower = lbp_sim::scene::MoveTweak {
+        configuration: 11,
+        vel: [0., 0.],
+        range: 28.,
+        accel: 0.125,
+        decel: 0.125,
+        min_range: 100.,
+        max_range: 2100.,
+        angle_range: 360.,
+        up_down: true,
+        thing: 0,
+        behavior: 0,
+        local: false,
+        flee: false,
+        key: None,
+    };
+    let up = [0., 1.];
+    let v = follower.push([0., 0.], up, Some([1000., 0.]), 1.);
+    assert!((v[0] - 3.5).abs() < 1e-5 && v[1].abs() < 1e-6, "{v:?}");
+    // Half activation halves both the shaper's acceleration and the limits.
+    let v = follower.push([0., 0.], up, Some([1000., 0.]), 0.5);
+    assert!((v[0] - 1.75).abs() < 1e-5, "{v:?}");
+    let (mut x, mut v, mut top) = (0f32, [0f32, 0.], 0f32);
+    for _ in 0..200 {
+        v = follower.push(v, up, Some([1000. - x, 0.]), 1.);
+        top = top.max(v[0]);
+        x += v[0];
+        assert!(x <= 900. + 1e-2, "overshot to {x}");
+    }
+    assert!((top - 28.).abs() < 1e-4, "top speed {top}");
+    assert!(
+        (x - 900.).abs() < 1e-2 && v[0].abs() < 1e-3,
+        "stopped at {x}, {v:?}"
+    );
+    // Moving away from the target, the wanted speed is negative along the aim: it brakes.
+    let v = follower.push([-10., 0.], up, Some([500., 0.]), 1.);
+    assert!((v[0] - -6.5).abs() < 1e-4, "{v:?}");
+}
