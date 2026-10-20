@@ -49,6 +49,7 @@ mod native_script;
 mod native_tutorial;
 mod native_world;
 pub mod pad;
+mod pedestal;
 mod pod;
 mod pod_computer_native;
 mod remote;
@@ -222,6 +223,11 @@ pub struct SwitchState {
     /// output that is on, changed or not, and clears the flag. What sets it in the game
     /// is not established; nothing sets it here.
     pub force: bool,
+    /// The pocket item pedestal's value arrays (PSwitch+0xe4 → +0x28 floats, +0x34 s8),
+    /// one entry per output. The game refills them from a registry this runtime does not
+    /// have, so they stay empty and the switch reads off (docs/logic.md Part 27).
+    pub pedestal_activations: Vec<f32>,
+    pub pedestal_ternaries: Vec<i8>,
     /// What the switch remembers between ticks ([`compute_output`]'s state slot).
     pub memory: SwitchMemory,
 }
@@ -897,6 +903,8 @@ impl LevelWorld {
                         old_joint: s.retarded_old_joint,
                         old_lbp1_switch: s.crappy_old_lbp1_switch,
                         force: false,
+                        pedestal_activations: Vec::new(),
+                        pedestal_ternaries: Vec::new(),
                         memory: SwitchMemory {
                             updates: 0,
                             manual: signal(&s.manual_activation),
