@@ -1389,3 +1389,33 @@ fn d1111_keyed_followers_find_tags_with_their_colour_and_name() {
         (Some(a), None, [-500., 300.])
     );
 }
+
+#[test]
+fn d1147_attractors_pick_the_highest_priority_own_or_shared_block() {
+    use lbp_level::parts::AttractorBlock;
+    use lbp_sim::scene::AttractTweak;
+    let tweak = |thing, priority, beyond_group| AttractTweak {
+        thing,
+        block: AttractorBlock {
+            priority,
+            beyond_group,
+            ..Default::default()
+        },
+    };
+    let (own_low, other_high, shared_mid) =
+        (tweak(1, 1., false), tweak(2, 9., false), tweak(3, 5., true));
+    // Another group's tweak only counts when it is shared; the highest priority wins.
+    let picked =
+        AttractTweak::pick(&[(&own_low, true), (&other_high, false), (&shared_mid, false)]);
+    assert_eq!(picked.map(|t| t.thing), Some(3));
+    let picked = AttractTweak::pick(&[(&own_low, true), (&other_high, false)]);
+    assert_eq!(picked.map(|t| t.thing), Some(1));
+    assert!(AttractTweak::pick(&[(&other_high, false)]).is_none());
+    // Of equal priorities the first walked stays.
+    let twin = tweak(4, 1., false);
+    let picked = AttractTweak::pick(&[(&own_low, true), (&twin, true)]);
+    assert_eq!(picked.map(|t| t.thing), Some(1));
+    // The record is active above the input threshold.
+    assert!(AttractTweak::active(1.));
+    assert!(!AttractTweak::active(0.));
+}

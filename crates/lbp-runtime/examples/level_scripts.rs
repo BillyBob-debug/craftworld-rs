@@ -3413,6 +3413,19 @@ fn run() -> Result<(), String> {
                     *s.entry(k).or_default() += 1;
                 }
             }
+            // D1147: configuration 14's block.
+            if let Some(a) = &p.attractor {
+                for k in [
+                    format!("attractor priority {}", a.priority),
+                    format!("attractor first {:?}", a.first),
+                    format!("attractor second {:?}", a.second),
+                    format!("attractor flags {:?}", a.flags),
+                    format!("attractor shared {}", a.beyond_group),
+                    format!("attractor behavior {}", p.behavior),
+                ] {
+                    *s.entry(k).or_default() += 1;
+                }
+            }
         }
         row["level"] = serde_json::json!(label);
         row["stopped"] = serde_json::json!(report.stop.is_some());
