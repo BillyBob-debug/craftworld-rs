@@ -1374,7 +1374,7 @@ builds an aim vector per configuration):
   0x957df4, 11 has its own branch. Configuration 12 is not a physics row: 0x1cc660
   (about 0x1cc730) calls 0xce1f8 when the byte at *(tweak+0xd0)+0x24 is set, which moves
   the body between layers through 0xcd770 (tweak+0x68: 0 back, 1 front, 2-4 by depth);
-  not modelled.
+  Part 47 models it.
 
 lbp-sim (`SpinTweak::aim`, `target_along`, `sees`; `drive_spins` in lbp-sim and the
 viewer): 3 aims along the body's velocity in game units per tick, 4 at nothing (no
@@ -1390,3 +1390,32 @@ Census (census-all-32.json, 358 of 378 levels read), PPhysicsTweak by configurat
 14 ×268. That 5 is mostly keyed, as the follower is, backs reading followKey as its key.
 
 Test: `d1144_aim_tweaks_turn_up_along_velocity_stick_and_target` (lbp-sim sandbox).
+
+## Part 47: the layer switch (D1145)
+
+What the game does (EBOOT 01.33):
+- Each tick 0x1cc660 calls 0xce1f8 for every configuration 12 tweak whose wait byte
+  (*(tweak+0xd0)+0x24) is set, unless a frame flag (sp+0x247, meaning unknown) is set.
+  0xce1f8 clears the byte, reads the input's count n (*(*(thing+8)+0x60)[4]+0x1c) and
+  stops if it is 0. Turning off moves nothing back.
+- zBehavior (+0x68): 0 moves -n layers, 1 moves +n, 2 to 4 move by zBehavior - 1 -
+  trunc((z + 679) / 200) from the body's depth z (+0x78), which reaches layers 1 to 3
+  from the back (INFERRED). A layer is 200 deep (0xd953ac).
+- 0xcd770 moves the root Thing's glued group (0xcc854, gathering with 0xcc1f4 under
+  maximumMass at +0x60, 0 for none) only if there is room: the new depth stays in -511
+  to 110 (0xd95360, 0xd95364), no shape lands on another solid one, and the penetration
+  test (0x8d0af0) is at most 1. Then every body's matrix z gains the step at once.
+- Blocked, a set-layer move sets the wait again and tries one layer less, down to one.
+  A blocked step back or front is dropped.
+- NOT FOUND: what first sets the wait. INFERRED: it is waitingToMove beside
+  lastKnownActivation, set when the activation changes. canPush (+0x64) is INFERRED.
+
+lbp-sim (`LayerTweak`, `delta`, `tick`; one per configuration 12 tweak on its body):
+the tick returns the depth step for a `fits` test the host gives. Not modelled: moving
+the colliders (host work), the overlap and penetration tests, and the mass limit.
+
+Census (census-all-32.json): 2,632 configuration 12 tweaks. Configuration 13 replays a
+recorded move (0xcb688, 0xcb19c, player at tweak+0x100; INFERRED), and 14 is read as
+attract-o-gel from cwlib only; neither is modelled.
+
+Test: `d1145_layer_switches_step_a_layer_or_go_to_a_set_one_when_there_is_room`.

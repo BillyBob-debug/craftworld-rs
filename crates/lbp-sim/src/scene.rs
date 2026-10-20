@@ -116,6 +116,84 @@ pub struct SceneBody {
     pub spins: Vec<SpinTweak>,
     /// D1110: its movers and followers, in Thing order.
     pub moves: Vec<MoveTweak>,
+    /// D1145: its layer switches (configuration 12), in Thing order.
+    pub layers: Vec<LayerTweak>,
+}
+
+/// D1145: one layer of depth, the step of a layer switch (0xd953ac).
+pub const LAYER_DEPTH: f32 = 200.;
+
+/// D1145: the depth band a layer move must stay in (0xd95360, 0xd95364).
+pub const LAYER_Z_RANGE: (f32, f32) = (-511., 110.);
+
+/// D1145: a PPhysicsTweak with configuration 12, the layer switch: it moves its body's
+/// glued group back or front a layer, or to a set layer, if there is room. Read from
+/// 0x1cc660, 0xce1f8 and 0xcd770 (EBOOT 01.33).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct LayerTweak {
+    /// The PPhysicsTweak's Thing index.
+    pub thing: usize,
+    /// PPhysicsTweak.behavior, read as the input mode (D1101).
+    pub behavior: i32,
+    /// zBehavior: 0 back, 1 front, 2 to 4 to a set layer.
+    pub z_behavior: i32,
+    /// maximumMass: the mass the move may carry, 0 for no limit (INFERRED: 0xcc1f4 spends
+    /// it on the group's mass; not modelled).
+    pub maximum_mass: f32,
+    /// waitingToMove and lastKnownActivation, as saved and then as run.
+    pub waiting: bool,
+    pub last_activation: f32,
+}
+
+impl LayerTweak {
+    /// D1145: the layers to move for a body at depth `z` when the input's count is `n`.
+    /// FOUND (0xce1f8): 0 is -n, 1 is +n; 2 to 4 is zBehavior - 1 - trunc((z + 679) / 200),
+    /// so the set layers are 1, 2 and 3 counted from the back (INFERRED).
+    pub fn delta(&self, z: f32, n: i32) -> i32 {
+        match self.z_behavior {
+            0 => -n,
+            1 => n,
+            d => d - 1 - ((z + 679.) / LAYER_DEPTH).trunc() as i32,
+        }
+    }
+
+    /// D1145: one tick with the input at `activation` (count `n`) for a body at depth `z`;
+    /// `fits(dz)` says whether the group has room `dz` deeper. Returns the depth change.
+    /// FOUND (0x1cc660, 0xce1f8): only while waiting; the wait clears, and with a zero
+    /// count nothing moves and nothing moves back. A blocked move to a set layer waits
+    /// again and tries one layer less, down to one; a blocked step back or front is
+    /// dropped. FOUND (0xcc854): a move whose new depth leaves [`LAYER_Z_RANGE`] is
+    /// blocked. INFERRED: the wait is set when the activation changes from the last one
+    /// (the setter is NOT FOUND; lastKnownActivation is saved beside it).
+    pub fn tick(&mut self, activation: f32, n: i32, z: f32, fits: impl Fn(f32) -> bool) -> f32 {
+        if activation != self.last_activation {
+            self.last_activation = activation;
+            self.waiting = activation != 0.;
+        }
+        if !self.waiting {
+            return 0.;
+        }
+        self.waiting = false;
+        if n == 0 {
+            return 0.;
+        }
+        let mut d = self.delta(z, n);
+        loop {
+            let dz = d as f32 * LAYER_DEPTH;
+            let to = z + dz;
+            if d == 0 || (to >= LAYER_Z_RANGE.0 && to <= LAYER_Z_RANGE.1 && fits(dz)) {
+                return dz;
+            }
+            if self.z_behavior < 2 {
+                return 0.;
+            }
+            self.waiting = true;
+            if d.abs() < 2 {
+                return 0.;
+            }
+            d -= d.signum();
+        }
+    }
 }
 
 /// D1100: the PPhysicsTweaks with configuration 0 (anti-gravity tweakers) on a body's
@@ -711,6 +789,7 @@ fn build_scene_inner(
                             anti_gravity: None,
                             spins: vec![],
                             moves: vec![],
+                            layers: vec![],
                         });
                         scene.bodies.len() - 1
                     })
@@ -879,6 +958,29 @@ fn build_scene_inner(
                 angle_range: tw.angle_range,
                 key: (tw.configuration == 5 && tw.follow_key)
                     .then(|| key_of(tw.color_index, &tw.name)),
+            });
+        }
+    }
+    for (i, t) in things.iter().enumerate() {
+        let Some(tw) = t
+            .data
+            .physics_tweak
+            .as_ref()
+            .filter(|tw| tw.configuration == 12)
+        else {
+            continue;
+        };
+        let slot = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        if let Some(b) = slot {
+            scene.bodies[b].layers.push(LayerTweak {
+                thing: i,
+                behavior: tw.behavior,
+                z_behavior: tw.z_behavior,
+                maximum_mass: tw.maximum_mass,
+                waiting: tw.waiting_to_move,
+                last_activation: tw.last_known_activation,
             });
         }
     }

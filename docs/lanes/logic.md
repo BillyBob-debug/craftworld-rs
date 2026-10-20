@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-46 (pistons; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-47 (pistons; layer switch; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -52,9 +52,10 @@
 - Merged: D1141 (PR 284, 4976a39) the tag and player sensors' cone and layer tests.
 - Merged: D1142 (PR 285, 3e5b6eb) the grab and impact sensors have no cone or layer test.
 - Merged: D1143 (PR 286, f32c181) the chip-table angle of a Thing without a PPos.
-- D1144 (branch `logic-d1144`, worktree `E:\Projects\wt-d324`): turning tweaks 3, 4 and
-  5 aim along velocity, stick and target; configuration 12 is a layer switch (Part 46).
-- Decision numbers: D1100-D1199, next free D1145.
+- Merged: D1144 (PR 287, 78d3e4e) turning tweaks 3, 4 and 5.
+- D1145 (branch `logic-d1145`, worktree `E:\Projects\wt-d324`): the layer switch,
+  configuration 12 (Part 47).
+- Decision numbers: D1100-D1199, next free D1146.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -93,7 +94,7 @@
   after D1134 x 24,464 on tick 2004, unchanged, no crash;
   after D1135 a GPU device-lost crash near tick 685 in 4 of 4 runs, main
   without D1135 too; after D1136 the same crash near tick 682 in 3 of 3 runs,
-  main without D1136 too).
+  main without D1136 too; after D1143 and D1144 x 24,464 on tick 2005, unchanged).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -163,7 +164,9 @@ EBOOT rule and unit tests:
    The cone direction's callers 0x114de4 and 0x115088 are editor drawing only (D1144
    read). Grab and impact have no cone or layer test (Part 44), tag and player do
    (Part 43), chip tables since D1143.
-3. Outputs not yet modelled: configuration 12's layer move (0xce1f8, Part 46), stick
+3. Outputs not yet modelled: the host must call `LayerTweak::tick` each frame and move
+   the body's glued group and colliders by the step it returns, with a `fits` test for
+   overlap (Part 47); configuration 13's recorded moves and 14 (Part 47), stick
    slots for configuration 4, configuration 5's lead, the exact 0x1c21f4 speed and which
    wrapped term is its error, the flip and the +0x220 angle; the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
