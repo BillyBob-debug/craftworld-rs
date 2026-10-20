@@ -597,7 +597,7 @@ impl MoveTweak {
     /// (u.x cos + u.y sin, u.y cos - u.x sin) (0xcc484, 0x9587ac). With allowUpDown off the
     /// follower drops its error along that axis (0x9587ac); with localSpace the wanted
     /// velocity of 8 and 11 alike is turned by it (0x9582c4). Followers with allowInOut
-    /// are not packed here (the caller sends them to 0x1c8250), see [`build_scene`].
+    /// are packed the same; the caller only moves their layer first (0x1c8250).
     /// INFERRED: the input scale 0xcbed4 read as 1; the mirror flag (which negates the
     /// angle for localSpace) not modelled; stick movers see no stick.
     pub fn rows(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>, act: f32) -> Vec<Row> {
@@ -1243,7 +1243,6 @@ fn build_scene_inner(
             .physics_tweak
             .as_ref()
             .filter(|tw| matches!(tw.configuration, 6..=8 | 11))
-            .filter(|tw| !(tw.configuration == 11 && tw.allow_in_out))
         else {
             continue;
         };

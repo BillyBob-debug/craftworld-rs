@@ -103,7 +103,10 @@
   main without D1136 too; after D1143 to D1148 x 24,464 on tick 2005, unchanged;
   after D1149 the GPU crash near tick 685 in 4 of 4 runs, with Sackboy at
   x -11,704.3 on tick 680 as on the D1148 build; after D1150 the same crash, tick 680
-  unchanged).
+  unchanged; after D1151 the crash near tick 688 in 1 of 2 runs, and the run that
+  finished stopped at x 910.8 from tick 1111 (r held, Sackboy standing) to tick 2005
+  instead of x 24,464, the same with or without allowInOut followers, so from D1149 or
+  D1150).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -151,7 +154,7 @@
   +0x20, limits +0x24/+0x28 = ±accel × velRange, × activation × 1/mass (0x95fdc8).
   Speed shaper 0x1c21f4 with root helper 0x1c2128 (Part 51). Followers (11) and 6-8
   via 0x957df4 (Part 12); followers call 0x1c21f4 at 0x9586cc (Part 52); +0x5c localSpace,
-  +0xe4 allowInOut (sent to 0x1c8250), +0xe5 allowUpDown (0x9587ac) (Part 53); tag
+  +0xe4 allowInOut (layer move 0x1c8250, then packed), +0xe5 allowUpDown (0x9587ac) (Part 53); tag
   search 0x1c3e04 and map 0xceb8c (Part 13).
 
 ## Next
@@ -191,7 +194,7 @@ EBOOT rule and unit tests:
    inputs, add `SpinTweak::lead` for a target with a body, and the +0x220 parent
    angle (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
    for followers, a host filling `MoveTweak::angle`, the mirror negation of the
-   localSpace angle, the allowInOut path 0x1c8250 and the 1/mass rate (Part 53);
+   localSpace angle, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).

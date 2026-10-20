@@ -1543,7 +1543,7 @@ fn d1150_followers_ease_in_with_the_turn_shaper() {
 }
 
 #[test]
-fn d1151_followers_turn_their_up_axis_drop_in_out_and_keep_local_space() {
+fn d1151_followers_turn_their_up_axis_and_keep_local_space() {
     // A box with a follower (Thing 2) that keeps 100 from its target.
     let mut things = vec![
         floor(),
@@ -1568,9 +1568,9 @@ fn d1151_followers_turn_their_up_axis_drop_in_out_and_keep_local_space() {
         ..Default::default()
     });
     let follower = build_scene(&things).bodies[0].moves[0];
-    // With allowInOut the caller packs it elsewhere (0x1c8250): no row here.
+    // With allowInOut the caller moves layers first (0x1c8250), then packs it as usual.
     things[2].data.physics_tweak.as_mut().unwrap().allow_in_out = true;
-    assert!(build_scene(&things).bodies[0].moves.is_empty());
+    assert_eq!(build_scene(&things).bodies[0].moves.len(), 1);
     let up = [0., 1.];
     let d = Some([1000., 0.]);
     // allowUpDown off drops the error along the up axis; the +0x220 angle turns that axis,

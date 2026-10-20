@@ -8,9 +8,13 @@ Part 52 left three branches of the follower packer 0x957df4 unread. The serializ
 0xb7834c names the bytes: +0x5c localSpace, +0xe4 allowInOut, +0xe5 allowUpDown, +0xf5
 flee.
 
-FOUND, allowInOut: a configuration 11 tweak with allowInOut set is not packed by
-0x957df4; its caller sends it to 0x1c8250 instead. The lvsl at 0x9585ac does not use
-+0xe5 (rA = 0); it loads from the stack at 0x70.
+FOUND, allowInOut: for a configuration 11 tweak with allowInOut set the caller
+(0x1c7fb4) first runs 0x1c8250, which writes no rows: it calls the tag search 0x1c3e04
+with minRange, maxRange and angleRange, turns two Z values into layer indices and calls
+0xcd770 with their difference (INFERRED: a layer move). Every exit rejoins 0x1c7fc0, the
+usual path (0xcbc98, then 0x957df4), so the follower rows are packed as for any other
+follower. The lvsl at 0x9585ac does not use +0xe5 (rA = 0); it loads from the stack
+at 0x70.
 
 FOUND, the up axis: Y is the body's world-matrix row +0x50, turned by theta = the float
 at tweak+0x220 (not negated) to a = (Y.x cos + Y.y sin, Y.y cos - Y.x sin, Y.z). With
@@ -33,9 +37,8 @@ and the limits are scaled by k x the activation. INFERRED: that m is the mass.
 
 Model: `MoveTweak` gains `angle` (0 until a host fills it); `rows` turns the up axis by
 it, drops the error along that axis when allowUpDown is off, and turns a local follower's
-wanted velocity as configuration 8 already did; `build_scene` drops allowInOut
-followers. The test `d1151_followers_turn_their_up_axis_drop_in_out_and_keep_local_space`
-checks each.
+wanted velocity as configuration 8 already did; allowInOut followers keep their rows.
+The test `d1151_followers_turn_their_up_axis_and_keep_local_space` checks each.
 
 Census (census-all-40, followers by flag):
 
@@ -43,5 +46,5 @@ Census (census-all-40, followers by flag):
 |---|---|---|
 | 224 | 0 local, 1,895 world | 0 local, 175 world |
 
-Not modelled: a host filling the +0x220 angle; the mirror negation; the allowInOut path
-0x1c8250; the 1/mass rate.
+Not modelled: a host filling the +0x220 angle; the mirror negation; the allowInOut layer
+move 0x1c8250 (0x1c3e04, 0xcd770); the 1/mass rate.
