@@ -6827,3 +6827,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Logic lane: a creature in an alive state within the seat radius sits and drives; the
   seat lets go when port 0 shuts it or the driver leaves state 4 (0x6a2938, 0x6a2fc4,
   0x89950c; docs/logic.md Part 40).
+
+## D1139 player death and checkpoint lives (2026-10-20)
+- Logic lane: a dead player respawns at a checkpoint that has a life left; the first
+  activation gives lifeMultiplier x (players + 2) lives, and a respawn takes one unless
+  lives are unlimited (0x599dc, 0x5a2d8, 0x5a0c4; docs/logic.md Part 41).

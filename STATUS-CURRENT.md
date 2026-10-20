@@ -11,10 +11,9 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1139 player death and checkpoint lives (2026-10-20)
-- Logic lane: a dead player respawns at a checkpoint that has a life left; the first
-  activation gives lifeMultiplier x (players + 2) lives, and a respawn takes one unless
-  lives are unlimited (0x599dc, 0x5a2d8, 0x5a0c4; docs/logic.md Part 41).
+## Latest: D1140 a destroyed controlinator kills its driver (2026-10-20)
+- Logic lane: a player sitting in a controlinator starts dying when the controlinator is
+  destroyed under them (0x7d5dc, 0x8d2bc; docs/logic.md Part 42).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

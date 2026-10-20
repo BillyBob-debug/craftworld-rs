@@ -124,6 +124,17 @@ impl LevelWorld {
         {
             cr.state = SEATED;
             cr.frames = 0;
+            cr.seat = Some(ctl);
+        }
+    }
+
+    /// The host destroyed `thing`: every creature seated in it loses its seat (+0xecc),
+    /// so its next [`crate::CreatureState::seated_tick`] puts it in state 5.
+    pub fn seat_destroyed(&mut self, thing: u32) {
+        for cr in self.things.iter_mut().filter_map(|t| t.creature.as_mut()) {
+            if cr.seat == Some(thing) {
+                cr.seat = None;
+            }
         }
     }
 
@@ -280,6 +291,28 @@ mod tests {
         assert_eq!(w.controlinator_seat_tick(0), Some(3));
         assert_eq!(w.things[0].controlinator.unwrap().part.driver, None);
         assert_eq!(w.controlinator_seat_tick(0), None, "empty");
+    }
+
+    #[test]
+    fn a_driver_whose_seat_is_destroyed_is_dying() {
+        let mut w = seat_world();
+        w.controlinator_enter(0, 3);
+        let cr = w.things[3].creature.as_mut().unwrap();
+        cr.lethal = 2;
+        assert!(!cr.seated_tick(), "the seat is still there");
+        w.seat_destroyed(1);
+        assert!(
+            !w.things[3].creature.as_mut().unwrap().seated_tick(),
+            "another Thing"
+        );
+        w.seat_destroyed(0);
+        let cr = w.things[3].creature.as_mut().unwrap();
+        assert!(cr.seated_tick());
+        assert_eq!(
+            (cr.state, cr.lethal, cr.frames),
+            (crate::creature::DYING, 2, 0)
+        );
+        assert!(!cr.seated_tick(), "only from state 4");
     }
 
     #[test]
