@@ -383,6 +383,28 @@ impl Switches {
                 }
                 continue;
             }
+            if s.switch_type == 0 {
+                let out0 = s.outputs.first().and_then(|o| o.as_ref());
+                count("button".into(), true);
+                count("button inverted".into(), s.inverted);
+                count(format!("button team_filter={}", s.team_filter), true);
+                count(format!("button outputs={}", s.outputs.len()), true);
+                count(
+                    "button output 0 wired".into(),
+                    out0.is_some_and(|o| !o.targets.is_empty()),
+                );
+                count(
+                    "button stored on".into(),
+                    out0.is_some_and(|o| o.stored.ternary != 0),
+                );
+                count("button without a parent".into(), t.parent.is_none());
+                count("button with a shape".into(), t.parts.contains(&"SHAPE"));
+                count(
+                    "button port 0 wired".into(),
+                    matches!(t.inputs.first(), Some(Some(_))),
+                );
+                continue;
+            }
             if s.switch_type == 54 {
                 let own = |j: u32| world.things[j as usize].parent.unwrap_or(j);
                 let me = own(i as u32);

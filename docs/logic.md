@@ -393,9 +393,9 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   (3,944; Part 15), camera finished 32 (2,760; Part 16), magic mouth 34 (1,426;
   Part 17), projectile 39 (816) and paint 8 (51; Part 18), linear velocity 42 (771)
   and angular velocity 43 (122; Part 19), grab 6 (666; Part 20), control
-  pad 38 (535; Part 21), key remote 54 (497; Part 22).
+  pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23).
 - Kept as stored (the world signal is not modelled yet):
-  button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123),
+  motion recorder 45 (142), angle 41 (126), 57 (123),
   65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
   (11), trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
@@ -653,3 +653,34 @@ its key, wherever they are. compute_output's table sends it to 0x11cf18, which c
 - lbp-runtime: `key_remote` in remote.rs over `LevelWorld.tags` and `tag_signal`.
 - Tests: `key_remote_takes_the_strongest_tag_of_its_key`,
   `key_remote_players_unwired_tags_and_inversion` in remote.rs.
+
+## Part 23: the button switch (D1121)
+
+The button (type 0, 224 placed) is on while something presses its body hard enough.
+compute_output's table sends it to 0x11caac, which calls 0x11a998(out, PSwitch, 1); the
+shared tail 0x11c2c4 inverts it.
+
+- Force (0x100da4): over this tick's pair-cache contacts of the button's bodies (the
+  object PSwitch+0x90, bodies +0x58 and +0x5a), skipping a body's contact with itself,
+  the sum of each contact's two impulse lengths (+0x10, +0x20), counting only contacts
+  whose other body's player passes the team filter (PSwitch+0x60, 0xf9a64).
+- Player: the counted contacts' players in order, each one with a player replacing the
+  one kept, except that once the kept player is output 0's player it stays; else -1.
+- Activation: the force over 10000.0 (r2-0x3e6c) kept to [0, 1]. Ternary (0x11873c,
+  the default rule): 0 at or below 0.25, 1 at or above 0.75, between them held.
+- Release hold: while PSwitch+0x24 is 3 or less and the ternary is 0, the output is
+  output 0's signal (taken back through the inversion so the tail gives it back).
+- End step (0x124b0c entry 0 → 0x124bb8): while output 0 is on before the inversion,
+  0x11a998 runs again with mode 0; a press sets PSwitch+0x24 to 0, none adds 1. So a
+  released button stays on four more ticks. Then 0x10ffd4 eases the glow PSwitch+0x20,
+  which changes no signal (not modelled).
+- Census (census-all-6.json): 224 buttons, 3 inverted, one output each (205 wired),
+  3 storing on, all with team filter 0 and a shape, 63 without a parent, none with
+  port 0 wired.
+- INFERRED: the button's body is the switch's own Thing and a body's player the player
+  whose Sackboy Thing it is. Not found: where PSwitch+0x24 starts (here 0, so a button
+  never pressed keeps its stored signal). Not modelled: the team filter's owner.
+- lbp-runtime: `button` and `button_step` in button.rs over `LevelWorld.contacts`, whose
+  new `Contact.impulse` the host fills (nothing fills it yet).
+- Tests: `button_force_threshold_and_presser`,
+  `button_holds_four_ticks_after_release_and_inverts` in button.rs.

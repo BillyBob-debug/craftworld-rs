@@ -19,7 +19,8 @@
 //!
 //! The logic types are computed, and so are the tag sensor, the player sensor and the
 //! impact sensor (`sensors.rs`), the velocity sensors (`velocity.rs`), the grab switch
-//! (`grab.rs`), the control pad (`pad.rs`) and the key remote (`remote.rs`); the other
+//! (`grab.rs`), the control pad (`pad.rs`), the key remote (`remote.rs`) and the button
+//! (`button.rs`); the other
 //! types whose signal comes from the world (physics, the other pads) keep the signal the
 //! level file stores.
 //!
@@ -31,14 +32,14 @@
 //! - The skip for a Thing whose flag byte +0x78 has bit 1 set (meaning not established).
 //! - Outputs without targets that a second test forces off like a deactivated Thing
 //!   (pad types 0x26, 0x2c and 0x37 only).
-//! - The per-type work at the end of a switch's update other than the timer's (types 0,
-//!   8/0x27, 0x13, 0x1d).
+//! - The per-type work at the end of a switch's update of types 0x13 and 0x1d.
 //! - Where the random switch's seed (PSwitch+0x1c) starts; here at 0.
 //! - The player / team filter of a counter (always passes here).
 //! - Deactivation inside a sequencer and of a cursor chip; the re-fire flag (PSwitch+0xe3).
 //! - Switch types 0x24/0x25 standing in for their microchip's switch in the ordering.
 //! - The other object kinds a signal is applied to (lights, emitters, movers and so on).
 //! - The activating player the game records on the target before the dispatch.
+use crate::button::button;
 use crate::cutscene::camera_finished;
 use crate::grab::grab_sensor;
 use crate::pad::pad_sensor;
@@ -77,7 +78,8 @@ pub struct SwitchMemory {
     /// sets it was not found; here it starts at 0 (INFERRED).
     pub seed: u32,
     /// The random switch's phase (PSwitch+0x24): ticks left on (positive) or off
-    /// (negative); 0 picks on the next step ([`random_tick`]).
+    /// (negative); 0 picks on the next step ([`random_tick`]). For a button the same
+    /// slot counts the ticks since it was last pressed (`button.rs`).
     pub phase: i32,
     /// BulletRefreshTime (PSwitch+0x1c, the random switch's seed slot): ticks until a
     /// full projectile or paint sensor empties ([`LevelWorld::projectile_step`]).
@@ -355,6 +357,18 @@ fn board_port_offset(owner: &ThingState) -> Option<usize> {
     })
 }
 
+/// The standard inversion (FOUND, 0x11c16c): the activation a becomes 1 - a (a + 1 below
+/// 0), the ternary 1 when it was 0 and 0 otherwise; the player is kept.
+pub(crate) fn invert_standard(mut s: SwitchInput) -> SwitchInput {
+    s.activation = if s.activation < 0. {
+        s.activation + 1.
+    } else {
+        1. - s.activation
+    };
+    s.ternary = i32::from(s.ternary == 0);
+    s
+}
+
 /// The ternary output 0 holds, taken back through the inversion when the switch is
 /// inverted: what a ternary rule with a hold band keeps (FOUND, 0x11873c).
 pub(crate) fn held_ternary(cx: &SwitchContext<'_>) -> i32 {
@@ -486,6 +500,8 @@ pub fn compute_output(
         38 if (10..=17).contains(&output) => Some((pad_sensor(cx, output), Invert::Negate)),
         38 => standard(pad_sensor(cx, output)),
         54 => standard(key_remote(cx)),
+        // BUTTON, 0x11caac → 0x11a998, FOUND (button.rs).
+        0 => standard(button(cx)),
         // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
         42 | 43 => standard(velocity_sensor(cx)),
         // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.
@@ -521,14 +537,7 @@ pub fn compute_output(
                 new.activation = -new.activation;
                 new.ternary = -new.ternary;
             }
-            Invert::Standard => {
-                new.activation = if new.activation < 0. {
-                    new.activation + 1.
-                } else {
-                    1. - new.activation
-                };
-                new.ternary = i32::from(new.ternary == 0);
-            }
+            Invert::Standard => new = invert_standard(new),
         }
     }
     if s.old_joint {
@@ -1419,6 +1428,9 @@ impl LevelWorld {
         if !deactivated && matches!(switch_type, 8 | 39) {
             self.projectile_step(thing);
         }
+        if !deactivated && switch_type == 0 {
+            self.button_step(thing);
+        }
         visits
     }
 
@@ -1474,10 +1486,12 @@ mod tests {
         }
     }
 
-    /// A switch Thing with one output per entry: (stored signal, targets).
+    /// A switch Thing with one output per entry: (stored signal, targets). Its type is the
+    /// score switch's (30), which keeps the stored signal.
     fn switch(outputs: &[(SwitchInput, &[(u32, i32)])]) -> ThingState {
         ThingState {
             switch: Some(SwitchState {
+                switch_type: 30,
                 outputs: outputs
                     .iter()
                     .map(|(s, targets)| {
@@ -1882,7 +1896,7 @@ mod tests {
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
         // The other sensors keep the stored signal, also when inverted.
-        for ty in [0, 30, 41, 65] {
+        for ty in [30, 41, 65] {
             let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
             let s = t.switch.as_mut().unwrap();
             (s.switch_type, s.inverted) = (ty, true);

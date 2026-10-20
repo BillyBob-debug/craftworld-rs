@@ -6715,3 +6715,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1112 every switch type counted; the random switch (2026-10-19)
 - Logic lane: a census of all 141,572 switches in 358 levels by type, and the random
   switch's dice, pick patterns and on / off times from the EBOOT (docs/logic.md P14).
+
+## D1113 the impact switch (2026-10-19)
+- Logic lane: impact switches (3,944) follow the EBOOT rule from this tick's physics
+  contacts: player mode, touching and the tag filter (docs/logic.md Part 15).
