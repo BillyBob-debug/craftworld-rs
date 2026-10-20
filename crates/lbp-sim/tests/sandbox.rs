@@ -1063,10 +1063,10 @@ fn d1144_aim_tweaks_turn_up_along_velocity_stick_and_target() {
     let right = along.aim([5., 0.], None);
     assert!(along.turn_along(0., 0., 1., right) < 0.);
     assert!(along.turn_along(0., 0., 1., along.aim([-5., 0.], None)) > 0.);
-    assert_eq!(along.target_along(0., along.aim([0., 5.], None)).0, 0.);
+    assert_eq!(along.target_along(0., 0., along.aim([0., 5.], None)).0, 0.);
     // Slower than the dead zone (x² + y² under 0.1) it wants no turn and brakes.
     let slow = along.aim([0.3, 0.], None);
-    assert_eq!(along.target_along(0., slow).0, 0.);
+    assert_eq!(along.target_along(0., 0., slow).0, 0.);
     let w = along.turn_along(0., 0.5, 1., slow);
     assert!((w - (0.5 - 0.2094394)).abs() < 1e-6, "{w}");
     // Configuration 4 sees no stick here, so it brakes too.
@@ -1075,7 +1075,7 @@ fn d1144_aim_tweaks_turn_up_along_velocity_stick_and_target() {
     // Configuration 5 aims at its target, and turns nothing towards none.
     let seek = tweak(5);
     assert!(seek.turn_along(0., 0., 1., seek.aim([0., 0.], Some([100., 0.]))) < 0.);
-    assert_eq!(seek.target_along(0., seek.aim([0., 0.], None)).0, 0.);
+    assert_eq!(seek.target_along(0., 0., seek.aim([0., 0.], None)).0, 0.);
     // Its search is the follower's: inside the distance band only.
     assert!(seek.sees([100., 0.], [0., 1.]));
     assert!(!seek.sees([5., 0.], [0., 1.]));
@@ -1463,4 +1463,36 @@ fn d1148_aim_tweaks_take_the_stick_inputs_mirror_and_lead_the_target() {
         let spin = build_scene(&things).bodies[0].spins[0];
         assert_eq!((spin.flip, spin.stick), (flip, [0., 0.]));
     }
+}
+
+#[test]
+fn d1149_turn_speed_speeds_up_eases_in_and_lands_in_a_tick() {
+    use lbp_sim::scene::SpinTweak;
+    // half = 0.5 × accel × range; full acceleration is 2 × half per tick.
+    let half = 0.01;
+    // Far off it wants full acceleration on top of its speed, either way.
+    assert!((SpinTweak::speed(half, 0., 0., 1.) - 0.02).abs() < 1e-6);
+    assert!((SpinTweak::speed(half, 0., 0., -1.) + 0.02).abs() < 1e-6);
+    assert!((SpinTweak::speed(half, 0.05, 0., 1.) - 0.07).abs() < 1e-6);
+    // Arriving in two ticks (h = 2, u = 0.75) it eases in: 2 × half × u × (2 − u).
+    let e = 23. * half / 8.;
+    assert!((SpinTweak::speed(half, 0., 0., e) - 0.01875).abs() < 1e-5);
+    assert!((SpinTweak::speed(half, 0., 0., -e) + 0.01875).abs() < 1e-5);
+    // Within a tick it closes the gap at once, plus the aim's own turn.
+    assert!((SpinTweak::speed(half, 0., 0., 0.001) - 0.001).abs() < 1e-7);
+    assert!((SpinTweak::speed(half, 0., 0.0005, 0.001) - 0.0015).abs() < 1e-6);
+    // A gyroscope tilted by 0.3 rad comes upright without overshooting past 0.01.
+    let gyro = SpinTweak {
+        configuration: 1,
+        range: 0.2094394,
+        accel: 0.1,
+        ..Default::default()
+    };
+    let (mut angle, mut w) = (0.3f32, 0f32);
+    for _ in 0..200 {
+        w = gyro.turn(angle, w, 1.);
+        angle += w;
+        assert!(angle > -0.01, "overshot to {angle}");
+    }
+    assert!(angle.abs() < 1e-3 && w.abs() < 1e-3, "{angle} {w}");
 }
