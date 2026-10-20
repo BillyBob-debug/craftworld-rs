@@ -3455,12 +3455,13 @@ fn run() -> Result<(), String> {
             }
         }
         // D1149: turning tweaks by the ticks 0x1c21f4 takes to reach full speed
-        // (range / (accel × range)), or none when accel × range is 0.
+        // (range / (accel × range)), or none when accel × range is 0; D1150: followers
+        // (configuration 11) too, as they call it at 0x9586cc.
         for t in &report.things {
             let Some(p) = &t.data.physics_tweak else {
                 continue;
             };
-            if (1..=5).contains(&p.configuration) {
+            if matches!(p.configuration, 1..=5 | 11) {
                 let ticks = if p.accel_strength * p.vel_range == 0. {
                     "none"
                 } else {
@@ -3471,10 +3472,14 @@ fn run() -> Result<(), String> {
                         _ => "over 60",
                     }
                 };
-                let k = format!(
-                    "turn configuration {} full speed ticks {ticks}",
-                    p.configuration
-                );
+                let k = if p.configuration == 11 {
+                    format!("follower full speed ticks {ticks}")
+                } else {
+                    format!(
+                        "turn configuration {} full speed ticks {ticks}",
+                        p.configuration
+                    )
+                };
                 *totals.switches.sensors.entry(k).or_default() += 1;
             }
         }

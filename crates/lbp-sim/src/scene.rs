@@ -585,10 +585,14 @@ impl MoveTweak {
     /// ±decel × range; row 2 holds the cross axis at 0 with ±decel × range, only when that
     /// is not 0. The follower aims at the point min_range (max_range when fleeing) short of
     /// its target, with ±accel × range on both rows and its speed clamped to ±range.
-    /// INFERRED: the follower's 0x1c21f4 speed, read as sqrt(2 × accel × range × distance)
-    /// (as the gyroscope's, D1109); the input scale 0xcbed4 read as 1; the mirror flag and
-    /// the follower's +0x220 angle not modelled; stick movers (6, 7) see no stick.
-    pub fn rows(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>) -> Vec<Row> {
+    /// D1150 FOUND (0x9586cc, the only call of 0x1c21f4 outside the turning packer): the
+    /// follower's speed is [`SpinTweak::speed`] with half = 0.5 × accel × range ×
+    /// `act`, the body's speed along the aim, no lead and the distance as the error,
+    /// clamped to ±range; a negative speed flips the row's axis (0x958068, the row keeps
+    /// |v|). A zero distance skips the call. Stick movers (6, 7) do not call it.
+    /// INFERRED: the input scale 0xcbed4 read as 1; the mirror flag and the follower's
+    /// +0x220 angle not modelled; stick movers see no stick.
+    pub fn rows(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>, act: f32) -> Vec<Row> {
         let a = self.accel * self.range;
         let k = self.decel * self.range;
         let follow = self.configuration == 11;
@@ -617,11 +621,18 @@ impl MoveTweak {
         };
         let mut rows = Vec::with_capacity(2);
         let axis = match unit(want) {
-            Some(axis) => {
-                let target = if follow {
-                    (2. * a * want[0].hypot(want[1])).sqrt().min(self.range)
+            Some(dir) => {
+                let (axis, target) = if follow {
+                    let half = 0.5 * a * act;
+                    let s = SpinTweak::speed(half, dot(vel, dir), 0., want[0].hypot(want[1]))
+                        .clamp(-self.range, self.range);
+                    if s < 0. {
+                        ([-dir[0], -dir[1]], -s)
+                    } else {
+                        (dir, s)
+                    }
                 } else {
-                    want[0].hypot(want[1])
+                    (dir, want[0].hypot(want[1]))
                 };
                 let lo = if follow { -a } else { -k };
                 rows.push(Row {
@@ -660,7 +671,7 @@ impl MoveTweak {
     /// activation (0x95fdc8; 1/mass left out as for D1109).
     pub fn push(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>, act: f32) -> [f32; 2] {
         let mut v = vel;
-        for r in self.rows(vel, up, d) {
+        for r in self.rows(vel, up, d, act) {
             let s = dot(v, r.axis);
             let ds = (r.target - s).clamp(r.lo * act, r.hi * act);
             v = [v[0] + r.axis[0] * ds, v[1] + r.axis[1] * ds];
