@@ -57,6 +57,7 @@ mod story_native;
 mod switches;
 pub mod transform;
 pub mod velocity;
+mod wormhole;
 pub use camera::*;
 pub use cutscene::*;
 pub use display::*;
@@ -124,6 +125,9 @@ pub struct ThingState {
     /// from the microchip or circuit board holding the Thing
     /// ([`LevelWorld::recompute_deactivated`]).
     pub deactivated: bool,
+    /// PWormhole+0x16, the one-tick "just ended" byte the wormhole switch reads (Part 26).
+    /// Nothing runs the wormhole here, so it stays false.
+    pub wormhole_ended: bool,
     /// PMicrochip: the chip's circuit-board Thing. The components on the board are the
     /// board's children.
     pub circuit_board: Option<u32>,

@@ -6727,3 +6727,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1115 the magic mouth switch (2026-10-19)
 - Logic lane: magic mouths (1,426) read their script's OutputEndSignalFrames in the
   switch pass, as the game does, so inverted mouths work (docs/logic.md Part 17).
+
+## D1116 the projectile and paint switches (2026-10-19)
+- Logic lane: projectile (816) and paint (51) sensors output hits / required with
+  the game's held ternary and empty 6 ticks after full (docs/logic.md Part 18).

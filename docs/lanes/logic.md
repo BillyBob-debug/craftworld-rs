@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-25 (pistons; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-26 (pistons; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -31,9 +31,10 @@
 - Merged: D1120 (PR 263, 4242f1f) the key remote switch.
 - Merged: D1121 (PR 264, 5f2ac7c) the button switch.
 - Merged: D1122 (PR 265, e504be1) the motion recorder switch.
-- D1123 (branch `logic-angle`, worktree `E:\Projects\wt-d324`):
-  the angle sensor switch (docs/logic.md Part 25).
-- Decision numbers: D1100-D1199, next free D1124.
+- Merged: D1123 (PR 266, 8a1e600) the angle sensor switch.
+- D1124 (branch `logic-wormhole`, worktree `E:\Projects\wt-d324`):
+  the wormhole switch (docs/logic.md Part 26).
+- Decision numbers: D1100-D1199, next free D1125.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -55,14 +56,16 @@
   after D1120 x 24,464 on tick 2004, unchanged;
   after D1121 x 24,464 on tick 2004, unchanged: nothing fills impulses yet;
   after D1122 x 24,464 on tick 2004, unchanged: nothing writes the word yet;
-  after D1123 x 24,464 on tick 2004, unchanged).
+  after D1123 x 24,464 on tick 2004, unchanged;
+  after D1124 x 24,464 on tick 2004, unchanged).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
   (Part 21), census-all-5.json the key remotes (Part 22),
   census-all-6.json the buttons (Part 23),
   census-all-7.json the motion recorders (Part 24),
-  census-all-8.json the angle sensors (Part 25).
+  census-all-8.json the angle sensors (Part 25),
+  census-all-9.json the wormhole switches (Part 26).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -82,7 +85,7 @@
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
 EBOOT rule and unit tests:
-1. The switches kept as stored (Part 14), by count: wormhole 57, data sampler 65,
+1. The switches kept as stored (Part 14), by count: data sampler 65, lever 1,
    then the rest. The host must fill `PlayerState.grabbing` for the grab switch
    (Part 20), `PlayerState.piloting` and `pad` for the control pad (Part 21) and
    `ThingState.body` from avian2d for the velocity switches (Part 19). The host must fill

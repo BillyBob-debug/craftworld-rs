@@ -394,9 +394,9 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   Part 17), projectile 39 (816) and paint 8 (51; Part 18), linear velocity 42 (771)
   and angular velocity 43 (122; Part 19), grab 6 (666; Part 20), control
   pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23),
-  motion recorder 45 (142; Part 24), angle 41 (126; Part 25).
+  motion recorder 45 (142; Part 24), angle 41 (126; Part 25), wormhole 57 (123;
+  Part 26).
 - Kept as stored (the world signal is not modelled yet):
-  57 (123),
   65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
   (11), trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
@@ -737,3 +737,34 @@ index is not read, so every output gets the same signal; the player is always -1
 - lbp-runtime: `angle_sensor` in angle.rs.
 - Tests: `angle_sensor_reads_its_objects_turn`, `angle_sensor_modes_and_inversion` in
   angle.rs.
+
+## Part 26: the wormhole switch (D1124)
+
+The wormhole switch (type 57, 123 placed) reports a wormhole that has just finished.
+compute_output's table 0x11be00 entry 57 is 0x11d104. The store 0x11bf18 inverts the
+result through the standard tail: 0x11bfac sends types above 0x37 to 0x11c16c, past
+table 0x11bfd4. There is no end step (0x124934 sends types above 0x27 past table
+0x124b0c). The output index is not read, and the player is always -1.
+
+- The Thing is the switch's own (PSwitch+8), not its parent. The output is off
+  (0x11bf08) unless bit 49 of the Thing's 64-bit part mask (Thing+0x10) is set and part
+  slot 49 of its part block (Thing+0x34 → +0xc4) is not null.
+- Otherwise it is on (1.0, ternary 1, r2-0x4174) while byte +0x16 of that part is set,
+  else 0.0 and 0 (r2-0x41cc).
+- Slot 49 is the WORMHOLE part (INFERRED: the runtime part enum shifts the indices
+  above 0x28 by one, so serialized WORMHOLE 0x30 is slot 49; every type-57 Thing in the
+  census has the part).
+- PWormhole (ctor 0x137944, 0x3c bytes) sets +0x16 to 0. Its update 0x138040 (called by
+  the manager 0xcfbb4 at 0xcfc04) clears +0x16 when it was 1, and sets it for one tick,
+  clearing +0x17, when the wormhole stops being active (+0x17): when the countdown +0x1c
+  passes 10 (0x138094), or when no player is inside. +0x17 is what the IsActiveWormHole
+  native (0x6d3a2c) reads; TriggerWormHole (0x641208, 0x13883c) sets +0x15.
+- Census (census-all-9.json): 123 switches, none inverted, all with one output; output
+  0 is wired in 40 and stores on in 0; 56 have no parent. Parts on these Things: POS,
+  WORMHOLE and SWITCH 123 each, RENDER_MESH 81, SCRIPT, SHAPE and TRIGGER 79 each, BODY
+  57, DECORATIONS 2.
+- Not modelled: the wormhole's own update, so `ThingState.wormhole_ended` stays false
+  and a wormhole switch reads off here (the stored signal is no longer kept).
+- lbp-runtime: `wormhole_sensor` in wormhole.rs.
+- Tests: `wormhole_switch_reads_its_ended_byte`,
+  `wormhole_switch_inverts_through_the_standard_tail` in wormhole.rs.
