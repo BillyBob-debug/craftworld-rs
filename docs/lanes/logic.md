@@ -61,9 +61,10 @@
 - Merged: D1150 (PR 293, 4d67b8a) the followers' speed through 0x1c21f4.
 - Merged: D1151 (PR 294, 269a784) the followers' up axis, localSpace and allowInOut.
 - Merged: D1152 (PR 295, 82767b3) the followers' tag key colour is an s32.
-- D1153 (branch `logic-d1153`, worktree `E:\Projects\wt-d324`): touching layers do not
-  collide, within `SLAB_TOUCH_EPSILON` (docs/logic/part-55.md).
-- Decision numbers: D1100-D1199, next free D1154.
+- Merged: D1153 (PR 296, 3e16c77) touching layers do not collide.
+- D1154 (branch `logic-d1154`, worktree `E:\Projects\wt-d324`): followers measure from
+  their parent's point (docs/logic/part-56.md).
+- Decision numbers: D1100-D1199, next free D1155.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -113,7 +114,9 @@
   1,000, ending at x -2,053.9 on tick 2,007, blocked by lift 2643, follower 2652 key 35,
   jammed against gyroscope 1320, Part 54); after D1153 the lift leaves and Sackboy
   stands at x -1,092.7, y 5,238.4 on ticks 2,006 to 2,008, inside the xy range of
-  body 1951 (3 movers, 3 spins), Part 55).
+  body 1951 (3 movers, 3 spins), Part 55); after D1154 body 1951 holds still, but
+  lift 2643 rises to its y-5,539 tag at level start and Sackboy falls at x -2,870.3 on
+  tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -147,7 +150,8 @@
   census-all-40.json the followers by allowInOut, localSpace and allowUpDown (Part 53),
   census-all-42.json the followKey followers with a matching tag (Part 54);
   local-analysis/logic/d1153/census-all.json (`level_physics --all`) the touching
-  layer pairs (Part 55).
+  layer pairs (Part 55); local-analysis/logic/d1154/census-all.json the followers
+  and their offset search points (Part 56).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -170,7 +174,10 @@
   Tag search 0x1c3e04 has no tag activation test; 0x12f6f4 rejects a tag whose Thing
   +0x7f is set, 0xf9a64 is a mode/player check, not a layer test (D1153). PShape
   thickness +0x7c, massDepth +0x70, serializer 0xb41534; the pairwise depth test is NOT
-  FOUND (SPU ELFs at file offsets 0xcb1080-0xd43780) (Part 55).
+  FOUND (SPU ELFs at file offsets 0xcb1080-0xd43780) (Part 55). Followers search
+  from their Thing's parent (+0x5c, else the Thing), its translation at
+  `*(*(thing+0x2c)+0xc)+0x70` (0x957df4; spins 0x95fdc8 the same); 0x88f7dc ->
+  0x550e70 is a player check on a global's +0x180 (Part 56).
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -210,8 +217,9 @@ EBOOT rule and unit tests:
    angle (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
    for followers, a host filling `MoveTweak::angle`, the mirror negation of the
    localSpace angle, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
-   next on the route, why Sackboy stops at x -1,092.7 on body 1951 (Things 2472,
-   2473 and 2669, Part 55);
+   next on the route (D1155), which key-35 tags lift 2643 sees at level start: tag
+   inputs or map registration (0xceb8c, inserter 0xddf98), Part 56; spin followers
+   (configuration 5) searching from the parent point too (0x95fdc8, Part 56);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).

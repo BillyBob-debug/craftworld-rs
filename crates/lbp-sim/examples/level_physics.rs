@@ -295,6 +295,8 @@ fn run() -> Result<(), String> {
     let (mut joints, mut rejected_joints) = (0, BTreeMap::<&str, usize>::new());
     let mut anchored = 0;
     let (mut touching_pairs, mut touching_pairs_dynamic) = (0usize, 0usize);
+    // D1154: followers, and those whose parent's point is off their body's origin.
+    let (mut followers, mut followers_offset) = (0usize, 0usize);
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -360,6 +362,18 @@ fn run() -> Result<(), String> {
         }
         touching_pairs += touching;
         touching_pairs_dynamic += touching_dynamic;
+        let (mut follow, mut follow_offset) = (0usize, 0usize);
+        for m in scene
+            .bodies
+            .iter()
+            .flat_map(|b| &b.moves)
+            .filter(|m| m.configuration == 11)
+        {
+            follow += 1;
+            follow_offset += usize::from(m.at[0].hypot(m.at[1]) > 1.);
+        }
+        followers += follow;
+        followers_offset += follow_offset;
         let r = &scene.report;
         fixed_bodies += r.fixed_bodies;
         nested_bodies += r.nested_bodies;
@@ -477,6 +491,7 @@ fn run() -> Result<(), String> {
             "bodies": m.bodies, "moved_over_1": m.moved_1, "moved_over_100": m.moved_100,
             "non_finite": m.non_finite, "max_move": m.max_move,
             "touching_pairs": touching, "touching_pairs_dynamic": touching_dynamic,
+            "followers": follow, "followers_offset": follow_offset,
         }));
     }
     let mut top: Vec<(&String, &usize)> = materials.iter().collect();
@@ -502,6 +517,7 @@ fn run() -> Result<(), String> {
         "not_collidable": not_collidable, "rejected": rejected, "filled": filled,
         "joints": joints, "rejected_joints": rejected_joints,
         "touching_pairs": touching_pairs, "touching_pairs_dynamic": touching_pairs_dynamic,
+        "followers": followers, "followers_offset": followers_offset,
         "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,
