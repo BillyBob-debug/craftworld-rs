@@ -1,4 +1,5 @@
-//! The lever switch (switch type 1) (docs/logic.md Part 28).
+//! The lever (switch type 1, docs/logic.md Part 28) and the three-way switch (switch
+//! type 2, Part 29).
 //!
 //! FOUND in the 01.33 executable (compute_output 0x11bd58, table 0x11be00 entry 1 →
 //! 0x11cad0 → 0x11a6a4, then the store 0x11bf18):
@@ -13,12 +14,17 @@
 //!   holds. The player is -1. Every output gets the same signal.
 //! - Inverted through the standard tail (table 0x11bfd4 entry 1 is 0x11c16c).
 //!
+//! The three-way switch (table 0x11be00 entry 2 → 0x11caf0 → 0x11a3b4) reads the same
+//! offset; its activation is x / 100 kept to [-1, 1] (1.0 r2-0x4174, -1.0 r2-0x4168) and
+//! its ternary the same default rule. Inverted, both are negated (table 0x11bfd4 entry 2
+//! is 0x11c234), so the ternary it holds is output 0's negated back.
+//!
 //! Not modelled: 0xf13a0 applies the world matrix to a local point (+0x50 of the Thing's
 //! object at +0x30) when there is one; here the position is the matrix's translation.
 //! Across the 74 levers the ternary band still matches the stored one on 73 (the
 //! activations differ by at most 0.064). Without a world matrix on either Thing the
 //! signal is off here.
-use crate::switches::{held_ternary, SwitchContext, SIGNAL_OFF};
+use crate::switches::{clamp, held_ternary, SwitchContext, SIGNAL_OFF};
 use crate::LevelWorld;
 use lbp_script_vm::natives::SwitchInput;
 
@@ -49,8 +55,9 @@ impl LevelWorld {
     }
 }
 
-/// The ternary of 0x11873c's default rule for `activation` (see the module).
-pub(crate) fn default_ternary(cx: &SwitchContext<'_>, activation: f32) -> i32 {
+/// The ternary of 0x11873c's default rule for `activation`, `held` between the bands
+/// (see the module).
+pub(crate) fn default_ternary(activation: f32, held: i32) -> i32 {
     if activation.abs() <= 0.25 {
         0
     } else if activation >= 0.75 {
@@ -58,7 +65,7 @@ pub(crate) fn default_ternary(cx: &SwitchContext<'_>, activation: f32) -> i32 {
     } else if activation <= -0.75 {
         -1
     } else {
-        held_ternary(cx)
+        held
     }
 }
 
@@ -70,7 +77,22 @@ pub(crate) fn lever(cx: &SwitchContext<'_>) -> SwitchInput {
     let activation = ((x + LEVER_HALF_TRAVEL) / (2. * LEVER_HALF_TRAVEL)).clamp(0., 1.);
     SwitchInput {
         activation,
-        ternary: default_ternary(cx, activation),
+        ternary: default_ternary(activation, held_ternary(cx)),
+        player: -1,
+    }
+}
+
+/// The three-way switch (see the module).
+pub(crate) fn trinary(cx: &SwitchContext<'_>) -> SwitchInput {
+    let Some(x) = cx.world.reference_offset(cx.thing) else {
+        return SIGNAL_OFF;
+    };
+    let activation = clamp(x / LEVER_HALF_TRAVEL, -1., 1.);
+    let held = cx.current(0).ternary;
+    let held = if cx.switch.inverted { -held } else { held };
+    SwitchInput {
+        activation,
+        ternary: default_ternary(activation, held),
         player: -1,
     }
 }
@@ -163,5 +185,31 @@ mod tests {
         let mut w = world(0., 1100., 50., true);
         w.things[1].switch.as_mut().unwrap().inverted = true;
         assert_eq!(outs(&mut w), vec![sig(0., 0); 2]);
+    }
+
+    fn trinary(hx: f32, reference: bool, inverted: bool) -> Vec<SwitchInput> {
+        let mut w = world(0., hx, 50., reference);
+        let s = w.things[1].switch.as_mut().unwrap();
+        s.switch_type = 2;
+        s.inverted = inverted;
+        outs(&mut w)
+    }
+
+    #[test]
+    fn trinary_is_signed() {
+        assert_eq!(trinary(1100., false, false), vec![SIGNAL_OFF; 2]);
+        assert_eq!(trinary(1100., true, false), vec![sig(1., 1); 2]);
+        assert_eq!(trinary(800., true, false), vec![sig(-1., -1); 2]);
+        assert_eq!(trinary(1000., true, false), vec![sig(0., 0); 2]);
+        // 0.5 is between the bands: output 0's ternary (1 as stored) is kept.
+        assert_eq!(trinary(1050., true, false), vec![sig(0.5, 1); 2]);
+    }
+
+    #[test]
+    fn trinary_inverts_by_negation() {
+        assert_eq!(trinary(1100., true, true), vec![sig(-1., -1); 2]);
+        assert_eq!(trinary(925., true, true), vec![sig(0.75, 1); 2]);
+        // Held: the stored 1 is -1 before the negation, so it stays 1 after it.
+        assert_eq!(trinary(1050., true, true), vec![sig(-0.5, 1); 2]);
     }
 }

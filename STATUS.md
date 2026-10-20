@@ -6739,3 +6739,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1118 the grab switch (2026-10-19)
 - Logic lane: grab switches (666) are on while a player grabs their object, by the
   game's three modes, PlayerMode and tag filter (0x10f508; docs/logic.md Part 20).
+
+## D1119 the control pad switch (2026-10-19)
+- Logic lane: control pads (535) give the driver's buttons, sticks and tilt on 18
+  outputs with the game's dead zone and inversion (0x11d378; docs/logic.md Part 21).

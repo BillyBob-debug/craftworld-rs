@@ -403,7 +403,12 @@ impl Switches {
                     };
                     let st = s.outputs.first().and_then(Option::as_ref).map(|o| o.stored);
                     let st = st.map_or(f32::NAN, |v| v.activation);
-                    let st = if s.inverted { 1. - st } else { st };
+                    // The lever inverts by 1 - a, the three-way switch by -a.
+                    let st = match (s.inverted, s.switch_type) {
+                        (false, _) => st,
+                        (true, 1) => 1. - st,
+                        (true, _) => -st,
+                    };
                     count(
                         format!("{k} offset rule matches stored"),
                         (a - st).abs() < 1e-3,
