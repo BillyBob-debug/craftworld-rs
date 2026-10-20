@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-55.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-57.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -62,9 +62,10 @@
 - Merged: D1151 (PR 294, 269a784) the followers' up axis, localSpace and allowInOut.
 - Merged: D1152 (PR 295, 82767b3) the followers' tag key colour is an s32.
 - Merged: D1153 (PR 296, 3e16c77) touching layers do not collide.
-- D1154 (branch `logic-d1154`, worktree `E:\Projects\wt-d324`): followers measure from
-  their parent's point (docs/logic/part-56.md).
-- Decision numbers: D1100-D1199, next free D1155.
+- Merged: D1154 (PR 297, baf0614) followers measure from their parent's point.
+- D1155 (branch `logic-d1155`, worktree `E:\Projects\wt-d324`): a tag switched off by
+  its input cannot be followed (docs/logic/part-57.md).
+- Decision numbers: D1100-D1199, next free D1156.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -116,7 +117,9 @@
   stands at x -1,092.7, y 5,238.4 on ticks 2,006 to 2,008, inside the xy range of
   body 1951 (3 movers, 3 spins), Part 55); after D1154 body 1951 holds still, but
   lift 2643 rises to its y-5,539 tag at level start and Sackboy falls at x -2,870.3 on
-  tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56).
+  tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
+  lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
+  y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -217,8 +220,8 @@ EBOOT rule and unit tests:
    angle (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
    for followers, a host filling `MoveTweak::angle`, the mirror negation of the
    localSpace angle, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
-   next on the route (D1155), which key-35 tags lift 2643 sees at level start: tag
-   inputs or map registration (0xceb8c, inserter 0xddf98), Part 56; spin followers
+   part 0x30 (world list +0x2b8, tick 0x132800) and the tag it places, type 1
+   0x131f88 (Part 57); spin followers
    (configuration 5) searching from the parent point too (0x95fdc8, Part 56);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the

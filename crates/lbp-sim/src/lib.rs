@@ -247,15 +247,17 @@ pub fn drive_spins(
 #[derive(Component, Debug, Clone)]
 pub struct MoveTweaks(pub Vec<scene::MoveTweak>);
 
-/// D1111: the tags riding on a body (key, point in the body's frame, game units), or, on
-/// the one entity [`spawn_scene`] makes for them, the tags on no body (world points).
+/// D1111: the tags riding on a body (Thing, key, point in the body's frame, game units),
+/// or, on the one entity [`spawn_scene`] makes for them, the tags on no body (world
+/// points).
 #[derive(Component, Debug, Clone)]
-pub struct TagMarks(pub Vec<(u32, [f32; 2])>);
+pub struct TagMarks(pub Vec<(u32, u32, [f32; 2])>);
 
-/// D1111: a tag where it is this tick: its key, the body it rides (None: on no body) and
-/// its world position in game units.
+/// D1111: a tag where it is this tick: its Thing, its key, the body it rides (None: on no
+/// body) and its world position in game units.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TagSpot {
+    pub thing: u32,
     pub key: u32,
     pub body: Option<Entity>,
     pub at: [f32; 2],
@@ -272,7 +274,8 @@ pub fn tag_spots<'a>(
             position: [p.0.x / UNIT_SCALE, p.0.y / UNIT_SCALE],
             angle: r.as_radians(),
         });
-        spots.extend(m.0.iter().map(|&(key, at)| TagSpot {
+        spots.extend(m.0.iter().map(|&(thing, key, at)| TagSpot {
+            thing,
             key,
             body: frame.map(|_| e),
             at: frame.map_or(at, |f| f.world(at)),
@@ -281,12 +284,20 @@ pub fn tag_spots<'a>(
     spots
 }
 
+/// D1155: the tags a follower or an aiming tweak can find. FOUND (0x1c3e04): the keyed
+/// search takes each tag's signal (0x12f6f4) and passes over a tag whose ternary is 0, so
+/// a tag switched off by its wired input is not there; `ternary` gives a tag Thing's.
+pub fn lit_tags(mut spots: Vec<TagSpot>, ternary: impl Fn(u32) -> i32) -> Vec<TagSpot> {
+    spots.retain(|g| ternary(g.thing) != 0);
+    spots
+}
+
 /// D1110: each mover and follower moves its body's velocity towards its rows
 /// ([`scene::MoveTweak::push`], per tick, in order) with the tweak's current activation; a
 /// follower (configuration 11) follows `player` when it sees it. D1111: a follower with
 /// followKey follows instead the nearest tag in `tags` with its key that it sees and that
-/// is not on its own body (FOUND, 0x1c3e04). D1154: a follower measures from its
-/// parent's point ([`scene::MoveTweak::at`]). Wakes a body whose velocity changed.
+/// is not on its own body (FOUND, 0x1c3e04; D1155: the caller passes [`lit_tags`]).
+/// D1154: a follower measures from its parent's point ([`scene::MoveTweak::at`]). Wakes a body whose velocity changed.
 pub fn drive_moves(
     commands: &mut Commands,
     q: &mut Query<(
@@ -562,7 +573,7 @@ pub fn spawn_scene(commands: &mut Commands, scene: &PhysicsScene) -> Spawned {
     // D1111: tags ride their bodies; tags on no body share one entity.
     let mut marks = vec![Vec::new(); bodies.len() + 1];
     for g in &scene.tags {
-        marks[g.body.unwrap_or(bodies.len())].push((g.key, g.at));
+        marks[g.body.unwrap_or(bodies.len())].push((g.thing as u32, g.key, g.at));
     }
     let loose = marks.pop().unwrap_or_default();
     for (b, m) in marks.into_iter().enumerate().filter(|(_, m)| !m.is_empty()) {
