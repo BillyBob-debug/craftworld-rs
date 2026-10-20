@@ -6822,3 +6822,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Logic lane: a creature that is not a player dies from the strongest lethal type it
   touches or from crushing, dying then dead after a per-type time (0x81824, 0x7d6ec;
   docs/logic.md Part 39). Enemy pieces (3,484) are stored; the brain is NOT FOUND.
+
+## D1138 getting in and out of a controlinator (2026-10-20)
+- Logic lane: a creature in an alive state within the seat radius sits and drives; the
+  seat lets go when port 0 shuts it or the driver leaves state 4 (0x6a2938, 0x6a2fc4,
+  0x89950c; docs/logic.md Part 40).

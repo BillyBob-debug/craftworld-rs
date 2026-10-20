@@ -4650,6 +4650,7 @@ mod tests {
                 spawns_left: max,
                 max_spawns_left: max,
                 infinite_spawns: infinite,
+                ..Default::default()
             });
             t
         };
@@ -4698,6 +4699,7 @@ mod tests {
             spawns_left: left,
             max_spawns_left: max,
             infinite_spawns: inf,
+            ..Default::default()
         };
         assert_eq!(checkpoint_light_alpha(&c(-1, 0, true)), 0.5);
         assert_eq!(checkpoint_light_alpha(&c(0, 3, true)), 0.5);
@@ -4719,6 +4721,7 @@ mod tests {
             spawns_left: left,
             max_spawns_left: max,
             infinite_spawns: false,
+            ..Default::default()
         };
         assert_eq!(checkpoint_light_alpha(&c(3, 3)), 0.5);
         assert_eq!(checkpoint_light_alpha(&c(1, 2)), 0.75);
