@@ -389,6 +389,26 @@ impl Switches {
                 count("tweak has a parent".into(), t.parent.is_some());
                 count("tweak on at load".into(), world.tweak_on(i as u32));
             }
+            if let Some(e) = t.emitter {
+                // PEmitter (D1134).
+                let p = e.part;
+                count("emitter".into(), true);
+                count(
+                    "emitter input wired".into(),
+                    t.inputs.first().is_some_and(Option::is_some),
+                );
+                count(format!("emitter behavior {}", p.behavior), true);
+                count("emitter frequency 0".into(), p.frequency == 0);
+                count("emitter at once 0".into(), p.max_emitted_at_once == 0);
+                count("emitter max emitted set".into(), p.max_emitted != 0);
+                count("emitter recycles".into(), p.recycle_emitted_objects);
+                count("emitter lifetime 0".into(), p.lifetime == 0);
+                count("emitter current nonzero".into(), p.current_emitted != 0);
+                count("emitter hidden in play".into(), p.hide_in_play_mode);
+                count("emitter editor".into(), p.editor_emitter);
+                count("emitter deactivated".into(), t.deactivated);
+                count("emitter may emit at load".into(), e.may_emit());
+            }
             let Some(s) = t.switch.as_ref() else {
                 continue;
             };

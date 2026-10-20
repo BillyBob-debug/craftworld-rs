@@ -154,7 +154,8 @@
 //!   Rotation, worldZ, zOffset, emitFrontZ, emitBackZ f32, hideInPlayMode bool, behavior
 //!   i32, effectCreate/Destroy (i8 pair >= 0x38d, else i32 pair), ignoreParentsVelocity
 //!   bool, ref EmittedObjectSource {thingarray, plan res}, editorEmitter bool (>= 0x361),
-//!   isLimboFlippedForGunEmitter bool (>= 0x38d), zOffset f32 (>= 0x3ae).
+//!   isLimboFlippedForGunEmitter bool (>= 0x38d), zOffset f32 (>= 0x3ae). Kept as
+//!   `PartData::emitter` (D1134), without posVel, plan and the source.
 //! - AUDIO_WORLD (PAudioWorld): soundName str, initialVolume, initialPitch,
 //!   initialParam1, maxFalloff, impactTolerance f32, playMode i32, paramAffectVol/Pitch/
 //!   Param bool, isLocal bool, hideInPlayMode bool, behavior i32, soundNames guid and
@@ -335,6 +336,9 @@ pub struct PartData {
     /// PMaterialTweak as stored (D1133).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub material_tweak: Option<MaterialTweak>,
+    /// PEmitter as stored (D1134).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emitter: Option<Emitter>,
     /// PSwitchInput as stored (D1132): the adapter a switch drives on a non-logic Thing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub switch_input: Option<SwitchInput>,
@@ -476,6 +480,40 @@ pub struct MaterialTweak {
     pub disable_physics_audio: bool,
     /// None below 0x3ed, where it is not stored.
     pub has_shadow: Option<bool>,
+}
+
+/// PEmitter as stored, the fields kept (the rest is read through; the module comment has
+/// the full serialized order). Offsets are the 01.33 PEmitter fields.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct Emitter {
+    pub ang_vel: f32,
+    /// Frames between emits (+0x48); 0 never emits.
+    pub frequency: u32,
+    /// Frame offset of the first emit (+0x4c).
+    pub phase: u32,
+    /// Frames an emitted object lives (+0x60); 0 = forever.
+    pub lifetime: i32,
+    pub recycle_emitted_objects: bool,
+    /// Total emits allowed (+0x64); 0 = no limit.
+    pub max_emitted: i32,
+    /// Objects alive at once (+0x6c); 0 never emits.
+    pub max_emitted_at_once: i32,
+    pub speed_scale_start_frame: f32,
+    pub speed_scale_delta_frames: f32,
+    pub speed_scale: SwitchSignal,
+    pub linear_vel: f32,
+    /// Emits so far (+0x68).
+    pub current_emitted: i32,
+    pub emit_flip: bool,
+    pub parent_relative_offset: [f32; 4],
+    pub world_z: f32,
+    pub z_offset: f32,
+    pub hide_in_play_mode: bool,
+    /// +0x70: 0 = timed while on, 1 = once per switch trigger, 2 = timed at the input's
+    /// speed.
+    pub behavior: i32,
+    pub ignore_parents_velocity: bool,
+    pub editor_emitter: bool,
 }
 
 /// SwitchSignal as stored: activation f32, ternary s32, player i32 (-1 = no player).
@@ -1357,7 +1395,10 @@ fn part_body(
                 r.f32()?;
             }
         }
-        "EMITTER" => emitter(r, things)?,
+        "EMITTER" => {
+            let e = emitter(r, things)?;
+            things.list[me].data.emitter = Some(e);
+        }
         "AUDIO_WORLD" => {
             r.str8()?;
             r.skip_f32(5)?;
@@ -2148,31 +2189,39 @@ fn creature(r: &mut Reader, things: &mut Things) -> Result<()> {
     Ok(())
 }
 
-fn emitter(r: &mut Reader, things: &mut Things) -> Result<()> {
+fn emitter(r: &mut Reader, things: &mut Things) -> Result<Emitter> {
     let v = r.rev.version();
     if v < 0x368 {
         r.v3()?;
     }
-    r.f32()?;
-    r.i32()?;
-    r.i32()?;
-    r.i32()?;
-    r.bool()?;
+    let mut e = Emitter {
+        ang_vel: r.f32()?,
+        frequency: r.i32()? as u32,
+        phase: r.i32()? as u32,
+        lifetime: r.i32()?,
+        recycle_emitted_objects: r.bool()?,
+        ..Default::default()
+    };
     r.resource(false)?;
-    r.i32()?;
-    r.i32()?;
-    r.skip_f32(2)?;
-    switch_signal(r)?;
+    e.max_emitted = r.i32()?;
+    e.max_emitted_at_once = r.i32()?;
+    e.speed_scale_start_frame = r.f32()?;
+    e.speed_scale_delta_frames = r.f32()?;
+    e.speed_scale = switch_signal(r)?;
     if v >= 0x38e {
         r.f32()?;
     }
+    r.f32()?;
+    e.linear_vel = r.f32()?;
+    e.current_emitted = r.i32()?;
+    e.emit_flip = r.bool()?;
+    e.parent_relative_offset = r.v4()?;
+    r.f32()?;
+    e.world_z = r.f32()?;
+    e.z_offset = r.f32()?;
     r.skip_f32(2)?;
-    r.i32()?;
-    r.bool()?;
-    r.v4()?;
-    r.skip_f32(5)?;
-    r.bool()?;
-    r.i32()?;
+    e.hide_in_play_mode = r.bool()?;
+    e.behavior = r.i32()?;
     if v >= 0x38d {
         r.i8()?;
         r.i8()?;
@@ -2180,7 +2229,7 @@ fn emitter(r: &mut Reader, things: &mut Things) -> Result<()> {
         r.i32()?;
         r.i32()?;
     }
-    r.bool()?;
+    e.ignore_parents_velocity = r.bool()?;
     let tag = r.tag("EmittedObjectSource", |r| {
         Ok(r.next_other("EmittedObjectSource"))
     })?;
@@ -2191,7 +2240,7 @@ fn emitter(r: &mut Reader, things: &mut Things) -> Result<()> {
         r.leave();
     }
     if v >= 0x361 {
-        r.bool()?;
+        e.editor_emitter = r.bool()?;
     }
     if v >= 0x38d {
         r.bool()?;
@@ -2199,7 +2248,7 @@ fn emitter(r: &mut Reader, things: &mut Things) -> Result<()> {
     if v >= 0x3ae {
         r.f32()?;
     }
-    Ok(())
+    Ok(e)
 }
 
 fn switch_signal(r: &mut Reader) -> Result<SwitchSignal> {
