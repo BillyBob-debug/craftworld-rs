@@ -1107,6 +1107,68 @@ fn d1144_aim_tweaks_turn_up_along_velocity_stick_and_target() {
 }
 
 #[test]
+fn d1145_layer_switches_step_a_layer_or_go_to_a_set_one_when_there_is_room() {
+    use lbp_sim::scene::LayerTweak;
+    let tweak = |z_behavior| LayerTweak {
+        z_behavior,
+        ..Default::default()
+    };
+    let room = |_: f32| true;
+    // Back (0) and front (1) step one layer on the input's rising edge, once.
+    let mut back = tweak(0);
+    assert_eq!(back.tick(1., 1, 0., room), -200.);
+    assert_eq!(back.tick(1., 1, -200., room), 0.);
+    let mut front = tweak(1);
+    assert_eq!(front.tick(1., 1, -200., room), 200.);
+    // Turning off moves nothing back.
+    assert_eq!(front.tick(0., 1, 0., room), 0.);
+    // Out of the depth band (-511 to 110) the step is dropped.
+    let mut front = tweak(1);
+    assert_eq!(front.tick(1., 1, 0., room), 0.);
+    assert!(!front.waiting);
+    // Set layers 2..4 go to layers 1..3 from the back: z -479 is layer 1, -279 layer 2.
+    assert_eq!(tweak(2).delta(-479., 1), 0);
+    assert_eq!(tweak(3).delta(-479., 1), 1);
+    assert_eq!(tweak(4).delta(-479., 1), 2);
+    assert_eq!(tweak(2).delta(-79., 1), -2);
+    let mut deep = tweak(4);
+    assert_eq!(deep.tick(1., 1, -479., room), 400.);
+    // Blocked, a set-layer move waits again and tries one layer less.
+    let mut deep = tweak(4);
+    assert_eq!(deep.tick(1., 1, -479., |dz| dz < 300.), 200.);
+    let mut stuck = tweak(4);
+    assert_eq!(stuck.tick(1., 1, -479., |_| false), 0.);
+    assert!(stuck.waiting);
+    assert_eq!(stuck.tick(1., 1, -479., room), 400.);
+    // A zero count clears the wait and moves nothing.
+    let mut none = tweak(1);
+    assert_eq!(none.tick(1., 0, -200., room), 0.);
+    assert!(!none.waiting);
+    // Built from a level: configuration 12 rides its body as a layer switch.
+    let mut things = vec![
+        floor(),
+        thing(
+            1,
+            matrix(0., 300., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(2, matrix(0., 300., 0., 0., 1., 1.), None, false),
+    ];
+    things[2].parent = Some(1);
+    things[2].data.physics_tweak = Some(PhysicsTweak {
+        configuration: 12,
+        z_behavior: 3,
+        waiting_to_move: true,
+        ..Default::default()
+    });
+    let scene = build_scene(&things);
+    assert_eq!(scene.bodies[0].layers[0].z_behavior, 3);
+    assert!(scene.bodies[0].layers[0].waiting);
+    assert!(scene.bodies[0].spins.is_empty() && scene.bodies[0].moves.is_empty());
+}
+
+#[test]
 fn d1110_movers_reach_their_velocity_and_followers_stop_short_of_their_target() {
     // A box carrying a mover (Thing 2) as saved in the Rookie Test: 35 up per tick.
     let mut things = vec![
