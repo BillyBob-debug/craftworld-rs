@@ -446,6 +446,48 @@ impl Switches {
                     child = ct.next_sibling;
                 }
             }
+            if let Some(c) = t.controlinator.as_ref() {
+                // PControlinator (D1136).
+                let p = c.part;
+                let me = Some(i);
+                count("controlinator".into(), true);
+                count(format!("controlinator mode {}", p.mode), true);
+                count("controlinator link self".into(), p.link == me);
+                count("controlinator link none".into(), p.link.is_none());
+                count("controlinator driver set".into(), p.driver.is_some());
+                count("controlinator attached set".into(), p.attached.is_some());
+                count("controlinator ref 18 set".into(), p.ref_18.is_some());
+                count("controlinator inputs self".into(), p.inputs == me);
+                count("controlinator inputs set".into(), p.inputs.is_some());
+                count(format!("controlinator saved state {}", p.saved_state), true);
+                count(format!("controlinator flags 50 {:?}", p.flags_50), true);
+                count("controlinator flag 48".into(), p.flag_48);
+                count(format!("controlinator flag 49 {}", p.flag_49), true);
+                count("controlinator scale 1".into(), p.input_scale == 1.0);
+                count("controlinator deactivated".into(), t.deactivated);
+            }
+            if let Some(s) = t
+                .switch
+                .as_ref()
+                .filter(|s| matches!(s.switch_type, 38 | 55))
+            {
+                // Where the pad's controlinator is (0x11d378, D1136).
+                let k = format!("pad type {}", s.switch_type);
+                let has = |n: Option<u32>| {
+                    n.and_then(|n| world.things.get(n as usize))
+                        .is_some_and(|t| t.controlinator.is_some())
+                };
+                let parent = t.parent;
+                let grand = parent.and_then(|p| world.things[p as usize].parent);
+                count(k.clone(), true);
+                count(format!("{k} self has ctl"), t.controlinator.is_some());
+                count(format!("{k} parent has ctl"), has(parent));
+                count(format!("{k} grandparent has ctl"), has(grand));
+                count(
+                    format!("{k} reads a driver rule"),
+                    world.pad_controlinator(i as u32).is_some(),
+                );
+            }
             let Some(s) = t.switch.as_ref() else {
                 continue;
             };

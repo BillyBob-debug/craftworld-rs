@@ -11,7 +11,12 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1135 the sequencer (2026-10-20)
+## Latest: D1136 the controlinator (2026-10-20)
+- Logic lane: control pads (546) read the driver of the controlinator (596) on their
+  Thing's grandparent: its link's driver, or in mode 8 the attached player (0x11d378,
+  0x6a0134; docs/logic.md Part 38).
+
+## D1135 the sequencer (2026-10-20)
 - Logic lane: sequencers (1,736) move their play head by tempo and behavior and
   switch the Things on their board on under the head (0xf5008, 0x409dc;
   docs/logic.md Part 37).

@@ -615,12 +615,14 @@ signal is stored at 0x11bf18 (the button prompt 0x3dae04 does not change it).
 - Census (census-all-4.json): every pad has 18 outputs and a parent; none inverted.
   Wired outputs: 0 154, 1 10, 2 41, 3 16, 4 78, 5 3, 6 2, 7 4, 8 85, 9 3, 10 7, 11 3,
   12 99, 13 68, 14 9, 15 7, 16 0, 17 12.
-- INFERRED: the driver is the player whose `piloting` is the switch's Thing; circle and
-  cross are not swapped (0x6a0ea8 taken as 0); the mirror sign of outputs 10, 12, 14 and
-  16 (0x6a1140) is +1; an inverted output's held ternary turns back as the inversion
-  does. Not modelled: recorded values (+0x54 → +0x60 entries, 0x6a122c), the mask
-  0xff0fff7f, the second table 0x6a163c, the right stick's curve 0x38b3ec and the d-pad
-  and tilt fallbacks (0x386c78, 0x386fa8).
+- The driver comes from the controlinator on the pad's grandparent (Part 38, D1136).
+  INFERRED: a player is matched by Thing or by `piloting` (the controlinator's Thing, or
+  the switch's Thing where there is none); circle and cross are not swapped (0x6a0ea8
+  taken as 0); the mirror sign of outputs 10, 12, 14 and 16 (0x6a1140) is +1; an
+  inverted output's held ternary turns back as the inversion does. Not modelled:
+  recorded values (+0x54 → +0x60 entries, 0x6a122c), the mask 0xff0fff7f, the second
+  table 0x6a163c, the right stick's curve 0x38b3ec and the d-pad and tilt fallbacks
+  (0x386c78, 0x386fa8).
 - lbp-runtime: `pad_sensor` in pad.rs reads `PlayerState.piloting` and `PlayerState.pad`.
   The host does not fill them yet, so pads read 0.0 with player -1 for now.
 - Tests: `control_pad_maps_buttons_sticks_and_tilt`,
@@ -1113,3 +1115,35 @@ circuit board and switches the board's contents on in the columns under the head
 - Tests: `unwired_head_runs_at_tempo_and_stops_or_loops_at_the_end`,
   `port_zero_starts_and_port_one_stops`,
   `board_things_play_while_the_head_is_in_their_columns`.
+
+## Part 38: the controlinator (D1136)
+
+PControlinator (part bit 0x26, slot +0x98, kinds 6 to 8 at 0x3ed2c) is the seat a player
+sits in to drive a contraption; the control pads under it read that player's pad.
+
+- Offsets (reader 0xb73008, ctor 0x6a0844): +0xc driver, +0x18 a Thing, +0x28 link,
+  +0x34 attached player (each a Thing reference), +0x40 mode, +0x44 input scale, +0x48
+  bool, +0x4c state, +0x50..+0x52 bytes, +0x54 the recorded-inputs Thing, +0x49 i8 from
+  revision 0x3ed (1 before). The reader drops the stored state; the ctor sets it to 0.
+- Pad (0x11d378): the control pad's Thing's parent's parent holds the controlinator.
+- Driver (0x6a0134): mode 8 in state 2 with an attached player reads that player;
+  otherwise the driver of the controlinator on the link Thing, or none. With no driver
+  every output but 0 reads 0.0 (0x6a1004).
+- Group (0x69ffec): another controlinator holds the mode when it is not deactivated, in
+  the same mode, in state 1, its port 0 off, and has a driver. Attached controlinators
+  push their mode to the others in the world list (0x12d2a4). INFERRED: the input read
+  is port 0's ternary.
+- Census (census-all-27.json): 596 controlinators; mode 0 x530, 1 x17, 2 x17, 3 x15, 8
+  x17; link to itself 499, none 97; driver stored 149, attached 0; stored state 0 x499,
+  1 x33, 2 x64. All 546 control pads (535 type 38, 11 type 55) have their controlinator
+  on the grandparent, none on the parent or the pad's own Thing.
+- Not modelled: getting in and out (the update 0x6a3edc and its gate 0x6a096c), the
+  recorded inputs read first from the +0x54 Thing, the Thing type 8 path of 0x6a1004
+  and the mirror sign from the link Thing's group matrix. NOT FOUND: what +0x18, +0x48
+  and +0x50..+0x52 mean.
+- lbp-runtime: controlinator.rs, `ThingState.controlinator`,
+  `LevelWorld::pad_controlinator`, `controlinator_driver` and `controlinator_holds_group`;
+  `pad_sensor` reads the driver through it.
+- Tests: `pad_reads_the_link_driver_of_its_grandparent`,
+  `mode_eight_in_state_two_reads_the_attached_player`,
+  `a_driven_controlinator_holds_its_mode`, `pad_reads_the_driver_of_its_controlinator`.

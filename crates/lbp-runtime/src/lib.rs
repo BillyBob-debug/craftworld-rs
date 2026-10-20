@@ -31,6 +31,7 @@ use std::sync::Arc;
 mod angle;
 mod button;
 mod camera;
+mod controlinator;
 mod cutscene;
 mod display;
 mod emitter;
@@ -69,6 +70,7 @@ pub mod velocity;
 mod wormhole;
 
 pub use camera::*;
+pub use controlinator::ControlinatorState;
 pub use cutscene::*;
 pub use display::*;
 pub use emitter::EmitterState;
@@ -174,6 +176,8 @@ pub struct ThingState {
     pub emitter: Option<EmitterState>,
     /// PSequencer as stored and its frame count, when the Thing has one (D1135).
     pub sequencer: Option<SequencerState>,
+    /// PControlinator as stored and its runtime state, when the Thing has one (D1136).
+    pub controlinator: Option<ControlinatorState>,
     /// The motion of the Thing's physics body, as the host's physics reports it: the
     /// velocity sensors read it ([`velocity::BodyMotion`]). None unless the host fills it.
     pub body: Option<velocity::BodyMotion>,
@@ -979,6 +983,7 @@ impl LevelWorld {
                     material_tweak: t.data.material_tweak,
                     emitter: t.data.emitter.map(EmitterState::new),
                     sequencer: t.data.sequencer.map(|q| SequencerState::new(q, 0.0)),
+                    controlinator: t.data.controlinator.map(ControlinatorState::new),
                     ..Default::default()
                 })
                 .collect(),

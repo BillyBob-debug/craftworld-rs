@@ -34,8 +34,11 @@
 //!   0x11c25c); no end-of-update step (0x124b0c covers types up to 39). Its outputs 18
 //!   and 19 read 0.0 here. All 11 placed store the no-driver signal on all 20 outputs.
 //!
-//! INFERRED: the driver is the player whose `piloting` is the switch's Thing; circle and
-//! cross are not swapped (0x6a0ea8 reads 0, as for a pad whose enter button is cross);
+//! The pad belongs to the controlinator on its Thing's parent's parent (0x11d378; all 546
+//! placed pads, census 27) and reads that controlinator's driver (D1136, controlinator.rs):
+//! the player whose Thing it names, or whose `piloting` is the controlinator's Thing.
+//! INFERRED: with no controlinator, the player whose `piloting` is the switch's Thing; circle
+//! and cross are not swapped (0x6a0ea8 reads 0, as for a pad whose enter button is cross);
 //! the mirror sign of outputs 10, 12, 14 and 16 (a determinant, 0x6a1140) is +1; the
 //! held ternary of an inverted output is turned back as the inversion turns it. Not
 //! modelled: recorded values (an entry at +0x54 → +0x60 whose +0x18 is not 0, 0x6a122c),
@@ -149,11 +152,19 @@ fn pad_ternary(cx: &SwitchContext<'_>, output: usize, a: f32) -> i32 {
 
 /// The control pad switch's output `output` (see the module).
 pub(crate) fn pad_sensor(cx: &SwitchContext<'_>, output: usize) -> SwitchInput {
-    let driver = cx
-        .world
-        .players
-        .iter()
-        .find(|p| p.piloting == Some(cx.thing) && p.pad.live);
+    let w = cx.world;
+    let driver = match w.pad_controlinator(cx.thing) {
+        Some(ctl) => {
+            let d = w.controlinator_driver(ctl);
+            w.players
+                .iter()
+                .find(|p| p.pad.live && (Some(p.thing) == d || p.piloting == Some(ctl)))
+        }
+        None => w
+            .players
+            .iter()
+            .find(|p| p.piloting == Some(cx.thing) && p.pad.live),
+    };
     let (activation, player) = match driver {
         // Type 55 keeps the player -1 (0x11d0f4).
         Some(p) if cx.switch.switch_type == 55 => (pad_value(&p.pad, output), -1),
@@ -317,5 +328,41 @@ mod tests {
         w.things[0].switch.as_mut().unwrap().inverted = false;
         w.players[0].piloting = None;
         assert!(outs(&mut w).iter().all(|&s| s == (0., 0, -1)));
+    }
+
+    #[test]
+    fn pad_reads_the_driver_of_its_controlinator() {
+        use crate::ControlinatorState;
+        use lbp_level::parts::Controlinator;
+        let mut w = pad_world(38, 20);
+        // The controlinator (link to itself), then a Thing between it and the pad.
+        let (c, mid) = (w.things.len(), w.things.len() as u32 + 1);
+        let ctl = Controlinator {
+            link: Some(c),
+            ..Default::default()
+        };
+        w.things.push(ThingState {
+            controlinator: Some(ControlinatorState::new(ctl)),
+            ..Default::default()
+        });
+        w.things.push(ThingState {
+            parent: Some(c as u32),
+            ..Default::default()
+        });
+        w.things[0].parent = Some(mid);
+        w.players[0].pad.buttons = BUTTON_L2;
+        assert_eq!(
+            outs(&mut w)[0].0,
+            0.,
+            "piloting the pad's Thing no longer counts"
+        );
+        w.players[0].piloting = Some(c as u32);
+        assert_eq!(outs(&mut w)[0], (1., 1, 0), "sitting in the controlinator");
+        w.players[0].piloting = None;
+        let me = w.players[0].thing as usize;
+        w.things[c].controlinator.as_mut().unwrap().part.driver = Some(me);
+        assert_eq!(outs(&mut w)[0], (1., 1, 0), "named as its driver");
+        w.players[0].pad.live = false;
+        assert_eq!(outs(&mut w)[0], (0., 0, -1));
     }
 }
