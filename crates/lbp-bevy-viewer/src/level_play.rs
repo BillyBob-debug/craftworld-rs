@@ -2181,7 +2181,10 @@ fn drive_spins(
 ) {
     let world = &play.host.world;
     let player = sackboy.iter().next().map(|p| p.0);
-    let tags = lbp_sim::tag_spots(marks.iter());
+    // D1155: a tag switched off by its input is not found.
+    let tags = lbp_sim::lit_tags(lbp_sim::tag_spots(marks.iter()), |t| {
+        world.tag_signal(t).ternary
+    });
     lbp_sim::drive_spins(&mut commands, &mut q, player, &tags, |t| {
         world.tweak_activation(t.thing, t.behavior)
     });
@@ -2212,7 +2215,10 @@ fn drive_moves(
 ) {
     let world = &play.host.world;
     let player = sackboy.iter().next().map(|p| p.0);
-    let tags = lbp_sim::tag_spots(marks.iter());
+    // D1155: a tag switched off by its input is not found.
+    let tags = lbp_sim::lit_tags(lbp_sim::tag_spots(marks.iter()), |t| {
+        world.tag_signal(t).ternary
+    });
     lbp_sim::drive_moves(&mut commands, &mut q, player, &tags, |t| {
         world.tweak_activation(t.thing, t.behavior)
     });

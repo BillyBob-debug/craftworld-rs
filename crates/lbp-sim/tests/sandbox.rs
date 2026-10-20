@@ -1372,8 +1372,8 @@ fn d1111_keyed_followers_find_tags_with_their_colour_and_name() {
     // Spots: a body's tags move with it; loose tags keep their world point.
     let mut w = World::new();
     let (a, b) = (w.spawn_empty().id(), w.spawn_empty().id());
-    let on_body = lbp_sim::TagMarks(vec![(key, at)]);
-    let loose = lbp_sim::TagMarks(vec![(key, [-500., 300.])]);
+    let on_body = lbp_sim::TagMarks(vec![(4, key, at)]);
+    let loose = lbp_sim::TagMarks(vec![(6, key, [-500., 300.])]);
     let (p, r) = (
         Position::new(Vec2::new(10., 3.)),
         Rotation::radians(quarter),
@@ -1388,6 +1388,9 @@ fn d1111_keyed_followers_find_tags_with_their_colour_and_name() {
         (spots[0].body, spots[1].body, spots[1].at),
         (Some(a), None, [-500., 300.])
     );
+    // D1155: a tag whose signal's ternary is 0 cannot be found; the others stay.
+    let lit = lbp_sim::lit_tags(spots, |t| i32::from(t != 4));
+    assert_eq!(lit.iter().map(|g| g.thing).collect::<Vec<_>>(), [6]);
 }
 
 #[test]
