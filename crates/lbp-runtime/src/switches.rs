@@ -20,7 +20,8 @@
 //! The logic types are computed, and so are the tag sensor, the player sensor and the
 //! impact sensor (`sensors.rs`), the velocity sensors (`velocity.rs`), the grab switch
 //! (`grab.rs`), the control pad (`pad.rs`), the key remote (`remote.rs`), the button
-//! (`button.rs`) and the motion recorder (`motion.rs`); the other
+//! (`button.rs`), the motion recorder (`motion.rs`) and the angle sensor (`angle.rs`); the
+//! other
 //! types whose signal comes from the world (physics, the other pads) keep the signal the
 //! level file stores.
 //!
@@ -39,6 +40,7 @@
 //! - Switch types 0x24/0x25 standing in for their microchip's switch in the ordering.
 //! - The other object kinds a signal is applied to (lights, emitters, movers and so on).
 //! - The activating player the game records on the target before the dispatch.
+use crate::angle::angle_sensor;
 use crate::button::button;
 use crate::cutscene::camera_finished;
 use crate::grab::grab_sensor;
@@ -505,6 +507,8 @@ pub fn compute_output(
         0 => standard(button(cx)),
         // MOTION_RECORDER, 0x11d4d0, FOUND (motion.rs): PSwitch+0xcc read per output.
         45 => standard(motion_recorder(cx, output)),
+        // ANGLE, 0x11cd3c → 0x1141f4, FOUND (angle.rs): the object's turn over angleRange.
+        41 => standard(angle_sensor(cx)),
         // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
         42 | 43 => standard(velocity_sensor(cx)),
         // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.
@@ -1899,7 +1903,7 @@ mod tests {
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
         // The other sensors keep the stored signal, also when inverted.
-        for ty in [30, 41, 65] {
+        for ty in [30, 57, 65] {
             let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
             let s = t.switch.as_mut().unwrap();
             (s.switch_type, s.inverted) = (ty, true);

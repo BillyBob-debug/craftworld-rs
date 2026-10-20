@@ -26,6 +26,7 @@ use lbp_script_vm::{ClassId, Host, MemberKind, ObjectId, Step, Task, Value, Vm};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+mod angle;
 mod button;
 mod camera;
 mod cutscene;
