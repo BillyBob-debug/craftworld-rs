@@ -1245,3 +1245,26 @@ All FOUND in 01.33 unless marked.
   spawningDelay and lifeMultiplier.
 - Tests: `the_first_activation_gives_lives_once`,
   `respawns_take_lives_until_none_are_left`, `unlimited_lives_and_the_delay`, `a_forced_spawn_tops_up_toward_players_plus_two`.
+
+## Part 42: a seated player whose controlinator is destroyed (D1140)
+
+All FOUND in 01.33 unless marked.
+
+- Of the 50 calls to the state setter 0x7b454, four pass state 5. Three only run with no
+  player part (0x81824, 0x7d6ec at 0x7db48, 0x36eb38 at 0x36f2ec). The fourth, in the
+  creature update 0x8d2bc at 0x8d8fc, has no player check.
+- Sitting (0x6a2fc4 through the thunk 0x89f82c) calls 0x7d5dc: it points the weak
+  reference +0xecc at the controlinator's Thing (0x511a8), clears +0xed8, sets +0xf12 to
+  0 or 6 by 0x5fab8 and puts the creature in state 4.
+- Each update, a creature in state 4 whose +0xecc is null (0x5fa90) calls 0x7d1a4 (it
+  lets go of the seat's Thing) and goes to state 5. The lethal type +0xd68 is not set, so
+  the dying time is the last type's. The weak reference is nulled when the seat's Thing
+  is destroyed (INFERRED: 0x511f8 unlinks it, the Thing's +8 list holds it).
+- 0x7b454 has a special case only for state 0xb; per-state tables at 0xd93c08 (old) and
+  0xd93c0c (new) are not decoded. The thunks 0x89821c and 0x8a469c and the computed
+  state at 0xdacb4 (0xdab6c) were not traced.
+- So a player still dies from contact by a path NOT FOUND (Part 41); this is the only
+  engine path that puts a player creature in state 5 found so far.
+- No census: it applies to every controlinator (Part 38).
+- lbp-runtime: `CreatureState.seat`, `CreatureState::seated_tick`,
+  `LevelWorld::seat_destroyed`; `controlinator_enter` sets the seat.

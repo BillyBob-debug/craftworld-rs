@@ -55,6 +55,9 @@ pub struct CreatureState {
     pub lethal: u8,
     /// +0xd80: crush frames.
     pub crush: u32,
+    /// +0xecc: the Thing a seated creature sits in (0x7d5dc), a weak reference the game
+    /// clears when that Thing is destroyed ([`crate::LevelWorld::seat_destroyed`]).
+    pub seat: Option<u32>,
 }
 
 /// The strongest lethal type touched (0x81824): `contact[i]` is how hard type `i + 1` is
@@ -104,6 +107,16 @@ impl CreatureState {
             return false;
         }
         self.kill(CRUSH);
+        true
+    }
+
+    /// The seated check of the update 0x8d2bc: a creature in state 4 whose seat is gone
+    /// (0x5fa90) is dying; the lethal type (+0xd68) is left as it was. True when it is.
+    pub fn seated_tick(&mut self) -> bool {
+        if self.state != crate::controlinator::SEATED || self.seat.is_some() {
+            return false;
+        }
+        self.set(DYING);
         true
     }
 

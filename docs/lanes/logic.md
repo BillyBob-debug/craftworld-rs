@@ -47,9 +47,10 @@
 - Merged: D1136 (PR 279, af19bb7) the controlinator.
 - Merged: D1137 (PR 280, 922909f) the creature.
 - Merged: D1138 (PR 281, 9fb266e) getting in and out of a controlinator.
-- D1139 (branch `logic-player-death`, worktree `E:\Projects\wt-d324`): player death,
-  respawn and checkpoint lives (Part 41).
-- Decision numbers: D1100-D1199, next free D1140.
+- Merged: D1139 (PR 282, 5593712) player death and checkpoint lives.
+- D1140 (branch `logic-d1140`, worktree `E:\Projects\wt-d324`): a seated player
+  whose controlinator is destroyed is dying (Part 42).
+- Decision numbers: D1100-D1199, next free D1141.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -138,7 +139,8 @@ EBOOT rule and unit tests:
    must call `CreatureState::touch`, `crush_frame` and `tick` with config values (NOT
    FOUND), and seat players with `controlinator_in_reach`, `controlinator_enter` and
    `controlinator_seat_tick` (Part 40), and respawn dead players with
-   `CheckpointLives::respawn` after `activate` (Part 41). The host
+   `CheckpointLives::respawn` after `activate` (Part 41), call `seat_destroyed` when
+   it destroys a Thing and `seated_tick` each frame (Part 42). The host
    must carry out `LevelWorld.destroy_requests`, apply `lethal_type` and
    `body_material`, call `emitter_tick` each frame and spawn the plan when it
    says so, and call `sequencer_tick` each frame and `sequencer_input` when a
@@ -158,5 +160,6 @@ EBOOT rule and unit tests:
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
    the type 4 / angle-wrap question at 0x962590, the switch type bucket in 0x900730.
 5. The creature brain (PEnemy reader NOT FOUND; leads: the TOC entry for string
-   "PEnemy" 0xc79058, bit 0x1c tests); who puts a player in state 5 and sends the
-   respawn (0x7feb8, Part 41); the controlinator's recorded inputs (Part 38) and what sets its +0x4c (Part 40).
+   "PEnemy" 0xc79058, bit 0x1c tests); who puts a player in state 5 on contact (Part
+   42 has the seat path) and sends the respawn (0x7feb8, Part 41); the controlinator's
+   recorded inputs (Part 38) and what sets its +0x4c (Part 40).
