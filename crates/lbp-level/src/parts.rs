@@ -571,7 +571,7 @@ pub struct Controlinator {
     pub attached: Option<usize>,
     /// +0x40: mode / group id; controlinators with the same one share a driver.
     pub mode: i32,
-    /// +0x44: the scale of inputs 9 to 19.
+    /// +0x44: the seat radius (0x6a2938, D1138); also the scale of inputs 9 to 19.
     pub input_scale: f32,
     pub flag_48: bool,
     /// +0x4c as saved; the reader drops it and keeps the runtime state.

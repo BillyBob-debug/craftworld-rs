@@ -464,6 +464,22 @@ impl Switches {
                 count("controlinator flag 48".into(), p.flag_48);
                 count(format!("controlinator flag 49 {}", p.flag_49), true);
                 count("controlinator scale 1".into(), p.input_scale == 1.0);
+                // The seat radius +0x44 and whether port 0 can shut the seat (D1138).
+                let r = p.input_scale;
+                let band = if r <= 0.0 {
+                    "<=0"
+                } else if r < 100.0 {
+                    "<100"
+                } else if r < 500.0 {
+                    "<500"
+                } else {
+                    ">=500"
+                };
+                count(format!("controlinator radius {band}"), true);
+                count(
+                    "controlinator port 0 wired".into(),
+                    t.inputs.first().is_some_and(Option::is_some),
+                );
                 count("controlinator deactivated".into(), t.deactivated);
             }
             if t.parts.contains(&"CREATURE") {

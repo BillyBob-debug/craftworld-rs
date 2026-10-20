@@ -11,13 +11,27 @@
 //! same mode, on a Thing not deactivated, in state 1, whose port 0 is not on, with a
 //! driver.
 //!
-//! Not modelled: getting in and out (the update 0x6a3edc and its gate 0x6a096c), the
-//! recorded inputs read first from the +0x54 Thing's input table, the Thing type 8 path
-//! of 0x6a1004 and the mirror sign from the link Thing's group matrix.
+//! Getting in and out (D1138, Part 40), FOUND in the update 0x6a3264: the gate 0x6a096c
+//! shuts while port 0 is on, and then the seat drops its driver. With no driver, a
+//! creature in an alive state within the radius +0x44 (0x6a2938) can sit; with +0x51 set
+//! it sits at once (0x6a2fc4), else a player's button decides. Sitting puts the creature
+//! in state 4 and makes it the driver (0x6a0b78); the seat lets go once the driver is
+//! no longer in state 4 (0x89950c).
+//!
+//! Not modelled: the gate's world and Thing flags (world+0x804, +0x820, T+0x7f,
+//! 0x550e70), the button test itself, the brain path (brain+0x58), the recorded inputs
+//! read first from the +0x54 Thing's input table, the Thing type 8 path of 0x6a1004 and
+//! the mirror sign from the link Thing's group matrix.
 
 use lbp_level::parts::Controlinator;
 
 use crate::LevelWorld;
+
+/// The creature state of a seated driver.
+pub const SEATED: u8 = 4;
+
+/// The creature states that may sit (0x6a2938).
+const MAY_SIT: [u8; 11] = [0, 1, 2, 3, 7, 8, 9, 10, 11, 12, 16];
 
 /// A controlinator as stored, with its runtime state (+0x4c).
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -56,6 +70,87 @@ impl LevelWorld {
             .part
             .driver
             .map(|t| t as u32)
+    }
+
+    /// Whether the seat is open (0x6a096c): not while port 0 is on.
+    pub fn controlinator_open(&self, ctl: u32) -> bool {
+        self.controlinator(Some(ctl as usize)).is_some()
+            && !crate::switches::wired(self, ctl, 0).is_some_and(|(_, s)| s.ternary != 0)
+    }
+
+    fn creature_state(&self, thing: u32) -> u8 {
+        self.things
+            .get(thing as usize)
+            .and_then(|t| t.creature)
+            .map_or(0, |c| c.state)
+    }
+
+    /// Whether `who`, `distance` away, may sit in `ctl` (0x6a2938): the seat open and
+    /// empty, the creature in an alive state and closer than the radius (+0x44).
+    pub fn controlinator_in_reach(&self, ctl: u32, who: u32, distance: f32) -> bool {
+        let Some(c) = self.controlinator(Some(ctl as usize)) else {
+            return false;
+        };
+        c.part.driver.is_none()
+            && self.controlinator_open(ctl)
+            && MAY_SIT.contains(&self.creature_state(who))
+            && distance < c.part.input_scale
+    }
+
+    /// Whether `ctl` seats a creature in reach without a button (+0x51).
+    pub fn controlinator_auto(&self, ctl: u32) -> bool {
+        self.controlinator(Some(ctl as usize))
+            .is_some_and(|c| c.part.flags_50[1] != 0)
+    }
+
+    /// Seats `who` (0x6a2fc4, 0x6a0b78): it drives `ctl` and its creature goes to state 4.
+    pub fn controlinator_enter(&mut self, ctl: u32, who: u32) {
+        let auto = self.controlinator_auto(ctl);
+        let Some(c) = self
+            .things
+            .get_mut(ctl as usize)
+            .and_then(|t| t.controlinator.as_mut())
+        else {
+            return;
+        };
+        c.part.driver = Some(who as usize);
+        if auto {
+            c.part.ref_18 = Some(who as usize);
+        }
+        if let Some(cr) = self
+            .things
+            .get_mut(who as usize)
+            .and_then(|t| t.creature.as_mut())
+        {
+            cr.state = SEATED;
+            cr.frames = 0;
+        }
+    }
+
+    /// One frame of a seat with a driver: when the seat shuts the driver is put out of
+    /// state 4, and once the driver is not in state 4 the seat lets go (0x89950c,
+    /// 0x6a0b78). Returns the driver let go.
+    pub fn controlinator_seat_tick(&mut self, ctl: u32) -> Option<u32> {
+        let driver = self.controlinator(Some(ctl as usize))?.part.driver? as u32;
+        if self.controlinator_open(ctl) && self.creature_state(driver) == SEATED {
+            return None;
+        }
+        if let Some(cr) = self
+            .things
+            .get_mut(driver as usize)
+            .and_then(|t| t.creature.as_mut())
+            .filter(|c| c.state == SEATED)
+        {
+            cr.state = 0;
+            cr.frames = 0;
+            return None;
+        }
+        self.things[ctl as usize]
+            .controlinator
+            .as_mut()?
+            .part
+            .driver = None;
+        Some(driver)
     }
 
     /// Whether `other` is a driven controlinator in `ctl`'s mode (0x69ffec).
@@ -146,6 +241,45 @@ mod tests {
         assert_eq!(w.controlinator_driver(0), Some(1));
         w.things[0].controlinator.as_mut().unwrap().part.mode = 7;
         assert_eq!(w.controlinator_driver(0), Some(3), "only mode 8");
+    }
+
+    fn seat_world() -> LevelWorld {
+        let mut w = world();
+        let c = w.things[0].controlinator.as_mut().unwrap();
+        c.part.driver = None;
+        c.part.input_scale = 2.0;
+        w.things[3].creature = Some(crate::CreatureState::default());
+        w
+    }
+
+    #[test]
+    fn a_creature_in_reach_sits_and_drives() {
+        let mut w = seat_world();
+        assert!(!w.controlinator_in_reach(0, 3, 2.0), "the radius is strict");
+        assert!(w.controlinator_in_reach(0, 3, 1.5));
+        w.things[3].creature.as_mut().unwrap().state = crate::creature::DYING;
+        assert!(!w.controlinator_in_reach(0, 3, 1.5), "dying may not sit");
+        w.things[3].creature.as_mut().unwrap().state = 0;
+        assert!(!w.controlinator_auto(0));
+        w.controlinator_enter(0, 3);
+        assert_eq!(w.controlinator_driver(0), Some(3));
+        assert_eq!(w.things[3].creature.unwrap().state, SEATED);
+        assert_eq!(w.things[0].controlinator.unwrap().part.ref_18, None);
+        assert!(!w.controlinator_in_reach(0, 3, 1.5), "taken");
+        assert_eq!(w.controlinator_seat_tick(0), None, "still seated");
+    }
+
+    #[test]
+    fn the_seat_lets_go_once_the_driver_stands() {
+        let mut w = seat_world();
+        w.things[0].controlinator.as_mut().unwrap().part.flags_50[1] = 1;
+        assert!(w.controlinator_auto(0));
+        w.controlinator_enter(0, 3);
+        assert_eq!(w.things[0].controlinator.unwrap().part.ref_18, Some(3));
+        w.things[3].creature.as_mut().unwrap().state = 0;
+        assert_eq!(w.controlinator_seat_tick(0), Some(3));
+        assert_eq!(w.things[0].controlinator.unwrap().part.driver, None);
+        assert_eq!(w.controlinator_seat_tick(0), None, "empty");
     }
 
     #[test]

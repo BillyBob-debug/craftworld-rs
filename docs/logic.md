@@ -1137,7 +1137,7 @@ sits in to drive a contraption; the control pads under it read that player's pad
   x17; link to itself 499, none 97; driver stored 149, attached 0; stored state 0 x499,
   1 x33, 2 x64. All 546 control pads (535 type 38, 11 type 55) have their controlinator
   on the grandparent, none on the parent or the pad's own Thing.
-- Not modelled: getting in and out (the update 0x6a3edc and its gate 0x6a096c), the
+- Getting in and out: Part 40. Not modelled: the
   recorded inputs read first from the +0x54 Thing, the Thing type 8 path of 0x6a1004
   and the mirror sign from the link Thing's group matrix. NOT FOUND: what +0x18, +0x48
   and +0x50..+0x52 mean.
@@ -1182,3 +1182,33 @@ it. This part covers how a creature that is not a player dies.
 - Tests: `the_strongest_type_wins_and_gas_reads_as_six`,
   `contact_kills_after_the_types_duration`, `an_unclaimed_creature_takes_type_e`,
   `crushing_counts_deep_frames_then_kills`.
+
+## Part 40: getting in and out of a controlinator (D1138)
+
+The update is 0x6a3264 (0x6a3edc is inside it; caller 0x89014c). All FOUND in 01.33
+unless marked.
+
+- Gate (0x6a096c): shut while port 0 (Thing+0x60 entry 0) is on, which also clears +0x28
+  and +0x34; also shut on world+0x804, world+0x820, T+0x7f or 0x550e70(T,0). With a
+  driver, the gate stays open only while the driver is in creature state 4.
+- Reach (0x6a2938): the candidate's Thing type is 0x88 or 0x89; its creature state is
+  one of 0, 1, 2, 3, 7, 8, 9, 10, 11, 12, 16; its player part +0x848 is clear; it is not
+  +0x18; and it is closer to the seat than +0x44 (a radius in world units, as well as the
+  scale of inputs 9 to 19). The update only looks when there is no driver (+0xc).
+- Sitting (0x6a2fc4): with +0x51 set the nearest creature in reach sits at once and is
+  kept in +0x18; otherwise a player only gets the prompt flag (+0x24) and sits from the
+  player's own code (INFERRED), and a creature with no player sits when its brain
+  +0x58 is not 4 or on buttons 0x1001 (0x89586c). Sitting writes player+0xecc = T, puts
+  the creature in state 4 (0x7b454) and sets the driver (0x6a0b78).
+- Leaving (0x89950c): when the gate shuts with a driver, a driver still in state 4 is
+  put out of it; once it is not in state 4 the seat clears +0xc (0x6a0b78). No leave
+  button is read in the update; INFERRED: it is in the player's state 4 code.
+- +0x4c: the reader keeps the ctor's 0 (0xb52e3c reads into a local and puts the old
+  value back), and the update does not write it. NOT FOUND: what sets 1 or 2 in play.
+- Census (census-all-29.json): radius (+0x44) <=0 x5, <100 x11, <500 x370, >=500 x210;
+  +0x51 set x298 (flags [0,1,1] x183, [1,1,1] x115); port 0 wired x199; +0x18 set x49.
+- Not modelled: the gate's world and Thing flags, the player prompt and button, the
+  brain path, the nearest-candidate choice (the host passes the distance).
+- lbp-runtime: controlinator.rs `controlinator_open`, `controlinator_in_reach`,
+  `controlinator_auto`, `controlinator_enter`, `controlinator_seat_tick`, `SEATED`.
+- Tests: `a_creature_in_reach_sits_and_drives`, `the_seat_lets_go_once_the_driver_stands`.
