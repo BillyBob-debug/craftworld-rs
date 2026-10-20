@@ -55,8 +55,7 @@
   after D1120 x 24,464 on tick 2004, unchanged;
   after D1121 x 24,464 on tick 2004, unchanged: nothing fills impulses yet;
   after D1122 x 24,464 on tick 2004, unchanged: nothing writes the word yet;
-  after D1123 x 24,464 on tick 2004, unchanged: the route has no angle sensor
-  that changes).
+  after D1123 x 24,464 on tick 2004, unchanged).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
