@@ -2973,7 +2973,9 @@ fn physics_tweak(r: &mut Reader, things: &mut Things) -> Result<PhysicsTweak> {
         thing_ref(r, things)?;
     }
     t.hide_in_play_mode = r.bool()?;
-    t.color_index = r.i32()?;
+    // D1152: colorIndex is an s32 (zigzag when compressed, 0xb7834c via 0x8a9240), the
+    // same reader as the tag's colour, so followKey pairs match.
+    t.color_index = r.s32()?;
     t.name = r.wstring()?;
     t.team_filter = r.u8()?;
     t.behavior = r.i32()?;
