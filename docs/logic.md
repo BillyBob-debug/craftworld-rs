@@ -396,9 +396,10 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23),
   motion recorder 45 (142; Part 24), angle 41 (126; Part 25), wormhole 57 (123;
   Part 26), pocket item pedestal 65 (77; Part 27), lever 1 (74; Part 28),
-  three-way switch 2 (7; Part 29), sticker 5 (68; Part 30, its manual value).
+  three-way switch 2 (7; Part 29), sticker 5 (68; Part 30, its manual value),
+  score 30 (51; Part 31).
 - Kept as stored (the world signal is not modelled yet):
-  score 30 (51), movinator pad 44 (50), 55 (11).
+  movinator pad 44 (50), 55 (11).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
 - The names come from docs/runtime-evidence/logic.md A4; types 55, 57 and 65 are past
@@ -888,3 +889,27 @@ ManualActivation, as the battery does.
 - Not modelled: placing stickers, so ManualActivation stays as loaded.
 - lbp-runtime: the `5 | 17 | 28` arm in switches.rs.
 - Test: `sticker_switch_passes_its_manual_activation` in switches.rs.
+
+## Part 31: the score switch (D1129)
+
+Switch type 30 (51 placed) is the score switch. compute_output's table 0x11be00 entry 30
+is 0x11c834, which calls 0x11ab74 and stores through the shared tail 0x11c2c4.
+
+- The score: over the game state's player records (count +0x1e8, by index 0x156b74),
+  only those whose number (+0xdc) passes the team filter (PSwitch+0x60, 0xf9a64). By
+  the PWorld's game mode (the chain 0xf9a64 reads too): mode 0 the sum of their scores
+  (+0x30); mode 1 (versus) the highest above 0.0 (r2-0x41cc), the first record keeping
+  a tie, with its player; any other mode, teams (5) included, 0.0.
+- The target is PSwitch+0xcc, the field the counters read as bulletsRequired. With 0
+  the signal is {1.0 (r2-0x4174), 1, player}. Otherwise the activation is score /
+  target, not clamped; the ternary is 0x11873c's rule for type 30 (0x1187e8): 1 at or
+  above 1.0, -1 at or below -1.0, otherwise 0; the player is -1.
+- Inverted through the standard tail (table 0x11bfd4 entry 30 is 0x11c16c).
+- Census (census-all-19.json): 51 score switches, none inverted, all with one wired
+  output and team filter 0. Targets from 50 to 300,000 (none 0). The stored output is
+  {0, 0} on all 51, what the rule gives with no score.
+- Not modelled: the switch Thing's owner (Thing+0x50) given to the team filter; as for
+  the button it is nobody.
+- lbp-runtime: `score_switch` in score.rs reads `LevelWorld.player_records`.
+- Tests: `score_switch_sums_or_takes_the_best_score`,
+  `score_switch_is_not_clamped_and_inverts` in score.rs.

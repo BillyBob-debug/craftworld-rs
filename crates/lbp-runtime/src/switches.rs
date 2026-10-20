@@ -49,6 +49,7 @@ use crate::motion::motion_recorder;
 use crate::pad::pad_sensor;
 use crate::pedestal::pedestal_sensor;
 use crate::remote::key_remote;
+use crate::score::score_switch;
 use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
 use crate::velocity::velocity_sensor;
 use crate::wormhole::wormhole_sensor;
@@ -521,6 +522,8 @@ pub fn compute_output(
         // TRINARY (three-way switch), 0x11caf0 → 0x11a3b4, FOUND (lever.rs): the same
         // offset, signed; inverted by negation (0x11c234).
         2 => Some((trinary(cx), Invert::Negate)),
+        // SCORE, 0x11c834 → 0x11ab74, FOUND (score.rs): the players' score / target.
+        30 => standard(score_switch(cx)),
         // POCKET_ITEM_PEDESTAL, 0x11d164, FOUND (pedestal.rs): its value arrays per output.
         65 => standard(pedestal_sensor(cx, output)),
         // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
@@ -1508,11 +1511,11 @@ mod tests {
     }
 
     /// A switch Thing with one output per entry: (stored signal, targets). Its type is the
-    /// score switch's (30), which keeps the stored signal.
+    /// movinator pad's (44), which keeps the stored signal.
     fn switch(outputs: &[(SwitchInput, &[(u32, i32)])]) -> ThingState {
         ThingState {
             switch: Some(SwitchState {
-                switch_type: 30,
+                switch_type: 44,
                 outputs: outputs
                     .iter()
                     .map(|(s, targets)| {
@@ -1933,7 +1936,7 @@ mod tests {
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
         // The other sensors keep the stored signal, also when inverted.
-        for ty in [30, 55] {
+        for ty in [44, 55] {
             let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
             let s = t.switch.as_mut().unwrap();
             (s.switch_type, s.inverted) = (ty, true);

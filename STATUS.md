@@ -6747,3 +6747,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1120 the key remote switch (2026-10-19)
 - Logic lane: key remotes (497) pass on the strongest tag of their key, skipping
   tags on their own object (0x10fc88; docs/logic.md Part 22).
+
+## D1121 the button switch (2026-10-19)
+- Logic lane: buttons (224) are on while contacts press them with 7,500 or more
+  and stay on four ticks after release (0x11a998; docs/logic.md Part 23).
