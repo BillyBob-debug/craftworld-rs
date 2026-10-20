@@ -6771,3 +6771,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1126 the lever switch (2026-10-19)
 - Logic lane: levers (74) read their handle's offset in the lever's frame (0x11a6a4;
   docs/logic.md Part 28); the ternary band matches the stored one on 73 of 74.
+
+## D1127 the three-way switch (2026-10-19)
+- Logic lane: three-way switches (7) read the lever's handle offset as x / 100 in
+  [-1, 1] and invert by negation (0x11a3b4; docs/logic.md Part 29).

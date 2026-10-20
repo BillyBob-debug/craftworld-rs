@@ -1028,3 +1028,39 @@ PMaterialTweak (part bit 0x22) sets the physics material of its Thing's rigid gr
 - Tests: `group_tweaks_average_and_take_the_largest`,
   `wired_tweak_follows_its_input_and_deactivation`,
   `stickiness_three_is_kept_apart_and_bit_7_is_dropped`.
+
+## Part 36: the emitter (D1134)
+
+PEmitter (part bit 0x14) emits a copy of its plan on a clock or when a switch reaches it.
+
+- Offsets (reader 0xb8a228, visitor 0xb8a3b8): +0x40 clock state, +0x44 angVel, +0x48
+  frequency, +0x4c phase, +0x50 parentRelativeOffset, +0x60 lifetime, +0x64 maxEmitted,
+  +0x68 currentEmitted, +0x6c maxEmittedAtOnce, +0x70 behavior, +0x74 plan, +0xa1
+  recycleEmittedObjects, +0xec objects alive. Clock state: +4 time made, +8 frame the
+  scale changed, +0xc scale, +0x14 player.
+- Clock (0x9bee4, every frame t): returns early on another world, a paused world
+  (0x88fb1c), a deactivated Thing (+0x7f), behavior 1, or behavior 0 or 2 with frequency
+  0. The scale is 1.0 unwired; wired with behavior 2 the input's activation (output
+  +0x18); wired with behavior 0, 1.0 while the input's ternary (+0x1c) is nonzero, else
+  0.0 and no emit. A scale change keeps the time made: time += old*(t-base) - (t-base),
+  base = t. Time(t) = (t-base)*scale + base + time made. It emits when
+  floor((time(t-1)+phase)/frequency)*frequency + frequency <= time(t) + phase.
+- Behavior 1: 0x11ddf0's entry for kind 0x4b (0x11eac8) emits once when the switch
+  reaches it (0x9c3b0 -> 0x9baf8).
+- Gates (0x9baf8): unless recycling or maxEmittedAtOnce is 0, no emit while that many
+  are alive; then 0x93780: (maxEmitted 0 or currentEmitted < maxEmitted) and
+  maxEmittedAtOnce nonzero, so maxEmittedAtOnce 0 never emits. An emit (0x9a53c) gives
+  the object the lifetime and counts currentEmitted up.
+- Owner: the input's player when it has one, else the group owner (0xf8e70).
+- Census (census-all-25.json): 3,881 emitters, 3,435 with port 0 wired; behavior 0
+  x1,973, 1 x1,902, 2 x6; frequency 0 116; maxEmittedAtOnce 0 7; maxEmitted set 774;
+  recycling 2,545; lifetime 0 2,006; currentEmitted nonzero 421; editor emitters 131;
+  hidden in play 5; 3,874 pass the gates at load.
+- Not modelled: the thermometer budget (world+0x8d0), the flag at +0xf6, the group
+  owner, placing the object (0x97dd4). NOT FOUND: where a lifetime runs out and whether
+  recycling destroys the oldest.
+- lbp-runtime: emitter.rs, `ThingState.emitter`, `LevelWorld::emitter_tick` and
+  `emitter_trigger`. INFERRED: the input is port 0.
+- Tests: `unwired_emitter_emits_every_frequency_frames_after_the_phase`,
+  `at_once_and_total_limits_gate_emits`,
+  `wired_input_sets_the_speed_and_behavior_one_waits_for_the_switch`.

@@ -33,6 +33,7 @@ mod button;
 mod camera;
 mod cutscene;
 mod display;
+mod emitter;
 mod global_settings;
 mod gooey;
 mod grab;
@@ -69,6 +70,7 @@ mod wormhole;
 pub use camera::*;
 pub use cutscene::*;
 pub use display::*;
+pub use emitter::EmitterState;
 pub use global_settings::*;
 pub use gooey::*;
 pub use level_unlocking::*;
@@ -166,6 +168,8 @@ pub struct ThingState {
     pub switch_input: Option<InputAdapter>,
     /// PMaterialTweak as stored, when the Thing has one (D1133).
     pub material_tweak: Option<MaterialTweak>,
+    /// PEmitter as stored and its emit clock, when the Thing has one (D1134).
+    pub emitter: Option<EmitterState>,
     /// The motion of the Thing's physics body, as the host's physics reports it: the
     /// velocity sensors read it ([`velocity::BodyMotion`]). None unless the host fills it.
     pub body: Option<velocity::BodyMotion>,
@@ -968,6 +972,7 @@ impl LevelWorld {
                         lethal_frame: p.lethal_activation_frame,
                     }),
                     material_tweak: t.data.material_tweak,
+                    emitter: t.data.emitter.map(EmitterState::new),
                     ..Default::default()
                 })
                 .collect(),
