@@ -101,6 +101,17 @@ pub use story_native::*;
 pub use switch_input::{DestroyRequest, InputAdapter, MAX_DESTROY_REQUESTS};
 pub use switches::*;
 
+/// One entry of a PMicrochip's component table (the level file's `components`).
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ChipAngle {
+    /// The component's Thing.
+    pub thing: u32,
+    /// Its rotation on the board.
+    pub angle: f32,
+    /// Its mirrored flag.
+    pub flipped: bool,
+}
+
 /// One Thing as the runtime sees it.
 #[derive(Debug, Clone, Default)]
 pub struct ThingState {
@@ -154,6 +165,9 @@ pub struct ThingState {
     /// PMicrochip: the chip's circuit-board Thing. The components on the board are the
     /// board's children.
     pub circuit_board: Option<u32>,
+    /// PMicrochip's component table: per component on the board its Thing, angle and
+    /// flipped flag (read by the cone's rotation sum for a Thing without a PPos, Part 45).
+    pub chip_components: Vec<ChipAngle>,
     /// GUID of the mesh the Thing's PRenderMesh shows, when it has one with a GUID: the
     /// level file's until `Thing.SetRenderMeshMesh` sets another.
     pub mesh_guid: Option<u32>,
@@ -964,6 +978,19 @@ impl LevelWorld {
                         .as_ref()
                         .and_then(|m| m.circuit_board)
                         .and_then(handle),
+                    chip_components: t
+                        .data
+                        .microchip
+                        .iter()
+                        .flat_map(|m| &m.components)
+                        .filter_map(|c| {
+                            Some(ChipAngle {
+                                thing: c.thing.and_then(handle)?,
+                                angle: c.values[2],
+                                flipped: c.flag,
+                            })
+                        })
+                        .collect(),
                     mesh_guid: t
                         .data
                         .render_mesh

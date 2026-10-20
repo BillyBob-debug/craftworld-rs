@@ -189,9 +189,14 @@ impl LevelWorld {
     /// and negates the sum after a mirrored one; the direction is the base turned the
     /// other way round, negated again for a mirrored proxy.
     ///
+    /// A Thing without a PPos adds the angle of its entry in its chip's component table
+    /// instead, and negates the sum when the entry is flipped; one not in the table adds
+    /// nothing (D1143).
+    ///
     /// INFERRED: the game runs the sum when a level is loaded or edited, this runtime on
-    /// every test; a Thing without a PPos adds 0 (the game takes an angle from its chip's
-    /// table, not decoded); a sensor on a cursor is not modelled.
+    /// every test; table word 5 is the component's `angle` (words 3..8 read as x, y,
+    /// angle, scaleX, scaleY, flipped). Not modelled: a sensor under a cursor chip, which
+    /// looks along its cursor's angle (Part 45).
     pub fn cone_direction(&self, sensor: u32) -> Option<[f32; 2]> {
         let proxy = self.sensor_proxy(sensor);
         let m = self.things.get(proxy as usize)?.world_matrix?;
@@ -222,6 +227,12 @@ impl LevelWorld {
                 if det3(&l) < 0. {
                     angle = -angle;
                 }
+            } else if let Some(c) = self.chip_entry(t) {
+                // No PPos: its entry in the chip's component table (0x1103f8).
+                angle += c.angle;
+                if c.flipped {
+                    angle = -angle;
+                }
             }
             let Some(parent) = thing.parent else { break };
             t = parent;
@@ -232,6 +243,15 @@ impl LevelWorld {
         let (sin, cos) = angle.sin_cos();
         let (x, y) = (v[0] / len, v[1] / len);
         Some([x * cos + y * sin, y * cos - x * sin])
+    }
+
+    /// A Thing's entry in the component table of the chip whose board is its parent
+    /// (FOUND 0x110140: the chip is the board's parent, the Thing's grandparent).
+    fn chip_entry(&self, thing: u32) -> Option<crate::ChipAngle> {
+        let board = self.things.get(thing as usize)?.parent?;
+        let chip = *self.board_owners.get(&board)?;
+        let table = &self.things.get(chip as usize)?.chip_components;
+        table.iter().find(|c| c.thing == thing).copied()
     }
 
     /// World x and y of a Thing with a PPos.
@@ -1194,5 +1214,45 @@ mod tests {
         *m = at(0., 0.).unwrap();
         (m[5], m[6], m[9], m[10]) = (cos, sin, -sin, cos);
         assert!(close(w.cone_direction(0), [0., 1.]));
+    }
+
+    #[test]
+    fn cone_rotation_reads_the_chip_table_without_a_ppos() {
+        // D1143: chip 0 turned 90 degrees, board 1, sensor 2 on it with no local matrix.
+        let chip = ThingState {
+            world_matrix: at(0., 0.),
+            circuit_board: Some(1),
+            ..Default::default()
+        };
+        let mut sensor = tag_sensor_thing();
+        sensor.parent = Some(1);
+        let board = ThingState {
+            parent: Some(0),
+            ..Default::default()
+        };
+        let mut w = world(vec![chip, board, sensor]);
+        w.board_owners.insert(1, 0);
+        turn(&mut w, 0, 90.);
+        w.things[2].local_matrix = None;
+        let close = |d: Option<[f32; 2]>, e: [f32; 2]| {
+            let d = d.unwrap();
+            (d[0] - e[0]).abs() < 1e-5 && (d[1] - e[1]).abs() < 1e-5
+        };
+        // Not in the table: adds nothing, the chip's up.
+        assert!(close(w.cone_direction(2), [-1., 0.]));
+        let entry = |angle, flipped| crate::ChipAngle {
+            thing: 2,
+            angle,
+            flipped,
+        };
+        let quarter = std::f32::consts::FRAC_PI_2;
+        w.things[0].chip_components = vec![entry(quarter, false)];
+        assert!(close(w.cone_direction(2), [0., 1.]));
+        // Flipped: the sum is negated after the angle is added.
+        w.things[0].chip_components = vec![entry(quarter, true)];
+        assert!(close(w.cone_direction(2), [0., -1.]));
+        // A Thing with a local matrix ignores its table entry.
+        turn(&mut w, 2, 0.);
+        assert!(close(w.cone_direction(2), [-1., 0.]));
     }
 }

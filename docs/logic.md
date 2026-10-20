@@ -554,9 +554,9 @@ sends both to 0x11d28c (linear 0x11d1d0, angular 0x11d2a8); nothing is stored.
 - Angular: the body's angular velocity w. Modes: 1 max(w, 0), 2 max(-w, 0), 0 and
   above 2 w.
 - INFERRED: m is the unit x axis of the body Thing's world matrix (0x1141f4 may also
-  turn it to the nearest quarter turn). Not modelled: a Thing under an ancestor of
-  object kind 0x96 (0x3c594), which reads a joint's angle (0x1d3700) or motion
-  (0x1d315c) instead.
+  turn it to the nearest quarter turn). Not modelled: a Thing under a cursor chip
+  (object kind 0x96, Part 45; 0x3c594 returns its cursor record), which reads
+  0x1d3700 or 0x1d315c on that record instead.
 - lbp-runtime: `velocity_sensor` in velocity.rs reads `ThingState.body`
   (`BodyMotion { linear, centre, angular, still, inactive }`). The host does not fill it
   yet, so velocity switches read off (or on when inverted) for now.
@@ -1285,8 +1285,8 @@ All FOUND in 01.33 unless marked. Census (378 levels): player sensors 5,627, of 
   sensor and the Things above it on the chip: each adds the inverse of its in-plane
   rotation and a mirrored one negates the sum. So a plain sensor looks along its own
   up, one on a chip along the chip's up turned by its rotation on the board.
-- Not modelled: a sensor on a cursor (0x1d3594), a Thing without a PPos (adds a float
-  from its chip's table, 0x1104ec). INFERRED: a candidate at distance 0 passes.
+- A Thing without a PPos and a sensor under a cursor chip: Part 45. INFERRED: a
+  candidate at distance 0 passes.
 - Layer, tag sensor (0x1196b0, 0x11984c): the body is the proxy's when the proxy has the
   part at bit 31 of its part mask (INFERRED: the PShape), else its parent's. A sensor
   without a body accepts; a tag with neither part nor parent is rejected, one whose
@@ -1316,6 +1316,39 @@ All FOUND in 01.33. The "proximity" switch is the player sensor (type 3), Part 4
   identity check, not a spatial one.
 - Callers of 0x1141f4: the tag sensor (0x119718), the player sensor (0x11a230,
   0x11a2b8), the angle sensor (0x11cd48), the linear velocity sensor's resetWhenFull path
-  (0x11da60), and 0x114de4, 0x115088 (not identified).
+  (0x11da60), and 0x114de4, 0x115088 (the editor's cone drawing, Part 45).
 - lbp-runtime: no change to the rules; the tests `impact_sensor_has_no_cone_or_layer_test`
   and `grab_switch_has_no_cone`.
+## Part 45: the cone's chip table, cursor chips and the editor's cone drawing (D1143)
+
+FOUND in 01.33 unless marked.
+
+- Rotation sum 0x110140, a Thing without a PPos (0x1103f8): when the walk reaches a Thing
+  whose grandparent has the MICROCHIP part (part bit 0x21) and the Thing has no PPos
+  (+0x2c), it looks the Thing up in that PMicrochip's table (+0x5c: a count, then 9-word
+  entries from word 4, word 0 the Thing). Found: the sum adds the float in word 5, then
+  negates when the byte at word 8 is set (and XORs PSwitch+0xe2). Not found: nothing.
+  INFERRED: the table is the level file's `components` {thing, x, y, angle, scaleX,
+  scaleY, flipped} with x at word 3, so word 5 is `angle` and word 8 `flipped`.
+- Cursor chip: object kind 0x96 (0x3ed2c, case 0x3f45c, at 0x3f460) is a type-36 switch
+  with IncludeTouching (+0x8c) not 0. The cone direction 0x1141f4 first calls 0x3c594
+  when Thing+0x78 bit 0x100 is clear: it walks Thing+0x50 up through kinds 3, 5, 0x40
+  and 0x50, and on a kind 0x96 Thing (or the Thing itself) returns 0xd1df8: the record
+  in world+0xc0 (count +0xc4) whose +0x1b4 is that Thing, plus 0x70. Otherwise it sets
+  the bit and returns 0, the normal path 0x1142e0 (Part 43). With a record the
+  direction is the sincos (0x1d3594) of record+0x1b0, turned by PSwitch+0xdc (negated
+  for a mirrored sensor, 0x1147b8; else 0x114634). Not modelled: the record is runtime
+  state of the cursor, not in the level file.
+- 0x114930 (holding the calls 0x114de4 and 0x115088) is the editor's drawing of sensor
+  cones, render only: 0x567990 calls 0x564d3c twice (flag 0 and 1, after the depth
+  functions 0x203 and 0x206 are written), whose thunks 0x898f7c, 0x898f8c (0x12c988)
+  and 0x898f9c (0x12d2a4) reach it. It returns unless (parent or self)+0x10 bit 4 is
+  set and switches on Thing+0x7e.
+- Census (census-all-31.json, 358 of 378 levels read): the cone walk reaches a chip table
+  for 3,265 of 5,627 player sensors and 14,515 of 16,953 tag sensors; the entry adds an
+  angle or flips for 958 and 2,893 of them. 5 player and 25 tag sensors sit under a cursor
+  chip, none of them with a cone (angle range below 180), so leaving the cursor record out
+  changes no placed cone.
+- lbp-runtime: `ThingState.chip_components` (`ChipAngle { thing, angle, flipped }`),
+  read by `LevelWorld::cone_direction`; the test
+  `cone_rotation_reads_the_chip_table_without_a_ppos`.
