@@ -19,8 +19,9 @@
 //!
 //! The logic types are computed, and so are the tag sensor, the player sensor and the
 //! impact sensor (`sensors.rs`), the velocity sensors (`velocity.rs`), the grab switch
-//! (`grab.rs`) and the control pad (`pad.rs`); the other types whose signal comes from
-//! the world (physics, the other pads) keep the signal the level file stores.
+//! (`grab.rs`), the control pad (`pad.rs`) and the key remote (`remote.rs`); the other
+//! types whose signal comes from the world (physics, the other pads) keep the signal the
+//! level file stores.
 //!
 //! Not modelled:
 //! - The dirty flags. The game re-runs the event-driven switch types only when something
@@ -41,6 +42,7 @@
 use crate::cutscene::camera_finished;
 use crate::grab::grab_sensor;
 use crate::pad::pad_sensor;
+use crate::remote::key_remote;
 use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
 use crate::velocity::velocity_sensor;
 use crate::{InputWire, LevelWorld, SwitchState, ThingState};
@@ -483,6 +485,7 @@ pub fn compute_output(
         // when inverted (0x11c228).
         38 if (10..=17).contains(&output) => Some((pad_sensor(cx, output), Invert::Negate)),
         38 => standard(pad_sensor(cx, output)),
+        54 => standard(key_remote(cx)),
         // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
         42 | 43 => standard(velocity_sensor(cx)),
         // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.
@@ -1879,7 +1882,7 @@ mod tests {
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
         // The other sensors keep the stored signal, also when inverted.
-        for ty in [0, 30, 41, 54, 65] {
+        for ty in [0, 30, 41, 65] {
             let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
             let s = t.switch.as_mut().unwrap();
             (s.switch_type, s.inverted) = (ty, true);

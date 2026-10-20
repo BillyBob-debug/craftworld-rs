@@ -48,6 +48,7 @@ mod native_world;
 pub mod pad;
 mod pod;
 mod pod_computer_native;
+mod remote;
 mod sensors;
 mod story_native;
 mod switches;
