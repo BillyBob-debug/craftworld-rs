@@ -152,9 +152,10 @@ impl AntiGravity {
 }
 
 /// D1109: a PPhysicsTweak that turns its body: configuration 1 (the gyroscope, turning
-/// towards world up) or 9 (the rotator, turning at a set speed). Read from the SPU row
-/// packer 0x95fb20 (EBOOT 01.33); angles in radians, speeds per game tick.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// towards world up) or 9 (the rotator, turning at a set speed). D1144: 3, 4 and 5 turn
+/// their body's up axis along its velocity, the stick or a found target. Read from the
+/// SPU row packer 0x95fb20 (EBOOT 01.33); angles in radians, speeds per game tick.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub struct SpinTweak {
     /// The PPhysicsTweak's Thing index.
     pub thing: usize,
@@ -168,7 +169,17 @@ pub struct SpinTweak {
     pub decel: f32,
     /// The rotator's speed (middleVel z; per tick).
     pub speed: f32,
+    /// D1144: configuration 5's search (0x1c3e04, as the follower's, D1110): distance
+    /// band, cone (degrees; 180 or more is no cone) and followKey's tag key.
+    pub min_range: f32,
+    pub max_range: f32,
+    pub angle_range: f32,
+    pub key: Option<u32>,
 }
+
+/// D1144: the dead zone of the turning packer (0xc46400, 0x95fd88): an aim shorter than
+/// this squared gives a target speed of 0.
+const AIM_DEAD_ZONE: f32 = 0.1;
 
 /// D1109: `angle` wrapped into [-π, π] (the packer's vrfim step at 0x960790).
 fn wrap_angle(angle: f32) -> f32 {
@@ -184,6 +195,16 @@ impl SpinTweak {
     /// wrapped, target clamped to ±range (0x960858). INFERRED: the target shape inside
     /// 0x1c21f4 (a stop-in-time rule), read as sign(e) × sqrt(2 × accel × range × |e|).
     pub fn target(&self, angle: f32) -> (f32, f32, f32) {
+        self.target_along(angle, [0., 1.])
+    }
+
+    /// D1144: as [`Self::target`], turning the body's up axis towards `aim` (a world
+    /// vector) instead of world up. FOUND (0x95fd0c, 0x95fd88): an aim with x² + y² under
+    /// 0.1, or accel × range 0, wants speed 0 (still with ±accel × range, so it brakes).
+    /// INFERRED: the error is the wrapped angle from the up axis to the aim (the packer
+    /// forms two wrapped atan2 terms, 0x960588 to 0x960790; which one 0x1c21f4 takes is not
+    /// settled).
+    pub fn target_along(&self, angle: f32, aim: [f32; 2]) -> (f32, f32, f32) {
         let a = self.accel * self.range;
         match self.configuration {
             9 => {
@@ -192,21 +213,62 @@ impl SpinTweak {
                 let hi = if self.speed <= 0. { d } else { a };
                 (self.speed, lo, hi)
             }
+            _ if dot(aim, aim) < AIM_DEAD_ZONE || a == 0. => (0., -a, a),
             _ => {
-                let e = wrap_angle(-angle);
+                // The aim's angle from world up, so world up itself gives exactly -angle.
+                let e = wrap_angle((-aim[0]).atan2(aim[1]) - angle);
                 let w = e.signum() * (2. * a * e.abs()).sqrt();
                 (w.clamp(-self.range, self.range), -a, a)
             }
         }
     }
 
+    /// D1144: where the tweak aims (a world vector) for a body moving at `vel` (game units
+    /// per tick) whose target, if it found one, is at `d` (target minus body). FOUND
+    /// (0x95fd0c): 1 aims at world up; 3 along the body's velocity (state+0x10, x and y);
+    /// 4 along stick slots 1 and 2 (0xcb02c, 0xcb074), which nothing fills here, so 0;
+    /// 5 at its target (0x1c3e04), 0 with none. Not modelled: 5's lead by the target's
+    /// velocity (INFERRED from the vector steps), the mirror flag (negates 4's x) and the
+    /// +0x220 angle.
+    pub fn aim(&self, vel: [f32; 2], d: Option<[f32; 2]>) -> [f32; 2] {
+        match self.configuration {
+            3 => vel,
+            4 => [0., 0.],
+            5 => d.unwrap_or([0., 0.]),
+            _ => [0., 1.],
+        }
+    }
+
+    /// D1144: whether configuration 5 takes a target at `d` (target minus body) for a
+    /// body whose up axis is `up` (0x1c3e04, as [`MoveTweak::sees`]).
+    pub fn sees(&self, d: [f32; 2], up: [f32; 2]) -> bool {
+        self.configuration == 5 && sees(self.min_range, self.max_range, self.angle_range, d, up)
+    }
+
     /// D1109: the body's turn speed (per tick) after this tweak's row at `activation`:
     /// the change towards the target, clamped to the limits scaled by the activation
     /// (0x95fdc8). The 1/mass factor there is left out (INFERRED: the solver undoes it).
     pub fn turn(&self, angle: f32, w: f32, activation: f32) -> f32 {
-        let (target, lo, hi) = self.target(angle);
+        self.turn_along(angle, w, activation, [0., 1.])
+    }
+
+    /// D1144: as [`Self::turn`], aiming along `aim` ([`Self::aim`]).
+    pub fn turn_along(&self, angle: f32, w: f32, activation: f32, aim: [f32; 2]) -> f32 {
+        let (target, lo, hi) = self.target_along(angle, aim);
         w + (target - w).clamp(lo * activation, hi * activation)
     }
+}
+
+/// D1110: the search of 0x1c3e04 for a target at `d` (target minus body) by a body whose
+/// up axis is `up`: min < |d| < max in x, y, max below 0 is 1e8, and a cone under 180
+/// degrees. INFERRED: the cone is a half-angle about the body's up axis.
+fn sees(min: f32, max: f32, angle: f32, d: [f32; 2], up: [f32; 2]) -> bool {
+    let r = d[0].hypot(d[1]);
+    let max = if max < 0. { 1e8 } else { max };
+    if r <= min || r >= max {
+        return false;
+    }
+    angle >= 180. || dot(d, up) >= r * angle.to_radians().cos()
 }
 
 /// D1110: a PPhysicsTweak that pushes its body: configuration 8 (the mover, a set
@@ -257,16 +319,7 @@ impl MoveTweak {
     /// max_range below 0 is 1e8, and a cone under 180 degrees. INFERRED: the cone is a
     /// half-angle about the body's up axis.
     pub fn sees(&self, d: [f32; 2], up: [f32; 2]) -> bool {
-        let r = d[0].hypot(d[1]);
-        let max = if self.max_range < 0. {
-            1e8
-        } else {
-            self.max_range
-        };
-        if r <= self.min_range || r >= max {
-            return false;
-        }
-        self.angle_range >= 180. || dot(d, up) >= r * self.angle_range.to_radians().cos()
+        sees(self.min_range, self.max_range, self.angle_range, d, up)
     }
 
     /// D1110: the rows (axis, target, lo, hi) this tweak packs for a body with up axis `up`
@@ -770,30 +823,6 @@ fn build_scene_inner(
             }
         }
     }
-    for (i, t) in things.iter().enumerate() {
-        let Some(tw) = t
-            .data
-            .physics_tweak
-            .as_ref()
-            .filter(|tw| matches!(tw.configuration, 1 | 9))
-        else {
-            continue;
-        };
-        let slot = body_owner(things, i)
-            .0
-            .and_then(|b| body_of.get(&b).copied().flatten());
-        if let Some(b) = slot {
-            scene.bodies[b].spins.push(SpinTweak {
-                thing: i,
-                configuration: tw.configuration,
-                behavior: tw.behavior,
-                range: tw.vel_range,
-                accel: tw.accel_strength,
-                decel: tw.decel_strength,
-                speed: tw.middle_vel[2],
-            });
-        }
-    }
     // D1111: tags are keyed by colour and name.
     let mut keys = BTreeMap::<(i32, String), u32>::new();
     let mut key_of = |colour: i32, name: &str| -> u32 {
@@ -823,6 +852,35 @@ fn build_scene_inner(
             body,
             at,
         });
+    }
+    for (i, t) in things.iter().enumerate() {
+        let Some(tw) = t
+            .data
+            .physics_tweak
+            .as_ref()
+            .filter(|tw| matches!(tw.configuration, 1 | 3..=5 | 9))
+        else {
+            continue;
+        };
+        let slot = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        if let Some(b) = slot {
+            scene.bodies[b].spins.push(SpinTweak {
+                thing: i,
+                configuration: tw.configuration,
+                behavior: tw.behavior,
+                range: tw.vel_range,
+                accel: tw.accel_strength,
+                decel: tw.decel_strength,
+                speed: tw.middle_vel[2],
+                min_range: tw.min_range,
+                max_range: tw.max_range,
+                angle_range: tw.angle_range,
+                key: (tw.configuration == 5 && tw.follow_key)
+                    .then(|| key_of(tw.color_index, &tw.name)),
+            });
+        }
     }
     for (i, t) in things.iter().enumerate() {
         let Some(tw) = t

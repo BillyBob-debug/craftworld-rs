@@ -1038,10 +1038,72 @@ fn d1109_gyroscopes_right_their_body_and_rotators_turn_at_their_speed() {
         accel: 0.125,
         decel: 0.125,
         speed: 0.03490659,
+        ..Default::default()
     };
     let w = rot.turn(0., 0., 1.);
     assert!((w - 0.20943 * 0.125).abs() < 1e-6, "{w}");
     assert!((rot.turn(0., w, 1.) - 0.03490659).abs() < 1e-6);
+}
+
+#[test]
+fn d1144_aim_tweaks_turn_up_along_velocity_stick_and_target() {
+    use lbp_sim::scene::SpinTweak;
+    let tweak = |configuration| SpinTweak {
+        configuration,
+        range: 0.2094394,
+        accel: 1.,
+        min_range: 10.,
+        max_range: 500.,
+        angle_range: 180.,
+        ..Default::default()
+    };
+    // Configuration 3 aims along the velocity: moving right, an upright body turns
+    // clockwise (negative), moving left anticlockwise, upright when moving up.
+    let along = tweak(3);
+    let right = along.aim([5., 0.], None);
+    assert!(along.turn_along(0., 0., 1., right) < 0.);
+    assert!(along.turn_along(0., 0., 1., along.aim([-5., 0.], None)) > 0.);
+    assert_eq!(along.target_along(0., along.aim([0., 5.], None)).0, 0.);
+    // Slower than the dead zone (x² + y² under 0.1) it wants no turn and brakes.
+    let slow = along.aim([0.3, 0.], None);
+    assert_eq!(along.target_along(0., slow).0, 0.);
+    let w = along.turn_along(0., 0.5, 1., slow);
+    assert!((w - (0.5 - 0.2094394)).abs() < 1e-6, "{w}");
+    // Configuration 4 sees no stick here, so it brakes too.
+    let stick = tweak(4);
+    assert_eq!(stick.aim([5., 0.], Some([100., 0.])), [0., 0.]);
+    // Configuration 5 aims at its target, and turns nothing towards none.
+    let seek = tweak(5);
+    assert!(seek.turn_along(0., 0., 1., seek.aim([0., 0.], Some([100., 0.]))) < 0.);
+    assert_eq!(seek.target_along(0., seek.aim([0., 0.], None)).0, 0.);
+    // Its search is the follower's: inside the distance band only.
+    assert!(seek.sees([100., 0.], [0., 1.]));
+    assert!(!seek.sees([5., 0.], [0., 1.]));
+    assert!(!seek.sees([600., 0.], [0., 1.]));
+    assert!(!along.sees([100., 0.], [0., 1.]));
+    // The gyroscope still aims at world up.
+    assert_eq!(tweak(1).aim([5., 0.], None), [0., 1.]);
+    // Built from a level: configurations 3, 4 and 5 now ride their body.
+    for c in [3, 4, 5] {
+        let mut things = vec![
+            floor(),
+            thing(
+                1,
+                matrix(0., 300., 0., 0., 1., 1.),
+                Some(rect(100., 100., 7)),
+                true,
+            ),
+            thing(2, matrix(0., 300., 0., 0., 1., 1.), None, false),
+        ];
+        things[2].parent = Some(1);
+        things[2].data.physics_tweak = Some(PhysicsTweak {
+            configuration: c,
+            vel_range: 0.2094394,
+            accel_strength: 1.,
+            ..Default::default()
+        });
+        assert_eq!(build_scene(&things).bodies[0].spins[0].configuration, c);
+    }
 }
 
 #[test]

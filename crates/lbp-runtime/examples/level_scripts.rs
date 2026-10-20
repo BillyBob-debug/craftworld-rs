@@ -3390,6 +3390,17 @@ fn run() -> Result<(), String> {
         let level_vm = fresh.as_mut().unwrap_or(&mut vm);
         totals.objects_built += world.bind_objects(level_vm);
         let mut row = add_level(level_vm, &world, &mut totals);
+        // PPhysicsTweak by configuration (D1144), with followKey for the searching ones.
+        for p in report
+            .things
+            .iter()
+            .filter_map(|t| t.data.physics_tweak.as_ref())
+        {
+            let k = format!("physics tweak configuration {}", p.configuration);
+            let s = &mut totals.switches.sensors;
+            *s.entry(format!("{k} follow key")).or_default() += usize::from(p.follow_key);
+            *s.entry(k).or_default() += 1;
+        }
         row["level"] = serde_json::json!(label);
         row["stopped"] = serde_json::json!(report.stop.is_some());
         if let (Some(opts), true) = (&play_opts, every) {
