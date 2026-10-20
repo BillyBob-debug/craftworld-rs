@@ -395,9 +395,9 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   and angular velocity 43 (122; Part 19), grab 6 (666; Part 20), control
   pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23),
   motion recorder 45 (142; Part 24), angle 41 (126; Part 25), wormhole 57 (123;
-  Part 26).
+  Part 26), pocket item pedestal 65 (77; Part 27).
 - Kept as stored (the world signal is not modelled yet):
-  65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
+  lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
   (11), trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
@@ -768,3 +768,36 @@ table 0x11bfd4. There is no end step (0x124934 sends types above 0x27 past table
 - lbp-runtime: `wormhole_sensor` in wormhole.rs.
 - Tests: `wormhole_switch_reads_its_ended_byte`,
   `wormhole_switch_inverts_through_the_standard_tail` in wormhole.rs.
+
+## Part 27: the pocket item pedestal switch (D1125)
+
+Switch type 65 (77 placed) is named the pocket item pedestal (INFERRED: the switch-type
+name table 0xd6cb58). compute_output's table 0x11be00 entry 65 is 0x11d164. The store
+0x11bf18 inverts the result through the standard tail (0x11bfac sends types above 0x37
+to 0x11c16c). The player is always -1.
+
+- FUN_0010b0d8 returns the switch's value block at PSwitch+0xe4, allocating its 0x40
+  bytes on first use (init 0x10b134-0x10b1b8): +0 an id (default from
+  *PTR_DAT_00d95f34), +4 a wide-string name, +0x18 a string, and two vectors, empty at
+  init: floats at +0x28 (count +0x2c) and s8 values at +0x34 (count +0x38).
+- Output `o` reads activation = floats[o] and ternary = s8[o], each 0 past its count
+  (0.0 is r2-0x41cc).
+- FUN_0010e4f0 fills both vectors from a registry under FUN_00399b04's global (+0x4cc,
+  entries at +0x4dc/+0x4e0, stride 0x30: name +0, id +0x14, float vector +0x18, s8
+  vector +0x24) when an entry matches the block's id and name, and empties them on a
+  miss. It runs when the key is set (FUN_0010e714, from the property dispatcher
+  0x5c556c) and at level setup (FUN_001ab508 at 0x1ac3a0). No native writes the block.
+  FUN_0010b1c0 saves the block only when +0xe4 is set (INFERRED: the vectors are a cache
+  refilled from the registry). What fills the registry is not found (INFERRED: pocket
+  item or profile state).
+- Census (census-all-10.json): 77 switches, 8 inverted, all with a parent. Outputs: 3
+  in 59, 2 in 10, 1 in 3, 4 in 3, 5 in 1, 6 in 1. Wired: output 0 in 19, output 1 in
+  21, output 2 in 55, output 3 in 3. Stored on: output 0 in 4, output 1 in 3 (one at
+  0.25709596), output 2 in 4 (one at 0.9419894), output 3 in 1. Parts on these Things:
+  SWITCH 77, POS 9, RENDER_MESH 4.
+- Not modelled: the registry, so `SwitchState.pedestal_activations` and
+  `pedestal_ternaries` stay empty and every output reads off (on when inverted). The
+  stored signal is no longer kept, so the 12 outputs stored on now start off.
+- lbp-runtime: `pedestal_sensor` in pedestal.rs.
+- Tests: `pedestal_reads_its_value_arrays_per_output`,
+  `pedestal_inverts_through_the_standard_tail` in pedestal.rs.

@@ -6731,3 +6731,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1116 the projectile and paint switches (2026-10-19)
 - Logic lane: projectile (816) and paint (51) sensors output hits / required with
   the game's held ternary and empty 6 ticks after full (docs/logic.md Part 18).
+
+## D1117 the velocity switches (2026-10-19)
+- Logic lane: linear (771) and angular (122) velocity sensors follow the EBOOT rule:
+  body motion over the scale, seven modes, local frame (docs/logic.md Part 19).

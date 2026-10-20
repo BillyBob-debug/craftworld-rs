@@ -46,6 +46,7 @@ use crate::cutscene::camera_finished;
 use crate::grab::grab_sensor;
 use crate::motion::motion_recorder;
 use crate::pad::pad_sensor;
+use crate::pedestal::pedestal_sensor;
 use crate::remote::key_remote;
 use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
 use crate::velocity::velocity_sensor;
@@ -512,6 +513,8 @@ pub fn compute_output(
         41 => standard(angle_sensor(cx)),
         // WORMHOLE, 0x11d104, FOUND (wormhole.rs): its own Thing's wormhole ended byte.
         57 => standard(wormhole_sensor(cx)),
+        // POCKET_ITEM_PEDESTAL, 0x11d164, FOUND (pedestal.rs): its value arrays per output.
+        65 => standard(pedestal_sensor(cx, output)),
         // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
         42 | 43 => standard(velocity_sensor(cx)),
         // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.
@@ -1906,7 +1909,7 @@ mod tests {
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
         // The other sensors keep the stored signal, also when inverted.
-        for ty in [30, 65] {
+        for ty in [30, 55] {
             let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
             let s = t.switch.as_mut().unwrap();
             (s.switch_type, s.inverted) = (ty, true);
