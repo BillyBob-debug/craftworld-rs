@@ -3400,6 +3400,19 @@ fn run() -> Result<(), String> {
             let s = &mut totals.switches.sensors;
             *s.entry(format!("{k} follow key")).or_default() += usize::from(p.follow_key);
             *s.entry(k).or_default() += 1;
+            // D1146: configuration 13's saved player.
+            if let Some(r) = &p.recording {
+                for k in [
+                    format!("recording dir {}", r.dir),
+                    format!("recording kind {}", r.kind),
+                    format!("recording speed {}", r.speed),
+                    format!("recording set {}", r.has_recording),
+                    format!("recording absolute {}", r.path_is_absolute),
+                    format!("recording behavior {}", p.behavior),
+                ] {
+                    *s.entry(k).or_default() += 1;
+                }
+            }
         }
         row["level"] = serde_json::json!(label);
         row["stopped"] = serde_json::json!(report.stop.is_some());

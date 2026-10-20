@@ -381,7 +381,7 @@ pub struct CameraTweak {
 }
 
 /// PPhysicsTweak fields as stored (D1100; names from the toolkit, units UNVERIFIED). The
-/// configuration-specific tails (0xd, 0xe) are read through and not kept.
+/// 0xd tail is kept as `recording` (D1146); the 0xe tail is read through and not kept.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct PhysicsTweak {
     pub gravity: f32,
@@ -411,8 +411,22 @@ pub struct PhysicsTweak {
     pub z_behavior: i32,
     pub last_known_activation: f32,
     pub waiting_to_move: bool,
+    /// D1146: the RecordingPlayer of a configuration 13 tweak (v > 0x3b8).
+    pub recording: Option<RecordingPlayer>,
 }
 
+/// D1146: a configuration 13 tweak's RecordingPlayer as stored (names from the toolkit;
+/// which field the playback reads as which is INFERRED, docs/logic.md Part 48).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct RecordingPlayer {
+    /// The recording resource is set (its frames live in that resource, not the level).
+    pub has_recording: bool,
+    pub play_head: f32,
+    pub kind: i8,
+    pub dir: i8,
+    pub speed: f32,
+    pub path_is_absolute: bool,
+}
 /// PMaterialOverride as stored (D331): the region overrides in order and the mesh the
 /// overrides were authored against.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -2966,20 +2980,24 @@ fn physics_tweak(r: &mut Reader, things: &mut Things) -> Result<PhysicsTweak> {
         t.waiting_to_move = r.bool()?;
     }
     if v > 0x3b8 && configuration == 0xd {
-        r.resource(false)?;
-        r.f32()?;
+        let mut p = RecordingPlayer {
+            has_recording: r.resource(false)?.is_some(),
+            play_head: r.f32()?,
+            ..Default::default()
+        };
         if v < 0x3c4 {
             r.u8()?;
         }
-        r.i8()?;
-        r.i8()?;
+        p.kind = r.i8()?;
+        p.dir = r.i8()?;
         r.v3()?;
         r.bool()?;
         r.m44()?;
-        r.f32()?;
+        p.speed = r.f32()?;
         if v > 0x3c4 {
-            r.bool()?;
+            p.path_is_absolute = r.bool()?;
         }
+        t.recording = Some(p);
     }
     if configuration == 0xe && v > 0x3e3 {
         r.f32()?;

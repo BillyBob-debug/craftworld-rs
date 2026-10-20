@@ -1107,6 +1107,81 @@ fn d1144_aim_tweaks_turn_up_along_velocity_stick_and_target() {
 }
 
 #[test]
+fn d1146_recorded_moves_play_by_activation_and_restart_or_pause_when_off() {
+    use lbp_level::parts::RecordingPlayer;
+    use lbp_sim::scene::PlaybackTweak;
+    let tweak = |behavior, dir| PlaybackTweak {
+        behavior,
+        player: RecordingPlayer {
+            speed: 1.,
+            dir,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    // On, the head moves by activation × speed from a fresh start.
+    let mut digital = tweak(0, 0);
+    digital.pos = 7.;
+    assert!(digital.tick(1.));
+    assert_eq!(digital.pos, 1.);
+    assert!(digital.tick(1.));
+    assert_eq!(digital.pos, 2.);
+    // Off, a digital input restarts next time; an analog one pauses where it was.
+    assert!(!digital.tick(0.));
+    digital.tick(1.);
+    assert_eq!(digital.pos, 1.);
+    let mut analog = tweak(1, 0);
+    analog.tick(0.5);
+    analog.tick(0.5);
+    assert!(!analog.tick(0.0005));
+    analog.tick(0.5);
+    assert_eq!(analog.pos, 1.5);
+    // Forward holds the last frame, backward runs from it, back and forth turns.
+    let mut p = tweak(0, 0);
+    p.pos = 12.;
+    assert_eq!(p.frame(5), 4.);
+    p.player.dir = 1;
+    p.pos = 1.;
+    assert_eq!(p.frame(5), 3.);
+    p.player.dir = 2;
+    p.pos = 6.;
+    assert_eq!(p.frame(5), 2.);
+    // Frames are offsets from the start pose, linear between neighbours.
+    let frames = [[0., 0., 0.], [10., 0., 0.], [10., 20., 0.]];
+    assert_eq!(PlaybackTweak::sample(&frames, 0.5), [5., 0., 0.]);
+    assert_eq!(PlaybackTweak::sample(&frames, 1.25), [10., 5., 0.]);
+    assert_eq!(PlaybackTweak::sample(&frames, 9.), [10., 20., 0.]);
+    assert_eq!(PlaybackTweak::sample(&[], 1.), [0.; 3]);
+    // Built from a level: configuration 13 rides its body with its saved player.
+    let mut things = vec![
+        floor(),
+        thing(
+            1,
+            matrix(0., 300., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(2, matrix(0., 300., 0., 0., 1., 1.), None, false),
+    ];
+    things[2].parent = Some(1);
+    things[2].data.physics_tweak = Some(PhysicsTweak {
+        configuration: 13,
+        behavior: 1,
+        recording: Some(RecordingPlayer {
+            speed: 0.5,
+            dir: 2,
+            ..Default::default()
+        }),
+        ..Default::default()
+    });
+    let scene = build_scene(&things);
+    let b = &scene.bodies[0];
+    assert_eq!(b.playbacks[0].player.dir, 2);
+    assert_eq!(b.playbacks[0].behavior, 1);
+    assert!(b.layers.is_empty() && b.spins.is_empty() && b.moves.is_empty());
+}
+
+#[test]
 fn d1145_layer_switches_step_a_layer_or_go_to_a_set_one_when_there_is_room() {
     use lbp_sim::scene::LayerTweak;
     let tweak = |z_behavior| LayerTweak {

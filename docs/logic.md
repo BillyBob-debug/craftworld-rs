@@ -1415,7 +1415,37 @@ the tick returns the depth step for a `fits` test the host gives. Not modelled: 
 the colliders (host work), the overlap and penetration tests, and the mass limit.
 
 Census (census-all-32.json): 2,632 configuration 12 tweaks. Configuration 13 replays a
-recorded move (0xcb688, 0xcb19c, player at tweak+0x100; INFERRED), and 14 is read as
-attract-o-gel from cwlib only; neither is modelled.
+recorded move (Part 48), and 14 is read as attract-o-gel from cwlib only, not modelled.
 
 Test: `d1145_layer_switches_step_a_layer_or_go_to_a_set_one_when_there_is_room`.
+
+## Part 48: the recorded move player (D1146)
+
+What the game does (EBOOT 01.33):
+- 0xcb688 runs for every configuration 13 tweak with its activation from 0xcaf9c
+  (Part 3). Above 0.001 it calls 0x3ced10; at or below, a digital input (tweak+0x10 0)
+  resets the player (0x3ce348) so the next start is fresh, and an analog one pauses.
+  It is called from 0xeacd4 (each logic frame) and from 0x1a1c88 at 0x1a3024 (inside
+  the physics substeps); whether both move the head is NOT FOUND.
+- 0x3ced10: on a fresh start it takes the Thing's matrix as the origin (0x3ce4a0), then
+  moves the head (a frame index) by activation × speed each call. dir 0 plays forward,
+  1 backward (len - 1 - head), 2 back and forth; kind 2 clamps the head to the last
+  frame. Frames (0x6beba4, 0x6bec5c, 0x6bf140) hold a position offset and a rotation
+  from the origin, frame 0 is zero, and samples are linear between neighbours.
+- The frames live in the recording resource, not the level; the level saves only its
+  descriptor and the player (playHead, kind, dir, speed, pathIsAbsolute and the start
+  matrix, read in `physics_tweak`). INFERRED: the body is driven towards the sample
+  through 0x42e6c (velocity terms in *(body+0x110)), not moved there outright, and past
+  the end the head holds the last frame for every kind.
+
+lbp-sim (`PlaybackTweak`, `tick`, `frame`, `sample`; one per configuration 13 tweak on
+its body, with `RecordingPlayer` from lbp-level): the head and the sampled offset. Not
+modelled: loading the recording resource, driving the body, the rotation, the two
+callers.
+
+Census (census-all-33.json): 142 configuration 13 tweaks, every one with a recording
+set and pathIsAbsolute false; dir 0 ×140, 2 ×2; kind 0 ×10, 1 ×58, 2 ×74; behavior
+0 ×26, 1 ×116; speed 1 ×116, the rest 0.4 to 2. That speed is mostly 1 backs reading
+it as the head's step.
+
+Test: `d1146_recorded_moves_play_by_activation_and_restart_or_pause_when_off`.
