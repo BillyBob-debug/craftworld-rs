@@ -385,23 +385,24 @@ fn wrap_angle(angle: f32) -> f32 {
 }
 
 impl SpinTweak {
-    /// D1109: the turn speed (per tick) the tweak wants for a body at `angle` and its
-    /// change limits (lo, hi) for this tick, before the activation. FOUND (0x95fb20):
-    /// limits ±accel × range; the rotator's target is its speed, with decel × range on
-    /// the side that slows it (0x95fd4c); the gyroscope aims at world up, angle error
-    /// wrapped, target clamped to ±range (0x960858). INFERRED: the target shape inside
-    /// 0x1c21f4 (a stop-in-time rule), read as sign(e) × sqrt(2 × accel × range × |e|).
-    pub fn target(&self, angle: f32) -> (f32, f32, f32) {
-        self.target_along(angle, [0., 1.])
+    /// D1109: the turn speed (per tick) the tweak wants for a body at `angle` turning at
+    /// `w` and its change limits (lo, hi) for this tick, before the activation. FOUND
+    /// (0x95fb20): limits ±accel × range; the rotator's target is its speed, with decel ×
+    /// range on the side that slows it (0x95fd4c); the gyroscope aims at world up, angle
+    /// error wrapped, target clamped to ±range (0x960858). D1149: the target is
+    /// [`Self::speed`] (0x1c21f4).
+    pub fn target(&self, angle: f32, w: f32) -> (f32, f32, f32) {
+        self.target_along(angle, w, [0., 1.])
     }
 
     /// D1144: as [`Self::target`], turning the body's up axis towards `aim` (a world
     /// vector) instead of world up. FOUND (0x95fd0c, 0x95fd88): an aim with x² + y² under
     /// 0.1, or accel × range 0, wants speed 0 (still with ±accel × range, so it brakes).
-    /// INFERRED: the error is the wrapped angle from the up axis to the aim (the packer
-    /// forms two wrapped atan2 terms, 0x960588 to 0x960790; which one 0x1c21f4 takes is not
-    /// settled).
-    pub fn target_along(&self, angle: f32, aim: [f32; 2]) -> (f32, f32, f32) {
+    /// D1149 FOUND: the error is the wrapped [-π, π) term of 0x96059c (aim angle minus the
+    /// up axis's, minus the +0x220 parent angle); INFERRED: its sign, as here. The lead
+    /// rate (the vrfim term at 0x960790) is 0 here; a host with a moving target can pass
+    /// it to [`Self::speed`].
+    pub fn target_along(&self, angle: f32, w: f32, aim: [f32; 2]) -> (f32, f32, f32) {
         let a = self.accel * self.range;
         match self.configuration {
             9 => {
@@ -414,9 +415,36 @@ impl SpinTweak {
             _ => {
                 // The aim's angle from world up, so world up itself gives exactly -angle.
                 let e = wrap_angle((-aim[0]).atan2(aim[1]) - angle);
-                let w = e.signum() * (2. * a * e.abs()).sqrt();
-                (w.clamp(-self.range, self.range), -a, a)
+                let s = Self::speed(0.5 * a, w, 0., e);
+                (s.clamp(-self.range, self.range), -a, a)
             }
+        }
+    }
+
+    /// D1149: the wanted turn speed of 0x1c21f4 for a body turning at `w` (state+0x30)
+    /// that is `e` (radians) short of its aim, which itself turns at `lead` per tick,
+    /// with `half` = 0.5 × accel × range. FOUND: an acceleration-limited shaper. It takes
+    /// the larger arrival time h of speeding up or down ([`shape_time`]; the side that
+    /// cannot arrive gives -1e10); far off (u > 1)
+    /// it wants w + 2 × half, then eases in as w + 2 × half × u × (2 − u), and within a
+    /// tick (h ≤ 1) it wants e + lead, closing the gap at once. The packer passes 0 for
+    /// its third and fourth arguments, so they are left out.
+    pub fn speed(half: f32, w: f32, lead: f32, e: f32) -> f32 {
+        let up = shape_time(half, w + half, lead, e);
+        let down = shape_time(-half, w - half, lead, e);
+        let (a, h) = if up >= down {
+            (half, up)
+        } else {
+            (-half, down)
+        };
+        let m = w + a;
+        let u = 0.25 * ((2. * h * a + lead - m) / a);
+        if u > 1. {
+            a + m
+        } else if h > 1. {
+            2. * a * u * (2. - u) + (m - a)
+        } else {
+            e + lead
         }
     }
 
@@ -466,8 +494,24 @@ impl SpinTweak {
 
     /// D1144: as [`Self::turn`], aiming along `aim` ([`Self::aim`]).
     pub fn turn_along(&self, angle: f32, w: f32, activation: f32, aim: [f32; 2]) -> f32 {
-        let (target, lo, hi) = self.target_along(angle, aim);
+        let (target, lo, hi) = self.target_along(angle, w, aim);
         w + (target - w).clamp(lo * activation, hi * activation)
+    }
+}
+
+/// D1149: the helper 0x1c2128 of [`SpinTweak::speed`] with its zero arguments dropped:
+/// the larger root (in ticks) of the arrival quadratic for acceleration `a` from speed
+/// `m` towards an aim `e` away turning at `lead`, or -1e10 with none. FOUND: t = 4a,
+/// U = −4a², W = t(lead − m), root (−W − √(W² − 4U((lead − m)² + 8ae))) / 2U.
+fn shape_time(a: f32, m: f32, lead: f32, e: f32) -> f32 {
+    let t = 4. * a;
+    let u = t * -a;
+    let w = t * (lead - m);
+    let disc = w * w - 4. * u * ((lead - m) * (lead - m) + 8. * a * e);
+    if disc < 0. {
+        -1.0e10
+    } else {
+        (-w - disc.sqrt()) / (2. * u)
     }
 }
 

@@ -3454,6 +3454,30 @@ fn run() -> Result<(), String> {
                 *totals.switches.sensors.entry(k).or_default() += 1;
             }
         }
+        // D1149: turning tweaks by the ticks 0x1c21f4 takes to reach full speed
+        // (range / (accel × range)), or none when accel × range is 0.
+        for t in &report.things {
+            let Some(p) = &t.data.physics_tweak else {
+                continue;
+            };
+            if (1..=5).contains(&p.configuration) {
+                let ticks = if p.accel_strength * p.vel_range == 0. {
+                    "none"
+                } else {
+                    match (1. / p.accel_strength.abs()).ceil() as u32 {
+                        0..=1 => "1",
+                        2..=10 => "2-10",
+                        11..=60 => "11-60",
+                        _ => "over 60",
+                    }
+                };
+                let k = format!(
+                    "turn configuration {} full speed ticks {ticks}",
+                    p.configuration
+                );
+                *totals.switches.sensors.entry(k).or_default() += 1;
+            }
+        }
         row["level"] = serde_json::json!(label);
         row["stopped"] = serde_json::json!(report.stop.is_some());
         if let (Some(opts), true) = (&play_opts, every) {

@@ -56,9 +56,10 @@
 - Merged: D1145 (PR 288, f34c212) the layer switch, configuration 12.
 - Merged: D1146 (PR 289, c240604) the recorded move player, configuration 13.
 - Merged: D1147 (PR 290, 5407aee) the attractor tweak, configuration 14.
-- D1148 (branch `logic-d1148`, worktree `E:\Projects\wt-d324`): the aim tweaks'
-  stick, flip and lead (Part 50).
-- Decision numbers: D1100-D1199, next free D1149.
+- Merged: D1148 (PR 291, ee35293) the aim tweaks' stick, flip and lead.
+- D1149 (branch `logic-d1149`, worktree `E:\Projects\wt-d324`): the exact turn speed
+  of 0x1c21f4 (docs/logic/part-51.md).
+- Decision numbers: D1100-D1199, next free D1150.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -125,7 +126,8 @@
   census-all-32.json the PPhysicsTweak configurations (Part 46),
   census-all-33.json the recorded move players (Part 48),
   census-all-34.json the attractor blocks (Part 49),
-  census-all-36.json the mirrored aim tweaks (Part 50).
+  census-all-36.json the mirrored aim tweaks (Part 50),
+  census-all-38.json the turning tweaks' ticks to full speed (Part 51).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -140,7 +142,7 @@
   2 and 9 rotators, 3-5 aim along velocity / stick / target (dead zone x² + y² < 0.1,
   Part 46). Row: target turn speed
   +0x20, limits +0x24/+0x28 = ±accel × velRange, × activation × 1/mass (0x95fdc8).
-  Stop-in-time helper 0x1c21f4. Followers (11) and 6-8 via 0x957df4 (Part 12); tag
+  Speed shaper 0x1c21f4 with root helper 0x1c2128 (Part 51). Followers (11) and 6-8 via 0x957df4 (Part 12); tag
   search 0x1c3e04 and map 0xceb8c (Part 13).
 
 ## Next
@@ -178,8 +180,8 @@ EBOOT rule and unit tests:
    gather around the camera and the SPU job's force (NOT FOUND, needs SPU code,
    Part 49); for configurations 3-5, fill `SpinTweak.stick` from the wired X and Y
    inputs, add `SpinTweak::lead` for a target with a body, and the +0x220 parent
-   angle (Part 50); the exact 0x1c21f4 speed and which wrapped term is its error;
-   the sackbot input, the
+   angle (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
+   whether the followers' speed (0x957df4) is 0x1c21f4 too; the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
