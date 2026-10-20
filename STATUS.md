@@ -6755,3 +6755,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1122 the motion recorder switch (2026-10-19)
 - Logic lane: motion recorders (142) read their three outputs from one stored word
   (0x11d4d0; docs/logic.md Part 24).
+
+## D1123 the angle sensor switch (2026-10-19)
+- Logic lane: angle sensors (126) read the turn of the object they sit on over
+  their range (0x11cd3c; docs/logic.md Part 25).

@@ -507,8 +507,11 @@ pub fn compute_output(
         // CONTROL_PAD, 0x11d378 → 0x6a1004, FOUND (pad.rs); outputs 10 to 17 negated
         // when inverted (0x11c228).
         // MOVINATOR_PAD, the same handler (pad.rs); outputs 10 to 24 negated (0x11c24c).
-        38 | 44 if negated(s.switch_type, output) => Some((pad_sensor(cx, output), Invert::Negate)),
-        38 | 44 => standard(pad_sensor(cx, output)),
+        // Type 55, 0x11d098, the same pad with the player -1; 7 to 19 negated (0x11c25c).
+        38 | 44 | 55 if negated(s.switch_type, output) => {
+            Some((pad_sensor(cx, output), Invert::Negate))
+        }
+        38 | 44 | 55 => standard(pad_sensor(cx, output)),
         54 => standard(key_remote(cx)),
         // BUTTON, 0x11caac → 0x11a998, FOUND (button.rs).
         0 => standard(button(cx)),
@@ -1512,11 +1515,11 @@ mod tests {
     }
 
     /// A switch Thing with one output per entry: (stored signal, targets). Its type is the
-    /// type 55's, which keeps the stored signal.
+    /// type 25's (none placed), which keeps the stored signal.
     fn switch(outputs: &[(SwitchInput, &[(u32, i32)])]) -> ThingState {
         ThingState {
             switch: Some(SwitchState {
-                switch_type: 55,
+                switch_type: 25,
                 outputs: outputs
                     .iter()
                     .map(|(s, targets)| {
@@ -1936,10 +1939,10 @@ mod tests {
             w.update_switches();
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
-        // Type 55 keeps the stored signal, also when inverted.
+        // A type with no rule (25, none placed) keeps the stored signal, also inverted.
         let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
         let s = t.switch.as_mut().unwrap();
-        (s.switch_type, s.inverted) = (55, true);
+        (s.switch_type, s.inverted) = (25, true);
         let mut w = world(vec![t]);
         assert!(w.update_switches().is_empty());
         assert_eq!(out(&w, 0, 0), sig(0.5, 1, 2));
