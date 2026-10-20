@@ -3427,6 +3427,33 @@ fn run() -> Result<(), String> {
                 }
             }
         }
+        // D1148: aim tweaks whose world basis is mirrored (the flip).
+        for t in &report.things {
+            let Some(p) = &t.data.physics_tweak else {
+                continue;
+            };
+            if (3..=5).contains(&p.configuration) {
+                // A tweak Thing with no matrix takes its nearest parent's.
+                let mut at = Some(t);
+                for _ in 0..32 {
+                    match at {
+                        Some(u) if u.data.pos.is_none() => {
+                            at = u.parent.and_then(|q| report.things.get(q));
+                        }
+                        _ => break,
+                    }
+                }
+                let mirrored = at.and_then(|u| u.data.pos.as_ref()).map(|m| {
+                    let w = &m.world;
+                    w[0] * w[5] - w[1] * w[4] < 0.
+                });
+                let k = format!(
+                    "aim configuration {} mirrored {mirrored:?}",
+                    p.configuration
+                );
+                *totals.switches.sensors.entry(k).or_default() += 1;
+            }
+        }
         row["level"] = serde_json::json!(label);
         row["stopped"] = serde_json::json!(report.stop.is_some());
         if let (Some(opts), true) = (&play_opts, every) {

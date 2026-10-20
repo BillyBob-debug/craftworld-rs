@@ -1419,3 +1419,48 @@ fn d1147_attractors_pick_the_highest_priority_own_or_shared_block() {
     assert!(AttractTweak::active(1.));
     assert!(!AttractTweak::active(0.));
 }
+
+#[test]
+fn d1148_aim_tweaks_take_the_stick_inputs_mirror_and_lead_the_target() {
+    use lbp_sim::scene::SpinTweak;
+    // Configuration 4 aims along its wired stick (slots 1 and 2, x then y).
+    let mut stick = SpinTweak {
+        configuration: 4,
+        range: 0.2094394,
+        accel: 1.,
+        stick: [1., 0.],
+        ..Default::default()
+    };
+    let right = stick.aim([0., 0.], None);
+    assert_eq!(right, [1., 0.]);
+    assert!(stick.turn_along(0., 0., 1., right) < 0.);
+    // Mirrored, x is negated, so the same stick turns the other way.
+    stick.flip = true;
+    assert_eq!(stick.aim([0., 0.], None), [-1., 0.]);
+    // Configuration 5's lead: the target point's velocity, vel + omega x r.
+    assert_eq!(SpinTweak::lead([2., 0.], 0., [10., 0.]), [2., 0.]);
+    assert_eq!(SpinTweak::lead([0., 0.], 0.5, [10., 0.]), [0., 5.]);
+    assert_eq!(SpinTweak::lead([1., 1.], 0.5, [0., 4.]), [-1., 1.]);
+    // Built from a level, a tweak on a mirrored body is flipped and an upright one is not.
+    for (sx, flip) in [(1., false), (-1., true)] {
+        let mut things = vec![
+            floor(),
+            thing(
+                1,
+                matrix(0., 300., 0., 0., sx, 1.),
+                Some(rect(100., 100., 7)),
+                true,
+            ),
+            thing(2, matrix(0., 300., 0., 0., sx, 1.), None, false),
+        ];
+        things[2].parent = Some(1);
+        things[2].data.physics_tweak = Some(PhysicsTweak {
+            configuration: 4,
+            vel_range: 0.2094394,
+            accel_strength: 1.,
+            ..Default::default()
+        });
+        let spin = build_scene(&things).bodies[0].spins[0];
+        assert_eq!((spin.flip, spin.stick), (flip, [0., 0.]));
+    }
+}
