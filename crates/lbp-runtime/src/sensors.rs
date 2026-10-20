@@ -142,7 +142,7 @@ fn sensor_ternary(cx: &SwitchContext<'_>, activation: f32) -> i32 {
 /// - Any other mode: 0, 1, 3 and 4 pass, 2 fails.
 ///
 /// INFERRED: a filter value past 4 fails in modes 1 and 5 as well.
-fn team_filter(world: &LevelWorld, player: i32, filter: i32, owner: i32) -> bool {
+pub(crate) fn team_filter(world: &LevelWorld, player: i32, filter: i32, owner: i32) -> bool {
     let records = &world.player_records;
     let team = |p: i32| {
         records
@@ -164,7 +164,7 @@ fn team_filter(world: &LevelWorld, player: i32, filter: i32, owner: i32) -> bool
 }
 
 /// The body's owning player, which the runtime does not keep: nobody.
-const NO_OWNER: i32 = -1;
+pub(crate) const NO_OWNER: i32 = -1;
 
 /// The tag sensor (switch type 4), before the inversion.
 ///
@@ -705,7 +705,12 @@ mod tests {
     }
 
     fn hit(a: u32, b: u32, force: bool) -> Contact {
-        Contact { a, b, force }
+        Contact {
+            a,
+            b,
+            force,
+            impulse: 0.,
+        }
     }
 
     #[test]

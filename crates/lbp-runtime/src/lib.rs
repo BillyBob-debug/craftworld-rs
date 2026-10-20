@@ -26,6 +26,7 @@ use lbp_script_vm::{ClassId, Host, MemberKind, ObjectId, Step, Task, Value, Vm};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
+mod button;
 mod camera;
 mod cutscene;
 mod display;
@@ -559,12 +560,15 @@ pub struct LevelWorld {
 /// One contact between two Things' bodies this tick (the game's pair cache, world
 /// 0xdf5b28, 64-byte records). `force` is whether the contact carried an impulse (the
 /// record's two impulse vectors, +0x10 and +0x20, are not both zero; INFERRED: written
-/// by the physics solver); a contact without one is only touching.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// by the physics solver); a contact without one is only touching. `impulse` is the sum
+/// of the two vectors' lengths (FOUND, 0x100da4, the button's force; 0.0 when the host
+/// does not know it).
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Contact {
     pub a: u32,
     pub b: u32,
     pub force: bool,
+    pub impulse: f32,
 }
 
 /// One recorded call kept with its arguments ([`LevelWorld::requests`]).
