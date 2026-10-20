@@ -19,8 +19,8 @@
 //!
 //! The logic types are computed, and so are the tag sensor, the player sensor and the
 //! impact sensor (`sensors.rs`), the velocity sensors (`velocity.rs`), the grab switch
-//! (`grab.rs`), the control pad (`pad.rs`), the key remote (`remote.rs`) and the button
-//! (`button.rs`); the other
+//! (`grab.rs`), the control pad (`pad.rs`), the key remote (`remote.rs`), the button
+//! (`button.rs`) and the motion recorder (`motion.rs`); the other
 //! types whose signal comes from the world (physics, the other pads) keep the signal the
 //! level file stores.
 //!
@@ -42,6 +42,7 @@
 use crate::button::button;
 use crate::cutscene::camera_finished;
 use crate::grab::grab_sensor;
+use crate::motion::motion_recorder;
 use crate::pad::pad_sensor;
 use crate::remote::key_remote;
 use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
@@ -502,6 +503,8 @@ pub fn compute_output(
         54 => standard(key_remote(cx)),
         // BUTTON, 0x11caac → 0x11a998, FOUND (button.rs).
         0 => standard(button(cx)),
+        // MOTION_RECORDER, 0x11d4d0, FOUND (motion.rs): PSwitch+0xcc read per output.
+        45 => standard(motion_recorder(cx, output)),
         // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
         42 | 43 => standard(velocity_sensor(cx)),
         // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.

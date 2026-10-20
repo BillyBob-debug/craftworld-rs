@@ -37,6 +37,7 @@ mod level_unlocking;
 mod media;
 mod message_view;
 mod messages;
+mod motion;
 mod native_bubble;
 mod native_launcher;
 mod native_music;
