@@ -95,7 +95,7 @@
   after D1134 x 24,464 on tick 2004, unchanged, no crash;
   after D1135 a GPU device-lost crash near tick 685 in 4 of 4 runs, main
   without D1135 too; after D1136 the same crash near tick 682 in 3 of 3 runs,
-  main without D1136 too; after D1143, D1144 and D1145 x 24,464 on tick 2005, unchanged).
+  main without D1136 too; after D1143 to D1146 x 24,464 on tick 2005, unchanged).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
