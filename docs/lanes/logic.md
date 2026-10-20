@@ -102,7 +102,8 @@
   without D1135 too; after D1136 the same crash near tick 682 in 3 of 3 runs,
   main without D1136 too; after D1143 to D1148 x 24,464 on tick 2005, unchanged;
   after D1149 the GPU crash near tick 685 in 4 of 4 runs, with Sackboy at
-  x -11,704.3 on tick 680 as on the D1148 build).
+  x -11,704.3 on tick 680 as on the D1148 build; after D1150 the same crash, tick 680
+  unchanged).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
