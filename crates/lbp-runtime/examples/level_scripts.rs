@@ -351,6 +351,27 @@ impl Switches {
                 count("tags port 0 wired".into(), wired);
                 count("tags without a position".into(), !placed(i));
             }
+            if let Some(a) = t.switch_input {
+                // PSwitchInput (D1132): handlers for update types 1, 2 and 10 only.
+                let k = format!("input type {}", a.update_type);
+                let wired = matches!(t.inputs.first(), Some(Some(_)));
+                count(k.clone(), true);
+                count(format!("{k} port 0 wired"), wired);
+                count(format!("{k} latch"), a.latch);
+                count(format!("{k} deactivated"), t.deactivated);
+                if a.update_type == 2 {
+                    count(format!("{k} lethal type {}", a.lethal_type), true);
+                    count(format!("{k} inverted"), a.lethal_inverted);
+                    count(format!("{k} stored frame nonzero"), a.lethal_frame != 0);
+                    count(
+                        format!("{k} lethal at load"),
+                        world.lethal_type(i as u32) != 0,
+                    );
+                }
+                if a.update_type == 1 {
+                    count(format!("{k} rigid connectors"), a.include_rigid_connectors);
+                }
+            }
             let Some(s) = t.switch.as_ref() else {
                 continue;
             };

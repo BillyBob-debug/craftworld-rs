@@ -11,7 +11,12 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1131 switch type 55 (2026-10-19)
+## Latest: D1132 switch inputs (2026-10-19)
+- Logic lane: switch inputs (15,521) take their switch's signal: lethal inputs set
+  the group's lethal type, destroy inputs ask for a destroy on the edge
+  (0x11ddf0; docs/logic.md Part 34).
+
+## D1131 switch type 55 (2026-10-19)
 - Logic lane: type 55 switches (11) read the pad with the player -1, outputs 7
   to 19 negated when inverted (0x11d098; docs/logic.md Part 33). Every placed
   switch type now has a rule.
@@ -39,10 +44,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1125 the pocket item pedestal switch (2026-10-19)
 - Logic lane: pocket item pedestal switches (77) read their per-output value arrays
   (0x11d164; docs/logic.md Part 27); the registry that fills them is not modelled.
-
-## D1124 the wormhole switch (2026-10-19)
-- Logic lane: wormhole switches (123) read their wormhole's one-tick "ended" byte
-  (0x11d104; docs/logic.md Part 26); the wormhole itself is not run yet.
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

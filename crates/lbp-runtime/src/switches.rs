@@ -1124,6 +1124,12 @@ impl LevelWorld {
             }
             return;
         }
+        if self.switch_input_signal(target, on, signal) {
+            return;
+        }
+        let Some(t) = self.things.get(target as usize) else {
+            return;
+        };
         let Some(s) = t.switch.as_ref().filter(|_| on) else {
             return;
         };

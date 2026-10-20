@@ -57,10 +57,12 @@ mod remote;
 mod score;
 mod sensors;
 mod story_native;
+mod switch_input;
 mod switches;
 pub mod transform;
 pub mod velocity;
 mod wormhole;
+
 pub use camera::*;
 pub use cutscene::*;
 pub use display::*;
@@ -82,6 +84,7 @@ pub use native_world::*;
 pub use pod::*;
 pub use pod_computer_native::*;
 pub use story_native::*;
+pub use switch_input::{DestroyRequest, InputAdapter, MAX_DESTROY_REQUESTS};
 pub use switches::*;
 
 /// One Thing as the runtime sees it.
@@ -155,6 +158,8 @@ pub struct ThingState {
     pub anim_loop: Option<bool>,
     /// PSwitchKey, when the Thing has one: the tag a tag sensor finds it by.
     pub switch_key: Option<TagKey>,
+    /// PSwitchInput, when the Thing has one (D1132, [`LevelWorld::lethal_type`]).
+    pub switch_input: Option<InputAdapter>,
     /// The motion of the Thing's physics body, as the host's physics reports it: the
     /// velocity sensors read it ([`velocity::BodyMotion`]). None unless the host fills it.
     pub body: Option<velocity::BodyMotion>,
@@ -227,7 +232,7 @@ pub struct SwitchState {
     /// output that is on, changed or not, and clears the flag. What sets it in the game
     /// is not established; nothing sets it here.
     pub force: bool,
-    /// The pocket item pedestal's value arrays (PSwitch+0xe4 → +0x28 floats, +0x34 s8),
+    /// The pocket item pedestal's value arrays (PSwitch+0xe4 â†’ +0x28 floats, +0x34 s8),
     /// one entry per output. The game refills them from a registry this runtime does not
     /// have, so they stay empty and the switch reads off (docs/logic.md Part 27).
     pub pedestal_activations: Vec<f32>,
@@ -545,6 +550,9 @@ pub struct LevelWorld {
     /// [`MAX_REQUESTS`]; the calls past that are counted in `requests_dropped`.
     pub requests: Vec<EngineRequest>,
     pub requests_dropped: u64,
+    /// The destroys DESTROY inputs asked for, oldest first (D1132), for the host to carry
+    /// out. At most [`MAX_DESTROY_REQUESTS`].
+    pub destroy_requests: Vec<DestroyRequest>,
     /// The speech bubbles, subtitles and prompts that are open, by the game's rules for
     /// its message list ([`Messages`]); the messaging natives feed it.
     pub messages: Messages,
@@ -945,6 +953,14 @@ impl LevelWorld {
                         .as_ref()
                         .map(|k| key(k.colour_index, &k.name)),
                     script_name: t.data.script_name.as_ref().map(|n| n.name.clone()),
+                    switch_input: t.data.switch_input.as_ref().map(|p| InputAdapter {
+                        update_type: p.update_type,
+                        lethal_type: p.lethal_type,
+                        lethal_inverted: p.lethal_inverted,
+                        latch: p.behavior == 1,
+                        include_rigid_connectors: p.include_rigid_connectors,
+                        lethal_frame: p.lethal_activation_frame,
+                    }),
                     ..Default::default()
                 })
                 .collect(),
