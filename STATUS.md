@@ -6751,3 +6751,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1121 the button switch (2026-10-19)
 - Logic lane: buttons (224) are on while contacts press them with 7,500 or more
   and stay on four ticks after release (0x11a998; docs/logic.md Part 23).
+
+## D1122 the motion recorder switch (2026-10-19)
+- Logic lane: motion recorders (142) read their three outputs from one stored word
+  (0x11d4d0; docs/logic.md Part 24).
