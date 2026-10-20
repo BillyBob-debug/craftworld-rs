@@ -6735,3 +6735,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1117 the velocity switches (2026-10-19)
 - Logic lane: linear (771) and angular (122) velocity sensors follow the EBOOT rule:
   body motion over the scale, seven modes, local frame (docs/logic.md Part 19).
+
+## D1118 the grab switch (2026-10-19)
+- Logic lane: grab switches (666) are on while a player grabs their object, by the
+  game's three modes, PlayerMode and tag filter (0x10f508; docs/logic.md Part 20).

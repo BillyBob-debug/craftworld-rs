@@ -383,6 +383,70 @@ impl Switches {
                 }
                 continue;
             }
+            if s.switch_type == 1 || s.switch_type == 2 {
+                let k = if s.switch_type == 1 {
+                    "lever"
+                } else {
+                    "trinary"
+                };
+                count(k.into(), true);
+                count(format!("{k} inverted"), s.inverted);
+                count(format!("{k} outputs={}", s.outputs.len()), true);
+                count(format!("{k} without a parent"), t.parent.is_none());
+                count(format!("{k} with a child"), t.first_child.is_some());
+                count(format!("{k} with a reference"), s.reference_thing.is_some());
+                if let Some(x) = world.reference_offset(i as u32) {
+                    let a = if s.switch_type == 1 {
+                        ((x + 100.) / 200.).clamp(0., 1.)
+                    } else {
+                        (x / 100.).clamp(-1., 1.)
+                    };
+                    let st = s.outputs.first().and_then(Option::as_ref).map(|o| o.stored);
+                    let st = st.map_or(f32::NAN, |v| v.activation);
+                    let st = if s.inverted { 1. - st } else { st };
+                    count(
+                        format!("{k} offset rule matches stored"),
+                        (a - st).abs() < 1e-3,
+                    );
+                    let band = |a: f32| {
+                        if a.abs() <= 0.25 {
+                            0
+                        } else if a >= 0.75 {
+                            1
+                        } else if a <= -0.75 {
+                            -1
+                        } else {
+                            2
+                        }
+                    };
+                    count(
+                        format!("{k} offset rule band matches stored band"),
+                        band(a) == band(st),
+                    );
+                    count(format!("{k} offset x {x:.0}"), true);
+                    if (a - st).abs() >= 1e-3 {
+                        count(format!("{k} mismatch rule {a:.3} stored {st:.3}"), true);
+                    }
+                }
+                for part in &t.parts {
+                    count(format!("{k} part {part}"), true);
+                }
+                if let Some(c) = t.first_child.and_then(|c| world.things.get(c as usize)) {
+                    for part in &c.parts {
+                        count(format!("{k} child part {part}"), true);
+                    }
+                }
+                for (o, out) in s.outputs.iter().enumerate() {
+                    let out = out.as_ref();
+                    let wired = out.is_some_and(|o| !o.targets.is_empty());
+                    count(format!("{k} output {o} wired"), wired);
+                    let st = out.map(|o| o.stored);
+                    let key =
+                        st.map_or("none".into(), |v| format!("{} {}", v.activation, v.ternary));
+                    count(format!("{k} output {o} stored {key}"), true);
+                }
+                continue;
+            }
             if s.switch_type == 65 {
                 count("sampler".into(), true);
                 count("sampler inverted".into(), s.inverted);

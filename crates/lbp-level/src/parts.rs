@@ -465,6 +465,8 @@ pub struct Switch {
     pub crappy_old_lbp1_switch: bool,
     pub outputs: Vec<Option<SwitchOutput>>,
     pub switch_type: i32,
+    /// referenceThing: the Thing a lever or three-way switch measures (PSwitch+0x90).
+    pub reference_thing: Option<usize>,
     pub manual_activation: SwitchSignal,
     pub activation_hold_time: i32,
     pub include_touching: i32,
@@ -2192,7 +2194,7 @@ fn switch(r: &mut Reader, things: &mut Things) -> Result<Switch> {
     }
     r.bool()?;
     let kind = r.s32()?;
-    thing_ref(r, things)?;
+    let reference_thing = thing_ref(r, things)?;
     let manual_activation = switch_signal(r)?;
     if v >= 0x398 && kind == 5 {
         r.resource(true)?;
@@ -2261,6 +2263,7 @@ fn switch(r: &mut Reader, things: &mut Things) -> Result<Switch> {
         crappy_old_lbp1_switch,
         outputs,
         switch_type: kind,
+        reference_thing,
         manual_activation,
         activation_hold_time,
         include_touching,

@@ -395,9 +395,9 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   and angular velocity 43 (122; Part 19), grab 6 (666; Part 20), control
   pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23),
   motion recorder 45 (142; Part 24), angle 41 (126; Part 25), wormhole 57 (123;
-  Part 26), pocket item pedestal 65 (77; Part 27).
+  Part 26), pocket item pedestal 65 (77; Part 27), lever 1 (74; Part 28).
 - Kept as stored (the world signal is not modelled yet):
-  lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
+  sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
   (11), trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
@@ -801,3 +801,42 @@ to 0x11c16c). The player is always -1.
 - lbp-runtime: `pedestal_sensor` in pedestal.rs.
 - Tests: `pedestal_reads_its_value_arrays_per_output`,
   `pedestal_inverts_through_the_standard_tail` in pedestal.rs.
+
+## Part 28: the lever switch (D1126)
+
+Switch type 1 (74 placed) is the lever. compute_output's table 0x11be00 entry 1 is
+0x11cad0, which calls 0x11a6a4. The store 0x11bf18 inverts the result through the
+standard tail (table 0x11bfd4 entry 1 is 0x11c16c). The player is always -1, and every
+output gets the same signal.
+
+- The handle is the Thing at PSwitch+0x90, a weak reference (ctor 0x10c930 zeroes the
+  node {Thing*, prev, next}; link 0x511a8, unlink 0x511f8). INFERRED: it is the
+  serialized referenceThing, the thing_ref read right after the switch type. Without
+  one the signal is {0.0, 0, -1}.
+- 0xf13a0 gives a position for each of the handle and the switch Thing (PSwitch+8):
+  when the Thing's object at +0x30 is set, its local point +0x50 under the world
+  matrix, else the world matrix's translation (+0x70 of the block at Thing+0xc). The
+  handle's position less the switch's is taken into the switch Thing's frame by the
+  inverse of its world matrix ((Thing+0xc)+0x40); x is the first component.
+- Activation = (x + 100) / 200 (100.0 r2-0x3f6c, 200.0 r2-0x3eac) kept to [0, 1].
+- The ternary is the default rule 0x11873c on output 0 (0x118874): 0 when |a| is at
+  most 0.25 (r2-0x3f10), 1 at or above 0.75, -1 at or below -0.75, and in between what
+  output 0 already holds.
+- Census (census-all-16.json): 74 levers, 4 inverted, all with one output (67 wired)
+  and a referenceThing; 12 without a parent, 18 with a child. Parts: POS, RENDER_MESH,
+  SHAPE and SWITCH on all, BODY on 12. Stored activation of output 0: 0 in 57,
+  0.0639 in 12, 0.7401 in 1, 1 in 4.
+- With the translation as the position, x is -112 on 33 levers and -94.5 on 39 (the
+  handle at rest at the left end of two lever designs), 54 on one and -100 on one.
+  The rule's activation equals the stored one on 34 of 74; the rest differ by at most
+  0.064 (0.028 against 0 on 27, 0.028 against 0.064 on 12, 0.770 against 0.740 on
+  1). The ternary band agrees on 73 of 74. INFERRED: the gap is the body point
+  (+0x30, +0x50) that the translation leaves out, or physics settling before the save:
+  levers with the same x store both 0 and 0.064, so the saved geometry alone does not
+  give the stored value.
+- Not modelled: the body point; the position is the world matrix's translation. A
+  handle or switch without a world matrix reads off.
+- lbp-level: `Switch.reference_thing`. lbp-runtime: `lever`, `default_ternary` and
+  `LevelWorld::reference_offset` in lever.rs.
+- Tests: `lever_reads_its_handle_offset`,
+  `lever_holds_its_ternary_between_the_bands_and_inverts` in lever.rs.

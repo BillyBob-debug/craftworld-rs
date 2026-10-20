@@ -35,6 +35,7 @@ mod global_settings;
 mod gooey;
 mod grab;
 mod level_unlocking;
+mod lever;
 mod media;
 mod message_view;
 mod messages;
@@ -189,6 +190,8 @@ pub struct SwitchState {
     /// In stored order; `None` for an output the level file leaves null.
     pub outputs: Vec<Option<SwitchOutputState>>,
     /// ManualActivation as stored. The live value is [`SwitchMemory::manual`].
+    /// The Thing a lever or three-way switch measures (referenceThing, PSwitch+0x90).
+    pub reference_thing: Option<u32>,
     pub manual_activation: SwitchInput,
     /// ActivationHoldTime as stored: a timer's length in ticks.
     pub activation_hold_time: i32,
@@ -877,6 +880,7 @@ impl LevelWorld {
                                 })
                             })
                             .collect(),
+                        reference_thing: s.reference_thing.and_then(handle),
                         manual_activation: signal(&s.manual_activation),
                         activation_hold_time: s.activation_hold_time,
                         bullets_required: s.bullets_required,
