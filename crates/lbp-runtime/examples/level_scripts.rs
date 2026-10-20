@@ -418,6 +418,30 @@ impl Switches {
                 }
                 continue;
             }
+            if s.switch_type == 30 {
+                // The score switch: score / target (0x11ab74); the rule with no score.
+                count("score".into(), true);
+                count("score inverted".into(), s.inverted);
+                count(format!("score outputs={}", s.outputs.len()), true);
+                count(format!("score target {}", s.bullets_required), true);
+                count(format!("score team filter {}", s.team_filter), true);
+                let on = s.bullets_required == 0;
+                let want = if on != s.inverted { (1., 1) } else { (0., 0) };
+                for (o, out) in s.outputs.iter().enumerate() {
+                    let Some(out) = out.as_ref() else { continue };
+                    let st = out.stored;
+                    count(format!("score output {o} wired"), !out.targets.is_empty());
+                    count(
+                        format!("score output {o} stored {} {}", st.activation, st.ternary),
+                        true,
+                    );
+                    count(
+                        "score output matches no score".into(),
+                        (st.activation - want.0).abs() < 1e-3 && st.ternary == want.1,
+                    );
+                }
+                continue;
+            }
             if s.switch_type == 1 || s.switch_type == 2 {
                 let k = if s.switch_type == 1 {
                     "lever"

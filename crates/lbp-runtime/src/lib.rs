@@ -54,6 +54,7 @@ mod pedestal;
 mod pod;
 mod pod_computer_native;
 mod remote;
+mod score;
 mod sensors;
 mod story_native;
 mod switches;
