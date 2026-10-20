@@ -6767,3 +6767,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1125 the pocket item pedestal switch (2026-10-19)
 - Logic lane: pocket item pedestal switches (77) read their per-output value arrays
   (0x11d164; docs/logic.md Part 27); the registry that fills them is not modelled.
+
+## D1126 the lever switch (2026-10-19)
+- Logic lane: levers (74) read their handle's offset in the lever's frame (0x11a6a4;
+  docs/logic.md Part 28); the ternary band matches the stored one on 73 of 74.
