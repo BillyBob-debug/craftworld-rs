@@ -433,8 +433,10 @@ pub fn compute_output(
         21 => standard(or_gate(cx)),
         // XOR, 0x11c574, FOUND.
         22 => standard(xor_gate(cx)),
-        // ALWAYS_ON (battery), TOGGLE, 0x11c820, FOUND: ManualActivation.
-        17 | 28 => standard(memory.manual),
+        // ALWAYS_ON (battery), TOGGLE, STICKER, 0x11c820, FOUND: ManualActivation. The
+        // sticker switch's is set to {1.0, 1, -1} when a matching sticker is placed
+        // within its radius (0x53c584; not modelled: no sticker placing yet).
+        5 | 17 | 28 => standard(memory.manual),
         // DIRECTION (combiner), 0x11c328, FOUND: port 1 positive, port 0 negative.
         20 => {
             let (a, b) = (cx.port(0), cx.port(1));
@@ -1802,6 +1804,22 @@ mod tests {
         state(&mut w, 0).inverted = true;
         w.update_switches();
         assert_eq!(out(&w, 0, 0), sig(0.75, 0, 2));
+    }
+
+    #[test]
+    fn sticker_switch_passes_its_manual_activation() {
+        // Off until a matching sticker sets it to {1.0, 1, -1} (0x53c584).
+        let mut sticker = battery(SIGNAL_OFF, &[]);
+        sticker.switch.as_mut().unwrap().switch_type = 5;
+        let mut w = world(vec![sticker]);
+        w.update_switches();
+        assert_eq!(out(&w, 0, 0), SIGNAL_OFF);
+        set_battery(&mut w, 0, sig(1., 1, -1));
+        w.update_switches();
+        assert_eq!(out(&w, 0, 0), sig(1., 1, -1));
+        state(&mut w, 0).inverted = true;
+        w.update_switches();
+        assert_eq!(out(&w, 0, 0), sig(0., 0, -1));
     }
 
     #[test]

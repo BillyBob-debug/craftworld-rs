@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-29 (pistons; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-30 (pistons; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -35,9 +35,10 @@
 - Merged: D1124 (PR 267, bdd1329) the wormhole switch.
 - Merged: D1125 (PR 268, 0f11073) the pocket item pedestal switch.
 - Merged: D1126 (PR 269, 1f4c887) the lever switch.
-- D1127 (branch `logic-trinary`, worktree `E:\Projects\wt-d324`):
-  the three-way switch (docs/logic.md Part 29).
-- Decision numbers: D1100-D1199, next free D1128.
+- Merged: D1127 (PR 270, 5a9b6d8) the three-way switch.
+- D1128 (branch `logic-sticker`, worktree `E:\Projects\wt-d324`):
+  the sticker switch (docs/logic.md Part 30).
+- Decision numbers: D1100-D1199, next free D1129.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -65,7 +66,8 @@
   same build lost the GPU device near tick 675, cause not found, and no
   type 65 switch is reached on the route;
   after D1126 x 24,464 on tick 2004, unchanged;
-  after D1127 x 24,464 on tick 2005, unchanged).
+  after D1127 x 24,464 on tick 2005, unchanged;
+  after D1128 x 24,464 on tick 2005, unchanged).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -76,7 +78,8 @@
   census-all-9.json the wormhole switches (Part 26),
   census-all-10.json the pocket item pedestals (Part 27),
   census-all-16.json the levers and three-way switches (Part 28),
-  census-all-17.json the three-way switches (Part 29).
+  census-all-17.json the three-way switches (Part 29),
+  census-all-18.json the sticker switches (Part 30).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -96,7 +99,7 @@
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
 EBOOT rule and unit tests:
-1. The switches kept as stored (Part 14), by count: sticker 5, score 30,
+1. The switches kept as stored (Part 14), by count: score 30, movinator pad 44,
    then the rest. The host must fill `PlayerState.grabbing` for the grab switch
    (Part 20), `PlayerState.piloting` and `pad` for the control pad (Part 21) and
    `ThingState.body` from avian2d for the velocity switches (Part 19). The host must fill

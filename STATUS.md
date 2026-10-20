@@ -6743,3 +6743,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1119 the control pad switch (2026-10-19)
 - Logic lane: control pads (535) give the driver's buttons, sticks and tilt on 18
   outputs with the game's dead zone and inversion (0x11d378; docs/logic.md Part 21).
+
+## D1120 the key remote switch (2026-10-19)
+- Logic lane: key remotes (497) pass on the strongest tag of their key, skipping
+  tags on their own object (0x10fc88; docs/logic.md Part 22).
