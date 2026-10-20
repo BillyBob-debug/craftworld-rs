@@ -877,6 +877,34 @@ impl Switches {
             count(format!("{p} bullets_required={bullets}"), true);
             count(format!("{p} detect_unspawned"), s.detect_unspawned_players);
             count(format!("{p} without a position"), !placed(i));
+            // D1143: the cone's rotation walk meets a Thing without a PPos that is in its
+            // chip's table (with a non-zero angle or flipped), or a cursor chip above it.
+            let (mut table, mut turned, mut cursor) = (false, false, false);
+            let mut t = i as u32;
+            for _ in 0..64 {
+                let Some(thing) = world.things.get(t as usize) else {
+                    break;
+                };
+                let entry = thing
+                    .parent
+                    .and_then(|b| world.board_owners.get(&b))
+                    .and_then(|&c| world.things.get(c as usize))
+                    .and_then(|c| c.chip_components.iter().find(|e| e.thing == t));
+                if let (None, Some(e)) = (thing.local_matrix, entry) {
+                    table = true;
+                    turned |= e.angle != 0. || e.flipped;
+                }
+                cursor |= thing
+                    .switch
+                    .as_ref()
+                    .is_some_and(|c| c.switch_type == 36 && c.include_touching != 0);
+                let Some(parent) = thing.parent else { break };
+                t = parent;
+            }
+            count(format!("{p} cone walk reads a chip table"), table);
+            count(format!("{p} cone walk chip table angle or flip"), turned);
+            count(format!("{p} under a cursor chip"), cursor);
+            count(format!("{p} cone under a cursor chip"), cursor && cone);
             if s.switch_type == 3 {
                 count("player require_all".into(), s.require_all);
                 count(format!("player player_mode={}", s.player_mode), true);
