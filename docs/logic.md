@@ -1299,3 +1299,23 @@ All FOUND in 01.33 unless marked. Census (378 levels): player sensors 5,627, of 
   local x / y box stands in for the outline of a tilted Thing.
 - lbp-runtime: `ThingState.shape_box`, `LevelWorld::z_span`,
   `LevelWorld::cone_direction`; the tests in `tag_sensor` and `player_sensor`.
+## Part 44: the grab and impact sensors have no cone or layer test (D1142)
+
+All FOUND in 01.33. The "proximity" switch is the player sensor (type 3), Part 43.
+
+- Impact sensor (type 18, body 0x11ae80..0x11b570): it never reads PSwitch+0x7c
+  (AngleRange) and never calls the cone direction 0x1141f4, the proxy base 0x113fb0 or
+  the rotation sum 0x110140. It copies the body's box (*(body+0x160)) to the stack and
+  hands it to the per-contact function 0x900f54 (calls at 0x11b2fc, 0x11b3e4), which
+  loads no floats and reads no +0x7c. IncludeTouching (+0x8c) only admits touching
+  contacts (0x9011e8); it is not a layer test.
+- Grab sensor (type 6, 0x10f000..0x10fd00): no read of PSwitch+0x7c (the two `sth` to
+  +0x7c at 0x10f1e4 and 0x10f230 write another struct) and no call to the helpers above.
+  Mode 2's extra test 0x1d31c0 follows player+0x144 to the grab record and compares the
+  grabbed Thing's tag filter (+0xc9, 0x10f250) with the other Thing's u16 +0x7a: an
+  identity check, not a spatial one.
+- Callers of 0x1141f4: the tag sensor (0x119718), the player sensor (0x11a230,
+  0x11a2b8), the angle sensor (0x11cd48), the linear velocity sensor's resetWhenFull path
+  (0x11da60), and 0x114de4, 0x115088 (not identified).
+- lbp-runtime: no change to the rules; the tests `impact_sensor_has_no_cone_or_layer_test`
+  and `grab_switch_has_no_cone`.

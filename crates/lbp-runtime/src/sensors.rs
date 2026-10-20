@@ -23,7 +23,8 @@
 //! - A tag skipped by a Thing flag in one game state (the meaning of both not settled).
 //! - Players out of play and DetectUnspawnedPlayers on a player sensor (players waiting
 //!   at a checkpoint): the world has neither state.
-//! - The impact sensor: IncludeRigidConnectors (PSwitch+0xca, the whole rigid group's
+//! - The impact sensor has no cone or layer test at all (D1142, docs/logic.md Part 44).
+//!   Its own leftovers: IncludeRigidConnectors (PSwitch+0xca, the whole rigid group's
 //!   contacts), the collision mask and shape overlap tests of a touching contact, the
 //!   game-state check of its tag filter, creatures counting as players and the tag's
 //!   own player. See [`impact_sensor`].
@@ -527,6 +528,9 @@ pub(crate) fn player_sensor(cx: &SwitchContext<'_>) -> SwitchInput {
 ///   0x900fc0, 0x900fcc).
 /// - The signal: activation 1.0 and ternary 1 (0x11873c, threshold 0.25) when one
 ///   counts, with the player of the first one that is a player's; else off.
+/// - No cone and no layer test (D1142): AngleRange (PSwitch+0x7c) is never read, the
+///   cone and layer helpers are never called, and the per-contact function 0x900f54
+///   loads no floats.
 ///
 /// INFERRED: a tag counts when it is the other Thing or a child of it (the game compares
 /// the other Thing's u16 +0x7a with the tag's id); creatures do not count as players.
@@ -968,6 +972,22 @@ mod tests {
         w.contacts = vec![hit(1, 2, true)];
         assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
         w.things[0].parent = Some(1);
+        assert_eq!(pass(&mut w, 0), sig(1., 1, -1));
+    }
+
+    #[test]
+    fn impact_sensor_has_no_cone_or_layer_test() {
+        // D1142: AngleRange is never read and IncludeTouching only adds touching
+        // contacts, so a hit from below, on another layer, still counts.
+        let mut w = impact_world();
+        let s = state(&mut w, 0);
+        (s.player_mode, s.angle_range, s.include_touching) = (2, 10., 1);
+        move_to(&mut w, 1, 0., -50.);
+        slab(&mut w, 0, 0., 10.);
+        slab(&mut w, 1, 400., 10.);
+        w.contacts = vec![hit(0, 1, true)];
+        assert_eq!(pass(&mut w, 0), sig(1., 1, -1));
+        w.contacts = vec![hit(1, 0, false)];
         assert_eq!(pass(&mut w, 0), sig(1., 1, -1));
     }
 
