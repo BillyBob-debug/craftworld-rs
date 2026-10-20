@@ -120,6 +120,44 @@ pub struct SceneBody {
     pub layers: Vec<LayerTweak>,
     /// D1146: its recorded move players (configuration 13), in Thing order.
     pub playbacks: Vec<PlaybackTweak>,
+    /// D1147: its attractor tweaks (configuration 14), in Thing order.
+    pub attractors: Vec<AttractTweak>,
+}
+
+/// D1147: a PPhysicsTweak with configuration 14. It runs no per-tick code of its own
+/// (0x1c7ed0 skips configurations above 11). While any exists, 0x69be2c each frame
+/// gathers the things around the camera view (0x69a600, 0x699b50) and, for each, picks
+/// one tweak block (0x610a8) for an SPU job; the job's force law is NOT FOUND.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct AttractTweak {
+    /// The PPhysicsTweak's Thing index.
+    pub thing: usize,
+    /// The saved block (docs/logic.md Part 49).
+    pub block: lbp_level::parts::AttractorBlock,
+}
+
+impl AttractTweak {
+    /// D1147: the block a gathered thing takes from the tweaks in its group tree, each
+    /// given with whether its owner group is that thing. FOUND (0x610a8): a tweak counts
+    /// if it is the thing's own or its `beyond_group` flag is set, and the highest
+    /// priority wins (the first of equals, as the walk keeps only a strictly higher one).
+    pub fn pick<'a>(tweaks: &[(&'a AttractTweak, bool)]) -> Option<&'a AttractTweak> {
+        let mut best: Option<&AttractTweak> = None;
+        for &(t, own) in tweaks {
+            if (own || t.block.beyond_group)
+                && best.is_none_or(|b| t.block.priority > b.block.priority)
+            {
+                best = Some(t);
+            }
+        }
+        best
+    }
+
+    /// D1147: the record's active flag. FOUND (0x610a8): activation (0xcaf9c) above the
+    /// constant at 0xd9333c; INFERRED to be the 0.001 that configuration 13 uses.
+    pub fn active(activation: f32) -> bool {
+        activation > 0.001
+    }
 }
 
 /// D1146: a PPhysicsTweak with configuration 13, which plays a recorded move relative to
@@ -866,6 +904,7 @@ fn build_scene_inner(
                             moves: vec![],
                             layers: vec![],
                             playbacks: vec![],
+                            attractors: vec![],
                         });
                         scene.bodies.len() - 1
                     })
@@ -1080,6 +1119,25 @@ fn build_scene_inner(
                 pos: player.play_head,
                 player,
                 started: false,
+            });
+        }
+    }
+    for (i, t) in things.iter().enumerate() {
+        let Some(tw) = t
+            .data
+            .physics_tweak
+            .as_ref()
+            .filter(|tw| tw.configuration == 14)
+        else {
+            continue;
+        };
+        let slot = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        if let Some(b) = slot {
+            scene.bodies[b].attractors.push(AttractTweak {
+                thing: i,
+                block: tw.attractor.clone().unwrap_or_default(),
             });
         }
     }

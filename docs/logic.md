@@ -1449,3 +1449,32 @@ set and pathIsAbsolute false; dir 0 ×140, 2 ×2; kind 0 ×10, 1 ×58, 2 ×74; b
 it as the head's step.
 
 Test: `d1146_recorded_moves_play_by_activation_and_restart_or_pause_when_off`.
+## Part 49: the attractor tweak (D1147)
+
+What the game does (EBOOT 01.33):
+- Configuration 14 runs no per-tick code of its own: 0x1c7ed0 skips configurations
+  above 11, and 0xcb688 and 0xcb86c handle only 13 and 0. Setting 14 (0xcb534)
+  allocates a 0x20-byte block at tweak+0xf8 (constructor 0x699abc) and takes a shared
+  resource (0x699f00); setting anything else frees it (0x699ff8).
+- While any configuration 14 tweak exists, 0x69be2c each frame calls 0x69a600, which
+  widens the camera view rect (0xd6628) by a margin and calls 0x699b50. That queries the
+  grid for things in the rect (0x1bfeb0) and builds a 0x28-byte record per thing for an
+  SPU job. The job's force law, falloff and targets are NOT FOUND (SPU code).
+- 0x610a8 fills the record: it walks the thing's group tree (+0x54 root, +0x48, +0x4c,
+  +0x50) for configuration 14 tweaks whose owner group is that thing or whose block
+  byte +0x1f is set, keeps the one with the highest block f32 +0, and adds an active
+  flag, activation (0xcaf9c) above the constant at 0xd9333c (INFERRED 0.001, as Part 48).
+- The block as saved (v > 0x3e3, serializer 0xb78a34): f32 +0, then two (i32, f32,
+  f32) triples, then four u8 (constructor defaults 1, 1, 1, 0).
+
+lbp-level keeps it as `AttractorBlock` (`priority`, `first`, `second`, `flags`,
+`beyond_group`); lbp-sim puts an `AttractTweak` on its body, with `pick` and `active`.
+Not modelled: the gather, the SPU job and any force.
+
+Census (census-all-34.json): 268 configuration 14 tweaks, all behavior 0. The i32s
+read as ARGB colours (INFERRED from the values): first 0xff00bfff ×233, white ×35;
+second white ×266, with (0.5, 0.5) in 264. priority is a multiple of 52.5 in nearly
+every tweak (315 ×86, 525 ×56, 210 ×52, 840 ×23), so it may be a size rather than a
+rank; only its use as the winner is FOUND. flags [1, 1, 1] ×263; shared ×1.
+
+Test: `d1147_attractors_pick_the_highest_priority_own_or_shared_block`.

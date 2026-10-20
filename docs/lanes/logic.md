@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-48 (pistons; layer switch; recorded moves; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 (pistons; layer switch; recorded moves; attractors; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -54,9 +54,10 @@
 - Merged: D1143 (PR 286, f32c181) the chip-table angle of a Thing without a PPos.
 - Merged: D1144 (PR 287, 78d3e4e) turning tweaks 3, 4 and 5.
 - Merged: D1145 (PR 288, f34c212) the layer switch, configuration 12.
-- D1146 (branch `logic-d1146`, worktree `E:\Projects\wt-d324`): the recorded move
-  player, configuration 13 (Part 48).
-- Decision numbers: D1100-D1199, next free D1147.
+- Merged: D1146 (PR 289, c240604) the recorded move player, configuration 13.
+- D1147 (branch `logic-d1147`, worktree `E:\Projects\wt-d324`): the attractor
+  tweak, configuration 14 (Part 49).
+- Decision numbers: D1100-D1199, next free D1148.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -121,7 +122,8 @@
   census-all-30.json the checkpoint lives (Part 41),
   census-all-31.json the chip-table cone walks and cursor chips (Part 45),
   census-all-32.json the PPhysicsTweak configurations (Part 46),
-  census-all-33.json the recorded move players (Part 48).
+  census-all-33.json the recorded move players (Part 48),
+  census-all-34.json the attractor blocks (Part 49).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -170,7 +172,9 @@ EBOOT rule and unit tests:
    the body's glued group and colliders by the step it returns, with a `fits` test for
    overlap (Part 47); for configuration 13, load the recording resource (type NOT
    FOUND), call `PlaybackTweak::tick` each frame and drive the body towards
-   `sample` at `frame` from its start pose (Part 48); configuration 14, stick
+   `sample` at `frame` from its start pose (Part 48); for configuration 14, the
+   gather around the camera and the SPU job's force (NOT FOUND, needs SPU code,
+   Part 49); stick
    slots for configuration 4, configuration 5's lead, the exact 0x1c21f4 speed and which
    wrapped term is its error, the flip and the +0x220 angle; the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the

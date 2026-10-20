@@ -413,6 +413,20 @@ pub struct PhysicsTweak {
     pub waiting_to_move: bool,
     /// D1146: the RecordingPlayer of a configuration 13 tweak (v > 0x3b8).
     pub recording: Option<RecordingPlayer>,
+    /// D1147: the attractor block of a configuration 14 tweak (v > 0x3e3).
+    pub attractor: Option<AttractorBlock>,
+}
+
+/// D1147: a configuration 14 tweak's 0x20-byte block (serializer 0xb78a34, constructor
+/// 0x699abc). `priority` and `beyond_group` are FOUND by use in 0x610a8; what the two
+/// (mode, min, max) triples and the three flags mean is INFERRED (docs/logic.md Part 49).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct AttractorBlock {
+    pub priority: f32,
+    pub first: (i32, f32, f32),
+    pub second: (i32, f32, f32),
+    pub flags: [u8; 3],
+    pub beyond_group: bool,
 }
 
 /// D1146: a configuration 13 tweak's RecordingPlayer as stored (names from the toolkit;
@@ -3000,12 +3014,17 @@ fn physics_tweak(r: &mut Reader, things: &mut Things) -> Result<PhysicsTweak> {
         t.recording = Some(p);
     }
     if configuration == 0xe && v > 0x3e3 {
-        r.f32()?;
-        r.i32()?;
-        r.skip_f32(2)?;
-        r.i32()?;
-        r.skip_f32(2)?;
-        r.bytes(4)?;
+        let priority = r.f32()?;
+        let first = (r.i32()?, r.f32()?, r.f32()?);
+        let second = (r.i32()?, r.f32()?, r.f32()?);
+        let b = r.bytes(4)?;
+        t.attractor = Some(AttractorBlock {
+            priority,
+            first,
+            second,
+            flags: [b[0], b[1], b[2]],
+            beyond_group: b[3] != 0,
+        });
     }
     Ok(t)
 }
