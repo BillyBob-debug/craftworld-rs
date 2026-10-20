@@ -395,10 +395,10 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   and angular velocity 43 (122; Part 19), grab 6 (666; Part 20), control
   pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23),
   motion recorder 45 (142; Part 24), angle 41 (126; Part 25), wormhole 57 (123;
-  Part 26), pocket item pedestal 65 (77; Part 27), lever 1 (74; Part 28).
+  Part 26), pocket item pedestal 65 (77; Part 27), lever 1 (74; Part 28),
+  three-way switch 2 (7; Part 29).
 - Kept as stored (the world signal is not modelled yet):
-  sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
-  (11), trinary 2 (7).
+  sticker 5 (68), score 30 (51), movinator pad 44 (50), 55 (11).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
 - The names come from docs/runtime-evidence/logic.md A4; types 55, 57 and 65 are past
@@ -840,3 +840,26 @@ output gets the same signal.
   `LevelWorld::reference_offset` in lever.rs.
 - Tests: `lever_reads_its_handle_offset`,
   `lever_holds_its_ternary_between_the_bands_and_inverts` in lever.rs.
+
+## Part 29: the three-way switch (D1127)
+
+Switch type 2 (7 placed) is the three-way switch. compute_output's table 0x11be00
+entry 2 is 0x11caf0, which calls 0x11a3b4, built like the lever's 0x11a6a4 (Part 28):
+the same handle (PSwitch+0x90), the same two 0xf13a0 positions (0x11a41c, 0x11a43c)
+and the same x in the switch Thing's frame.
+
+- Activation = x / 100 (r2-0x3f6c) kept to [-1, 1] by two fsel pairs (1.0 r2-0x4174,
+  -1.0 r2-0x4168). The ternary is the default rule 0x11873c, as for the lever. The
+  player is -1, and every output gets the same signal.
+- Inverted, table 0x11bfd4 entry 2 is 0x11c234: `fneg f31,f31; neg r30,r30`, so both
+  the activation and the ternary are negated (not 1 - a as for the lever). The held
+  ternary is output 0's negated back before the rule.
+- Census (census-all-17.json): 7 three-way switches, 1 inverted, all with one output
+  (3 wired) and a referenceThing; 3 without a parent, 1 with a child. Parts: POS,
+  RENDER_MESH, SHAPE and SWITCH on all, BODY on 3. Stored activation of output 0: 0
+  in 3, and -0.0098, -0.0109, -0.0146, -0.0153 on the others; all stored ternaries 0.
+- With the translation as the position x is about 1 on all 7 (the handle centred); the
+  rule gives 0.011 to 0.013 against stored values within 0.028 of it. The ternary band
+  agrees on 7 of 7. INFERRED: the gap is the same unmodelled body point as the lever's.
+- lbp-runtime: `trinary` in lever.rs; `default_ternary` now takes the held ternary.
+- Tests: `trinary_is_signed`, `trinary_inverts_by_negation` in lever.rs.

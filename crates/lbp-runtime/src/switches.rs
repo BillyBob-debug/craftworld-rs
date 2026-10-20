@@ -44,7 +44,7 @@ use crate::angle::angle_sensor;
 use crate::button::button;
 use crate::cutscene::camera_finished;
 use crate::grab::grab_sensor;
-use crate::lever::lever;
+use crate::lever::{lever, trinary};
 use crate::motion::motion_recorder;
 use crate::pad::pad_sensor;
 use crate::pedestal::pedestal_sensor;
@@ -516,6 +516,9 @@ pub fn compute_output(
         57 => standard(wormhole_sensor(cx)),
         // LEVER, 0x11cad0 → 0x11a6a4, FOUND (lever.rs): its handle's offset.
         1 => standard(lever(cx)),
+        // TRINARY (three-way switch), 0x11caf0 → 0x11a3b4, FOUND (lever.rs): the same
+        // offset, signed; inverted by negation (0x11c234).
+        2 => Some((trinary(cx), Invert::Negate)),
         // POCKET_ITEM_PEDESTAL, 0x11d164, FOUND (pedestal.rs): its value arrays per output.
         65 => standard(pedestal_sensor(cx, output)),
         // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
