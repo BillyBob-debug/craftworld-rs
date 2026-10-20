@@ -46,9 +46,10 @@
 - Merged: D1135 (PR 278, 0d8f6d4) the sequencer.
 - Merged: D1136 (PR 279, af19bb7) the controlinator.
 - Merged: D1137 (PR 280, 922909f) the creature.
-- D1138 (branch `logic-controlinator-seat`, worktree
-  `E:\Projects\wt-d324`): getting in and out of a controlinator (Part 40).
-- Decision numbers: D1100-D1199, next free D1139.
+- Merged: D1138 (PR 281, 9fb266e) getting in and out of a controlinator.
+- D1139 (branch `logic-player-death`, worktree `E:\Projects\wt-d324`): player death,
+  respawn and checkpoint lives (Part 41).
+- Decision numbers: D1100-D1199, next free D1140.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -109,7 +110,8 @@
   census-all-26.json the sequencers (Part 37),
   census-all-27.json the controlinators (Part 38),
   census-all-28.json the creatures and enemies (Part 39),
-  census-all-29.json the controlinator seats (Part 40).
+  census-all-29.json the controlinator seats (Part 40),
+  census-all-30.json the checkpoint lives (Part 41).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -135,7 +137,8 @@ EBOOT rule and unit tests:
    since D1136 (Part 38), creature deaths since D1137 (Part 39). The host
    must call `CreatureState::touch`, `crush_frame` and `tick` with config values (NOT
    FOUND), and seat players with `controlinator_in_reach`, `controlinator_enter` and
-   `controlinator_seat_tick` (Part 40). The host
+   `controlinator_seat_tick` (Part 40), and respawn dead players with
+   `CheckpointLives::respawn` after `activate` (Part 41). The host
    must carry out `LevelWorld.destroy_requests`, apply `lethal_type` and
    `body_material`, call `emitter_tick` each frame and spawn the plan when it
    says so, and call `sequencer_tick` each frame and `sequencer_input` when a
@@ -155,5 +158,5 @@ EBOOT rule and unit tests:
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
    the type 4 / angle-wrap question at 0x962590, the switch type bucket in 0x900730.
 5. The creature brain (PEnemy reader NOT FOUND; leads: the TOC entry for string
-   "PEnemy" 0xc79058, bit 0x1c tests), the player death path 0x63f28; the
-   controlinator's recorded inputs (Part 38) and what sets its +0x4c (Part 40).
+   "PEnemy" 0xc79058, bit 0x1c tests); who puts a player in state 5 and sends the
+   respawn (0x7feb8, Part 41); the controlinator's recorded inputs (Part 38) and what sets its +0x4c (Part 40).

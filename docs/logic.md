@@ -1212,3 +1212,36 @@ unless marked.
 - lbp-runtime: controlinator.rs `controlinator_open`, `controlinator_in_reach`,
   `controlinator_auto`, `controlinator_enter`, `controlinator_seat_tick`, `SEATED`.
 - Tests: `a_creature_in_reach_sits_and_drives`, `the_seat_lets_go_once_the_driver_stands`.
+
+## Part 41: player death, respawn and checkpoint lives (D1139)
+
+All FOUND in 01.33 unless marked.
+
+- Lethal contact on a player (0x81824) calls 0x63f28, which only notifies: tag 0xc9516493
+  to the killer for fire, tags to the players at part+0x65/+0x67 when game+0x180 is 0,
+  0x55e49554 for type 0xe, and a script hook on the player's Thing. It never sets state 5;
+  who does is NOT FOUND (INFERRED: the script hook or the player manager).
+- Dying (state 5) ends in state 6 after cfg+0x40 (fire), +0x48 (electric), +0x50 (type
+  0xe) or +0x4c frames. The strings FramesFrom{Fire,Ice,Electric,Crush,Drowned}DeathTill
+  Respawn suggest +0x40..+0x50 in that order (INFERRED).
+- Respawn 0x7fb00 sets state 0 and calls 0x5a2d8; its only caller is the message handler
+  0x7feb8 (sender NOT FOUND). 0x5a2d8 spawns when 0x5a134 allows: spawningDelay
+  (+0x34, INFERRED) is 0, and a life is left (+0x10 > 0) unless lives are unlimited or
+  the spawn is forced. A plain spawn takes one life when counted; a forced one tops +0x10/+0x14 up
+  toward game+0x1e8 + 2 by the multiplier (three times it when +0x10 was negative).
+- Lives are unlimited (0x5a0c4) when game+0x180 != 0, in the pod (game+0x3b5), or when
+  0x5a038 is true (+0x41, INFERRED instanceInfiniteSpawns, or 0x3ad08, 0x59e94, a global).
+- Activation 0x599dc sets +0x40 and, while +0x10 is -1, +0x10 = +0x14 = lifeMultiplier
+  (+0x38, INFERRED) x (game+0x1e8 + 2). INFERRED: game+0x1e8 is the player count; the
+  stored 3/3 lives on multiplier 1 and 6/6 on multiplier 2 fit one player.
+- Scripts: native_IsPlayerDead 0x5fe12c is true in state 5 or 6; the death count
+  (game+0x1c4) is bumped by the script (native_IncDeathCount 0x5f4d2c), not the engine.
+- Census (census-all-30.json, 1314 checkpoints): multiplier 1 x751, 2 x563; lives -1/0
+  x1087, 3/3 x171, 6/6 x35, 4/4 x14, 8/8 x5, 5/5 x1, 12/12 x1; infinite x458; delay x41.
+- Not modelled: the spawn slots (+0x28/+0x2c), the type 's' checkpoint and body test in
+  0x5a134, creature+0xc48, the lives_zero sound (0x18c948) and the game over.
+- lbp-runtime: checkpoint_lives.rs `CheckpointLives` (`activate`, `can_spawn`, `spawn`,
+  `respawn`), `LivesRules`, `is_player_dead`; `ThingState.checkpoint`. lbp-level keeps
+  spawningDelay and lifeMultiplier.
+- Tests: `the_first_activation_gives_lives_once`,
+  `respawns_take_lives_until_none_are_left`, `unlimited_lives_and_the_delay`, `a_forced_spawn_tops_up_toward_players_plus_two`.

@@ -31,6 +31,7 @@ use std::sync::Arc;
 mod angle;
 mod button;
 mod camera;
+mod checkpoint_lives;
 mod controlinator;
 mod creature;
 mod cutscene;
@@ -71,6 +72,7 @@ pub mod velocity;
 mod wormhole;
 
 pub use camera::*;
+pub use checkpoint_lives::{is_player_dead, CheckpointLives, LivesRules};
 pub use controlinator::ControlinatorState;
 pub use creature::{CreatureConfig, CreatureState};
 pub use cutscene::*;
@@ -184,6 +186,8 @@ pub struct ThingState {
     pub enemy: Option<lbp_level::parts::Enemy>,
     /// A creature's runtime state, when the Thing has PCreature (D1137).
     pub creature: Option<CreatureState>,
+    /// A checkpoint's lives, when the Thing has PCheckpoint (D1139).
+    pub checkpoint: Option<CheckpointLives>,
     /// The motion of the Thing's physics body, as the host's physics reports it: the
     /// velocity sensors read it ([`velocity::BodyMotion`]). None unless the host fills it.
     pub body: Option<velocity::BodyMotion>,
@@ -992,6 +996,7 @@ impl LevelWorld {
                     controlinator: t.data.controlinator.map(ControlinatorState::new),
                     enemy: t.data.enemy,
                     creature: t.parts.contains(&"CREATURE").then(CreatureState::default),
+                    checkpoint: t.data.checkpoint.map(CheckpointLives::from),
                     ..Default::default()
                 })
                 .collect(),

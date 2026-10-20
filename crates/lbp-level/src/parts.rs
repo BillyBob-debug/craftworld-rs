@@ -444,6 +444,11 @@ pub struct Checkpoint {
     pub spawns_left: i32,
     pub max_spawns_left: i32,
     pub infinite_spawns: bool,
+    /// spawningDelay: a spawn waits while it is nonzero (INFERRED +0x34, 0x5a134, D1139).
+    pub spawning_delay: i32,
+    /// lifeMultiplier (INFERRED +0x38): the lives a first activation gives scale by it
+    /// (0x599dc, D1139).
+    pub life_multiplier: i32,
 }
 
 /// PSwitchKey as stored, the fields kept: the tag's colour index and its name (empty for
@@ -1412,14 +1417,16 @@ fn part_body(
             let max_spawns_left = r.s32()?;
             let infinite_spawns = r.bool()?;
             thing_array(r, things)?;
-            r.i32()?;
-            r.i32()?;
+            let spawning_delay = r.i32()?;
+            let life_multiplier = r.i32()?;
             r.i32()?;
             things.list[me].data.checkpoint = Some(Checkpoint {
                 active,
                 spawns_left,
                 max_spawns_left,
                 infinite_spawns,
+                spawning_delay,
+                life_multiplier,
             });
         }
         "PHYSICS_TWEAK" => {

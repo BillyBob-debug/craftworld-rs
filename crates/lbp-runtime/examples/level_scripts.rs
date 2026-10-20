@@ -482,6 +482,13 @@ impl Switches {
                 );
                 count("controlinator deactivated".into(), t.deactivated);
             }
+            if let Some(cp) = t.checkpoint {
+                // PCheckpoint lives (D1139).
+                count(format!("checkpoint multiplier {}", cp.multiplier), true);
+                count(format!("checkpoint lives {}/{}", cp.left, cp.max), true);
+                count("checkpoint infinite".into(), cp.infinite);
+                count("checkpoint delay set".into(), cp.delay != 0);
+            }
             if t.parts.contains(&"CREATURE") {
                 // PCreature (D1137).
                 count("creature".into(), true);

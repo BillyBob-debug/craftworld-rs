@@ -11,7 +11,8 @@
 //! the processor then skips. Crushing (0x7d6ec) counts frames while the penetration
 //! passes cfg+0x74 and kills with type 4 once the count passes cfg+0x78.
 //!
-//! Not modelled: the player path (0x63f28), the early outs on Thing+0x78, 0x88f7dc,
+//! The player path (0x63f28 notifies only) and the respawn are in checkpoint_lives.rs
+//! (D1139). Not modelled: the early outs on Thing+0x78, 0x88f7dc,
 //! world+0x804 and 0x63b80, the fire stun (state 1, cfg+0x58), the other lethal-4 writer
 //! 0x952cc, and the PEnemy brain, whose reader was NOT FOUND. The config values are NOT
 //! FOUND, so the host supplies them.
@@ -34,7 +35,8 @@ pub struct CreatureConfig {
     pub electric_frames: u32,
     /// +0x50: dying frames after type 0xe.
     pub unclaimed_frames: u32,
-    /// +0x4c: dying frames after any other type.
+    /// +0x4c: dying frames after any other type. The strings FramesFrom{Fire,Ice,Electric,
+    /// Crush,Drowned}DeathTillRespawn suggest +0x40..+0x50 in that order (INFERRED, D1139).
     pub other_frames: u32,
     /// +0x74: the penetration a crush frame must pass.
     pub crush_depth: f32,
