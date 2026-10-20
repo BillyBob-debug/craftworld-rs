@@ -393,9 +393,10 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   (3,944; Part 15), camera finished 32 (2,760; Part 16), magic mouth 34 (1,426;
   Part 17), projectile 39 (816) and paint 8 (51; Part 18), linear velocity 42 (771)
   and angular velocity 43 (122; Part 19), grab 6 (666; Part 20), control
-  pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23).
+  pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23),
+  motion recorder 45 (142; Part 24).
 - Kept as stored (the world signal is not modelled yet):
-  motion recorder 45 (142), angle 41 (126), 57 (123),
+  angle 41 (126), 57 (123),
   65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
   (11), trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
@@ -684,3 +685,24 @@ shared tail 0x11c2c4 inverts it.
   new `Contact.impulse` the host fills (nothing fills it yet).
 - Tests: `button_force_threshold_and_presser`,
   `button_holds_four_ticks_after_release_and_inverts` in button.rs.
+
+## Part 24: the motion recorder switch (D1122)
+
+The motion recorder (type 45, 142 placed) has three outputs, each read from one word of
+the switch, PSwitch+0xcc (the slot other types call bulletsRequired). compute_output's
+table 0x11be00 entry 45 is 0x11d4d0, which branches on the output index; the store
+0x11bf18 inverts the result through the standard tail (table 0x11bfd4 entry 45 is
+0x11c16c). There is no end step (table 0x124b0c stops at 0x27). The player is always -1.
+
+- Output 0 (0x11d8bc): the low four bits over 15.0 (r2-0x4100), the ternary 1 when they
+  are not 0, else 0.
+- Output 1 (0x11d914): bit 4 as 0.0 or 1.0, the ternary the same bit.
+- Output 2 (0x11d4e8): bit 5, the same way. Any other output is off (0x11bf08).
+- Census (census-all-7.json): 142 recorders, none inverted, all with three outputs;
+  the word is 0 in 78 and 1 in 64; only output 1 is wired (6), no output stores on,
+  port 0 wired in 118.
+- Not found: what writes the word while the game runs (the recorder's own update), so
+  here it keeps the value the level file stores.
+- lbp-runtime: `motion_recorder` in motion.rs.
+- Tests: `motion_recorder_reads_its_word`,
+  `motion_recorder_inverts_through_the_standard_tail` in motion.rs.

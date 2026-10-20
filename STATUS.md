@@ -6719,3 +6719,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1113 the impact switch (2026-10-19)
 - Logic lane: impact switches (3,944) follow the EBOOT rule from this tick's physics
   contacts: player mode, touching and the tag filter (docs/logic.md Part 15).
+
+## D1114 the camera finished switch (2026-10-19)
+- Logic lane: camera finished switches (2,760) follow the game's cutscene timer:
+  hold time, the 3-tick ending and 9 ticks after (docs/logic.md Part 16).

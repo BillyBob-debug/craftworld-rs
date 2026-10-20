@@ -383,6 +383,25 @@ impl Switches {
                 }
                 continue;
             }
+            if s.switch_type == 45 {
+                let state = s.bullets_required;
+                count("motion recorder".into(), true);
+                count("motion recorder inverted".into(), s.inverted);
+                count(format!("motion recorder outputs={}", s.outputs.len()), true);
+                count(format!("motion recorder state={state:#x}"), true);
+                for (o, out) in s.outputs.iter().enumerate() {
+                    let out = out.as_ref();
+                    let wired = out.is_some_and(|o| !o.targets.is_empty());
+                    count(format!("motion recorder output {o} wired"), wired);
+                    let on = out.is_some_and(|o| o.stored.ternary != 0);
+                    count(format!("motion recorder output {o} stored on"), on);
+                }
+                count(
+                    "motion recorder port 0 wired".into(),
+                    matches!(t.inputs.first(), Some(Some(_))),
+                );
+                continue;
+            }
             if s.switch_type == 0 {
                 let out0 = s.outputs.first().and_then(|o| o.as_ref());
                 count("button".into(), true);
