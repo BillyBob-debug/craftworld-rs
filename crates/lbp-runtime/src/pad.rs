@@ -1,5 +1,6 @@
 //! The control pad switch (switch type 38, the controlinator's 18 outputs) (docs/logic.md
-//! Part 21) and the movinator pad (switch type 44, 25 outputs, Part 32).
+//! Part 21), the movinator pad (switch type 44, 25 outputs, Part 32) and switch type 55
+//! (20 outputs, Part 33).
 //!
 //! FOUND in the 01.33 executable (compute_output 0x11bd58 entry 38 → 0x11d378):
 //! - The pad is the driver's (the object at +0x98 reached from the switch's Thing,
@@ -26,6 +27,12 @@
 //!   0x11bfd4 entry 44 is 0x11c24c). Its outputs past 17 read 0.0 here (not modelled:
 //!   0x6a1004's values for them); the button prompts set after it (0x11d448) are not
 //!   modelled. All 50 placed store the no-driver signal on all 25 outputs.
+//! - Type 55 (0x11be00 entry 55 is 0x11d098) reads the same pad through the same call
+//!   (0x89033c with the output and 0) but keeps the player -1 (r28) and sets no prompts.
+//!   Its ternary is 0x11873c's default rule (0x118878), so outputs 6 and 9 take the
+//!   dead zone too. Inverted, outputs 7 to 19 are negated (0x11bfd4 entry 55 is
+//!   0x11c25c); no end-of-update step (0x124b0c covers types up to 39). Its outputs 18
+//!   and 19 read 0.0 here. All 11 placed store the no-driver signal on all 20 outputs.
 //!
 //! INFERRED: the driver is the player whose `piloting` is the switch's Thing; circle and
 //! cross are not swapped (0x6a0ea8 reads 0, as for a pad whose enter button is cross);
@@ -107,15 +114,21 @@ fn pad_value(pad: &PadState, output: usize) -> f32 {
 }
 
 /// Whether output `output` of a pad of `switch_type` is negated when inverted: 10 to 17
-/// of the control pad (0x11c228), 10 to 24 of the movinator pad (0x11c24c).
+/// of the control pad (0x11c228), 10 to 24 of the movinator pad (0x11c24c), 7 to 19 of
+/// type 55 (0x11c25c).
 pub(crate) fn negated(switch_type: i32, output: usize) -> bool {
-    let last = if switch_type == 44 { 24 } else { 17 };
-    (10..=last).contains(&output)
+    let range = match switch_type {
+        44 => 10..=24,
+        55 => 7..=19,
+        _ => 10..=17,
+    };
+    range.contains(&output)
 }
 
-/// The ternary of output `output` (0x11873c for types 38 and 44, the jump at 0x118830).
+/// The ternary of output `output` (0x11873c: for types 38 and 44 the jump at 0x118830,
+/// for type 55 the default rule 0x118878, the same bands without outputs 6 and 9's).
 fn pad_ternary(cx: &SwitchContext<'_>, output: usize, a: f32) -> i32 {
-    if output == 6 || output == 9 {
+    if (output == 6 || output == 9) && cx.switch.switch_type != 55 {
         return i32::from(a > 0.);
     }
     if a.abs() <= DEAD_ZONE {
@@ -142,6 +155,8 @@ pub(crate) fn pad_sensor(cx: &SwitchContext<'_>, output: usize) -> SwitchInput {
         .iter()
         .find(|p| p.piloting == Some(cx.thing) && p.pad.live);
     let (activation, player) = match driver {
+        // Type 55 keeps the player -1 (0x11d0f4).
+        Some(p) if cx.switch.switch_type == 55 => (pad_value(&p.pad, output), -1),
         Some(p) => (pad_value(&p.pad, output), p.number),
         None => (0., -1),
     };
@@ -275,6 +290,30 @@ mod tests {
             ((1., 1, 0), (-0.8, -1, 0), (-0., 0, 0))
         );
         // No driver: all 0.0 and the player -1, as all 50 placed store.
+        w.things[0].switch.as_mut().unwrap().inverted = false;
+        w.players[0].piloting = None;
+        assert!(outs(&mut w).iter().all(|&s| s == (0., 0, -1)));
+    }
+
+    #[test]
+    fn type_55_reads_the_pad_without_a_player() {
+        let mut w = pad_world(55, 20);
+        let pad = &mut w.players[0].pad;
+        (pad.buttons, pad.l2) = (BUTTON_L2, 128);
+        pad.left[1] = 0.8;
+        let o = outs(&mut w);
+        // The player stays -1; output 6 takes the dead-zone bands (held 0), not > 0.
+        assert_eq!((o[0], o[13]), ((1., 1, -1), (0.8, 1, -1)));
+        assert_eq!((o[6].1, o[6].2), (0, -1));
+        assert!(o[18..].iter().all(|&s| s == (0., 0, -1)));
+        // Inverted: 7 to 19 negated, the others the standard tail.
+        w.things[0].switch.as_mut().unwrap().inverted = true;
+        let o = outs(&mut w);
+        assert_eq!(
+            (o[1], o[13], o[19]),
+            ((1., 1, -1), (-0.8, -1, -1), (-0., 0, -1))
+        );
+        // No driver: all 0.0 and the player -1, as all 11 placed store.
         w.things[0].switch.as_mut().unwrap().inverted = false;
         w.players[0].piloting = None;
         assert!(outs(&mut w).iter().all(|&s| s == (0., 0, -1)));

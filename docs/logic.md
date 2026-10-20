@@ -397,8 +397,9 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   motion recorder 45 (142; Part 24), angle 41 (126; Part 25), wormhole 57 (123;
   Part 26), pocket item pedestal 65 (77; Part 27), lever 1 (74; Part 28),
   three-way switch 2 (7; Part 29), sticker 5 (68; Part 30, its manual value),
-  score 30 (51; Part 31), movinator pad 44 (50; Part 32, the control pad's rule).
-- Kept as stored (the world signal is not modelled yet): 55 (11).
+  score 30 (51; Part 31), movinator pad 44 (50; Part 32, the control pad's rule),
+  type 55 (11; Part 33, the pad without a player).
+- Kept as stored (the world signal is not modelled yet): no placed type is left.
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
 - The names come from docs/runtime-evidence/logic.md A4; types 55, 57 and 65 are past
@@ -933,3 +934,25 @@ compute_output's table 0x11be00 entry 44 is 0x11d378, the same as entry 38.
   prompts set after it for type 44 (0x11d448).
 - lbp-runtime: `pad_sensor` serves both types; `negated` in pad.rs gives the range.
 - Test: `movinator_pad_reads_the_pad_and_negates_to_24` in pad.rs.
+
+## Part 33: switch type 55 (D1131)
+
+Switch type 55 (11 placed, 20 outputs each) reads the same pad as the control pad
+(Part 21) without a player. compute_output's table 0x11be00 entry 55 is 0x11d098.
+
+- The pad lookup and the activation call are the control pad's (0x89033c → 0x6a1004
+  with the output and 0), but the player is kept at -1 (r28, 0x11d0f4) and no button
+  prompts are set; the signal is stored through 0x11bf18.
+- The ternary is 0x11873c's default rule (0x118878; type 55 is not in its list), so
+  outputs 6 and 9 take the dead-zone bands as the others do.
+- Inverted: outputs 7 to 19 are negated (table 0x11bfd4 entry 55 is 0x11c25c, which
+  checks output - 7 against 12), the others take the standard tail. 0x900730 already
+  marks the same outputs as signed. No end-of-update step (0x124b0c's table covers
+  types up to 39).
+- Census (census-all-21.json): 11 switches, none inverted, all with 20 outputs and a
+  parent; one also carries POS and RENDER_MESH. Wired outputs: 13 (2) and 15 (4). All
+  220 outputs store {0, 0, -1}, the no-driver signal.
+- Not modelled: 0x6a1004's values for outputs 18 and 19 (0.0 here). The name is not
+  known (Part 14: past the A4 table's band).
+- lbp-runtime: `pad_sensor` serves the type; `negated` in pad.rs gives the range.
+- Test: `type_55_reads_the_pad_without_a_player` in pad.rs.

@@ -442,36 +442,36 @@ impl Switches {
                 }
                 continue;
             }
-            if s.switch_type == 44 {
-                // The movinator pad: the control pad's handler (0x11d378); no driver.
-                count("movinator".into(), true);
-                count("movinator inverted".into(), s.inverted);
-                count(format!("movinator outputs={}", s.outputs.len()), true);
-                count("movinator without a parent".into(), t.parent.is_none());
+            if s.switch_type == 44 || s.switch_type == 55 {
+                // The movinator pad and type 55: the control pad's pad (0x11d378, 0x11d098).
+                let (k, last) = if s.switch_type == 44 {
+                    ("movinator", 24)
+                } else {
+                    ("type 55", 19)
+                };
+                let first = if s.switch_type == 44 { 10 } else { 7 };
+                count(k.into(), true);
+                count(format!("{k} inverted"), s.inverted);
+                count(format!("{k} outputs={}", s.outputs.len()), true);
+                count(format!("{k} without a parent"), t.parent.is_none());
                 for p in &t.parts {
-                    count(format!("movinator part {p}"), true);
+                    count(format!("{k} part {p}"), true);
                 }
                 for (o, out) in s.outputs.iter().enumerate() {
                     let Some(out) = out.as_ref() else { continue };
                     let st = out.stored;
-                    let want = if s.inverted && !(10..=24).contains(&o) {
+                    let want = if s.inverted && !(first..=last).contains(&o) {
                         (1., 1)
                     } else {
                         (0., 0)
                     };
+                    count(format!("{k} output {o:02} wired"), !out.targets.is_empty());
                     count(
-                        format!("movinator output {o:02} wired"),
-                        !out.targets.is_empty(),
-                    );
-                    count(
-                        format!(
-                            "movinator stored {} {} {}",
-                            st.activation, st.ternary, st.player
-                        ),
+                        format!("{k} stored {} {} {}", st.activation, st.ternary, st.player),
                         true,
                     );
                     count(
-                        "movinator output matches no driver".into(),
+                        format!("{k} output matches no driver"),
                         (st.activation - want.0).abs() < 1e-3 && st.ternary == want.1,
                     );
                 }

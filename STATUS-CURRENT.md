@@ -11,7 +11,12 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1130 the movinator pad (2026-10-19)
+## Latest: D1131 switch type 55 (2026-10-19)
+- Logic lane: type 55 switches (11) read the pad with the player -1, outputs 7
+  to 19 negated when inverted (0x11d098; docs/logic.md Part 33). Every placed
+  switch type now has a rule.
+
+## D1130 the movinator pad (2026-10-19)
 - Logic lane: movinator pads (50) run the control pad's rule, with outputs 10 to
   24 negated when inverted (0x11d378; docs/logic.md Part 32).
 
@@ -38,10 +43,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1124 the wormhole switch (2026-10-19)
 - Logic lane: wormhole switches (123) read their wormhole's one-tick "ended" byte
   (0x11d104; docs/logic.md Part 26); the wormhole itself is not run yet.
-
-## D1123 the angle sensor switch (2026-10-19)
-- Logic lane: angle sensors (126) read the turn of the object they sit on over
-  their range (0x11cd3c; docs/logic.md Part 25).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by
