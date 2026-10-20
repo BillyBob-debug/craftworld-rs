@@ -136,7 +136,8 @@
 //!   includeRigidConnectors bool, lethalActivationFrame i32, lethalInverted bool,
 //!   hideInPlayMode bool, disableLethalAudio bool (> 0x38f), ref NpcBehavior (a new
 //!   non-null body stops: not implemented), sackbotObjectColorIndex s32, behavior i32,
-//!   effectDestroy i32, playerMode i8 (> 0x3ec).
+//!   effectDestroy i32, playerMode i8 (> 0x3ec). Kept as `PartData::switch_input`
+//!   (D1132).
 //! - MICROCHIP (PMicrochip + CompactComponent): circuitBoardThing ref Thing,
 //!   hideInPlayMode bool, wiresVisible bool, lastTouched s32, offset v4, then (>= 0x34d)
 //!   name wstr, components array {ref Thing, x, y, angle, scaleX, scaleY f32, flipped
@@ -330,6 +331,9 @@ pub struct PartData {
     /// PMicrochip as stored: the circuit-board Thing (rscript-plan stage 3).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub microchip: Option<Microchip>,
+    /// PSwitchInput as stored (D1132): the adapter a switch drives on a non-logic Thing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub switch_input: Option<SwitchInput>,
     /// PSwitchKey as stored: the tag a tag sensor looks for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub switch_key: Option<SwitchKey>,
@@ -438,6 +442,21 @@ pub struct SwitchKey {
 #[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
 pub struct Microchip {
     pub circuit_board: Option<usize>,
+}
+
+/// PSwitchInput fields as stored (D1132, docs/logic.md Part 34). The sackbot fields and
+/// hideInPlayMode/disableLethalAudio are read through.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct SwitchInput {
+    /// The Thing whose switch output feeds this input (null when unwired).
+    pub data_source: Option<usize>,
+    /// ESwitchInputUpdateType: ACTIVATION 0, DESTROY 1, LETHAL 2, ... (Part 34).
+    pub update_type: i32,
+    pub lethal_type: i32,
+    pub include_rigid_connectors: bool,
+    pub lethal_activation_frame: i32,
+    pub lethal_inverted: bool,
+    pub behavior: i32,
 }
 
 /// SwitchSignal as stored: activation f32, ternary s32, player i32 (-1 = no player).
@@ -1531,23 +1550,32 @@ fn part_body(
             things.list[me].data.material_override = Some(MaterialOverride { regions, mesh });
         }
         "SWITCH_INPUT" => {
-            thing_ref(r, things)?;
-            r.i32()?;
-            r.i32()?;
-            r.bool()?;
-            r.i32()?;
-            r.bool()?;
+            let data_source = thing_ref(r, things)?;
+            let update_type = r.i32()?;
+            let lethal_type = r.i32()?;
+            let include_rigid_connectors = r.bool()?;
+            let lethal_activation_frame = r.i32()?;
+            let lethal_inverted = r.bool()?;
             r.bool()?;
             if v > 0x38f {
                 r.bool()?;
             }
             npc_behavior_ref(r, things)?;
             r.s32()?;
-            r.i32()?;
+            let behavior = r.i32()?;
             r.i32()?;
             if v > 0x3ec {
                 r.i8()?;
             }
+            things.list[me].data.switch_input = Some(SwitchInput {
+                data_source,
+                update_type,
+                lethal_type,
+                include_rigid_connectors,
+                lethal_activation_frame,
+                lethal_inverted,
+                behavior,
+            });
         }
         "WORLD" => {
             let list = thing_array(r, things)?;

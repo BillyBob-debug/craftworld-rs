@@ -956,3 +956,41 @@ Switch type 55 (11 placed, 20 outputs each) reads the same pad as the control pa
   known (Part 14: past the A4 table's band).
 - lbp-runtime: `pad_sensor` serves the type; `negated` in pad.rs gives the range.
 - Test: `type_55_reads_the_pad_without_a_player` in pad.rs.
+
+## Part 34: switch inputs (D1132)
+
+SWITCH_INPUT (PSwitchInput, part 0x20; 15,521 placed in 168 levels) is the adapter a
+switch output drives on a Thing that is not a logic part. It is not polled: when an
+output's on state or player changes, the switch pass (0x1244a4) calls 0x11ddf0 for each
+target, which jumps on the target's object type (+0x7e) through the table at
+`*(0xd962f8)`. Object types 68, 69 and 70 reach the three handlers below. Nothing reads
+dataSource or the activation float, and no code compares updateType with 0, 8 or 9.
+
+- LETHAL (updateType 2, 0x11ecf4): in the default mode (part +0x30 = 0) each visit sets
+  lethalActivationFrame (+0x1c) through 0x12e3a8. It becomes the current frame while
+  (port 0 ternary != 0) XOR lethalInverted (+0x38), and 0 otherwise, also when the
+  Thing is deactivated (+0x7f) or port 0 is not wired. In mode 1 the frame is taken
+  only on the edge. Then 0x12e114 resolves the group: the input with the largest
+  nonzero frame gives its lethalType (+0x34); with none on, an input whose port 0 is
+  not wired applies (it is always on); else 0. The game writes the type to the
+  material (0x0fdc48) unless the current value is 6 to 11, and plays the lethal sound
+  (0x2dcb3c) unless disableLethalAudio (+0x3a) is set.
+- DESTROY (updateType 1, 0x11ec6c): on the edge only, 0x12f354 destroys the owner's
+  group, with the rigidly joined Things when includeRigidConnectors (+0x3b) is set, with
+  effectDestroy (+0x3c), credited to the signal's player.
+- SACKBOT_BEHAVIOR (updateType 10, 0x11ebf8): on the edge, 0x12eccc on the owner's
+  parent and its behaviour object. Not modelled.
+- INFERRED: object types 68/69/70 are the Things whose updateType is 2/1/10, so the
+  runtime picks the handler by updateType. The group is taken as the Things with the
+  same root of the parent chain. Mode 1 is taken to be the stored `behavior` = 1.
+- Census (census-all-22.json): 10,432 DESTROY (10,088 with port 0 wired, 4,590 with
+  rigid connectors), 1,578 LETHAL (1,448 wired, 144 inverted, 196 with a stored frame;
+  lethal types 1 ×795, 2 ×480, 13 ×289, 0 ×14; 367 resolve lethal at load), 3,463
+  SACKBOT_BEHAVIOR (2,306 wired) and 48 CIRCUITBOARD (7, no handler, none wired). None is
+  in mode 1 and none is on a deactivated Thing at load.
+- lbp-level: `PartData::switch_input`. lbp-runtime: switch_input.rs, reached from
+  `apply_signal`; `LevelWorld::lethal_type` and `destroy_requests` are for the host,
+  which does not apply them yet.
+- Tests: `lethal_input_follows_its_port_and_inverts`,
+  `latest_lethal_input_wins_and_unwired_is_always_on`,
+  `destroy_input_asks_on_the_edge_only` in switch_input.rs.

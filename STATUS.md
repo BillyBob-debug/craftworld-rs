@@ -6759,3 +6759,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1123 the angle sensor switch (2026-10-19)
 - Logic lane: angle sensors (126) read the turn of the object they sit on over
   their range (0x11cd3c; docs/logic.md Part 25).
+
+## D1124 the wormhole switch (2026-10-19)
+- Logic lane: wormhole switches (123) read their wormhole's one-tick "ended" byte
+  (0x11d104; docs/logic.md Part 26); the wormhole itself is not run yet.
