@@ -43,9 +43,10 @@
 - Merged: D1132 (PR 275, ae24c2d) switch inputs.
 - Merged: D1133 (PR 276, 91e4066) the material tweaker.
 - Merged: D1134 (PR 277, bd6deb2) the emitter.
-- D1135 (branch `logic-sequencer`, worktree
-  `E:\Projects\wt-d324`): the sequencer (docs/logic.md Part 37).
-- Decision numbers: D1100-D1199, next free D1136.
+- Merged: D1135 (PR 278, 0d8f6d4) the sequencer.
+- D1136 (branch `logic-controlinator`, worktree
+  `E:\Projects\wt-d324`): the controlinator (docs/logic.md Part 38).
+- Decision numbers: D1100-D1199, next free D1137.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -83,7 +84,8 @@
   tick 680 hit 5 of 7 runs, the D1132 build too;
   after D1134 x 24,464 on tick 2004, unchanged, no crash;
   after D1135 a GPU device-lost crash near tick 685 in 4 of 4 runs, main
-  without D1135 too).
+  without D1135 too; after D1136 the same crash near tick 682 in 3 of 3 runs,
+  main without D1136 too).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -102,7 +104,8 @@
   census-all-22.json the switch inputs (Part 34),
   census-all-24.json the material tweaks (Part 35),
   census-all-25.json the emitters (Part 36),
-  census-all-26.json the sequencers (Part 37).
+  census-all-26.json the sequencers (Part 37),
+  census-all-27.json the controlinators (Part 38).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -124,13 +127,15 @@ Logic as a whole, one component kind per PR, each with a census across all level
 EBOOT rule and unit tests:
 1. Every placed switch type has a rule since D1131 (Part 14), and switch
    inputs since D1132 (Part 34), material tweaks since D1133 (Part 35),
-   emitters since D1134 (Part 36), sequencers since D1135 (Part 37). The host
+   emitters since D1134 (Part 36), sequencers since D1135 (Part 37), controlinators
+   since D1136 (Part 38). The host
    must carry out `LevelWorld.destroy_requests`, apply `lethal_type` and
    `body_material`, call `emitter_tick` each frame and spawn the plan when it
    says so, and call `sequencer_tick` each frame and `sequencer_input` when a
    switch reaches a sequencer. The host must
    fill `PlayerState.grabbing` for the grab switch
-   (Part 20), `PlayerState.piloting` and `pad` for the control pad (Part 21) and
+   (Part 20), `PlayerState.piloting` (the controlinator he sits in) and `pad` for the
+   control pad (Parts 21 and 38) and
    `ThingState.body` from avian2d for the velocity switches (Part 19). The host must fill
    `LevelWorld.contacts` from avian2d (Things by `lbp_sim::ThingIndex`) for the impact
    switch (Part 15) to see anything, with `impulse` for the button (Part 23), and call
@@ -142,4 +147,5 @@ EBOOT rule and unit tests:
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
    the type 4 / angle-wrap question at 0x962590, the switch type bucket in 0x900730.
-5. Sequencers, controlinators, creatures.
+5. Creatures; then the controlinator's getting in and out (0x6a3edc, gate 0x6a096c)
+   and its recorded inputs (Part 38).

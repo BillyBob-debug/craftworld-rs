@@ -342,6 +342,9 @@ pub struct PartData {
     /// PSequencer as stored (D1135).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sequencer: Option<Sequencer>,
+    /// PControlinator as stored (D1136).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub controlinator: Option<Controlinator>,
     /// PSwitchInput as stored (D1132): the adapter a switch drives on a non-logic Thing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub switch_input: Option<SwitchInput>,
@@ -533,6 +536,33 @@ pub struct Emitter {
     pub behavior: i32,
     pub ignore_parents_velocity: bool,
     pub editor_emitter: bool,
+}
+
+/// PControlinator as stored (reader 0xb73008). Field names are not in the EBOOT; each
+/// is named for its offset's use.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct Controlinator {
+    /// +0xc: the Thing driving it (a player's creature), or none.
+    pub driver: Option<usize>,
+    /// +0x18: a Thing ref with no use found.
+    pub ref_18: Option<usize>,
+    /// +0x28: the controlinator whose driver a pad reads (0x6a00b0).
+    pub link: Option<usize>,
+    /// +0x34: the player attached in mode 8 (state 2).
+    pub attached: Option<usize>,
+    /// +0x40: mode / group id; controlinators with the same one share a driver.
+    pub mode: i32,
+    /// +0x44: the scale of inputs 9 to 19.
+    pub input_scale: f32,
+    pub flag_48: bool,
+    /// +0x4c as saved; the reader drops it and keeps the runtime state.
+    pub saved_state: i32,
+    /// +0x50..+0x52 (defaults 0, 0, 1).
+    pub flags_50: [u8; 3],
+    /// +0x54: the Thing whose inputs (+0x60) the pad reads first.
+    pub inputs: Option<usize>,
+    /// +0x49 (revision > 0x3ec; default 1).
+    pub flag_49: i8,
 }
 
 /// PSequencer as stored. Fields absent in older revisions keep their defaults.
@@ -1569,18 +1599,20 @@ fn part_body(
         }
         "CREATURE" => creature(r, things)?,
         "CONTROLINATOR" => {
-            for _ in 0..4 {
-                thing_ref(r, things)?;
-            }
-            r.i32()?;
-            r.f32()?;
-            r.bool()?;
-            r.i32()?;
-            r.bytes(3)?;
-            thing_ref(r, things)?;
-            if v > 0x3ec {
-                r.i8()?;
-            }
+            let c = Controlinator {
+                driver: thing_ref(r, things)?,
+                ref_18: thing_ref(r, things)?,
+                link: thing_ref(r, things)?,
+                attached: thing_ref(r, things)?,
+                mode: r.i32()?,
+                input_scale: r.f32()?,
+                flag_48: r.bool()?,
+                saved_state: r.i32()?,
+                flags_50: [r.u8()?, r.u8()?, r.u8()?],
+                inputs: thing_ref(r, things)?,
+                flag_49: if v > 0x3ec { r.i8()? } else { 1 },
+            };
+            things.list[me].data.controlinator = Some(c);
         }
         "COSTUME" => {
             r.resource(false)?;
