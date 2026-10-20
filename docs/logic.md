@@ -392,9 +392,10 @@ lbp-runtime's switch pass (`compute_output`) handles each:
 - Sensors computed from the world: tag 4 (16,953), player 3 (5,627), impact 18
   (3,944; Part 15), camera finished 32 (2,760; Part 16), magic mouth 34 (1,426;
   Part 17), projectile 39 (816) and paint 8 (51; Part 18), linear velocity 42 (771)
-  and angular velocity 43 (122; Part 19), grab 6 (666; Part 20).
-- Kept as stored (the world signal is not modelled yet): control pad 38 (535), key
-  remote 54 (497), button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123),
+  and angular velocity 43 (122; Part 19), grab 6 (666; Part 20), control
+  pad 38 (535; Part 21).
+- Kept as stored (the world signal is not modelled yet): key remote 54 (497),
+  button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123),
   65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
   (11), trinary 2 (7).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
@@ -589,3 +590,36 @@ there is no end-of-update step (table 0x124b0c entry 6 is the epilogue 0x124940)
   fill it yet, so grab switches read off (or on when inverted) for now.
 - Tests: `grab_switch_sees_the_player_grabbing_its_object`,
   `grab_switch_modes_parent_and_tags` in grab.rs.
+
+## Part 21: the control pad switch (D1119)
+
+The control pad (type 38, 535 placed) is the controlinator's switch: 18 outputs that
+read the pad of the player driving it. compute_output's table sends it to 0x11d378;
+each output's activation comes from 0x6a1004 and its player from 0x6a0728, and the
+signal is stored at 0x11bf18 (the button prompt 0x3dae04 does not change it).
+
+- Driver: the object at +0x98 reached from the switch's Thing. With no driver, or a pad
+  that is not live (pad+0x1c & 0x1001), every output is 0.0 with player -1.
+- Outputs (table 0x6a15c0): 0 the constant 1.0; 1 square; 2 circle; 3 triangle; 4 cross
+  or d-pad right; 5 L1; 6 L2 pressure / 255 while L2 is down; 7 L3; 8 R1 or d-pad up;
+  9 R2 as L2; 10 d-pad right less left; 11 up less down; 12, 13 the left stick (pad+0x30,
+  +0x34); 14, 15 the right stick (0x38b604); 16 tilt pad+0xf8 / 90; 17 tilt pad+0x100 /
+  -90, both kept to [-1, 1]. The player is the driver's number (*(slot)+0xc).
+- Ternary (0x11873c, type 38 at 0x118830): outputs 6 and 9 are 1 above 0.0; the others
+  0 within 0.25 (r2-0x3f10), 1 at or above 0.75, -1 at or below -0.75, and between them
+  the value the output holds (slot+0x1c, 0x1188c0).
+- Inverted: outputs 10 to 17 negated (table 0x11bfd4 entry 38 → 0x11c228), the others
+  the standard tail 0x11c16c. No end-of-update step (0x124b0c entry 38 → 0x124940).
+- Census (census-all-4.json): every pad has 18 outputs and a parent; none inverted.
+  Wired outputs: 0 154, 1 10, 2 41, 3 16, 4 78, 5 3, 6 2, 7 4, 8 85, 9 3, 10 7, 11 3,
+  12 99, 13 68, 14 9, 15 7, 16 0, 17 12.
+- INFERRED: the driver is the player whose `piloting` is the switch's Thing; circle and
+  cross are not swapped (0x6a0ea8 taken as 0); the mirror sign of outputs 10, 12, 14 and
+  16 (0x6a1140) is +1; an inverted output's held ternary turns back as the inversion
+  does. Not modelled: recorded values (+0x54 → +0x60 entries, 0x6a122c), the mask
+  0xff0fff7f, the second table 0x6a163c, the right stick's curve 0x38b3ec and the d-pad
+  and tilt fallbacks (0x386c78, 0x386fa8).
+- lbp-runtime: `pad_sensor` in pad.rs reads `PlayerState.piloting` and `PlayerState.pad`.
+  The host does not fill them yet, so pads read 0.0 with player -1 for now.
+- Tests: `control_pad_maps_buttons_sticks_and_tilt`,
+  `control_pad_dead_zone_hysteresis_and_inversion` in pad.rs.

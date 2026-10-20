@@ -11,7 +11,11 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 - Snapshot `local-analysis/d68-inventory-0133-verified.json` (~166 MB; summarize by script).
 - Toolkit oracle pin d6a2ef80b5a09999f08f23a803b516096055e5c9 under `references/`.
 
-## Latest: D1118 the grab switch (2026-10-19)
+## Latest: D1119 the control pad switch (2026-10-19)
+- Logic lane: control pads (535) give the driver's buttons, sticks and tilt on 18
+  outputs with the game's dead zone and inversion (0x11d378; docs/logic.md Part 21).
+
+## D1118 the grab switch (2026-10-19)
 - Logic lane: grab switches (666) are on while a player grabs their object, by the
   game's three modes, PlayerMode and tag filter (0x10f508; docs/logic.md Part 20).
 
@@ -38,10 +42,6 @@ runtime (physics, scripts, playable Sackboy) lives in its own crates (AGENTS.md)
 ## D1112 every switch type counted; the random switch (2026-10-19)
 - Logic lane: a census of all 141,572 switches in 358 levels by type, and the random
   switch's dice, pick patterns and on / off times from the EBOOT (docs/logic.md P14).
-
-## D1111 keyed followers follow tags (2026-10-19)
-- Logic lane: followers with followKey go to the nearest tag of their colour and name,
-  and tags placed on chips sit at their parent (0x1c3e04; docs/logic.md P13).
 
 ## Measured counts (distinct catalog GUID; Complete = manual, all textures + geometry)
 - Mesh census 01.33 (4,261 GUIDs, after D188-D190): 4,259 viewable, 4,239 all-diffuse by

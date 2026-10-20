@@ -45,6 +45,7 @@ mod native_scoreboard;
 mod native_script;
 mod native_tutorial;
 mod native_world;
+pub mod pad;
 mod pod;
 mod pod_computer_native;
 mod sensors;
@@ -268,6 +269,11 @@ pub struct PlayerState {
     /// The Thing he is grabbing (player+0x1c & 0x1001 and +0x180 set), for the grab
     /// switch; the host fills it.
     pub grabbing: Option<u32>,
+    /// The Thing whose control pad he drives, for the control pad switch; the host fills
+    /// it.
+    pub piloting: Option<u32>,
+    /// His pad, for the control pad switch; the host fills it.
+    pub pad: pad::PadState,
 }
 
 /// What a trigger did to a Thing this tick.
@@ -1253,6 +1259,8 @@ impl LevelWorld {
             number,
             layers,
             grabbing: None,
+            piloting: None,
+            pad: pad::PadState::default(),
         });
         self.move_player(thing, position, layers);
         thing

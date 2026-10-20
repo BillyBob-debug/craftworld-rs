@@ -366,6 +366,23 @@ impl Switches {
                 count("grab without a parent".into(), t.parent.is_none());
                 continue;
             }
+            if s.switch_type == 38 {
+                let parent = t.parent.and_then(|p| world.things.get(p as usize));
+                let ctl = |t: Option<&lbp_runtime::ThingState>| {
+                    t.is_some_and(|t| t.parts.contains(&"CONTROLINATOR"))
+                };
+                count("pad".into(), true);
+                count("pad on a controlinator".into(), ctl(Some(t)));
+                count("pad under a controlinator".into(), ctl(parent));
+                count("pad without a parent".into(), t.parent.is_none());
+                count("pad inverted".into(), s.inverted);
+                count(format!("pad outputs={}", s.outputs.len()), true);
+                for (o, out) in s.outputs.iter().enumerate() {
+                    let wired = out.as_ref().is_some_and(|o| !o.targets.is_empty());
+                    count(format!("pad output {o:02} wired"), wired);
+                }
+                continue;
+            }
             let p = match s.switch_type {
                 3 => "player",
                 4 => "tag",
