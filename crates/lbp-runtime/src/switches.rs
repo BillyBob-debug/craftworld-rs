@@ -49,6 +49,7 @@ use crate::pad::pad_sensor;
 use crate::remote::key_remote;
 use crate::sensors::{impact_sensor, player_sensor, tag_sensor};
 use crate::velocity::velocity_sensor;
+use crate::wormhole::wormhole_sensor;
 use crate::{InputWire, LevelWorld, SwitchState, ThingState};
 use lbp_script_vm::natives::SwitchInput;
 use lbp_script_vm::Value;
@@ -509,6 +510,8 @@ pub fn compute_output(
         45 => standard(motion_recorder(cx, output)),
         // ANGLE, 0x11cd3c → 0x1141f4, FOUND (angle.rs): the object's turn over angleRange.
         41 => standard(angle_sensor(cx)),
+        // WORMHOLE, 0x11d104, FOUND (wormhole.rs): its own Thing's wormhole ended byte.
+        57 => standard(wormhole_sensor(cx)),
         // LINEAR_VELOCITY and ANGULAR_VELOCITY, 0x11d28c, FOUND (velocity.rs).
         42 | 43 => standard(velocity_sensor(cx)),
         // CAMERA_FINISHED, 0x11c854, FOUND: the cutscene camera's time since used.
@@ -1903,7 +1906,7 @@ mod tests {
             assert_eq!(out(&w, 0, 0), SIGNAL_OFF, "{ty}");
         }
         // The other sensors keep the stored signal, also when inverted.
-        for ty in [30, 57, 65] {
+        for ty in [30, 65] {
             let mut t = switch(&[(sig(0.5, 1, 2), &[])]);
             let s = t.switch.as_mut().unwrap();
             (s.switch_type, s.inverted) = (ty, true);

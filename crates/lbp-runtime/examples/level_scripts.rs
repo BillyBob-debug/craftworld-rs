@@ -383,6 +383,23 @@ impl Switches {
                 }
                 continue;
             }
+            if s.switch_type == 57 {
+                count("wormhole".into(), true);
+                count("wormhole inverted".into(), s.inverted);
+                count(format!("wormhole outputs={}", s.outputs.len()), true);
+                count("wormhole without a parent".into(), t.parent.is_none());
+                for part in &t.parts {
+                    count(format!("wormhole part {part}"), true);
+                }
+                for (o, out) in s.outputs.iter().enumerate() {
+                    let out = out.as_ref();
+                    let wired = out.is_some_and(|o| !o.targets.is_empty());
+                    count(format!("wormhole output {o} wired"), wired);
+                    let on = out.is_some_and(|o| o.stored.ternary != 0);
+                    count(format!("wormhole output {o} stored on"), on);
+                }
+                continue;
+            }
             if s.switch_type == 41 {
                 count("angle".into(), true);
                 count("angle inverted".into(), s.inverted);
