@@ -36,7 +36,8 @@
 //! - The per-type work at the end of a switch's update of types 0x13 and 0x1d.
 //! - Where the random switch's seed (PSwitch+0x1c) starts; here at 0.
 //! - The player / team filter of a counter (always passes here).
-//! - Deactivation inside a sequencer and of a cursor chip; the re-fire flag (PSwitch+0xe3).
+//! - Deactivation of a cursor chip; the re-fire flag (PSwitch+0xe3). A sequencer's board
+//!   is gated by its play head (D1135, `sequencer.rs`).
 //! - Switch types 0x24/0x25 standing in for their microchip's switch in the ordering.
 //! - The other object kinds a signal is applied to (lights, emitters, movers and so on).
 //! - The activating player the game records on the target before the dispatch.
@@ -1033,8 +1034,11 @@ impl LevelWorld {
     /// every child of the board is worked out the same way, so chips inside chips
     /// follow. The state a switch remembers is not reset.
     ///
-    /// Not modelled: a board that belongs to a sequencer (its contents switch by the
-    /// playhead) and a cursor chip; their flags are left as they are.
+    /// On a sequencer's board (D1135): a Thing with no wired input is also deactivated
+    /// while the play head is outside its columns, and every Thing is when the
+    /// sequencer has behavior 6 and its port 0 wired and off ([`crate::SequencerState::plays`]).
+    ///
+    /// Not modelled: a cursor chip; its flags are left as they are.
     pub fn recompute_deactivated(&mut self, thing: u32) {
         self.recompute_deactivated_at(thing, 0);
     }
@@ -1048,9 +1052,13 @@ impl LevelWorld {
             .switch
             .as_ref()
             .is_some_and(|s| s.switch_type == 36 && s.include_touching > 0);
-        if depth > MAX_NESTING || self.on_sequencer(thing) || cursor {
+        if depth > MAX_NESTING || cursor {
             return;
         }
+        let sequencer = self
+            .on_sequencer(thing)
+            .then(|| t.parent.and_then(get)?.parent)
+            .flatten();
         let parent = t.parent.and_then(get);
         let mut d = if is_chip(t) {
             wired(self, thing, 0).is_some_and(|(_, s)| s.ternary == 0)
@@ -1064,7 +1072,16 @@ impl LevelWorld {
             false
         };
         d |= parent.is_some_and(|p| is_board(p) && p.deactivated);
-        let board = t.circuit_board.filter(|_| !t.parts.contains(&"SEQUENCER"));
+        if let Some(q) = sequencer.and_then(|s| get(s)?.sequencer.as_ref()) {
+            // A Thing on a sequencer's board with no wired input plays while the head
+            // is in its columns; behavior 6 with port 0 wired and off turns all off.
+            if t.inputs.iter().all(Option::is_none) {
+                d |= q.plays(thing) == Some(false);
+            }
+            let seq = sequencer.unwrap_or(thing);
+            d |= q.part.behavior == 6 && wired(self, seq, 0).is_some_and(|(_, s)| s.ternary == 0);
+        }
+        let board = t.circuit_board;
         self.things[thing as usize].deactivated = d;
         let Some(board) = board.filter(|&b| b != thing && (b as usize) < self.things.len()) else {
             return;

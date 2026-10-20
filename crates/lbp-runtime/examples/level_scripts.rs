@@ -409,6 +409,43 @@ impl Switches {
                 count("emitter deactivated".into(), t.deactivated);
                 count("emitter may emit at load".into(), e.may_emit());
             }
+            if let Some(q) = t.sequencer.as_ref() {
+                // PSequencer (D1135).
+                let p = q.part;
+                count("sequencer".into(), true);
+                let wired = |n: usize| t.inputs.get(n).is_some_and(Option::is_some);
+                count("sequencer port 0 wired".into(), wired(0));
+                count("sequencer port 1 wired".into(), wired(1));
+                count(format!("sequencer behavior {}", p.behavior), true);
+                count("sequencer loops".into(), p.looped);
+                count("sequencer music".into(), p.music_sequencer);
+                count("sequencer playing at load".into(), p.is_playing);
+                count("sequencer head nonzero".into(), p.play_head != 0.0);
+                count("sequencer head past end".into(), p.play_head > q.length);
+                count("sequencer length 0".into(), q.length == 0.0);
+                count("sequencer tempo 125".into(), p.tempo == 125.0);
+                count("sequencer has a board".into(), t.circuit_board.is_some());
+                let mut child = t
+                    .circuit_board
+                    .and_then(|b| world.things[b as usize].first_child);
+                let mut left = world.things.len();
+                while let Some(c) = child.filter(|_| left > 0) {
+                    left -= 1;
+                    let ct = &world.things[c as usize];
+                    let listed = q.ranges.iter().any(|r| r.0 == c);
+                    count("sequencer board thing".into(), true);
+                    count("sequencer board thing listed".into(), listed);
+                    count(
+                        "sequencer board thing wired".into(),
+                        ct.inputs.iter().any(Option::is_some),
+                    );
+                    count(
+                        "sequencer board thing gated at load".into(),
+                        q.plays(c) == Some(false),
+                    );
+                    child = ct.next_sibling;
+                }
+            }
             let Some(s) = t.switch.as_ref() else {
                 continue;
             };

@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-36 (pistons; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-37 (pistons; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -42,9 +42,10 @@
 - Merged: D1131 (PR 274, 3fbcd7f) switch type 55.
 - Merged: D1132 (PR 275, ae24c2d) switch inputs.
 - Merged: D1133 (PR 276, 91e4066) the material tweaker.
-- D1134 (branch `logic-emitter`, worktree
-  `E:\Projects\wt-d324`): the emitter (docs/logic.md Part 36).
-- Decision numbers: D1100-D1199, next free D1135.
+- Merged: D1134 (PR 277, bd6deb2) the emitter.
+- D1135 (branch `logic-sequencer`, worktree
+  `E:\Projects\wt-d324`): the sequencer (docs/logic.md Part 37).
+- Decision numbers: D1100-D1199, next free D1136.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -80,7 +81,9 @@
   after D1132 x 24,464 on tick 2005, unchanged;
   after D1133 x 24,464 on tick 2004, unchanged; a GPU device-lost crash near
   tick 680 hit 5 of 7 runs, the D1132 build too;
-  after D1134 x 24,464 on tick 2004, unchanged, no crash).
+  after D1134 x 24,464 on tick 2004, unchanged, no crash;
+  after D1135 a GPU device-lost crash near tick 685 in 4 of 4 runs, main
+  without D1135 too).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -98,7 +101,8 @@
   census-all-21.json switch type 55 (Part 33),
   census-all-22.json the switch inputs (Part 34),
   census-all-24.json the material tweaks (Part 35),
-  census-all-25.json the emitters (Part 36).
+  census-all-25.json the emitters (Part 36),
+  census-all-26.json the sequencers (Part 37).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -120,9 +124,11 @@ Logic as a whole, one component kind per PR, each with a census across all level
 EBOOT rule and unit tests:
 1. Every placed switch type has a rule since D1131 (Part 14), and switch
    inputs since D1132 (Part 34), material tweaks since D1133 (Part 35),
-   emitters since D1134 (Part 36). The host must carry out
-   `LevelWorld.destroy_requests`, apply `lethal_type` and `body_material`,
-   and call `emitter_tick` each frame and spawn the plan when it says so. The host must
+   emitters since D1134 (Part 36), sequencers since D1135 (Part 37). The host
+   must carry out `LevelWorld.destroy_requests`, apply `lethal_type` and
+   `body_material`, call `emitter_tick` each frame and spawn the plan when it
+   says so, and call `sequencer_tick` each frame and `sequencer_input` when a
+   switch reaches a sequencer. The host must
    fill `PlayerState.grabbing` for the grab switch
    (Part 20), `PlayerState.piloting` and `pad` for the control pad (Part 21) and
    `ThingState.body` from avian2d for the velocity switches (Part 19). The host must fill
@@ -132,7 +138,8 @@ EBOOT rule and unit tests:
 2. Sensors: the cone and layer tests (player, tag, grab, impact, proximity).
 3. Outputs not yet modelled: configurations 3-5 and 12, the exact 0x1c21f4 speed, the
    mirror flag and the follower's +0x220 angle; the sackbot input, the
-   stickiness-3 tweak, the emitter's lifetime and recycling.
+   stickiness-3 tweak, the emitter's lifetime and recycling, the
+   sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
    the type 4 / angle-wrap question at 0x962590, the switch type bucket in 0x900730.
 5. Sequencers, controlinators, creatures.

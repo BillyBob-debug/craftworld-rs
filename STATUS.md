@@ -6775,3 +6775,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1127 the three-way switch (2026-10-19)
 - Logic lane: three-way switches (7) read the lever's handle offset as x / 100 in
   [-1, 1] and invert by negation (0x11a3b4; docs/logic.md Part 29).
+
+## D1128 the sticker switch (2026-10-19)
+- Logic lane: sticker switches (68) output their manual value, set to on when a
+  matching sticker is placed (0x53c584; docs/logic.md Part 30).

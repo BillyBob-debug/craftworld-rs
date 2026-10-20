@@ -60,6 +60,7 @@ mod pod_computer_native;
 mod remote;
 mod score;
 mod sensors;
+mod sequencer;
 mod story_native;
 mod switch_input;
 mod switches;
@@ -89,6 +90,7 @@ pub use native_tutorial::*;
 pub use native_world::*;
 pub use pod::*;
 pub use pod_computer_native::*;
+pub use sequencer::SequencerState;
 pub use story_native::*;
 pub use switch_input::{DestroyRequest, InputAdapter, MAX_DESTROY_REQUESTS};
 pub use switches::*;
@@ -170,6 +172,8 @@ pub struct ThingState {
     pub material_tweak: Option<MaterialTweak>,
     /// PEmitter as stored and its emit clock, when the Thing has one (D1134).
     pub emitter: Option<EmitterState>,
+    /// PSequencer as stored and its frame count, when the Thing has one (D1135).
+    pub sequencer: Option<SequencerState>,
     /// The motion of the Thing's physics body, as the host's physics reports it: the
     /// velocity sensors read it ([`velocity::BodyMotion`]). None unless the host fills it.
     pub body: Option<velocity::BodyMotion>,
@@ -940,6 +944,7 @@ impl LevelWorld {
                     circuit_board: t
                         .data
                         .microchip
+                        .as_ref()
                         .and_then(|m| m.circuit_board)
                         .and_then(handle),
                     mesh_guid: t
@@ -973,6 +978,7 @@ impl LevelWorld {
                     }),
                     material_tweak: t.data.material_tweak,
                     emitter: t.data.emitter.map(EmitterState::new),
+                    sequencer: t.data.sequencer.map(|q| SequencerState::new(q, 0.0)),
                     ..Default::default()
                 })
                 .collect(),
@@ -980,6 +986,21 @@ impl LevelWorld {
             ..Default::default()
         };
         w.tag_names = tag_names;
+        for (i, t) in list.iter().enumerate() {
+            if let (Some(chip), Some(q)) = (&t.data.microchip, w.things[i].sequencer.as_mut()) {
+                q.length = chip.board_size[0];
+                q.ranges = chip
+                    .components
+                    .iter()
+                    .filter_map(|c| {
+                        let me = c.thing.and_then(handle)?;
+                        let kind = list.get(c.thing?)?;
+                        Some((me, sequencer::component_columns(kind, c)))
+                    })
+                    .map(|(me, (s, e))| (me, s, e))
+                    .collect();
+            }
+        }
         // Children in Thing-list order.
         let mut last_child: Vec<Option<u32>> = vec![None; list.len()];
         for i in 0..list.len() {

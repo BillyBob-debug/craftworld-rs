@@ -1658,6 +1658,7 @@ fn chip_level() -> Vec<ThingRecord> {
     t[9].data.switch = logic(36);
     t[9].data.microchip = Some(Microchip {
         circuit_board: Some(10),
+        ..Default::default()
     });
     t[10].parts = vec!["SWITCH"];
     t[10].data.switch = logic(37);
@@ -1668,6 +1669,7 @@ fn chip_level() -> Vec<ThingRecord> {
     t[1].data.switch = logic(36);
     t[1].data.microchip = Some(Microchip {
         circuit_board: Some(2),
+        ..Default::default()
     });
     t[2].parts = vec!["SWITCH"];
     t[2].data.switch = logic(37);
@@ -1677,6 +1679,7 @@ fn chip_level() -> Vec<ThingRecord> {
     t[4].data.pos = pos(translation(-20., 0., 0.));
     t[4].data.microchip = Some(Microchip {
         circuit_board: Some(5),
+        ..Default::default()
     });
     t[5].parts = vec!["SWITCH"];
     t[5].data.switch = logic(37);
