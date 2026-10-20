@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 and docs/logic/part-50.md (pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-55.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -60,9 +60,10 @@
 - Merged: D1149 (PR 292, c3eecb5) the exact turn speed of 0x1c21f4.
 - Merged: D1150 (PR 293, 4d67b8a) the followers' speed through 0x1c21f4.
 - Merged: D1151 (PR 294, 269a784) the followers' up axis, localSpace and allowInOut.
-- D1152 (branch `logic-d1152`, worktree `E:\Projects\wt-d324`): the followers' tag key
-  colour is an s32 (docs/logic/part-54.md).
-- Decision numbers: D1100-D1199, next free D1153.
+- Merged: D1152 (PR 295, 82767b3) the followers' tag key colour is an s32.
+- D1153 (branch `logic-d1153`, worktree `E:\Projects\wt-d324`): touching layers do not
+  collide, within `SLAB_TOUCH_EPSILON` (docs/logic/part-55.md).
+- Decision numbers: D1100-D1199, next free D1154.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -110,7 +111,9 @@
   D1150; run with `$env:WGPU_BACKEND="dx12"` to avoid the device-lost crash; after
   D1152 follower 2499 finds its tag and Sackboy stops at x -2,467.6 from about tick
   1,000, ending at x -2,053.9 on tick 2,007, blocked by lift 2643, follower 2652 key 35,
-  jammed against gyroscope 1320, Part 54).
+  jammed against gyroscope 1320, Part 54); after D1153 the lift leaves and Sackboy
+  stands at x -1,092.7, y 5,238.4 on ticks 2,006 to 2,008, inside the xy range of
+  body 1951 (3 movers, 3 spins), Part 55).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -142,7 +145,9 @@
   census-all-38.json the turning tweaks' ticks to full speed (Part 51),
   census-all-39.json the followers' ticks to full speed (Part 52),
   census-all-40.json the followers by allowInOut, localSpace and allowUpDown (Part 53),
-  census-all-42.json the followKey followers with a matching tag (Part 54).
+  census-all-42.json the followKey followers with a matching tag (Part 54);
+  local-analysis/logic/d1153/census-all.json (`level_physics --all`) the touching
+  layer pairs (Part 55).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -162,6 +167,10 @@
   +0xe4 allowInOut (layer move 0x1c8250, then packed), +0xe5 allowUpDown (0x9587ac) (Part 53); tag
   search 0x1c3e04 and map 0xceb8c (Part 13); followKey match 0xceac0, colour reader
   0xc1dc90 -> 0x8a9240 (zigzag LEB128 when compressed) for both tag and tweak (Part 54).
+  Tag search 0x1c3e04 has no tag activation test; 0x12f6f4 rejects a tag whose Thing
+  +0x7f is set, 0xf9a64 is a mode/player check, not a layer test (D1153). PShape
+  thickness +0x7c, massDepth +0x70, serializer 0xb41534; the pairwise depth test is NOT
+  FOUND (SPU ELFs at file offsets 0xcb1080-0xd43780) (Part 55).
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -201,8 +210,8 @@ EBOOT rule and unit tests:
    angle (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
    for followers, a host filling `MoveTweak::angle`, the mirror negation of the
    localSpace angle, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
-   next on the route, why lift 2643 (MoveTweak 2652) jams against gyroscope 1320 at
-   x -2,074 (Part 54);
+   next on the route, why Sackboy stops at x -1,092.7 on body 1951 (Things 2472,
+   2473 and 2669, Part 55);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).

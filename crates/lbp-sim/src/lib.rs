@@ -106,10 +106,17 @@ pub struct ZSlab {
     pub half_thickness: f32,
 }
 
+/// Depth overlap a slab pair needs before it collides. INFERRED (D1153): the
+/// game's pairwise depth test runs on the SPU and was not found; level z values
+/// carry float rounding (99.99994 for 100), so slabs that only touch must not
+/// collide by a few ulps.
+pub const SLAB_TOUCH_EPSILON: f32 = 0.01;
+
 impl ZSlab {
-    /// Slabs collide when their depth ranges overlap (touching is not overlapping).
+    /// Slabs collide when their depth ranges overlap by more than
+    /// [`SLAB_TOUCH_EPSILON`] (touching is not overlapping).
     pub fn overlaps(&self, other: &ZSlab) -> bool {
-        (self.z - other.z).abs() < self.half_thickness + other.half_thickness
+        (self.z - other.z).abs() < self.half_thickness + other.half_thickness - SLAB_TOUCH_EPSILON
     }
 }
 

@@ -1,6 +1,6 @@
 //! R2 PC check (docs/sim-physics.md): does a level stand still in the sandbox?
 //!
-//! level_physics SNAPSHOT GAME-DIRS LEVEL-PATH|--all NEW-JSON [--ticks=N]
+//! level_physics SNAPSHOT GAME-DIRS LEVEL-PATH|guid:HEX|--all NEW-JSON [--ticks=N]
 //!
 //! Reads the level(s), builds the physics scene (bodies, static and dynamic shapes,
 //! rejected shapes by reason) and runs it headless for N game ticks at 30 Hz (default 90,
@@ -204,7 +204,7 @@ fn run() -> Result<(), String> {
     let args: Vec<&String> = all.iter().filter(|a| !a.starts_with("--ticks=")).collect();
     if args.len() != 5 {
         return Err(
-            "usage: level_physics SNAPSHOT GAME-DIRS LEVEL-PATH|--all NEW-JSON [--ticks=N]".into(),
+            "usage: level_physics SNAPSHOT GAME-DIRS LEVEL-PATH|guid:HEX|--all NEW-JSON [--ticks=N]".into(),
         );
     }
     let output = Path::new(args[4]);
@@ -281,8 +281,10 @@ fn run() -> Result<(), String> {
     } else {
         keys.push(lbp_preview::level_scene::resolve_level(
             &catalog,
-            None,
-            Some(args[3]),
+            args[3]
+                .strip_prefix("guid:")
+                .and_then(|g| u32::from_str_radix(g, 16).ok()),
+            (!args[3].starts_with("guid:")).then_some(args[3].as_str()),
         )?);
     }
     let mut levels = Vec::new();
@@ -292,6 +294,7 @@ fn run() -> Result<(), String> {
     let mut filled = BTreeMap::<&str, usize>::new();
     let (mut joints, mut rejected_joints) = (0, BTreeMap::<&str, usize>::new());
     let mut anchored = 0;
+    let (mut touching_pairs, mut touching_pairs_dynamic) = (0usize, 0usize);
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -314,6 +317,49 @@ fn run() -> Result<(), String> {
             }
         }
         let scene = build_scene_with(&report.things, &fixed);
+        // D1153 census: collider pairs on different bodies whose xy boxes overlap and whose
+        // depth ranges only touch (within SLAB_TOUCH_EPSILON), split by whether one is dynamic.
+        let boxes: Vec<([f32; 2], [f32; 2])> = scene
+            .colliders
+            .iter()
+            .map(|c| {
+                let (mut lo, mut hi) = ([f32::MAX; 2], [f32::MIN; 2]);
+                let (s, k) = c.frame.angle.sin_cos();
+                for p in c.triangles.iter().flatten() {
+                    let w = [
+                        c.frame.position[0] + k * p[0] - s * p[1],
+                        c.frame.position[1] + s * p[0] + k * p[1],
+                    ];
+                    for i in 0..2 {
+                        lo[i] = lo[i].min(w[i]);
+                        hi[i] = hi[i].max(w[i]);
+                    }
+                }
+                (lo, hi)
+            })
+            .collect();
+        let dynamic_of =
+            |c: &lbp_sim::scene::SceneCollider| c.body.is_some_and(|b| !scene.bodies[b].fixed);
+        let (mut touching, mut touching_dynamic) = (0usize, 0usize);
+        for (i, a) in scene.colliders.iter().enumerate() {
+            for (j, b) in scene.colliders.iter().enumerate().skip(i + 1) {
+                let sum = a.half_thickness + b.half_thickness;
+                let dz = (a.z - b.z).abs();
+                if a.body.is_some() && a.body == b.body
+                    || dz >= sum
+                    || dz < sum - lbp_sim::SLAB_TOUCH_EPSILON
+                {
+                    continue;
+                }
+                let ((alo, ahi), (blo, bhi)) = (boxes[i], boxes[j]);
+                if (0..2).all(|k| alo[k] <= bhi[k] && blo[k] <= ahi[k]) {
+                    touching += 1;
+                    touching_dynamic += usize::from(dynamic_of(a) || dynamic_of(b));
+                }
+            }
+        }
+        touching_pairs += touching;
+        touching_pairs_dynamic += touching_dynamic;
         let r = &scene.report;
         fixed_bodies += r.fixed_bodies;
         nested_bodies += r.nested_bodies;
@@ -430,6 +476,7 @@ fn run() -> Result<(), String> {
             "fixed_bodies": r.fixed_bodies, "nested_bodies": r.nested_bodies,
             "bodies": m.bodies, "moved_over_1": m.moved_1, "moved_over_100": m.moved_100,
             "non_finite": m.non_finite, "max_move": m.max_move,
+            "touching_pairs": touching, "touching_pairs_dynamic": touching_dynamic,
         }));
     }
     let mut top: Vec<(&String, &usize)> = materials.iter().collect();
@@ -454,6 +501,7 @@ fn run() -> Result<(), String> {
         "shapes": shapes, "dynamic": dynamic, "static": static_,
         "not_collidable": not_collidable, "rejected": rejected, "filled": filled,
         "joints": joints, "rejected_joints": rejected_joints,
+        "touching_pairs": touching_pairs, "touching_pairs_dynamic": touching_pairs_dynamic,
         "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,
