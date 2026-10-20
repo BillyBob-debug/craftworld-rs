@@ -1147,3 +1147,38 @@ sits in to drive a contraption; the control pads under it read that player's pad
 - Tests: `pad_reads_the_link_driver_of_its_grandparent`,
   `mode_eight_in_state_two_reads_the_attached_player`,
   `a_driven_controlinator_holds_its_mode`, `pad_reads_the_driver_of_its_controlinator`.
+
+## Part 39: the creature (D1137)
+
+PCreature is a creature's body; PEnemy is a creature piece (a brain or other part) on
+it. This part covers how a creature that is not a player dies.
+
+- State (FOUND): creature+0xc14 (0 at load, ctor 0x829b4), set by 0x7b454; +0xc18
+  frames in the state; +0xd68 the lethal type last applied. INFERRED: 5 dying, 6 dead.
+- Contact (0x81824, called from the update 0x8d2bc): 14 contact slots at
+  state(+0xbf0)+0x180+i*12; the strongest type 1 to 14 wins and gas 6 to 11 reads as 6.
+  With +0xf4c clear the type is 0xe (INFERRED: unclaimed). A creature with no player
+  part calls 0x7d1a4(c,1) and goes to state 5; a player goes to 0x63f28 instead.
+- Dying: state 5 ends in state 6 after cfg(+0xbf4)+0x40 frames for fire, +0x48 for
+  electricity, +0x50 for type 0xe and +0x4c for the rest. State 6 skips the processor.
+- Crush (0x7d6ec): while the penetration passes cfg+0x74 the count +0xd80 grows; past
+  cfg+0x78 the creature dies with type 4. 0x952cc also writes type 4 (not examined).
+- Early outs of 0x81824: Thing+0x7e not 0x88 or 0x89, Thing+0x78 & 2, state 6,
+  0x88f7dc, world+0x804, 0x63b80; a player part with +0x848 set skips the scan.
+- PEnemy (stored, `PartData.enemy`): part type, radius, snap vertex, centre offset, anim
+  Thing, anim speed, source player, new-enemy flag, smoke colour, smoke brightness (from
+  revision 0x39a). HasPEnemy is Thing+0x10 bit 0x1c; IsEnemyAI (0x6d6e54) needs the
+  creature bit 0xd. NOT FOUND: the PEnemy reader in the EBOOT, what part types mean, and
+  the brain rules (what kills a creature through its brain).
+- Census (census-all-28.json): 1504 creatures, 189 with a PEnemy on the creature's own
+  Thing, 181 with a parent. 3484 enemies: type 1 x2713, 2 x189, 3 x39, 4 x543; new 0 for
+  all; anim Thing set x39; source player 0 for all; smoke colour 0xffffffff x3310. The
+  189 of type 2 sit on the creature itself; of the rest, 1 has its creature on the
+  parent and 6 on the grandparent.
+- Not modelled: the player path, the early outs, the fire stun (state 1, cfg+0x58),
+  0x952cc, and the brain. NOT FOUND: the config values, so the host supplies them.
+- lbp-runtime: creature.rs, `CreatureState`, `CreatureConfig`, `strongest_lethal`,
+  `ThingState.creature` and `ThingState.enemy`.
+- Tests: `the_strongest_type_wins_and_gas_reads_as_six`,
+  `contact_kills_after_the_types_duration`, `an_unclaimed_creature_takes_type_e`,
+  `crushing_counts_deep_frames_then_kills`.

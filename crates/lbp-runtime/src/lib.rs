@@ -32,6 +32,7 @@ mod angle;
 mod button;
 mod camera;
 mod controlinator;
+mod creature;
 mod cutscene;
 mod display;
 mod emitter;
@@ -71,6 +72,7 @@ mod wormhole;
 
 pub use camera::*;
 pub use controlinator::ControlinatorState;
+pub use creature::{CreatureConfig, CreatureState};
 pub use cutscene::*;
 pub use display::*;
 pub use emitter::EmitterState;
@@ -178,6 +180,10 @@ pub struct ThingState {
     pub sequencer: Option<SequencerState>,
     /// PControlinator as stored and its runtime state, when the Thing has one (D1136).
     pub controlinator: Option<ControlinatorState>,
+    /// PEnemy as stored, when the Thing has one (D1137).
+    pub enemy: Option<lbp_level::parts::Enemy>,
+    /// A creature's runtime state, when the Thing has PCreature (D1137).
+    pub creature: Option<CreatureState>,
     /// The motion of the Thing's physics body, as the host's physics reports it: the
     /// velocity sensors read it ([`velocity::BodyMotion`]). None unless the host fills it.
     pub body: Option<velocity::BodyMotion>,
@@ -984,6 +990,8 @@ impl LevelWorld {
                     emitter: t.data.emitter.map(EmitterState::new),
                     sequencer: t.data.sequencer.map(|q| SequencerState::new(q, 0.0)),
                     controlinator: t.data.controlinator.map(ControlinatorState::new),
+                    enemy: t.data.enemy,
+                    creature: t.parts.contains(&"CREATURE").then(CreatureState::default),
                     ..Default::default()
                 })
                 .collect(),

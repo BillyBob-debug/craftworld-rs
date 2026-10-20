@@ -466,6 +466,36 @@ impl Switches {
                 count("controlinator scale 1".into(), p.input_scale == 1.0);
                 count("controlinator deactivated".into(), t.deactivated);
             }
+            if t.parts.contains(&"CREATURE") {
+                // PCreature (D1137).
+                count("creature".into(), true);
+                count("creature has enemy".into(), t.enemy.is_some());
+                count("creature has parent".into(), t.parent.is_some());
+                count("creature deactivated".into(), t.deactivated);
+            }
+            if let Some(e) = t.enemy.as_ref() {
+                // PEnemy (D1137): where its creature is.
+                let up = |n: Option<u32>| n.and_then(|n| world.things.get(n as usize));
+                let has = |th: Option<&lbp_runtime::ThingState>| {
+                    th.is_some_and(|th| th.parts.contains(&"CREATURE"))
+                };
+                let parent = up(t.parent);
+                count("enemy".into(), true);
+                count(format!("enemy type {}", e.part_type), true);
+                count(format!("enemy type {} new", e.part_type), e.new_enemy);
+                count(format!("enemy smoke colour {:#x}", e.smoke_color), true);
+                count("enemy anim thing set".into(), e.anim_thing.is_some());
+                count(
+                    format!("enemy source player {}", e.source_player_number),
+                    true,
+                );
+                count("enemy self creature".into(), has(Some(t)));
+                count("enemy parent creature".into(), has(parent));
+                count(
+                    "enemy grandparent creature".into(),
+                    has(up(parent.and_then(|p| p.parent))),
+                );
+            }
             if let Some(s) = t
                 .switch
                 .as_ref()

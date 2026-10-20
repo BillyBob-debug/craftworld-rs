@@ -345,6 +345,9 @@ pub struct PartData {
     /// PControlinator as stored (D1136).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub controlinator: Option<Controlinator>,
+    /// PEnemy as stored (D1137): a creature's brain or other creature piece.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enemy: Option<Enemy>,
     /// PSwitchInput as stored (D1132): the adapter a switch drives on a non-logic Thing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub switch_input: Option<SwitchInput>,
@@ -536,6 +539,22 @@ pub struct Emitter {
     pub behavior: i32,
     pub ignore_parents_velocity: bool,
     pub editor_emitter: bool,
+}
+
+/// PEnemy as stored, in the reader's order (names from the Toolkit).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct Enemy {
+    pub part_type: i32,
+    pub radius: f32,
+    pub snap_vertex: i32,
+    pub center_offset: [f32; 3],
+    pub anim_thing: Option<usize>,
+    pub anim_speed: f32,
+    pub source_player_number: i32,
+    pub new_enemy: bool,
+    pub smoke_color: i32,
+    /// Revision 0x39a and later; 0.0 before.
+    pub smoke_brightness: f32,
 }
 
 /// PControlinator as stored (reader 0xb73008). Field names are not in the EBOOT; each
@@ -1462,18 +1481,19 @@ fn part_body(
             things.list[me].data.microchip = Some(chip);
         }
         "ENEMY" => {
-            r.s32()?;
-            r.f32()?;
-            r.i32()?;
-            r.v3()?;
-            thing_ref(r, things)?;
-            r.f32()?;
-            r.i32()?;
-            r.bool()?;
-            r.i32()?;
-            if v >= 0x39a {
-                r.f32()?;
-            }
+            let e = Enemy {
+                part_type: r.s32()?,
+                radius: r.f32()?,
+                snap_vertex: r.i32()?,
+                center_offset: r.v3()?,
+                anim_thing: thing_ref(r, things)?,
+                anim_speed: r.f32()?,
+                source_player_number: r.i32()?,
+                new_enemy: r.bool()?,
+                smoke_color: r.i32()?,
+                smoke_brightness: if v >= 0x39a { r.f32()? } else { 0.0 },
+            };
+            things.list[me].data.enemy = Some(e);
         }
         "EMITTER" => {
             let e = emitter(r, things)?;

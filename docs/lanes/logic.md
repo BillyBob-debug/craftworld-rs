@@ -1,4 +1,4 @@
-# Lane state: logic (the game's gadgets and circuits) (2026-10-19)
+# Lane state: logic (the game's gadgets and circuits) (2026-10-20)
 
 ## Read first
 1. docs/logic.md: Part 1 (census of the Rookie Test's logic and the fix order), Part 2
@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-37 (pistons; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-39 (pistons; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -44,9 +44,10 @@
 - Merged: D1133 (PR 276, 91e4066) the material tweaker.
 - Merged: D1134 (PR 277, bd6deb2) the emitter.
 - Merged: D1135 (PR 278, 0d8f6d4) the sequencer.
-- D1136 (branch `logic-controlinator`, worktree
-  `E:\Projects\wt-d324`): the controlinator (docs/logic.md Part 38).
-- Decision numbers: D1100-D1199, next free D1137.
+- Merged: D1136 (PR 279, af19bb7) the controlinator.
+- D1137 (branch `logic-creature`, worktree
+  `E:\Projects\wt-d324`): the creature (docs/logic.md Part 39).
+- Decision numbers: D1100-D1199, next free D1138.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -105,7 +106,8 @@
   census-all-24.json the material tweaks (Part 35),
   census-all-25.json the emitters (Part 36),
   census-all-26.json the sequencers (Part 37),
-  census-all-27.json the controlinators (Part 38).
+  census-all-27.json the controlinators (Part 38),
+  census-all-28.json the creatures and enemies (Part 39).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -128,7 +130,9 @@ EBOOT rule and unit tests:
 1. Every placed switch type has a rule since D1131 (Part 14), and switch
    inputs since D1132 (Part 34), material tweaks since D1133 (Part 35),
    emitters since D1134 (Part 36), sequencers since D1135 (Part 37), controlinators
-   since D1136 (Part 38). The host
+   since D1136 (Part 38), creature deaths since D1137 (Part 39). The host
+   must call `CreatureState::touch`, `crush_frame` and `tick` with config values (NOT
+   FOUND). The host
    must carry out `LevelWorld.destroy_requests`, apply `lethal_type` and
    `body_material`, call `emitter_tick` each frame and spawn the plan when it
    says so, and call `sequencer_tick` each frame and `sequencer_input` when a
@@ -147,5 +151,7 @@ EBOOT rule and unit tests:
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
    the type 4 / angle-wrap question at 0x962590, the switch type bucket in 0x900730.
-5. Creatures; then the controlinator's getting in and out (0x6a3edc, gate 0x6a096c)
+5. The creature brain (PEnemy reader NOT FOUND; leads: the TOC entry for string
+   "PEnemy" 0xc79058, bit 0x1c tests), the player death path 0x63f28; then the
+   controlinator's getting in and out (0x6a3edc, gate 0x6a096c)
    and its recorded inputs (Part 38).
