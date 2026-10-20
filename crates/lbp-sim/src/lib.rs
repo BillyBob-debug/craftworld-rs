@@ -285,7 +285,8 @@ pub fn tag_spots<'a>(
 /// ([`scene::MoveTweak::push`], per tick, in order) with the tweak's current activation; a
 /// follower (configuration 11) follows `player` when it sees it. D1111: a follower with
 /// followKey follows instead the nearest tag in `tags` with its key that it sees and that
-/// is not on its own body (FOUND, 0x1c3e04). Wakes a body whose velocity changed.
+/// is not on its own body (FOUND, 0x1c3e04). D1154: a follower measures from its
+/// parent's point ([`scene::MoveTweak::at`]). Wakes a body whose velocity changed.
 pub fn drive_moves(
     commands: &mut Commands,
     q: &mut Query<(
@@ -305,8 +306,12 @@ pub fn drive_moves(
     for (e, tweaks, pos, rot, mut v) in q.iter_mut() {
         let up = [-rot.sin, rot.cos];
         let before = [v.0.x * per_tick, v.0.y * per_tick];
-        let me = [pos.0.x / UNIT_SCALE, pos.0.y / UNIT_SCALE];
         let after = tweaks.0.iter().fold(before, |vel, t| {
+            // D1154: from the follower's parent, carried by the body.
+            let me = [
+                pos.0.x / UNIT_SCALE + rot.cos * t.at[0] - rot.sin * t.at[1],
+                pos.0.y / UNIT_SCALE + rot.sin * t.at[0] + rot.cos * t.at[1],
+            ];
             let d = match t.key {
                 Some(k) => tags
                     .iter()

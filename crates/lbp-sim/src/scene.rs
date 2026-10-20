@@ -560,6 +560,10 @@ pub struct MoveTweak {
     /// D1151: the tweak's +0x220 angle (radians) turning its up axis; 0 until a host
     /// fills it (the parent chain's angle, D1148).
     pub angle: f32,
+    /// D1154: the point a follower looks and measures from, in its body's frame: its
+    /// Thing's parent (Thing+0x5c, else the Thing itself; 0x957df4 passes it to the
+    /// search 0x1c3e04 and subtracts its world translation from the target's).
+    pub at: [f32; 2],
 }
 
 /// D1110: `v` per unit length, or None for a zero vector.
@@ -1250,6 +1254,12 @@ fn build_scene_inner(
             .0
             .and_then(|b| body_of.get(&b).copied().flatten());
         if let Some(b) = slot {
+            // D1154: the parent's position, or its nearest positioned parent's (INFERRED
+            // for a parent with no matrix of its own, such as a chip's board).
+            let from = t.parent.filter(|&p| p != i).unwrap_or(i);
+            let at = placed(things, from).map_or([0.; 2], |p| {
+                scene.bodies[b].frame.local([p.world[12], p.world[13]])
+            });
             scene.bodies[b].moves.push(MoveTweak {
                 thing: i,
                 configuration: tw.configuration,
@@ -1267,6 +1277,7 @@ fn build_scene_inner(
                 key: (tw.configuration == 11 && tw.follow_key)
                     .then(|| key_of(tw.color_index, &tw.name)),
                 angle: 0.,
+                at,
             });
         }
     }
