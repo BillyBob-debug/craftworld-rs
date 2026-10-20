@@ -1064,3 +1064,52 @@ PEmitter (part bit 0x14) emits a copy of its plan on a clock or when a switch re
 - Tests: `unwired_emitter_emits_every_frequency_frames_after_the_phase`,
   `at_once_and_total_limits_gate_emits`,
   `wired_input_sets_the_speed_and_behavior_one_waits_for_the_switch`.
+
+## Part 37: the sequencer (D1135)
+
+PSequencer (part bit 0x2000000000, slot +0x94) moves a play head across its microchip's
+circuit board and switches the board's contents on in the columns under the head.
+
+- Offsets (reader 0xb57d20, ctor 0xf58c0): +0xc tempo (125), +0x10 swing, +0x14..+0x1c
+  echo feedback, time and mix, +0x20 reverb (3), +0x24 loop, +0x28 start point, +0x2c
+  channels, +0x30..+0x44 volumes, +0x48 play head, +0x4c playing, +0x4d music pending,
+  +0x50 frame count, +0x54 music sequencer (1), +0x64 trigger player, +0x68 behavior (2).
+  Kind (0x3ed2c): 4 for a music sequencer, 5 otherwise.
+- Board length: the microchip's +0x3c (0xf454c via 0xae380). INFERRED: it and +0x40
+  are the two f32 stored after the component list (CircuitBoardSizeX/Y).
+- Step (0xf45e4): base = tempo * 7/960 (0xd9593c). Unwired and not on another
+  sequencer: base while playing. Unwired on another sequencer: input 1, or 0 when the
+  Thing is deactivated. Wired (port 0 activation a, ternary t): behavior 0 and 6
+  base*t; 1 base*t, or -base when t is 0; 2 base while playing; 3 -base while playing;
+  4 base*a; 5 |a|*length - head. A music sequencer holds still while not pending and
+  frames <= 29.
+- Move (0xf5008): head + step below 0 stops at 0 (not playing) or loops to the end;
+  at or past the end it loops to 0 or stops at the end. Behaviors 2 and 3 and an
+  unwired top-level sequencer keep their playing flag (and stop playing at the end);
+  the rest play while the head is not 0. The setter (0xf4f20) works out the flag of
+  every Thing on the board again when the head changed (0x409dc).
+- Wires (0x11f3a0, kinds 4 and 5): a rising edge on port 0 starts behavior 2 from 0 and
+  behavior 3 from the end unless playing (0xf675c), and records the player; on port 1
+  it stops at 0 (0xf52b8). INFERRED: port 1 is the reset input.
+- Gating (0x409dc): a Thing on the board with no wired input is deactivated unless its
+  columns (s, e] hold head/52.5 (0xd92e94). Columns (0xae53c): x/52.5 from the
+  component list (+0x5c, 36-byte entries, words 3, 6 and 7 read as f32), w = word 6 /
+  word 7, at least 1; m = 2 for kinds 4, 0x48 and 0x49, else 1; s = floor(x - m + 0.5),
+  e = floor(w*m + x + 0.5); kinds 0x2f, 0x31, 0x32 (switch types 39, 15, 16) use w for
+  m in s and 1 in e. Behavior 6 with port 0 wired and off deactivates every Thing on
+  the board. INFERRED: words 3, 6, 7 are the stored f32 #0, #3, #4 (the Thing pointer
+  takes 3 words); 0x88f6cc is floor.
+- Census (census-all-26.json): 1,736 sequencers, port 0 wired 1,541, port 1 wired 207;
+  behavior 0 x46, 1 x8, 2 x1,556, 4 x4, 5 x122; loop 493; music 21; playing at load
+  198; head nonzero 132, past the end 26; length 0 once. 19,936 Things on their boards,
+  14,909 in the component list, 97 wired; 14,768 are outside the head at load.
+- Not modelled: the music (0x2cebcc, 0xf6db8), the pending byte +0x4d, 0x900730 on a
+  wired input with ternary 0, the other gating path when the board Thing's +0x10 bit 4
+  is set (0xae26c: local matrix x instead of the list, so 5,027 unlisted Things are not
+  gated), and the kind '%' call 0x368c40. NOT FOUND: the output a sequencer gives.
+  INFERRED: the frame count +0x50 counts `sequencer_tick` calls.
+- lbp-runtime: sequencer.rs, `ThingState.sequencer`, `LevelWorld::sequencer_tick` and
+  `sequencer_input`; lbp-level keeps PMicrochip's component list and board size.
+- Tests: `unwired_head_runs_at_tempo_and_stops_or_loops_at_the_end`,
+  `port_zero_starts_and_port_one_stops`,
+  `board_things_play_while_the_head_is_in_their_columns`.

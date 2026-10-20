@@ -339,6 +339,9 @@ pub struct PartData {
     /// PEmitter as stored (D1134).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub emitter: Option<Emitter>,
+    /// PSequencer as stored (D1135).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequencer: Option<Sequencer>,
     /// PSwitchInput as stored (D1132): the adapter a switch drives on a non-logic Thing.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub switch_input: Option<SwitchInput>,
@@ -445,11 +448,27 @@ pub struct SwitchKey {
     pub name: String,
 }
 
-/// PMicrochip as stored, the field kept: the Thing that is the chip's circuit board (the
-/// components on the board are its children). Null on a chip without a board.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+/// PMicrochip as stored, the fields kept: the Thing that is the chip's circuit board (the
+/// components on the board are its children; null on a chip without a board), the
+/// component list and the board size.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Microchip {
     pub circuit_board: Option<usize>,
+    /// The board's component list (+0x5c, D1135): a sequencer plays each by its columns.
+    pub components: Vec<ChipComponent>,
+    /// The two f32 after the list: the board's length and height (+0x3c, +0x40; read by
+    /// 0xf454c through 0xae380). INFERRED: that they are stored last.
+    pub board_size: [f32; 2],
+}
+
+/// One entry of a microchip's component list as stored: the Thing and five f32. INFERRED:
+/// the first is its x along the board and the fourth and fifth give its width (0xae53c
+/// reads entry words 3, 6 and 7 after the 3-word Thing pointer).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct ChipComponent {
+    pub thing: Option<usize>,
+    pub values: [f32; 5],
+    pub flag: bool,
 }
 
 /// PSwitchInput fields as stored (D1132, docs/logic.md Part 34). The sackbot fields and
@@ -514,6 +533,26 @@ pub struct Emitter {
     pub behavior: i32,
     pub ignore_parents_velocity: bool,
     pub editor_emitter: bool,
+}
+
+/// PSequencer as stored. Fields absent in older revisions keep their defaults.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize)]
+pub struct Sequencer {
+    pub tempo: f32,
+    pub swing: f32,
+    pub echo_feedback: f32,
+    pub echo_time: f32,
+    pub echo_mix: f32,
+    pub reverb_settings: i32,
+    pub looped: bool,
+    pub start_point: f32,
+    pub num_channels: i32,
+    pub volume: [f32; 6],
+    pub play_head: f32,
+    pub is_playing: bool,
+    pub music_sequencer: bool,
+    pub behavior: i32,
+    pub trigger_player: i32,
 }
 
 /// SwitchSignal as stored: activation f32, ternary s32, player i32 (-1 = no player).
@@ -1364,8 +1403,10 @@ fn part_body(
             r.i32()?;
         }
         "MICROCHIP" => {
-            let circuit_board = thing_ref(r, things)?;
-            things.list[me].data.microchip = Some(Microchip { circuit_board });
+            let mut chip = Microchip {
+                circuit_board: thing_ref(r, things)?,
+                ..Default::default()
+            };
             r.bool()?;
             r.bool()?;
             r.s32()?;
@@ -1374,12 +1415,21 @@ fn part_body(
                 r.wstr()?;
                 let n = r.count(1)?;
                 for _ in 0..n {
-                    thing_ref(r, things)?;
-                    r.skip_f32(5)?;
-                    r.bool()?;
+                    let thing = thing_ref(r, things)?;
+                    let mut values = [0.0; 5];
+                    for x in &mut values {
+                        *x = r.f32()?;
+                    }
+                    let flag = r.bool()?;
+                    chip.components.push(ChipComponent {
+                        thing,
+                        values,
+                        flag,
+                    });
                 }
-                r.skip_f32(2)?;
+                chip.board_size = [r.f32()?, r.f32()?];
             }
+            things.list[me].data.microchip = Some(chip);
         }
         "ENEMY" => {
             r.s32()?;
@@ -1411,30 +1461,8 @@ fn part_body(
             }
         }
         "SEQUENCER" => {
-            r.skip_f32(5)?;
-            if v > 0x370 {
-                r.i32()?;
-            }
-            if v > 0x36e {
-                r.bool()?;
-            }
-            r.f32()?;
-            r.i32()?;
-            r.skip_f32(6)?;
-            if v > 0x369 {
-                r.f32()?;
-                r.bool()?;
-            }
-            if v > 0x36c {
-                r.bool()?;
-            }
-            if v > 0x371 {
-                r.i32()?;
-            }
-            if v > 0x3a0 {
-                r.i32()?;
-                thing_ref(r, things)?;
-            }
+            let q = sequencer(r, things)?;
+            things.list[me].data.sequencer = Some(q);
         }
         "SWITCH" => {
             let switch = switch(r, things)?;
@@ -2187,6 +2215,44 @@ fn creature(r: &mut Reader, things: &mut Things) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn sequencer(r: &mut Reader, things: &mut Things) -> Result<Sequencer> {
+    let v = r.rev.version();
+    let mut q = Sequencer {
+        tempo: r.f32()?,
+        swing: r.f32()?,
+        echo_feedback: r.f32()?,
+        echo_time: r.f32()?,
+        echo_mix: r.f32()?,
+        ..Default::default()
+    };
+    if v > 0x370 {
+        q.reverb_settings = r.i32()?;
+    }
+    if v > 0x36e {
+        q.looped = r.bool()?;
+    }
+    q.start_point = r.f32()?;
+    q.num_channels = r.i32()?;
+    for x in &mut q.volume {
+        *x = r.f32()?;
+    }
+    if v > 0x369 {
+        q.play_head = r.f32()?;
+        q.is_playing = r.bool()?;
+    }
+    if v > 0x36c {
+        q.music_sequencer = r.bool()?;
+    }
+    if v > 0x371 {
+        q.behavior = r.i32()?;
+    }
+    if v > 0x3a0 {
+        q.trigger_player = r.i32()?;
+        thing_ref(r, things)?;
+    }
+    Ok(q)
 }
 
 fn emitter(r: &mut Reader, things: &mut Things) -> Result<Emitter> {
