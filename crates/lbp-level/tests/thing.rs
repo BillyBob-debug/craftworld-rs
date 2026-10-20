@@ -598,6 +598,46 @@ fn switch_and_switch_key_keep_the_sensor_fields() {
 }
 
 #[test]
+fn follow_key_tweak_colour_reads_like_the_tag_colour() {
+    // D1152: a PSwitchKey tag and a followKey PhysicsTweak on one Thing. Both colours are
+    // s32 (zigzag uleb when integers are compressed), so the pair matches in both modes.
+    for flags in [0u8, 1] {
+        let mut w = W::new(flags);
+        w.u32(1).raw(&[0x11; 20]); // cross-play hashes
+        w.u32(1)
+            .thing_header(1, 0, 0, 0, 0x3f, bit(0x1a) | bit(0x1e));
+        w.u32(2)
+            .s32(6)
+            .s32(6)
+            .raw(&[0, b'R', 0, b'i', 0, b's', 0, b'e', 0, b' ', 0, b'9']);
+        w.u8(0); // PSwitchKey
+        w.u32(3).f32(0.).f32(0.); // PPhysicsTweak: gravity, buoyancy
+        for _ in 0..9 {
+            w.f32(0.); // dampening, input, middleVel
+        }
+        w.f32(28.).f32(0.125).f32(0.125).u8(0).u32(11); // velRange, accel, decel, local, cfg
+        w.u8(0)
+            .s32(6)
+            .s32(6)
+            .raw(&[0, b'R', 0, b'i', 0, b's', 0, b'e', 0, b' ', 0, b'9']);
+        w.u8(0).s32(0).u8(0).u8(1); // teamFilter, behavior, allowInOut, allowUpDown
+        w.f32(0.).f32(2100.).u8(1).f32(180.).u8(0); // ranges, followKey, angleRange, flee
+        w.f32(0.).u8(0).s32(0).f32(0.).u8(0); // maximumMass .. waitingToMove
+        rlevel_tail_0x3f8(&mut w);
+        let r = run(&w, 0x3f8);
+        assert_eq!(r.stop, None, "flags {flags}");
+        let k = r.things[0].data.switch_key.as_ref().unwrap();
+        let t = r.things[0].data.physics_tweak.as_ref().unwrap();
+        assert_eq!((k.colour_index, k.name.as_str()), (6, "Rise 9"));
+        assert_eq!((t.color_index, t.name.as_str()), (6, "Rise 9"));
+        assert_eq!(
+            (t.configuration, t.follow_key, t.max_range),
+            (11, true, 2100.)
+        );
+    }
+}
+
+#[test]
 fn script_objects_keep_contents_and_shared_identity() {
     // Fields: a wide string, an f32 array, and an object array holding a back-reference to
     // the string, a null and a nested instance without a layout.

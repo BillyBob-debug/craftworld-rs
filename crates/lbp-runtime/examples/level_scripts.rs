@@ -3454,6 +3454,30 @@ fn run() -> Result<(), String> {
                 *totals.switches.sensors.entry(k).or_default() += 1;
             }
         }
+        // D1152: followKey tweaks (configurations 5 and 11) by whether a tag in the level
+        // has their exact (colour, name) pair, the key 0xceac0 compares; else whether a
+        // tag has the name in another colour.
+        let tags: Vec<_> = report
+            .things
+            .iter()
+            .filter_map(|t| t.data.switch_key.as_ref())
+            .map(|k| (k.colour_index, k.name.as_str()))
+            .collect();
+        for t in &report.things {
+            let Some(p) = &t.data.physics_tweak else {
+                continue;
+            };
+            if matches!(p.configuration, 5 | 11) && p.follow_key {
+                let pair = tags.contains(&(p.color_index, p.name.as_str()));
+                let named = tags.iter().any(|(_, n)| *n == p.name);
+                let k = format!(
+                    "followKey configuration {} tag pair {pair} name only {}",
+                    p.configuration,
+                    named && !pair
+                );
+                *totals.switches.sensors.entry(k).or_default() += 1;
+            }
+        }
         // D1149: turning tweaks by the ticks 0x1c21f4 takes to reach full speed
         // (range / (accel × range)), or none when accel × range is 0; D1150: followers
         // (configuration 11) too, as they call it at 0x9586cc.

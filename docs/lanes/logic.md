@@ -59,9 +59,10 @@
 - Merged: D1148 (PR 291, ee35293) the aim tweaks' stick, flip and lead.
 - Merged: D1149 (PR 292, c3eecb5) the exact turn speed of 0x1c21f4.
 - Merged: D1150 (PR 293, 4d67b8a) the followers' speed through 0x1c21f4.
-- D1151 (branch `logic-d1151`, worktree `E:\Projects\wt-d324`): the followers' up axis,
-  localSpace and allowInOut (docs/logic/part-53.md).
-- Decision numbers: D1100-D1199, next free D1152.
+- Merged: D1151 (PR 294, 269a784) the followers' up axis, localSpace and allowInOut.
+- D1152 (branch `logic-d1152`, worktree `E:\Projects\wt-d324`): the followers' tag key
+  colour is an s32 (docs/logic/part-54.md).
+- Decision numbers: D1100-D1199, next free D1153.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -106,7 +107,10 @@
   unchanged; after D1151 the crash near tick 688 in 1 of 2 runs, and the run that
   finished stopped at x 910.8 from tick 1111 (r held, Sackboy standing) to tick 2005
   instead of x 24,464, the same with or without allowInOut followers, so from D1149 or
-  D1150).
+  D1150; run with `$env:WGPU_BACKEND="dx12"` to avoid the device-lost crash; after
+  D1152 follower 2499 finds its tag and Sackboy stops at x -2,467.6 from about tick
+  1,000, ending at x -2,053.9 on tick 2,007, blocked by lift 2643, follower 2652 key 35,
+  jammed against gyroscope 1320, Part 54).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -137,7 +141,8 @@
   census-all-36.json the mirrored aim tweaks (Part 50),
   census-all-38.json the turning tweaks' ticks to full speed (Part 51),
   census-all-39.json the followers' ticks to full speed (Part 52),
-  census-all-40.json the followers by allowInOut, localSpace and allowUpDown (Part 53).
+  census-all-40.json the followers by allowInOut, localSpace and allowUpDown (Part 53),
+  census-all-42.json the followKey followers with a matching tag (Part 54).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -155,7 +160,8 @@
   Speed shaper 0x1c21f4 with root helper 0x1c2128 (Part 51). Followers (11) and 6-8
   via 0x957df4 (Part 12); followers call 0x1c21f4 at 0x9586cc (Part 52); +0x5c localSpace,
   +0xe4 allowInOut (layer move 0x1c8250, then packed), +0xe5 allowUpDown (0x9587ac) (Part 53); tag
-  search 0x1c3e04 and map 0xceb8c (Part 13).
+  search 0x1c3e04 and map 0xceb8c (Part 13); followKey match 0xceac0, colour reader
+  0xc1dc90 -> 0x8a9240 (zigzag LEB128 when compressed) for both tag and tweak (Part 54).
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -195,6 +201,8 @@ EBOOT rule and unit tests:
    angle (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
    for followers, a host filling `MoveTweak::angle`, the mirror negation of the
    localSpace angle, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
+   next on the route, why lift 2643 (MoveTweak 2652) jams against gyroscope 1320 at
+   x -2,074 (Part 54);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
