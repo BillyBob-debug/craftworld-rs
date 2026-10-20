@@ -366,6 +366,12 @@ pub struct SpinTweak {
     pub max_range: f32,
     pub angle_range: f32,
     pub key: Option<u32>,
+    /// D1148: configuration 4's stick, the Thing's wired inputs in slots 1 and 2
+    /// (0xcb02c, 0xcb074; INFERRED: the PHYSICS_TWEAK_X and _Y inputs); 0 when unwired.
+    pub stick: [f32; 2],
+    /// D1148: the mirror flip (0x95fd14): the tweak's mirror parity up its parent chain
+    /// (byte +0x224, built by 0xcd2e0) XOR its body's basis determinant below 0.
+    pub flip: bool,
 }
 
 /// D1144: the dead zone of the turning packer (0xc46400, 0x95fd88): an aim shorter than
@@ -417,17 +423,32 @@ impl SpinTweak {
     /// D1144: where the tweak aims (a world vector) for a body moving at `vel` (game units
     /// per tick) whose target, if it found one, is at `d` (target minus body). FOUND
     /// (0x95fd0c): 1 aims at world up; 3 along the body's velocity (state+0x10, x and y);
-    /// 4 along stick slots 1 and 2 (0xcb02c, 0xcb074), which nothing fills here, so 0;
-    /// 5 at its target (0x1c3e04), 0 with none. Not modelled: 5's lead by the target's
-    /// velocity (INFERRED from the vector steps), the mirror flag (negates 4's x) and the
-    /// +0x220 angle.
+    /// 4 along stick slots 1 and 2 (0xcb02c, 0xcb074; D1148: [`Self::stick`], x negated
+    /// by the flip); 5 at its target (0x1c3e04), 0 with none, with [`Self::lead`]
+    /// added by the caller for a moving target. Not modelled: the +0x220 parent angle
+    /// (0xcd2e0), which is 0 for a body with no parent chain.
     pub fn aim(&self, vel: [f32; 2], d: Option<[f32; 2]>) -> [f32; 2] {
         match self.configuration {
             3 => vel,
-            4 => [0., 0.],
+            4 => [
+                if self.flip {
+                    -self.stick[0]
+                } else {
+                    self.stick[0]
+                },
+                self.stick[1],
+            ],
             5 => d.unwrap_or([0., 0.]),
             _ => [0., 1.],
         }
+    }
+
+    /// D1148: configuration 5's lead (0x960924) for a target body moving at `vel` and
+    /// turning at `omega` whose centre is `r` from the aim point (point minus centre):
+    /// the point's velocity, vel + omega x r, unscaled. FOUND: added only when the
+    /// target has a body; the tweak's own velocity is never used.
+    pub fn lead(vel: [f32; 2], omega: f32, r: [f32; 2]) -> [f32; 2] {
+        [vel[0] - omega * r[1], vel[1] + omega * r[0]]
     }
 
     /// D1144: whether configuration 5 takes a target at `d` (target minus body) for a
@@ -1056,9 +1077,16 @@ fn build_scene_inner(
         else {
             continue;
         };
-        let slot = body_owner(things, i)
-            .0
-            .and_then(|b| body_of.get(&b).copied().flatten());
+        let owner = body_owner(things, i).0;
+        let slot = owner.and_then(|b| body_of.get(&b).copied().flatten());
+        // INFERRED: the world basis carries the parent chain's mirrors; a tweak Thing
+        // with no matrix of its own takes its body's.
+        let flip = things[i]
+            .data
+            .pos
+            .as_ref()
+            .or_else(|| owner.and_then(|o| things[o].data.pos.as_ref()))
+            .is_some_and(|p| p.world[0] * p.world[5] - p.world[1] * p.world[4] < 0.);
         if let Some(b) = slot {
             scene.bodies[b].spins.push(SpinTweak {
                 thing: i,
@@ -1073,6 +1101,8 @@ fn build_scene_inner(
                 angle_range: tw.angle_range,
                 key: (tw.configuration == 5 && tw.follow_key)
                     .then(|| key_of(tw.color_index, &tw.name)),
+                stick: [0.; 2],
+                flip,
             });
         }
     }

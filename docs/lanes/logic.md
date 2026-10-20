@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 (pistons; layer switch; recorded moves; attractors; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md (pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -55,9 +55,10 @@
 - Merged: D1144 (PR 287, 78d3e4e) turning tweaks 3, 4 and 5.
 - Merged: D1145 (PR 288, f34c212) the layer switch, configuration 12.
 - Merged: D1146 (PR 289, c240604) the recorded move player, configuration 13.
-- D1147 (branch `logic-d1147`, worktree `E:\Projects\wt-d324`): the attractor
-  tweak, configuration 14 (Part 49).
-- Decision numbers: D1100-D1199, next free D1148.
+- Merged: D1147 (PR 290, 5407aee) the attractor tweak, configuration 14.
+- D1148 (branch `logic-d1148`, worktree `E:\Projects\wt-d324`): the aim tweaks'
+  stick, flip and lead (Part 50).
+- Decision numbers: D1100-D1199, next free D1149.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -123,7 +124,8 @@
   census-all-31.json the chip-table cone walks and cursor chips (Part 45),
   census-all-32.json the PPhysicsTweak configurations (Part 46),
   census-all-33.json the recorded move players (Part 48),
-  census-all-34.json the attractor blocks (Part 49).
+  census-all-34.json the attractor blocks (Part 49),
+  census-all-36.json the mirrored aim tweaks (Part 50).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -174,9 +176,10 @@ EBOOT rule and unit tests:
    FOUND), call `PlaybackTweak::tick` each frame and drive the body towards
    `sample` at `frame` from its start pose (Part 48); for configuration 14, the
    gather around the camera and the SPU job's force (NOT FOUND, needs SPU code,
-   Part 49); stick
-   slots for configuration 4, configuration 5's lead, the exact 0x1c21f4 speed and which
-   wrapped term is its error, the flip and the +0x220 angle; the sackbot input, the
+   Part 49); for configurations 3-5, fill `SpinTweak.stick` from the wired X and Y
+   inputs, add `SpinTweak::lead` for a target with a body, and the +0x220 parent
+   angle (Part 50); the exact 0x1c21f4 speed and which wrapped term is its error;
+   the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,

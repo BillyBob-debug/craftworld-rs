@@ -1362,7 +1362,7 @@ builds an aim vector per configuration):
   0xcb074); a missing slot reads 0. The flip negates the aim's x (0x960108).
 - 5 aims at the nearest target of 0x1c3e04 (min +0xe8, max +0xec, cone +0xf0, key from
   byte +0x14 >> 4 and +0xd8): target minus body (state+0x20), plus the target's
-  velocity (lead INFERRED from the vector steps). No target gives speed 0.
+  point's velocity (the lead, Part 50). No target gives speed 0.
 - Dead zone (0xc46400, 0x95fd88): an aim with x² + y² under 0.1, or accel × velRange 0,
   sets the target speed to 0 and skips 0x1c21f4 and the clamp; the limits stay, so the
   body brakes.
@@ -1377,12 +1377,12 @@ builds an aim vector per configuration):
   Part 47 models it.
 
 lbp-sim (`SpinTweak::aim`, `target_along`, `sees`; `drive_spins` in lbp-sim and the
-viewer): 3 aims along the body's velocity in game units per tick, 4 at nothing (no
-stick slots here), 5 at the player or, with followKey, the nearest tag of its key not on
+viewer): 3 aims along the body's velocity in game units per tick, 4 along its stick
+(Part 50), 5 at the player or, with followKey, the nearest tag of its key not on
 its own body, searched as the follower's (Part 12). The error is the wrapped angle from
-the body's up axis to the aim (INFERRED), shaped as configuration 1. Not modelled: the
-lead, the flip and the +0x220 angle. followKey as 5's key is INFERRED (the same byte and
-field the follower reads).
+the body's up axis to the aim (INFERRED), shaped as configuration 1. The stick, flip and
+lead are Part 50. followKey as 5's key is INFERRED (the same byte and field the
+follower reads).
 
 Census (census-all-32.json, 358 of 378 levels read), PPhysicsTweak by configuration:
 0 ×42,984 (anti-gravity), 1 ×2,574, 2 ×124, 3 ×213, 4 ×80, 5 ×577 (491 with followKey),
@@ -1478,3 +1478,5 @@ every tweak (315 ×86, 525 ×56, 210 ×52, 840 ×23), so it may be a size rather
 rank; only its use as the winner is FOUND. flags [1, 1, 1] ×263; shared ×1.
 
 Test: `d1147_attractors_pick_the_highest_priority_own_or_shared_block`.
+
+Parts 50 on are one file each under docs/logic/ (docs/logic/part-50.md).
