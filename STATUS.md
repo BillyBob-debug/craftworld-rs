@@ -6812,3 +6812,8 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Logic lane: sequencers (1,736) move their play head by tempo and behavior and
   switch the Things on their board on under the head (0xf5008, 0x409dc;
   docs/logic.md Part 37).
+
+## D1136 the controlinator (2026-10-20)
+- Logic lane: control pads (546) read the driver of the controlinator (596) on their
+  Thing's grandparent: its link's driver, or in mode 8 the attached player (0x11d378,
+  0x6a0134; docs/logic.md Part 38).
