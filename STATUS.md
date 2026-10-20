@@ -6832,3 +6832,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 - Logic lane: a dead player respawns at a checkpoint that has a life left; the first
   activation gives lifeMultiplier x (players + 2) lives, and a respawn takes one unless
   lives are unlimited (0x599dc, 0x5a2d8, 0x5a0c4; docs/logic.md Part 41).
+
+## D1140 a destroyed controlinator kills its driver (2026-10-20)
+- Logic lane: a player sitting in a controlinator starts dying when the controlinator is
+  destroyed under them (0x7d5dc, 0x8d2bc; docs/logic.md Part 42).

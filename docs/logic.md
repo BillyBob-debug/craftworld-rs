@@ -1268,3 +1268,34 @@ All FOUND in 01.33 unless marked.
 - No census: it applies to every controlinator (Part 38).
 - lbp-runtime: `CreatureState.seat`, `CreatureState::seated_tick`,
   `LevelWorld::seat_destroyed`; `controlinator_enter` sets the seat.
+
+## Part 43: the cone and layer tests of the tag and player sensors (D1141)
+
+All FOUND in 01.33 unless marked. Census (378 levels): player sensors 5,627, of which
+1,811 have AngleRange < 180 and 212 IncludeTouching 1; tag sensors 16,953, of which
+2,975 and 489. IncludeTouching is only 0 or 1 on these two types.
+
+- Order per candidate (0x118d5c, 0x119910): range, then the cone when AngleRange < 180,
+  then the layer test when IncludeTouching is not 0.
+- Cone: passes when (dir . offset) / distance >= cos(AngleRange), AngleRange the half
+  angle in degrees. dir (0x1141f4) is the base of the proxy Thing (0x113fb0): its local
+  +Y, turned by the shortest arc that takes its local Z onto world Z, flattened and
+  normalised. That base is turned clockwise by PSwitch+0xdc, negated for a mirrored
+  proxy. 0x110140 (from 0xaec1c, a load or edit pass, INFERRED) sums +0xdc over the
+  sensor and the Things above it on the chip: each adds the inverse of its in-plane
+  rotation and a mirrored one negates the sum. So a plain sensor looks along its own
+  up, one on a chip along the chip's up turned by its rotation on the board.
+- Not modelled: a sensor on a cursor (0x1d3594), a Thing without a PPos (adds a float
+  from its chip's table, 0x1104ec). INFERRED: a candidate at distance 0 passes.
+- Layer, tag sensor (0x1196b0, 0x11984c): the body is the proxy's when the proxy has the
+  part at bit 31 of its part mask (INFERRED: the PShape), else its parent's. A sensor
+  without a body accepts; a tag with neither part nor parent is rejected, one whose
+  body is empty accepted; else the z spans of the two bodies' boxes (body+0x160) must
+  overlap, touching faces not counting.
+- Layer, player sensor (0x11a13c): a sensor span of 20 or less sees no player. Else
+  floor(min / 200 + 0.5) <= floor(player's middle z / 200) <= floor(max / 200 + 0.5)
+  (INFERRED: 0x758784 is floor). The checkpoint rule at 0x11a31c is not modelled.
+- INFERRED: the body box is the PShape slab, local z -thickness..+thickness, and the
+  local x / y box stands in for the outline of a tilted Thing.
+- lbp-runtime: `ThingState.shape_box`, `LevelWorld::z_span`,
+  `LevelWorld::cone_direction`; the tests in `tag_sensor` and `player_sensor`.
