@@ -372,6 +372,23 @@ impl Switches {
                     count(format!("{k} rigid connectors"), a.include_rigid_connectors);
                 }
             }
+            if let Some(m) = t.material_tweak {
+                // PMaterialTweak (D1133).
+                let wired = t.inputs.iter().any(Option::is_some);
+                count("tweak".into(), true);
+                count("tweak any input wired".into(), wired);
+                count("tweak hidden in play".into(), m.hide_in_play_mode);
+                count("tweak no auto destruct".into(), m.no_auto_destruct);
+                count("tweak physics audio off".into(), m.disable_physics_audio);
+                count("tweak shadow off".into(), m.has_shadow == Some(false));
+                count(format!("tweak grabbability {}", m.grabbability), true);
+                count(format!("tweak grab filter {}", m.grab_filter), true);
+                count(format!("tweak stickiness {}", m.stickiness), true);
+                count("tweak restitution not 0".into(), m.restitution != 0.0);
+                count("tweak friction not 1".into(), m.friction_scale != 1.0);
+                count("tweak has a parent".into(), t.parent.is_some());
+                count("tweak on at load".into(), world.tweak_on(i as u32));
+            }
             let Some(s) = t.switch.as_ref() else {
                 continue;
             };

@@ -14,7 +14,9 @@
 //! Entry names: `OnCreate__` and `Update__` are the create/update functions (PC D152:
 //! across the 49 classes Rookie Test and the other levels use, `OnCreate__` is defined by
 //! 24 and `Update__` by 11; the remaining names are UI, switch and enter/leave handlers).
-use lbp_level::parts::{ScriptObject, ScriptPart, ScriptValue, ShapeColor, SwitchSignal};
+use lbp_level::parts::{
+    MaterialTweak, ScriptObject, ScriptPart, ScriptValue, ShapeColor, SwitchSignal,
+};
 use lbp_level::thing::ThingRecord;
 use lbp_resource::translation::TranslationTable;
 use lbp_script_vm::natives::{
@@ -36,6 +38,7 @@ mod gooey;
 mod grab;
 mod level_unlocking;
 mod lever;
+mod material_tweak;
 mod media;
 mod message_view;
 mod messages;
@@ -69,6 +72,7 @@ pub use display::*;
 pub use global_settings::*;
 pub use gooey::*;
 pub use level_unlocking::*;
+pub use material_tweak::{BodyMaterial, STICKINESS_SEPARATE};
 pub use media::*;
 pub use message_view::*;
 pub use messages::*;
@@ -160,6 +164,8 @@ pub struct ThingState {
     pub switch_key: Option<TagKey>,
     /// PSwitchInput, when the Thing has one (D1132, [`LevelWorld::lethal_type`]).
     pub switch_input: Option<InputAdapter>,
+    /// PMaterialTweak as stored, when the Thing has one (D1133).
+    pub material_tweak: Option<MaterialTweak>,
     /// The motion of the Thing's physics body, as the host's physics reports it: the
     /// velocity sensors read it ([`velocity::BodyMotion`]). None unless the host fills it.
     pub body: Option<velocity::BodyMotion>,
@@ -232,7 +238,7 @@ pub struct SwitchState {
     /// output that is on, changed or not, and clears the flag. What sets it in the game
     /// is not established; nothing sets it here.
     pub force: bool,
-    /// The pocket item pedestal's value arrays (PSwitch+0xe4 â†’ +0x28 floats, +0x34 s8),
+    /// The pocket item pedestal's value arrays (PSwitch+0xe4 → +0x28 floats, +0x34 s8),
     /// one entry per output. The game refills them from a registry this runtime does not
     /// have, so they stay empty and the switch reads off (docs/logic.md Part 27).
     pub pedestal_activations: Vec<f32>,
@@ -961,6 +967,7 @@ impl LevelWorld {
                         include_rigid_connectors: p.include_rigid_connectors,
                         lethal_frame: p.lethal_activation_frame,
                     }),
+                    material_tweak: t.data.material_tweak,
                     ..Default::default()
                 })
                 .collect(),
