@@ -3482,6 +3482,19 @@ fn run() -> Result<(), String> {
                 };
                 *totals.switches.sensors.entry(k).or_default() += 1;
             }
+            // D1151: followers by allowInOut (a layer move at 0x1c8250 before the usual
+            // packing), else by the flags 0x957df4 reads, localSpace and allowUpDown.
+            if p.configuration == 11 {
+                let k = if p.allow_in_out {
+                    "follower allowInOut yes".to_string()
+                } else {
+                    format!(
+                        "follower allowInOut no localSpace {} allowUpDown {}",
+                        p.local_space, p.allow_up_down
+                    )
+                };
+                *totals.switches.sensors.entry(k).or_default() += 1;
+            }
         }
         row["level"] = serde_json::json!(label);
         row["stopped"] = serde_json::json!(report.stop.is_some());

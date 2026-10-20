@@ -57,11 +57,11 @@
 - Merged: D1146 (PR 289, c240604) the recorded move player, configuration 13.
 - Merged: D1147 (PR 290, 5407aee) the attractor tweak, configuration 14.
 - Merged: D1148 (PR 291, ee35293) the aim tweaks' stick, flip and lead.
-- D1149 (PR 292, branch `logic-d1149`): the exact turn speed of 0x1c21f4
-  (docs/logic/part-51.md).
-- D1150 (branch `logic-d1150`, worktree `E:\Projects\wt-d324`, on D1149): the
-  followers' speed through 0x1c21f4 (docs/logic/part-52.md).
-- Decision numbers: D1100-D1199, next free D1151.
+- Merged: D1149 (PR 292, c3eecb5) the exact turn speed of 0x1c21f4.
+- Merged: D1150 (PR 293, 4d67b8a) the followers' speed through 0x1c21f4.
+- D1151 (branch `logic-d1151`, worktree `E:\Projects\wt-d324`): the followers' up axis,
+  localSpace and allowInOut (docs/logic/part-53.md).
+- Decision numbers: D1100-D1199, next free D1152.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -103,7 +103,10 @@
   main without D1136 too; after D1143 to D1148 x 24,464 on tick 2005, unchanged;
   after D1149 the GPU crash near tick 685 in 4 of 4 runs, with Sackboy at
   x -11,704.3 on tick 680 as on the D1148 build; after D1150 the same crash, tick 680
-  unchanged).
+  unchanged; after D1151 the crash near tick 688 in 1 of 2 runs, and the run that
+  finished stopped at x 910.8 from tick 1111 (r held, Sackboy standing) to tick 2005
+  instead of x 24,464, the same with or without allowInOut followers, so from D1149 or
+  D1150).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -133,7 +136,8 @@
   census-all-34.json the attractor blocks (Part 49),
   census-all-36.json the mirrored aim tweaks (Part 50),
   census-all-38.json the turning tweaks' ticks to full speed (Part 51),
-  census-all-39.json the followers' ticks to full speed (Part 52).
+  census-all-39.json the followers' ticks to full speed (Part 52),
+  census-all-40.json the followers by allowInOut, localSpace and allowUpDown (Part 53).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -149,7 +153,8 @@
   Part 46). Row: target turn speed
   +0x20, limits +0x24/+0x28 = ±accel × velRange, × activation × 1/mass (0x95fdc8).
   Speed shaper 0x1c21f4 with root helper 0x1c2128 (Part 51). Followers (11) and 6-8
-  via 0x957df4 (Part 12); followers call 0x1c21f4 at 0x9586cc (Part 52); tag
+  via 0x957df4 (Part 12); followers call 0x1c21f4 at 0x9586cc (Part 52); +0x5c localSpace,
+  +0xe4 allowInOut (layer move 0x1c8250, then packed), +0xe5 allowUpDown (0x9587ac) (Part 53); tag
   search 0x1c3e04 and map 0xceb8c (Part 13).
 
 ## Next
@@ -188,8 +193,9 @@ EBOOT rule and unit tests:
    Part 49); for configurations 3-5, fill `SpinTweak.stick` from the wired X and Y
    inputs, add `SpinTweak::lead` for a target with a body, and the +0x220 parent
    angle (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
-   the follower's +0xe5 offset branch (0x9587ac) and +0x5c rotation (0x9582b4,
-   Part 52); the sackbot input, the
+   for followers, a host filling `MoveTweak::angle`, the mirror negation of the
+   localSpace angle, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
+   the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
