@@ -383,6 +383,41 @@ impl Switches {
                 }
                 continue;
             }
+            if s.switch_type == 5 {
+                // The sticker switch passes its ManualActivation through (0x11c820).
+                let m = s.manual_activation;
+                count("sticker".into(), true);
+                count("sticker inverted".into(), s.inverted);
+                count(format!("sticker outputs={}", s.outputs.len()), true);
+                count(
+                    format!("sticker manual {} {} {}", m.activation, m.ternary, m.player),
+                    true,
+                );
+                let want = if s.inverted {
+                    let a = if m.activation < 0. {
+                        m.activation + 1.
+                    } else {
+                        1. - m.activation
+                    };
+                    (a, i32::from(m.ternary == 0))
+                } else {
+                    (m.activation, m.ternary)
+                };
+                for (o, out) in s.outputs.iter().enumerate() {
+                    let Some(out) = out.as_ref() else { continue };
+                    let st = out.stored;
+                    count(format!("sticker output {o} wired"), !out.targets.is_empty());
+                    count(
+                        format!("sticker output {o} stored {} {}", st.activation, st.ternary),
+                        true,
+                    );
+                    count(
+                        "sticker output matches manual".into(),
+                        (st.activation - want.0).abs() < 1e-3 && st.ternary == want.1,
+                    );
+                }
+                continue;
+            }
             if s.switch_type == 1 || s.switch_type == 2 {
                 let k = if s.switch_type == 1 {
                     "lever"

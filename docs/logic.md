@@ -396,9 +396,9 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   pad 38 (535; Part 21), key remote 54 (497; Part 22), button 0 (224; Part 23),
   motion recorder 45 (142; Part 24), angle 41 (126; Part 25), wormhole 57 (123;
   Part 26), pocket item pedestal 65 (77; Part 27), lever 1 (74; Part 28),
-  three-way switch 2 (7; Part 29).
+  three-way switch 2 (7; Part 29), sticker 5 (68; Part 30, its manual value).
 - Kept as stored (the world signal is not modelled yet):
-  sticker 5 (68), score 30 (51), movinator pad 44 (50), 55 (11).
+  score 30 (51), movinator pad 44 (50), 55 (11).
 - Gate modes: AND 5,641 mode 0 and 56 mode 1; OR 4,084 mode 0 and 5 mode 1; NOT 5,686
   of 5,794 inverted. Timer behaviours 0-4: 4,194, 2,410, 5,159, 3,710, 40.
 - The names come from docs/runtime-evidence/logic.md A4; types 55, 57 and 65 are past
@@ -863,3 +863,28 @@ and the same x in the switch Thing's frame.
   agrees on 7 of 7. INFERRED: the gap is the same unmodelled body point as the lever's.
 - lbp-runtime: `trinary` in lever.rs; `default_ternary` now takes the held ternary.
 - Tests: `trinary_is_signed`, `trinary_inverts_by_negation` in lever.rs.
+
+## Part 30: the sticker switch (D1128)
+
+Switch type 5 (68 placed) is the sticker switch. compute_output's table 0x11be00
+entry 5 is 0x11c820, shared with types 9, 10, 17 (toggle), 28 (battery) and 29: it
+reloads ManualActivation (PSwitch+0xc activation, +0x10 ternary, +0x14 player) and
+stores it through the standard inversion tail. So the sticker switch outputs its own
+ManualActivation, as the battery does.
+
+- The writer is 0x53c584, run when a sticker is placed (not each frame). Through the
+  setter 0x10a5ec (trampoline 0x89882c, call at 0x53c908) it sets ManualActivation to
+  {1.0 (0xda6778), 1, -1} on each sticker switch whose Thing is within PSwitch+0x74 of
+  the placed sticker (squared distance, 0x53c744..0x53c770).
+- The reference is PSwitch+0x9c, INFERRED the serialized stickerPlan. Without a valid
+  plan reference (resource type 0x26) any sticker matches; with one, the placed
+  sticker's descriptor must equal it (0x53c9f0..0x53ca38; the hash compare 0x8959fc
+  INFERRED). No code that clears it again was found.
+- On a match it also triggers the switch's effect list (PSwitch+0x50) or the
+  "gameplay/sticker_switch/match" sound; INFERRED, not modelled.
+- Census (census-all-18.json): 68 sticker switches, none inverted, all with one
+  wired output; ManualActivation {0, 0, -1} on all 68, and the stored output equals
+  it (through the inversion) on 68 of 68.
+- Not modelled: placing stickers, so ManualActivation stays as loaded.
+- lbp-runtime: the `5 | 17 | 28` arm in switches.rs.
+- Test: `sticker_switch_passes_its_manual_activation` in switches.rs.
