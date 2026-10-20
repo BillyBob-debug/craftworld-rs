@@ -121,6 +121,9 @@ pub struct ThingState {
     pub script_classes: Vec<String>,
     /// Script members by field name; `None` when the Thing has no PScript layout.
     pub members: Option<BTreeMap<String, Value>>,
+    /// PShape's local box: x and y of its vertices (min x, max x, min y, max y) and its
+    /// thickness; the slab spans local z -thickness..+thickness ([`LevelWorld::z_span`]).
+    pub shape_box: Option<[f32; 5]>,
     /// PShape colour as a colour vector (`GetShapeEditorColour`).
     pub shape_colour: Option<[f32; 4]>,
     /// PShape colour tint a script set (`SetShapeEditorColourTint`); nothing draws it.
@@ -997,6 +1000,7 @@ impl LevelWorld {
                     enemy: t.data.enemy,
                     creature: t.parts.contains(&"CREATURE").then(CreatureState::default),
                     checkpoint: t.data.checkpoint.map(CheckpointLives::from),
+                    shape_box: t.data.shape.as_ref().and_then(sensors::shape_box),
                     ..Default::default()
                 })
                 .collect(),

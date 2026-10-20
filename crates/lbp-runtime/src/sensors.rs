@@ -9,13 +9,14 @@
 //!   ([`crate::compute_output`]), also to "off".
 //! - Distances are between world positions, x and y only.
 //!
-//! Not modelled:
-//! - The cone of a sensor whose AngleRange is below 180: the test is known (the cosine of
-//!   the angle to a direction against cos(AngleRange)), the direction is not, so every
-//!   direction passes (INFERRED choice).
-//! - The layer test of a sensor whose IncludeTouching is not 0: it needs the z span of the
-//!   sensor's and the tag's body, which the runtime does not keep, so every layer passes
-//!   (INFERRED choice).
+//! Modelled since D1141, and not modelled:
+//! - The cone of a sensor whose AngleRange is below 180 is modelled
+//!   ([`LevelWorld::cone_direction`]), except for a sensor on a cursor and the chip-table
+//!   angle of a Thing without a PPos.
+//! - The layer test of a sensor whose IncludeTouching is not 0 (0x1196b0, 0x11a13c) is
+//!   modelled from each body's PShape slab ([`LevelWorld::z_span`]); a tilted Thing's
+//!   outline is approximated by its local box, and the unspawned-checkpoint rule of a
+//!   player sensor (0x11a31c) is not modelled.
 //! - A sensor or tag on a player's cursor; the body's owning player (the player a tag
 //!   without one is given, and the "own" and "other" team filters of a versus level).
 //! - The body centre the player sensor measures between: the Thing positions are used.
@@ -30,6 +31,69 @@ use crate::switches::{clamp, held_ternary, wired, SwitchContext, SIGNAL_OFF};
 use crate::{LevelWorld, SwitchState, TagRecord};
 use lbp_script_vm::natives::SwitchInput;
 
+/// A sensor's or a tag's body for the layer test.
+enum Body {
+    /// Neither the Thing nor its proxy has the part, and there is no parent.
+    NoParent,
+    /// The holder has no slab (no PShape or no PPos).
+    None,
+    /// The slab's world z span.
+    Span(f32, f32),
+}
+
+/// The local box of a PShape: x and y bounds of its vertices and its thickness.
+pub(crate) fn shape_box(s: &lbp_level::parts::Shape) -> Option<[f32; 5]> {
+    let mut b = [f32::MAX, f32::MIN, f32::MAX, f32::MIN, s.thickness];
+    for v in &s.vertices {
+        b = [
+            b[0].min(v[0]),
+            b[1].max(v[0]),
+            b[2].min(v[1]),
+            b[3].max(v[1]),
+            b[4],
+        ];
+    }
+    (!s.vertices.is_empty()).then_some(b)
+}
+
+/// How many Things above a sensor the cone's rotation sum walks at most.
+const MAX_CONE_DEPTH: usize = 64;
+
+fn normalize3(v: [f32; 3]) -> [f32; 3] {
+    let l = (v[0] * v[0] + v[1] * v[1] + v[2] * v[2]).sqrt();
+    if l == 0. {
+        v
+    } else {
+        v.map(|x| x / l)
+    }
+}
+
+fn cross(a: [f32; 3], b: [f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
+/// Determinant of the upper 3 x 3 of a column-major matrix.
+fn det3(m: &[f32; 16]) -> f32 {
+    let c = cross([m[0], m[1], m[2]], [m[4], m[5], m[6]]);
+    c[0] * m[8] + c[1] * m[9] + c[2] * m[10]
+}
+
+/// The cone test of a sensor whose AngleRange is below 180 (FOUND, 0x118d5c and
+/// 0x119910): the cosine of the angle between `dir` and the candidate's offset must be at
+/// least cos(AngleRange), the half angle in degrees. INFERRED: a candidate at the
+/// sensor's own point passes; a sensor without a direction sees nothing.
+fn in_cone(s: &SwitchState, dir: Option<[f32; 2]>, dx: f32, dy: f32, d2: f32) -> bool {
+    if s.angle_range >= 180. {
+        return true;
+    }
+    let Some([x, y]) = dir else { return false };
+    d2 == 0. || (x * dx + y * dy) / d2.sqrt() >= s.angle_range.to_radians().cos()
+}
+
 /// The signal of a tag with nothing wired to it (FOUND, 0x12f6f4).
 const TAG_ON: SwitchInput = SwitchInput {
     activation: 1.,
@@ -43,6 +107,130 @@ impl LevelWorld {
     /// [`LevelWorld::microchip_of`]).
     pub fn sensor_proxy(&self, thing: u32) -> u32 {
         self.microchip_of(thing).unwrap_or(thing)
+    }
+
+    /// World z span (nearest, farthest) of a Thing's PShape slab, from its local box and
+    /// its world matrix; `None` without a PShape or a PPos.
+    ///
+    /// INFERRED: the game's body box (+0x160 of the body) holds the slab's world bounds; the
+    /// local x / y box stands in for the outline, the same when the Thing is not tilted.
+    pub fn z_span(&self, thing: u32) -> Option<(f32, f32)> {
+        let t = self.things.get(thing as usize)?;
+        let ([x0, x1, y0, y1, d], m) = (t.shape_box?, t.world_matrix?);
+        let z = |x: f32, y: f32| m[2] * x + m[6] * y + m[14];
+        let lo = z(x0, y0).min(z(x0, y1)).min(z(x1, y0)).min(z(x1, y1));
+        let hi = z(x0, y0).max(z(x0, y1)).max(z(x1, y0)).max(z(x1, y1));
+        let depth = (m[10] * d).abs();
+        Some((lo - depth, hi + depth))
+    }
+
+    /// The body a sensor or a tag is measured by (FOUND 0x1196b0, 0x11984c): its proxy's
+    /// when the proxy has the body part, else the proxy's parent's.
+    ///
+    /// INFERRED: the part tested (bit 31 of Thing+0x10) is the PShape.
+    fn body_of(&self, thing: u32) -> Body {
+        let p = self.sensor_proxy(thing);
+        let Some(t) = self.things.get(p as usize) else {
+            return Body::NoParent;
+        };
+        let holder = if t.parts.contains(&"SHAPE") {
+            p
+        } else if let Some(parent) = t.parent {
+            parent
+        } else {
+            return Body::NoParent;
+        };
+        self.z_span(holder)
+            .map_or(Body::None, |(lo, hi)| Body::Span(lo, hi))
+    }
+
+    /// The layer test of a sensor whose IncludeTouching is not 0 against a tag
+    /// (FOUND 0x119844): accepted when the sensor has no body or the tag's body is empty,
+    /// rejected when the tag has neither the part nor a parent, else the z spans must
+    /// overlap.
+    fn tag_in_layer(&self, sensor: u32, tag: u32) -> bool {
+        let Body::Span(s0, s1) = self.body_of(sensor) else {
+            return true;
+        };
+        match self.body_of(tag) {
+            Body::NoParent => false,
+            Body::None => true,
+            Body::Span(t0, t1) => !(s0 >= t1 || t0 >= s1),
+        }
+    }
+
+    /// The layer test of a player sensor whose IncludeTouching is not 0 (FOUND 0x11a13c):
+    /// accepted when the sensor has no body; rejected when its span is 20 or thinner;
+    /// else the player's middle layer (z / 200, floored) must lie between the sensor's
+    /// nearest and farthest layer (rounded).
+    ///
+    /// INFERRED: 0x758784 is floor; the player's body span is [`PlayerState::layers`].
+    fn player_in_layer(&self, sensor: u32, layers: (f32, f32)) -> bool {
+        let Body::Span(s0, s1) = self.body_of(sensor) else {
+            return true;
+        };
+        if s1 - s0 <= 20. {
+            return false;
+        }
+        let (lo, hi) = ((s0 / 200. + 0.5).floor(), (s1 / 200. + 0.5).floor());
+        let p = ((layers.0 + layers.1) * 0.5 / 200.).floor();
+        lo <= p && p <= hi
+    }
+
+    /// The x / y direction a sensor's cone points along (FOUND 0x1141f4, 0x113fb0,
+    /// 0x110140): its proxy's local +Y, with the tilt of the proxy's local Z turned out by
+    /// the shortest arc onto world Z, flattened and normalised, then turned by the
+    /// sensor's rotation on its chip. A sensor that is its own proxy points along its own
+    /// +Y. `None` without a PPos on the proxy.
+    ///
+    /// The rotation (PSwitch+0xdc) adds, for the sensor and each Thing above it until one
+    /// that is not on a chip, the inverse of its in-plane rotation in its local matrix,
+    /// and negates the sum after a mirrored one; the direction is the base turned the
+    /// other way round, negated again for a mirrored proxy.
+    ///
+    /// INFERRED: the game runs the sum when a level is loaded or edited, this runtime on
+    /// every test; a Thing without a PPos adds 0 (the game takes an angle from its chip's
+    /// table, not decoded); a sensor on a cursor is not modelled.
+    pub fn cone_direction(&self, sensor: u32) -> Option<[f32; 2]> {
+        let proxy = self.sensor_proxy(sensor);
+        let m = self.things.get(proxy as usize)?.world_matrix?;
+        let n = normalize3([m[8], m[9], m[10]]);
+        let y = [m[4], m[5], m[6]];
+        // Rodrigues with the unnormalised axis a = n x Z (|a| = sin, c = cos).
+        let (a, c) = ([n[1], -n[0], 0.], n[2]);
+        let v = if c > -1. + 1e-6 {
+            let ay = cross(a, y);
+            let k = (a[0] * y[0] + a[1] * y[1]) / (1. + c);
+            [0, 1].map(|i| y[i] * c + ay[i] + a[i] * k)
+        } else {
+            [y[0], y[1]]
+        };
+        let len = v[0].hypot(v[1]);
+        if len == 0. {
+            return None;
+        }
+        let mut angle = 0f32;
+        let mut t = sensor;
+        for _ in 0..MAX_CONE_DEPTH {
+            if self.microchip_of(t).is_none_or(|c| c == t) {
+                break;
+            }
+            let thing = &self.things[t as usize];
+            if let Some(l) = thing.local_matrix {
+                angle += -(-l[4]).atan2(l[5]);
+                if det3(&l) < 0. {
+                    angle = -angle;
+                }
+            }
+            let Some(parent) = thing.parent else { break };
+            t = parent;
+        }
+        if det3(&m) < 0. {
+            angle = -angle;
+        }
+        let (sin, cos) = angle.sin_cos();
+        let (x, y) = (v[0] / len, v[1] / len);
+        Some([x * cos + y * sin, y * cos - x * sin])
     }
 
     /// World x and y of a Thing with a PPos.
@@ -202,6 +390,7 @@ pub(crate) fn tag_sensor(cx: &SwitchContext<'_>) -> SwitchInput {
     } else {
         &tags[..]
     };
+    let dir = w.cone_direction(cx.thing);
     let signal_mode = s.key_sensor_mode == 1;
     let needed = usize::try_from(s.bullets_required).unwrap_or(0);
     let mut best: Vec<SwitchInput> = Vec::new();
@@ -227,7 +416,10 @@ pub(crate) fn tag_sensor(cx: &SwitchContext<'_>) -> SwitchInput {
         }
         let (dx, dy) = (r.x - sx, r.y - sy);
         let d2 = dx * dx + dy * dy;
-        if !in_range(s, d2) {
+        if !in_range(s, d2) || !in_cone(s, dir, dx, dy, d2) {
+            continue;
+        }
+        if s.include_touching != 0 && !w.tag_in_layer(cx.thing, r.thing) {
             continue;
         }
         if !signal_mode {
@@ -278,6 +470,7 @@ pub(crate) fn player_sensor(cx: &SwitchContext<'_>) -> SwitchInput {
     let Some([sx, sy]) = w.point(w.sensor_proxy(cx.thing)) else {
         return SIGNAL_OFF;
     };
+    let dir = w.cone_direction(cx.thing);
     let leader = w.player_records.first().map(|r| r.number);
     let bullets = usize::try_from(s.bullets_required).unwrap_or(0);
     let cap = if s.require_all { 4 } else { bullets };
@@ -293,7 +486,10 @@ pub(crate) fn player_sensor(cx: &SwitchContext<'_>) -> SwitchInput {
         };
         let (dx, dy) = (px - sx, py - sy);
         let d2 = dx * dx + dy * dy;
-        if !in_range(s, d2) {
+        if !in_range(s, d2) || !in_cone(s, dir, dx, dy, d2) {
+            continue;
+        }
+        if s.include_touching != 0 && !w.player_in_layer(cx.thing, p.layers) {
             continue;
         }
         if nearest.first().is_none_or(|&n| d2 < n) {
@@ -855,5 +1051,128 @@ mod tests {
         state(&mut w, 0).radius = -1.;
         w.move_player(a, [9000., 0., 0.], (0., 0.));
         assert_eq!(pass(&mut w, 0), sig(1., 1, 0));
+    }
+
+    /// Gives Thing `thing` a PShape slab of half depth `depth` (a 20 x 20 outline) at z.
+    fn slab(w: &mut LevelWorld, thing: usize, z: f32, depth: f32) {
+        let t = &mut w.things[thing];
+        t.parts.push("SHAPE");
+        t.shape_box = Some([-10., 10., -10., 10., depth]);
+        t.world_matrix.as_mut().unwrap()[14] = z;
+    }
+
+    #[test]
+    fn tag_sensor_layer_test() {
+        let mut w = world(vec![tag_sensor_thing(), tag(10., 0.), tag(0., 0.)]);
+        w.things[2].switch_key = None;
+        slab(&mut w, 0, 0., 50.);
+        slab(&mut w, 1, 200., 10.);
+        // IncludeTouching 0: every layer counts.
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+        // Otherwise the slabs must overlap in z.
+        state(&mut w, 0).include_touching = 1;
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        w.things[1].world_matrix.as_mut().unwrap()[14] = 40.;
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+        // Touching faces do not overlap.
+        w.things[1].world_matrix.as_mut().unwrap()[14] = 60.;
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        // A tag with no slab and no parent is rejected; one whose parent has no slab is
+        // accepted.
+        w.things[1].parts.clear();
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        w.things[1].parent = Some(2);
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+        // The parent's slab is the tag's when the tag has none.
+        slab(&mut w, 2, 300., 10.);
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        // A sensor with no body accepts every layer.
+        w.things[0].parts.clear();
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+    }
+
+    #[test]
+    fn player_sensor_layer_test() {
+        let mut w = world(vec![switch(3, 0., 0., &[])]);
+        slab(&mut w, 0, 0., 50.);
+        state(&mut w, 0).include_touching = 1;
+        let p = w.add_player([10., 0., 0.], (-10., 10.));
+        // The sensor spans layer 0 only (z -50..50); the player's middle is in layer 0.
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+        w.move_player(p, [10., 0., 0.], (190., 210.));
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        // A deeper slab reaches the next layer (z -50..250 rounds to layers 0..1).
+        slab(&mut w, 0, 100., 150.);
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+        // A slab 20 deep or thinner sees no player.
+        slab(&mut w, 0, 200., 10.);
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        state(&mut w, 0).include_touching = 0;
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+    }
+
+    /// Turns Thing `thing`'s world and local matrices `deg` degrees counter-clockwise in
+    /// the plane, keeping its position.
+    fn turn(w: &mut LevelWorld, thing: usize, deg: f32) {
+        let (sin, cos) = deg.to_radians().sin_cos();
+        let t = &mut w.things[thing];
+        for m in [&mut t.world_matrix, &mut t.local_matrix] {
+            let m = m.get_or_insert_with(|| at(0., 0.).unwrap());
+            (m[0], m[1], m[4], m[5]) = (cos, sin, -sin, cos);
+        }
+    }
+
+    #[test]
+    fn tag_sensor_cone_points_along_local_up() {
+        let mut w = world(vec![tag_sensor_thing(), tag(0., 50.)]);
+        state(&mut w, 0).angle_range = 45.;
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+        // 37 degrees off up is inside a 45 degree half angle; 90 is not.
+        move_to(&mut w, 1, 30., 40.);
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+        move_to(&mut w, 1, 50., 0.);
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        // Turned 90 degrees counter-clockwise, the cone points along -x.
+        move_to(&mut w, 1, -50., 0.);
+        assert_eq!(pass(&mut w, 0), SIGNAL_OFF);
+        turn(&mut w, 0, 90.);
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+        // AngleRange 180 sees every direction.
+        state(&mut w, 0).angle_range = 180.;
+        move_to(&mut w, 1, 50., 0.);
+        assert_eq!(pass(&mut w, 0).ternary, 1);
+    }
+
+    #[test]
+    fn cone_direction_on_a_chip_and_tilted() {
+        // Thing 0 a chip turned 90 degrees, board 1, sensor 2 on the board turned 90 more.
+        let chip = ThingState {
+            world_matrix: at(0., 0.),
+            circuit_board: Some(1),
+            ..Default::default()
+        };
+        let mut sensor = tag_sensor_thing();
+        sensor.parent = Some(1);
+        let board = ThingState {
+            parent: Some(0),
+            ..Default::default()
+        };
+        let mut w = world(vec![chip, board, sensor]);
+        w.board_owners.insert(1, 0);
+        turn(&mut w, 0, 90.);
+        let close = |d: Option<[f32; 2]>, e: [f32; 2]| {
+            let d = d.unwrap();
+            (d[0] - e[0]).abs() < 1e-5 && (d[1] - e[1]).abs() < 1e-5
+        };
+        // The chip's up is -x; the sensor's own rotation on the board turns it on to -y.
+        assert!(close(w.cone_direction(2), [-1., 0.]));
+        turn(&mut w, 2, 90.);
+        assert!(close(w.cone_direction(2), [0., -1.]));
+        // A chip leaning back about x still points its cone along its flattened +y.
+        let m = w.things[0].world_matrix.as_mut().unwrap();
+        let (sin, cos) = 30f32.to_radians().sin_cos();
+        *m = at(0., 0.).unwrap();
+        (m[5], m[6], m[9], m[10]) = (cos, sin, -sin, cos);
+        assert!(close(w.cone_direction(0), [0., 1.]));
     }
 }
