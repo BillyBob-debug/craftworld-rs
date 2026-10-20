@@ -118,6 +118,81 @@ pub struct SceneBody {
     pub moves: Vec<MoveTweak>,
     /// D1145: its layer switches (configuration 12), in Thing order.
     pub layers: Vec<LayerTweak>,
+    /// D1146: its recorded move players (configuration 13), in Thing order.
+    pub playbacks: Vec<PlaybackTweak>,
+}
+
+/// D1146: a PPhysicsTweak with configuration 13, which plays a recorded move relative to
+/// where its body stood when it started. Read from 0xcb688 and 0x3ced10 (EBOOT 01.33);
+/// the frames live in the recording resource, not the level.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct PlaybackTweak {
+    /// The PPhysicsTweak's Thing index.
+    pub thing: usize,
+    /// The input mode (D1101): 0 digital, otherwise analog.
+    pub behavior: i32,
+    /// The saved player (INFERRED mapping, docs/logic.md Part 48).
+    pub player: lbp_level::parts::RecordingPlayer,
+    /// The play head in frames, and whether the start pose has been taken.
+    pub pos: f32,
+    pub started: bool,
+}
+
+impl PlaybackTweak {
+    /// D1146: one call with the input at `activation`. FOUND (0xcb688): above 0.001 it
+    /// starts (taking the body's pose as the origin) or goes on, the head moving by
+    /// activation × speed (0x3ced10); at or below, a digital input restarts from a fresh
+    /// pose next time (0x3ce348) and an analog one pauses. Returns whether it plays.
+    pub fn tick(&mut self, activation: f32) -> bool {
+        if activation > 0.001 {
+            if !self.started {
+                self.started = true;
+                self.pos = 0.;
+            }
+            self.pos += activation * self.player.speed;
+            true
+        } else {
+            if self.behavior == 0 {
+                self.started = false;
+            }
+            false
+        }
+    }
+
+    /// D1146: the frame to sample in a recording of `len` frames. FOUND (0x3ced10): dir 0
+    /// plays forward, 1 backward (len - 1 - pos), 2 back and forth. INFERRED: past the end
+    /// it holds the last frame (kind 2 is FOUND to clamp), and back and forth turns at
+    /// each end.
+    pub fn frame(&self, len: usize) -> f32 {
+        let last = len.saturating_sub(1) as f32;
+        if last == 0. {
+            return 0.;
+        }
+        match self.player.dir {
+            1 => last - self.pos.clamp(0., last),
+            2 => {
+                let t = self.pos.max(0.) % (2. * last);
+                if t > last {
+                    2. * last - t
+                } else {
+                    t
+                }
+            }
+            _ => self.pos.clamp(0., last),
+        }
+    }
+
+    /// D1146: the offset from the start pose at frame `at` of `frames` (frame 0 is zero).
+    /// FOUND (0x6bec5c, 0x6bf140): linear between the frames either side.
+    pub fn sample(frames: &[[f32; 3]], at: f32) -> [f32; 3] {
+        let Some(last) = frames.len().checked_sub(1) else {
+            return [0.; 3];
+        };
+        let at = at.clamp(0., last as f32);
+        let (i, f) = (at.floor() as usize, at.fract());
+        let (a, b) = (frames[i], frames[(i + 1).min(last)]);
+        [0, 1, 2].map(|k| a[k] + (b[k] - a[k]) * f)
+    }
 }
 
 /// D1145: one layer of depth, the step of a layer switch (0xd953ac).
@@ -790,6 +865,7 @@ fn build_scene_inner(
                             spins: vec![],
                             moves: vec![],
                             layers: vec![],
+                            playbacks: vec![],
                         });
                         scene.bodies.len() - 1
                     })
@@ -981,6 +1057,29 @@ fn build_scene_inner(
                 maximum_mass: tw.maximum_mass,
                 waiting: tw.waiting_to_move,
                 last_activation: tw.last_known_activation,
+            });
+        }
+    }
+    for (i, t) in things.iter().enumerate() {
+        let Some(tw) = t
+            .data
+            .physics_tweak
+            .as_ref()
+            .filter(|tw| tw.configuration == 13)
+        else {
+            continue;
+        };
+        let slot = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        if let Some(b) = slot {
+            let player = tw.recording.clone().unwrap_or_default();
+            scene.bodies[b].playbacks.push(PlaybackTweak {
+                thing: i,
+                behavior: tw.behavior,
+                pos: player.play_head,
+                player,
+                started: false,
             });
         }
     }
