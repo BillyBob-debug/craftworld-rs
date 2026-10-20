@@ -6711,3 +6711,7 @@ Next: the Sackboy by default in the scripted Pod picture; the lane on engaging; 
 ## D1111 keyed followers follow tags (2026-10-19)
 - Logic lane: followers with followKey go to the nearest tag of their colour and name,
   and tags placed on chips sit at their parent (0x1c3e04; docs/logic.md P13).
+
+## D1112 every switch type counted; the random switch (2026-10-19)
+- Logic lane: a census of all 141,572 switches in 358 levels by type, and the random
+  switch's dice, pick patterns and on / off times from the EBOOT (docs/logic.md P14).

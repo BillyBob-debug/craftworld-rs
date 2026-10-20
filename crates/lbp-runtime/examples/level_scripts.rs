@@ -383,6 +383,36 @@ impl Switches {
                 }
                 continue;
             }
+            if s.switch_type == 54 {
+                let own = |j: u32| world.things[j as usize].parent.unwrap_or(j);
+                let me = own(i as u32);
+                let tags: Vec<u32> = (0..world.things.len() as u32)
+                    .filter(|&j| world.things[j as usize].switch_key == Some(s.key))
+                    .collect();
+                let on_me = tags.iter().filter(|&&j| own(j) == me).count();
+                let wired = tags
+                    .iter()
+                    .filter(|&&j| matches!(world.things[j as usize].inputs.first(), Some(Some(_))))
+                    .count();
+                count("remote".into(), true);
+                count("remote inverted".into(), s.inverted);
+                count("remote without a parent".into(), t.parent.is_none());
+                count(format!("remote outputs={}", s.outputs.len()), true);
+                let out0 = s.outputs.first().and_then(|o| o.as_ref());
+                count(
+                    "remote output 0 wired".into(),
+                    out0.is_some_and(|o| !o.targets.is_empty()),
+                );
+                count("remote key without a tag".into(), !keys.contains(&s.key));
+                count(format!("remote tags of key={}", tags.len().min(4)), true);
+                count(format!("remote tags on own object={}", on_me.min(2)), true);
+                count(format!("remote wired tags of key={}", wired.min(3)), true);
+                count(
+                    "remote stored on".into(),
+                    out0.is_some_and(|o| o.stored.ternary != 0),
+                );
+                continue;
+            }
             let p = match s.switch_type {
                 3 => "player",
                 4 => "tag",

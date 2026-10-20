@@ -393,8 +393,8 @@ lbp-runtime's switch pass (`compute_output`) handles each:
   (3,944; Part 15), camera finished 32 (2,760; Part 16), magic mouth 34 (1,426;
   Part 17), projectile 39 (816) and paint 8 (51; Part 18), linear velocity 42 (771)
   and angular velocity 43 (122; Part 19), grab 6 (666; Part 20), control
-  pad 38 (535; Part 21).
-- Kept as stored (the world signal is not modelled yet): key remote 54 (497),
+  pad 38 (535; Part 21), key remote 54 (497; Part 22).
+- Kept as stored (the world signal is not modelled yet):
   button 0 (224), motion recorder 45 (142), angle 41 (126), 57 (123),
   65 (77), lever 1 (74), sticker 5 (68), score 30 (51), movinator pad 44 (50), 55
   (11), trinary 2 (7).
@@ -623,3 +623,33 @@ signal is stored at 0x11bf18 (the button prompt 0x3dae04 does not change it).
   The host does not fill them yet, so pads read 0.0 with player -1 for now.
 - Tests: `control_pad_maps_buttons_sticks_and_tilt`,
   `control_pad_dead_zone_hysteresis_and_inversion` in pad.rs.
+
+## Part 22: the key remote switch (D1120)
+
+The key remote (type 54, 497 placed) passes on the strongest signal among the tags of
+its key, wherever they are. compute_output's table sends it to 0x11cf18, which calls
+0x10fc88(out, &PSwitch+0x80, object); the result is stored at 0x11bf18.
+
+- Object: the switch Thing's parent (Thing+0x5c), or the Thing itself.
+- Tags: the key's entries in the tag map 0xceb8c, each read as the tag sensor reads it
+  (0x12f6f4: off when the tag's Thing is deactivated, else the port 0 signal or on).
+- Skipped: a tag at activation 0.0, and a tag whose Thing's parent-or-self is the object.
+- Player: a tag signal with player -1 takes the creature's player number when its Thing
+  is a creature's (Thing+0x78 & 0x100, 0x3c594 → 0x1d2d30).
+- Kept: a tag whose |activation| is above the best so far (starting at 0.0), so the
+  first in x order keeps a tie. The output is its {activation, ternary, player}; with
+  none, {0.0, 0, -1}.
+- Inverted through the standard tail (0x11bfd4 entry 54 → 0x11c16c). No end-of-update
+  step (types above 0x27 go to the epilogue 0x124940 at 0x124938).
+- Census (census-all-5.json): 497 remotes, 5 inverted, all with a parent, one output
+  each (488 wired), 17 storing on. 298 keys have no tag in the level (INFERRED: their
+  tags come in emitted objects; not checked); tags per key 1: 148, 2: 6, 3: 26, 4+: 19;
+  none on the remote's own object. Wired tags per key 0: 420, 1: 68, 3+: 9.
+- INFERRED: the creature is the player whose Sackboy Thing is the tag's Thing. Not
+  modelled: the player of a tag owned by something else (+0x10 / +0x50 → +0x30 →
+  0xf8e70); the skip of tags whose Thing+0x78 & 2 is set while a global (+0x180) is 1;
+  the override after 0x10fc88 (0x2a1388, 0x2a7d38: a value per Thing UID when the
+  object's +8 & 0x4000 is set, taken when stronger; INFERRED network or replay state).
+- lbp-runtime: `key_remote` in remote.rs over `LevelWorld.tags` and `tag_signal`.
+- Tests: `key_remote_takes_the_strongest_tag_of_its_key`,
+  `key_remote_players_unwired_tags_and_inversion` in remote.rs.
