@@ -1447,6 +1447,54 @@ fn d1154_followers_measure_from_their_parent() {
 }
 
 #[test]
+fn d1156_spin_aimers_measure_from_their_parent() {
+    // As d1154: a quarter-turned box (1, 2) holding a chip 200 above it (3), the chip's
+    // board with no position (4) and a configuration-5 tweak on the board (5), and a
+    // second one straight on the box (6).
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let mut things = vec![
+        floor(),
+        thing(
+            1,
+            matrix(0., 300., 0., quarter, 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(2, matrix(0., 300., 0., quarter, 1., 1.), None, false),
+        thing(3, matrix(0., 500., 0., 0., 1., 1.), None, false),
+        thing(4, matrix(0., 0., 0., 0., 1., 1.), None, false),
+        thing(5, matrix(0., 0., 0., 0., 1., 1.), None, false),
+        thing(6, matrix(0., 0., 0., 0., 1., 1.), None, false),
+    ];
+    for t in [4, 5, 6] {
+        things[t].data.pos = None;
+    }
+    for (t, p) in [(2, 1), (3, 1), (4, 3), (5, 4), (6, 1)] {
+        things[t].parent = Some(p);
+    }
+    for t in [5, 6] {
+        things[t].data.physics_tweak = Some(PhysicsTweak {
+            configuration: 5,
+            vel_range: 0.1,
+            accel_strength: 0.125,
+            max_range: 2100.,
+            angle_range: 360.,
+            ..Default::default()
+        });
+    }
+    let scene = build_scene(&things);
+    let spins = &scene.bodies[0].spins;
+    assert_eq!(spins.iter().map(|m| m.thing).collect::<Vec<_>>(), [5, 6]);
+    let world = scene.bodies[0].frame.world(spins[0].at);
+    assert!(
+        world[0].abs() < 1e-3 && (world[1] - 500.).abs() < 1e-3,
+        "{world:?}"
+    );
+    let at = spins[1].at;
+    assert!(at[0].abs() < 1e-3 && at[1].abs() < 1e-3, "{at:?}");
+}
+
+#[test]
 fn d1147_attractors_pick_the_highest_priority_own_or_shared_block() {
     use lbp_level::parts::AttractorBlock;
     use lbp_sim::scene::AttractTweak;
