@@ -557,6 +557,9 @@ pub struct MoveTweak {
     /// D1111: followKey: the follower follows the tags with this key ([`SceneTag`])
     /// instead of the players.
     pub key: Option<u32>,
+    /// D1151: the tweak's +0x220 angle (radians) turning its up axis; 0 until a host
+    /// fills it (the parent chain's angle, D1148).
+    pub angle: f32,
 }
 
 /// D1110: `v` per unit length, or None for a zero vector.
@@ -590,18 +593,23 @@ impl MoveTweak {
     /// `act`, the body's speed along the aim, no lead and the distance as the error,
     /// clamped to ±range; a negative speed flips the row's axis (0x958068, the row keeps
     /// |v|). A zero distance skips the call. Stick movers (6, 7) do not call it.
-    /// INFERRED: the input scale 0xcbed4 read as 1; the mirror flag and the follower's
-    /// +0x220 angle not modelled; stick movers see no stick.
+    /// D1151 FOUND: the up axis is turned by the tweak's +0x220 angle ([`Self::angle`]) as
+    /// (u.x cos + u.y sin, u.y cos - u.x sin) (0xcc484, 0x9587ac). With allowUpDown off the
+    /// follower drops its error along that axis (0x9587ac); with localSpace the wanted
+    /// velocity of 8 and 11 alike is turned by it (0x9582c4). Followers with allowInOut
+    /// are not packed here (the caller sends them to 0x1c8250), see [`build_scene`].
+    /// INFERRED: the input scale 0xcbed4 read as 1; the mirror flag (which negates the
+    /// angle for localSpace) not modelled; stick movers see no stick.
     pub fn rows(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>, act: f32) -> Vec<Row> {
+        let (sin, cos) = self.angle.sin_cos();
+        let up = [up[0] * cos + up[1] * sin, up[1] * cos - up[0] * sin];
+        let turn = |v: [f32; 2]| [up[0] * v[1] + up[1] * v[0], up[1] * v[1] - up[0] * v[0]];
         let a = self.accel * self.range;
         let k = self.decel * self.range;
         let follow = self.configuration == 11;
         let side = if follow { a } else { k };
         let want = match self.configuration {
-            8 if self.local => {
-                let [x, y] = self.vel;
-                [up[0] * y + up[1] * x, up[1] * y - up[0] * x]
-            }
+            8 if self.local => turn(self.vel),
             8 => self.vel,
             11 => d.map_or([0., 0.], |d| {
                 let r = d[0].hypot(d[1]);
@@ -612,8 +620,13 @@ impl MoveTweak {
                 };
                 let mut off = [d[0] - d[0] / r * keep, d[1] - d[1] / r * keep];
                 if !self.up_down {
-                    let s = dot(off, up);
-                    off = [off[0] - up[0] * s, off[1] - up[1] * s];
+                    let n = dot(up, up);
+                    off = if n > 0. {
+                        let s = dot(off, up) / n;
+                        [off[0] - up[0] * s, off[1] - up[1] * s]
+                    } else {
+                        [0., 0.]
+                    };
                 }
                 off
             }),
@@ -626,11 +639,9 @@ impl MoveTweak {
                     let half = 0.5 * a * act;
                     let s = SpinTweak::speed(half, dot(vel, dir), 0., want[0].hypot(want[1]))
                         .clamp(-self.range, self.range);
-                    if s < 0. {
-                        ([-dir[0], -dir[1]], -s)
-                    } else {
-                        (dir, s)
-                    }
+                    let v = [dir[0] * s, dir[1] * s];
+                    let v = if self.local { turn(v) } else { v };
+                    (unit(v).unwrap_or(dir), s.abs())
                 } else {
                     (dir, want[0].hypot(want[1]))
                 };
@@ -1232,6 +1243,7 @@ fn build_scene_inner(
             .physics_tweak
             .as_ref()
             .filter(|tw| matches!(tw.configuration, 6..=8 | 11))
+            .filter(|tw| !(tw.configuration == 11 && tw.allow_in_out))
         else {
             continue;
         };
@@ -1255,6 +1267,7 @@ fn build_scene_inner(
                 up_down: tw.allow_up_down,
                 key: (tw.configuration == 11 && tw.follow_key)
                     .then(|| key_of(tw.color_index, &tw.name)),
+                angle: 0.,
             });
         }
     }

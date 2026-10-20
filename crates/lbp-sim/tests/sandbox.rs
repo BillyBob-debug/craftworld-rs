@@ -1517,6 +1517,7 @@ fn d1150_followers_ease_in_with_the_turn_shaper() {
         local: false,
         flee: false,
         key: None,
+        angle: 0.,
     };
     let up = [0., 1.];
     let v = follower.push([0., 0.], up, Some([1000., 0.]), 1.);
@@ -1539,4 +1540,61 @@ fn d1150_followers_ease_in_with_the_turn_shaper() {
     // Moving away from the target, the wanted speed is negative along the aim: it brakes.
     let v = follower.push([-10., 0.], up, Some([500., 0.]), 1.);
     assert!((v[0] - -6.5).abs() < 1e-4, "{v:?}");
+}
+
+#[test]
+fn d1151_followers_turn_their_up_axis_drop_in_out_and_keep_local_space() {
+    // A box with a follower (Thing 2) that keeps 100 from its target.
+    let mut things = vec![
+        floor(),
+        thing(
+            1,
+            matrix(0., 300., 0., 0., 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(2, matrix(0., 300., 0., 0., 1., 1.), None, false),
+    ];
+    things[2].parent = Some(1);
+    things[2].data.physics_tweak = Some(PhysicsTweak {
+        configuration: 11,
+        vel_range: 28.,
+        accel_strength: 0.125,
+        decel_strength: 0.125,
+        min_range: 100.,
+        max_range: 2100.,
+        angle_range: 360.,
+        allow_up_down: true,
+        ..Default::default()
+    });
+    let follower = build_scene(&things).bodies[0].moves[0];
+    // With allowInOut the caller packs it elsewhere (0x1c8250): no row here.
+    things[2].data.physics_tweak.as_mut().unwrap().allow_in_out = true;
+    assert!(build_scene(&things).bodies[0].moves.is_empty());
+    let up = [0., 1.];
+    let d = Some([1000., 0.]);
+    // allowUpDown off drops the error along the up axis; the +0x220 angle turns that axis,
+    // here a quarter turn onto x, so the sideways target is dropped too.
+    let flat = lbp_sim::scene::MoveTweak {
+        up_down: false,
+        ..follower
+    };
+    let v = flat.push([0., 0.], up, d, 1.);
+    assert!((v[0] - 3.5).abs() < 1e-5, "{v:?}");
+    let turned = lbp_sim::scene::MoveTweak {
+        angle: std::f32::consts::FRAC_PI_2,
+        ..flat
+    };
+    let v = turned.push([0., 0.], up, d, 1.);
+    assert!(v[0].abs() < 1e-3 && v[1].abs() < 1e-3, "{v:?}");
+    // localSpace turns the wanted velocity by the up axis: upright it is unchanged, with
+    // the up axis on x a push along x becomes one along -y.
+    let local = lbp_sim::scene::MoveTweak {
+        local: true,
+        ..follower
+    };
+    let v = local.push([0., 0.], up, d, 1.);
+    assert!((v[0] - 3.5).abs() < 1e-5 && v[1].abs() < 1e-5, "{v:?}");
+    let v = local.push([0., 0.], [1., 0.], d, 1.);
+    assert!(v[0].abs() < 1e-5 && (v[1] + 3.5).abs() < 1e-5, "{v:?}");
 }
