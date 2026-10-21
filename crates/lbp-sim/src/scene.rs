@@ -1811,6 +1811,9 @@ impl SceneJoint {
     /// synced to the measured angle when the joint first runs (0xc9af4, INFERRED), so only
     /// its change matters. The motor row (0x95f494) is unbounded for pattern 1 or a range
     /// of 2π or more, so the angle is clamped to the range only otherwise.
+    /// D1175: FOUND (01.33, 0xc95ec at 0xc9860) the game's pattern-0 motor rule leaves out
+    /// the + 0.5, so it swings about the centre; it differs from this one by range / 2,
+    /// which the sync cancels.
     pub fn motor_angle(&self, frame: f32, wired: bool) -> f32 {
         let base = self.min_length;
         let range = self.params.motion[0];
