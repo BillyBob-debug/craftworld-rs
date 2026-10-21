@@ -2333,11 +2333,14 @@ fn drive_motors(
         &mut lbp_sim::PistonDrive,
         &mut lbp_sim::avian2d::prelude::RevoluteJoint,
     )>,
-    rotations: Query<&lbp_sim::avian2d::prelude::Rotation>,
+    bodies: Query<(
+        &lbp_sim::avian2d::prelude::Rotation,
+        &lbp_sim::avian2d::prelude::AngularVelocity,
+    )>,
 ) {
     let world = &play.host.world;
     let now = play.scripts.ticks as f32;
-    lbp_sim::drive_motors(&mut commands, &mut q, &rotations, now, |j| {
+    lbp_sim::drive_motors(&mut commands, &mut q, &bodies, now, |j| {
         world
             .input_signal(j.thing)
             .map(|s| (s.ternary, s.activation, world.input_signed(j.thing)))
