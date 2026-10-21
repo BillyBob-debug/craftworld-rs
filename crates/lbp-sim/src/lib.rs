@@ -198,8 +198,11 @@ pub struct SpinTweaks(pub Vec<scene::SpinTweak>);
 /// ([`scene::SpinTweak::turn`], per tick, in order) with the tweak's current activation,
 /// and wakes a body whose speed changed. D1144: configurations 3 and 5 aim along the
 /// body's velocity or at the nearest target they see ([`scene::SpinTweak::aim`]): with
-/// followKey a tag in `tags` with its key not on its own body, else `player`.
-#[allow(clippy::type_complexity)]
+/// followKey a tag in `tags` with its key not on its own body, else `player`. D1164: a
+/// tag on a body leads by that body's point velocity ([`scene::SpinTweak::lead`]), from
+/// `motion`: the body's velocity and turn speed (game units and radians per tick) and its
+/// centre. The player is taken with no lead (INFERRED gap: the host passes no velocity).
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn drive_spins(
     commands: &mut Commands,
     q: &mut Query<(
@@ -215,6 +218,7 @@ pub fn drive_spins(
     activation: impl Fn(&scene::SpinTweak) -> f32,
     stick: impl Fn(&scene::SpinTweak) -> [f32; 2],
     scale: impl Fn(&scene::SpinTweak) -> f32,
+    motion: impl Fn(Entity) -> Option<([f32; 2], f32, [f32; 2])>,
 ) {
     let hz = TICK_HZ as f32;
     let per_tick = 1. / (hz * UNIT_SCALE);
@@ -235,18 +239,31 @@ pub fn drive_spins(
                 pos.0.x / UNIT_SCALE + rot.cos * t.at[0] - rot.sin * t.at[1],
                 pos.0.y / UNIT_SCALE + rot.sin * t.at[0] + rot.cos * t.at[1],
             ];
-            let d = match t.key {
-                Some(k) => tags
-                    .iter()
-                    .filter(|g| g.key == k && g.body != Some(e))
-                    .map(|g| [g.at[0] - me[0], g.at[1] - me[1]])
-                    .filter(|&d| t.sees(d, up))
-                    .min_by(|a, b| a[0].hypot(a[1]).total_cmp(&b[0].hypot(b[1]))),
-                None => player
-                    .map(|p| [p.x / UNIT_SCALE - me[0], p.y / UNIT_SCALE - me[1]])
-                    .filter(|&d| t.sees(d, up)),
+            let (d, lead) = match t.key {
+                Some(k) => {
+                    let g = tags
+                        .iter()
+                        .filter(|g| g.key == k && g.body != Some(e))
+                        .map(|g| (g, [g.at[0] - me[0], g.at[1] - me[1]]))
+                        .filter(|&(_, d)| t.sees(d, up))
+                        .min_by(|a, b| a.1[0].hypot(a.1[1]).total_cmp(&b.1[0].hypot(b.1[1])));
+                    let lead = g.and_then(|(g, _)| Some((g.at, motion(g.body?)?))).map_or(
+                        [0., 0.],
+                        |(at, (v, w, c))| {
+                            scene::SpinTweak::lead(v, w, [at[0] - c[0], at[1] - c[1]])
+                        },
+                    );
+                    (g.map(|g| g.1), lead)
+                }
+                None => (
+                    player
+                        .map(|p| [p.x / UNIT_SCALE - me[0], p.y / UNIT_SCALE - me[1]])
+                        .filter(|&d| t.sees(d, up)),
+                    [0., 0.],
+                ),
             };
-            t.turn_along(angle, s, activation(t), t.aim(vel, d))
+            let lead = if d.is_some() { lead } else { [0., 0.] };
+            t.turn_led(angle, s, activation(t), t.aim(vel, d), lead)
         });
         if (after - before).abs() > 1e-6 {
             w.0 = after * hz;

@@ -2186,9 +2186,32 @@ fn drive_spins(
         &lbp_sim::avian2d::prelude::LinearVelocity,
         &mut lbp_sim::avian2d::prelude::AngularVelocity,
     )>,
+    bodies: Query<
+        (
+            Entity,
+            &lbp_sim::avian2d::prelude::Position,
+            &lbp_sim::avian2d::prelude::LinearVelocity,
+            &lbp_sim::avian2d::prelude::AngularVelocity,
+        ),
+        Without<lbp_sim::SpinTweaks>,
+    >,
 ) {
     let world = &play.host.world;
     let player = sackboy.iter().next().map(|p| p.0);
+    // D1164: every body's motion, for configuration 5's lead on a tag that rides one.
+    let hz = lbp_sim::TICK_HZ as f32;
+    let motion: std::collections::HashMap<_, _> = q
+        .iter()
+        .map(|(e, _, p, _, v, w)| (e, (p.0, v.0, w.0)))
+        .chain(bodies.iter().map(|(e, p, v, w)| (e, (p.0, v.0, w.0))))
+        .map(|(e, (p, v, w))| {
+            let u = lbp_sim::UNIT_SCALE;
+            (
+                e,
+                ([v.x / (hz * u), v.y / (hz * u)], w / hz, [p.x / u, p.y / u]),
+            )
+        })
+        .collect();
     // D1155: a tag switched off by its input is not found.
     let mut tags = lbp_sim::lit_tags(lbp_sim::tag_spots(marks.iter()), |t| {
         world.tag_signal(t).ternary
@@ -2204,6 +2227,7 @@ fn drive_spins(
         |t| world.tweak_activation(t.thing, t.behavior),
         |t| world.tweak_stick(t.thing),
         |t| world.tweak_input_scale(t.thing, t.behavior),
+        |b| motion.get(&b).copied(),
     );
 }
 

@@ -441,6 +441,14 @@ impl SpinTweak {
     /// rate (the vrfim term at 0x960790) is 0 here; a host with a moving target can pass
     /// it to [`Self::speed`].
     pub fn target_along(&self, angle: f32, w: f32, aim: [f32; 2]) -> (f32, f32, f32) {
+        self.target_led(angle, w, aim, [0., 0.])
+    }
+
+    /// D1164: as [`Self::target_along`] for configuration 5 with its target point moving
+    /// `lead` per tick ([`Self::lead`]). FOUND (0x95fb20): the error is still measured
+    /// along `aim`, and the shaper's lead rate is the wrapped turn of the aim that the
+    /// lead adds, angle(aim + lead) − angle(aim) (0x960790).
+    pub fn target_led(&self, angle: f32, w: f32, aim: [f32; 2], lead: [f32; 2]) -> (f32, f32, f32) {
         let a = self.accel * self.range;
         match self.configuration {
             9 => {
@@ -453,8 +461,15 @@ impl SpinTweak {
             _ => {
                 // The aim's angle from world up, so world up itself gives exactly -angle.
                 let f13 = if self.flip { -1. } else { 1. };
-                let e = wrap_angle((-aim[0]).atan2(aim[1]) - angle + f13 * self.angle);
-                let s = Self::speed(0.5 * a, w, 0., e);
+                let from_up = |p: [f32; 2]| (-p[0]).atan2(p[1]);
+                let e = wrap_angle(from_up(aim) - angle + f13 * self.angle);
+                let led = [aim[0] + lead[0], aim[1] + lead[1]];
+                let rate = if lead == [0., 0.] {
+                    0.
+                } else {
+                    wrap_angle(from_up(led) - from_up(aim))
+                };
+                let s = Self::speed(0.5 * a, w, rate, e);
                 // D1161: ±velRange × |0xcbed4| (0x9607ec to 0x960868).
                 let r = self.range * self.scale.abs();
                 (s.clamp(-r, r), -a, a)
@@ -535,7 +550,19 @@ impl SpinTweak {
 
     /// D1144: as [`Self::turn`], aiming along `aim` ([`Self::aim`]).
     pub fn turn_along(&self, angle: f32, w: f32, activation: f32, aim: [f32; 2]) -> f32 {
-        let (target, lo, hi) = self.target_along(angle, w, aim);
+        self.turn_led(angle, w, activation, aim, [0., 0.])
+    }
+
+    /// D1164: as [`Self::turn_along`] with configuration 5's lead ([`Self::target_led`]).
+    pub fn turn_led(
+        &self,
+        angle: f32,
+        w: f32,
+        activation: f32,
+        aim: [f32; 2],
+        lead: [f32; 2],
+    ) -> f32 {
+        let (target, lo, hi) = self.target_led(angle, w, aim, lead);
         w + (target - w).clamp(lo * activation, hi * activation)
     }
 }
