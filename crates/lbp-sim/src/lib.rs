@@ -101,6 +101,35 @@ pub fn motor_damping(params: &lbp_level::parts::JointParams) -> f32 {
     MOTOR_DAMPING * params.strength.clamp(0., 1.)
 }
 
+/// D1178: FOUND (01.33) the solver's motor case 0x1c9eac passes the motor row 0x95f494 a
+/// k (f1) of 5 × the motor's strength (0xca760, TOC 0xd984d8) for pattern 2, or 0 for any
+/// other pattern or a pattern-2 motor wired in mode 1 or 4. The row (0x95f740) turns it
+/// into a force cap of k × max(|err|, 0.1) (TOC -0x202c) on the band edge at 1.5 × `err`
+/// ([`motor_band`]).
+pub fn motor_k(params: &lbp_level::parts::JointParams, wired: bool) -> f32 {
+    if params.animation_pattern != 2 || (wired && matches!(params.mode, 1 | 4)) {
+        return 0.;
+    }
+    5. * params.strength.clamp(0., 1.)
+}
+
+/// D1178: FOUND (01.33, the motor row 0x95f494) the band the row holds a motor's turn per
+/// frame to: `delta` cut to between 0 and `err` (0x95fa28, 0x95fb10, as
+/// [`PistonDrive::turn_to`] has it) and 1.5 × `err` (TOC -0x1d88, 0x95f734), sorted
+/// (0x95f778), with the strength cap on the `delta` edge and k × max(|err|, 0.1) on the
+/// 1.5 × `err` edge (INFERRED pairing; the row is solved off the PPU). Returns (lo, hi,
+/// the 1.5 × `err` edge's cap). INFERRED: with k 0 (every motor but pattern 2) that edge
+/// has no force, so only a pattern-2 motor is braked once it turns past 1.5 × `err`.
+pub fn motor_band(delta: f32, err: f32, k: f32) -> (f32, f32, f32) {
+    let d = if delta > 0. {
+        delta.min(err).max(0.)
+    } else {
+        delta.max(err).min(0.)
+    };
+    let e = 1.5 * err;
+    (d.min(e), d.max(e), k * err.abs().max(0.1))
+}
+
 /// D1174: FOUND (01.33) the solver's motor case 0x1c9eac gives the motor row its angle
 /// limits: for pattern 0 with a range `+0xc8` under 2π, the centre `+0xe0` ± range / 2
 /// (sorted); for pattern 2 with a range under 2π, the centre to the centre + range;
@@ -600,9 +629,9 @@ impl PistonDrive {
     /// both wrapped to [-π, π)), and turns by `delta` cut to between 0 and `err`
     /// (0x95fa28, 0x95fb10): it never runs past its target and never turns back. The
     /// angle rule is synced to the measure when it first runs (0xc9af4). The row's
-    /// strength cap scales the motor's push ([`motor_damping`], D1173). INFERRED: its
-    /// second bound, 1.5 × `err` with a cap of k × max(|err|, 0.1) (k is 0 except for
-    /// pattern 2, Part 70), is left out.
+    /// strength cap scales the motor's push ([`motor_damping`], D1173). The row's second
+    /// edge, 1.5 × `err` with a cap of k × max(|err|, 0.1) ([`motor_band`], [`motor_k`],
+    /// D1178), is not applied yet.
     pub fn turn_to(&mut self, now: f32, input: Option<(i32, f32, bool)>, measured: f32) -> f32 {
         let w = self.turn(now, input);
         let wired = input.is_some();

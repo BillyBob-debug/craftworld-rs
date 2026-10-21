@@ -2584,3 +2584,34 @@ fn d1176_a_one_shot_piston_runs_its_pattern_once() {
     assert!((j.length(100., true) - 842.).abs() < 1e-3);
     assert_eq!(j.length(400., true), 840.);
 }
+
+#[test]
+fn d1178_only_a_pattern_2_motor_has_a_k_term() {
+    use lbp_sim::{motor_band, motor_k};
+    let params = |pattern, mode, strength| JointParams {
+        animation_pattern: pattern,
+        mode,
+        strength,
+        ..Default::default()
+    };
+    // 0x1c9eac: 5 × strength for pattern 2, clamped like the strength cap.
+    assert_eq!(motor_k(&params(2, 0, 0.5), false), 2.5);
+    assert_eq!(motor_k(&params(2, 0, 3.), false), 5.);
+    assert_eq!(motor_k(&params(0, 0, 1.), false), 0.);
+    assert_eq!(motor_k(&params(1, 0, 1.), false), 0.);
+    // Wired in mode 1 or 4 it is 0; in mode 2 it stays.
+    assert_eq!(motor_k(&params(2, 1, 1.), true), 0.);
+    assert_eq!(motor_k(&params(2, 4, 1.), true), 0.);
+    assert_eq!(motor_k(&params(2, 2, 1.), true), 5.);
+    assert_eq!(motor_k(&params(2, 1, 1.), false), 5.);
+    // 0x95f494: the clipped delta to 1.5 × err, sorted, with a cap of k × max(|err|, 0.1).
+    let near = |(a, b, c): (f32, f32, f32), (x, y, z): (f32, f32, f32)| {
+        assert!(
+            (a - x).abs() < 1e-6 && (b - y).abs() < 1e-6 && (c - z).abs() < 1e-6,
+            "{a} {b} {c}"
+        )
+    };
+    near(motor_band(0.2, 0.4, 5.), (0.2, 0.6, 2.));
+    near(motor_band(0.2, -0.4, 5.), (-0.6, 0., 2.));
+    near(motor_band(-0.1, -0.02, 5.), (-0.03, -0.02, 0.5));
+}
