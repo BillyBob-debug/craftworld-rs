@@ -46,5 +46,5 @@ Census (census-all-40, followers by flag):
 |---|---|---|
 | 224 | 0 local, 1,895 world | 0 local, 175 world |
 
-Not modelled: a host filling the +0x220 angle; the mirror negation; the allowInOut layer
-move 0x1c8250 (0x1c3e04, 0xcd770); the 1/mass rate.
+Not modelled: a host filling the +0x220 angle; the mirror negation; the 1/mass rate. The
+allowInOut layer move 0x1c8250 is modelled since D1166 (Part 67).

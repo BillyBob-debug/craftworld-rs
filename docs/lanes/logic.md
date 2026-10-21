@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-61.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-67.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -81,9 +81,11 @@
   velRange is 0 (0x1c81a4; Part 64, corrects Part 12).
 - Merged: D1164 (PR 307, cfd4edc) configuration 5 leads a tag on a moving body and
   passes its lead rate to the shaper (Part 65).
-- D1165 (branch `logic-d1165`, worktree `E:\Projects\wt-d324`): configuration 5 leads
-  the player by Sackboy's velocity (docs/logic/part-66.md).
-- Decision numbers: D1100-D1199, next free D1166.
+- Merged: D1165 (PR 308, 0560b46) configuration 5 leads the player by Sackboy's
+  velocity (Part 66).
+- D1166 (branch `logic-d1166`, worktree `E:\Projects\wt-d324`): allowInOut followers
+  move their group to the target's layer (docs/logic/part-67.md).
+- Decision numbers: D1100-D1199, next free D1167.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -138,8 +140,8 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1165 unchanged (Parts 58-66; D1163 changes 2 Rookie Test
-  followers, none on the route; D1164 and D1165 change no Rookie Test aimer).
+  After D1156 to D1166 unchanged (Parts 58-67; D1163 changes 2 Rookie Test
+  followers, none on the route; D1164 and D1165 change no Rookie Test aimer; D1166 is not hosted).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -182,6 +184,8 @@
   local-analysis/logic/d1164/census1.json the aimers that lead a tag on a body (Part 65).
   local-analysis/logic/d1165/census1.json `chip.aim_player`: 67 keyless aimers, which
   lead the player (Part 66).
+  local-analysis/logic/d1166/census1.json `chip.follow_in_out`: 149 allowInOut
+  followers in 29 levels (Part 67).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -198,7 +202,7 @@
   +0x20, limits +0x24/+0x28 = ±accel × velRange, × activation × 1/mass (0x95fdc8).
   Speed shaper 0x1c21f4 with root helper 0x1c2128 (Part 51). Followers (11) and 6-8
   via 0x957df4 (Part 12); followers call 0x1c21f4 at 0x9586cc (Part 52); +0x5c localSpace,
-  +0xe4 allowInOut (layer move 0x1c8250, then packed), +0xe5 allowUpDown (0x9587ac) (Part 53); tag
+  +0xe4 allowInOut (layer move 0x1c8250, then packed; Part 67), +0xe5 allowUpDown (0x9587ac) (Part 53); tag
   search 0x1c3e04 and map 0xceb8c (Part 13); followKey match 0xceac0, colour reader
   0xc1dc90 -> 0x8a9240 (zigzag LEB128 when compressed) for both tag and tweak (Part 54).
   Tag search 0x1c3e04 has no tag activation test; 0x12f6f4 rejects a tag whose Thing
@@ -211,8 +215,13 @@
 
 ## Subagent models
 Owner rule (2026-10-21): subagents use haiku for browsing and narrow jobs, sonnet for
-contained edits, Opus only when needed. One line per PR: subagents, model, tokens, redone.
-- D1165: none (all steps ran in the thread).
+contained edits, Opus only when needed. One line per PR: each subagent's model, task,
+tokens, tool uses, wall-clock minutes and whether its result was wrong or redone (also
+when a later PR finds it), then the thread's own context at hand-off (ctx_audit).
+- D1165: none (all steps ran in the thread); thread context 104k at hand-off.
+- D1166: haiku general-purpose (disassembly of 0x1c8250), 39,849 tokens, 7 tool uses,
+  0.7 min, used as is, not redone so far; thread context 99k at hand-off (after a
+  compaction).
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -248,7 +257,8 @@ EBOOT rule and unit tests:
    `sample` at `frame` from its start pose (Part 48); for configuration 14, the
    gather around the camera and the SPU job's force (NOT FOUND, needs SPU code,
    Part 49);
-   for followers, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
+   for followers, the 1/mass rate (Part 53), and a host calling
+   `MoveTweak::in_out_step` and moving the group (Part 67);
    for tag synchronisers, the receiver's online source 0x2a8538, the useLayers z and
    the other 0x130c90 caller 0x29ff3c (Part 59);
    the sackbot input, the
