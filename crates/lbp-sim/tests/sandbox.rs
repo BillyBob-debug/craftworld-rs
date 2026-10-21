@@ -2693,3 +2693,66 @@ fn d1180_a_piston_row_has_the_motor_band_with_a_floor_of_10() {
     assert_eq!((lo, hi), (4., 12.));
     assert_eq!(piston_band(4., 8., 0.).2, 0.);
 }
+
+#[test]
+fn d1181_a_piston_drives_its_slider_within_its_band() {
+    use lbp_sim::scene::{Endpoint, JointKind, PistonClock, SceneJoint};
+    use lbp_sim::{motor_damping, UNIT_SCALE};
+    let mut params = JointParams {
+        mode: 1,
+        strength: 1.,
+        ..Default::default()
+    };
+    params.motion[..2].copy_from_slice(&[-200., 60.]);
+    let drive = || lbp_sim::PistonDrive {
+        joint: SceneJoint {
+            thing: 0,
+            kind: JointKind::Piston,
+            a: Endpoint::Static(0),
+            b: Endpoint::Static(1),
+            world_a: [0.; 2],
+            world_b: [0.; 2],
+            local_a: [0.; 2],
+            local_b: [0.; 2],
+            length: 400.,
+            min_length: 400.,
+            max_length: 400.,
+            params,
+        },
+        clock: PistonClock::default(),
+        sync: None,
+    };
+    let on = Some((1, 1., false));
+    let hz = lbp_sim::TICK_HZ as f32;
+    // Switched on (mode 1) it shortens 200 over 30 frames, uncut: the band is that
+    // `delta` to 1.5 × `err`, with the length at its rule (300 at tick 15).
+    let delta = -200. / 30.;
+    let slide = |rate: f32| drive().slide_to(15., on, 300., rate * hz);
+    let push = motor_damping(&params);
+    // At rest it is above the band and driven to `delta` with the strength cap.
+    let (v, d) = slide(0.);
+    assert!(
+        (v - delta * hz * UNIT_SCALE).abs() < 1e-3 && d == push,
+        "{v} {d}"
+    );
+    // Inside the band it is not pushed.
+    assert_eq!(slide(-8.).1, 0.);
+    // Too fast it is held to 1.5 × `err`, with k 0 (wired in mode 1) and so no push.
+    let (v, d) = slide(-15.);
+    assert!(
+        (v - 1.5 * delta * hz * UNIT_SCALE).abs() < 1e-2 && d == 0.,
+        "{v} {d}"
+    );
+}
+
+#[test]
+fn d1181_only_a_springy_piston_with_a_strength_slides() {
+    let params = |stiff, strength| JointParams {
+        stiff,
+        strength,
+        ..Default::default()
+    };
+    assert!(lbp_sim::slides(&params(false, 0.5)));
+    assert!(!lbp_sim::slides(&params(true, 0.5)));
+    assert!(!lbp_sim::slides(&params(false, 0.)));
+}

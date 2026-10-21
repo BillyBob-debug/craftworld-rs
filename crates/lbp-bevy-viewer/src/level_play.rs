@@ -2296,10 +2296,15 @@ fn drive_pistons(
         &mut lbp_sim::PistonDrive,
         &mut lbp_sim::avian2d::prelude::PrismaticJoint,
     )>,
+    bodies: Query<(
+        &lbp_sim::avian2d::prelude::Position,
+        &lbp_sim::avian2d::prelude::Rotation,
+        &lbp_sim::avian2d::prelude::LinearVelocity,
+    )>,
 ) {
     let world = &play.host.world;
     let now = play.scripts.ticks as f32;
-    lbp_sim::drive_pistons(&mut commands, &mut q, now, |j| {
+    lbp_sim::drive_pistons(&mut commands, &mut q, &bodies, now, |j| {
         world
             .input_signal(j.thing)
             .map(|s| (s.ternary, s.activation, world.input_signed(j.thing)))
