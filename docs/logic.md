@@ -313,7 +313,7 @@ sandbox).
 
 0x957df4 (EBOOT 01.33) packs a tweak's linear rows for the packer 0x95fb20. It is called
 twice (0x1c8030, 0x1c80b0); the second call happens only when decel × velRange is not 0
-(0x1c8038). Each row is a unit axis, a target speed, limits, and 1/mass.
+(0x1c8038) or the tweak is a follower (0x1c81a4; D1163, Part 64). Each row is a unit axis, a target speed, limits, and 1/mass.
 
 Row 1 (0x958068-0x958124): the configuration gives a wanted velocity v (x, y). The axis is
 v / |v|, the target |v|, the limits -decel × velRange and +accel × velRange. A zero v

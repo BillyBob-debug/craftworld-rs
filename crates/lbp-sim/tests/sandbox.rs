@@ -2025,3 +2025,41 @@ fn d1161_the_input_scale_scales_movers_and_caps_followers_and_spins() {
     let (s, _, _) = gyro.target(1., 0.);
     assert!((s.abs() - 0.1).abs() < 1e-6, "{s}");
 }
+
+#[test]
+fn d1163_a_follower_always_packs_its_cross_row() {
+    let mover = lbp_sim::scene::MoveTweak {
+        thing: 0,
+        configuration: 8,
+        behavior: 0,
+        range: 10.,
+        accel: 1.,
+        decel: 0.,
+        vel: [0., 4.],
+        local: false,
+        min_range: 0.,
+        max_range: 0.,
+        angle_range: 360.,
+        flee: false,
+        up_down: true,
+        key: None,
+        angle: 0.,
+        at: [0.; 2],
+        stick: [0.; 2],
+        scale: 1.,
+        mirror: false,
+        flip: false,
+    };
+    let up = [0., 1.];
+    // decel × range 0: a mover packs row 1 only (0x1c804c, 0x1c81ac).
+    assert_eq!(mover.rows([3., 0.], up, None, 1.).len(), 1);
+    // A follower packs row 2 anyway, ±accel × range, and holds its sideways speed.
+    let follower = lbp_sim::scene::MoveTweak {
+        configuration: 11,
+        ..mover
+    };
+    let d = Some([0., 1000.]);
+    assert_eq!(follower.rows([3., 0.], up, d, 1.).len(), 2);
+    let v = follower.push([3., 0.], up, d, 1.);
+    assert!(v[0].abs() < 1e-4 && v[1] > 0., "{v:?}");
+}
