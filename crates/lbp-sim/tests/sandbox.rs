@@ -2746,16 +2746,16 @@ fn d1181_a_piston_drives_its_slider_within_its_band() {
 }
 
 #[test]
-fn d1182_only_a_stiff_pattern_2_piston_with_a_strength_slides() {
+fn d1183_a_pattern_2_piston_with_a_strength_slides_stiff_or_not() {
     let params = |stiff, strength, animation_pattern| JointParams {
         stiff,
         strength,
         animation_pattern,
         ..Default::default()
     };
-    // The band row 0x962590 is the stiff piston's (0x1c9988).
+    // Rows 0x962590 (stiff) and 0x960988 (not stiff) share the band.
     assert!(lbp_sim::slides(&params(true, 0.5, 2), false));
-    assert!(!lbp_sim::slides(&params(false, 0.5, 2), false));
+    assert!(lbp_sim::slides(&params(false, 0.5, 2), false));
     // No push from a strength of 0, and no k without pattern 2 or when wired in mode 1.
     assert!(!lbp_sim::slides(&params(true, 0., 2), false));
     assert!(!lbp_sim::slides(&params(true, 0.5, 0), false));
