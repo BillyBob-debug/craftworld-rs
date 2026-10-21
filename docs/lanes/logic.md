@@ -215,10 +215,13 @@
 
 ## Subagent models
 Owner rule (2026-10-21): subagents use haiku for browsing and narrow jobs, sonnet for
-contained edits, Opus only when needed. One line per PR: subagents, model, tokens, redone.
-- D1165: none (all steps ran in the thread).
+contained edits, Opus only when needed. One line per PR: each subagent's model, task,
+tokens, tool uses, wall-clock minutes and whether its result was wrong or redone (also
+when a later PR finds it), then the thread's own context at hand-off (ctx_audit).
+- D1165: none (all steps ran in the thread); thread context 104k at hand-off.
 - D1166: haiku general-purpose (disassembly of 0x1c8250), 39,849 tokens, 7 tool uses,
-  used as is.
+  0.7 min, used as is, not redone so far; thread context 99k at hand-off (after a
+  compaction).
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
