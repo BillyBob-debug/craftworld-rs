@@ -305,6 +305,8 @@ fn run() -> Result<(), String> {
     let (mut senders, mut receivers, mut syncs_on_body) = (0usize, 0usize, 0usize);
     // D1167: receivers with no sender of their key in the level, which only work online.
     let mut receivers_unsent = 0usize;
+    let mut receivers_layered = 0usize;
+    let mut receivers_use_layers = 0usize;
     // D1158: stick tweaks (spin 4, move 6 and 7) and those with input port 1 or 2 wired.
     let (mut sticks, mut sticks_wired) = (0usize, 0usize);
     // D1159: spin and move tweaks with a turn on their microchip boards (+0x220), and flipped spins.
@@ -413,6 +415,18 @@ fn run() -> Result<(), String> {
             .filter(|y| y.kind == 1)
             .filter(|y| !scene.syncs.iter().any(|s| s.kind == 0 && s.key == y.key))
             .count();
+        // D1168: receivers with useLayers and a sender of their key take the sent z.
+        let layered = scene
+            .syncs
+            .iter()
+            .filter(|y| y.kind == 1 && y.use_layers)
+            .filter(|y| scene.syncs.iter().any(|s| s.kind == 0 && s.key == y.key))
+            .count();
+        let use_layers = scene
+            .syncs
+            .iter()
+            .filter(|y| y.kind == 1 && y.use_layers)
+            .count();
         senders += send;
         receivers += receive;
         let ports: std::collections::BTreeSet<(usize, i32)> = report
@@ -515,6 +529,8 @@ fn run() -> Result<(), String> {
         move_flipped += move_flip;
         syncs_on_body += sync_body;
         receivers_unsent += unsent;
+        receivers_layered += layered;
+        receivers_use_layers += use_layers;
         let r = &scene.report;
         fixed_bodies += r.fixed_bodies;
         nested_bodies += r.nested_bodies;
@@ -634,7 +650,8 @@ fn run() -> Result<(), String> {
             "touching_pairs": touching, "touching_pairs_dynamic": touching_dynamic,
             "followers": follow, "followers_offset": follow_offset,
             "aimers": aim, "aimers_offset": aim_offset,
-            "senders": send, "receivers": receive, "syncs_on_body": sync_body, "receivers_unsent": unsent,
+            "senders": send, "receivers": receive, "syncs_on_body": sync_body, "receivers_unsent": unsent, "receivers_layered": layered,
+            "receivers_use_layers": use_layers,
             "sticks": stick, "sticks_wired": stick_wired,
             "chip_turned": turned, "chip_flipped": flipped,
             "move_mirrored": mirrored, "move_flipped": move_flip,
@@ -666,7 +683,8 @@ fn run() -> Result<(), String> {
         "touching_pairs": touching_pairs, "touching_pairs_dynamic": touching_pairs_dynamic,
         "followers": followers, "followers_offset": followers_offset,
         "aimers": aimers, "aimers_offset": aimers_offset,
-        "senders": senders, "receivers": receivers, "syncs_on_body": syncs_on_body, "receivers_unsent": receivers_unsent,
+        "senders": senders, "receivers": receivers, "syncs_on_body": syncs_on_body, "receivers_unsent": receivers_unsent, "receivers_layered": receivers_layered,
+        "receivers_use_layers": receivers_use_layers,
         "sticks": sticks, "sticks_wired": sticks_wired,
         "chip": {
             "turned": chip_turned, "flipped": chip_flipped,

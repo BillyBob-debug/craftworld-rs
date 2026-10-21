@@ -932,6 +932,8 @@ pub struct SceneTag {
     /// tag's world position.
     pub body: Option<usize>,
     pub at: [f32; 2],
+    /// D1168: its world z (game units).
+    pub z: f32,
 }
 
 /// D1157: a tag synchroniser where it is placed. `kind` 0 sends, 1 receives (other kinds
@@ -946,9 +948,13 @@ pub struct SceneSync {
     pub radius: f32,
     pub min_radius: f32,
     pub scale: [f32; 2],
+    /// D1168: a receiver's tag takes the sent tag's z (else its own).
+    pub use_layers: bool,
     pub body: Option<usize>,
     pub at: [f32; 2],
     pub axes: [[f32; 2]; 2],
+    /// D1168: its world z (game units).
+    pub z: f32,
 }
 
 impl PhysicsScene {
@@ -1426,6 +1432,7 @@ fn build_scene_inner(
             key: key_of(k.colour_index, &k.name),
             body,
             at,
+            z: pos.world[14],
         });
     }
     for (i, t) in things.iter().enumerate() {
@@ -1467,9 +1474,11 @@ fn build_scene_inner(
             radius: sy.radius,
             min_radius: sy.min_radius,
             scale: sy.scale,
+            use_layers: sy.use_layers,
             body,
             at,
             axes,
+            z: m[14],
         });
     }
     for (i, t) in things.iter().enumerate() {

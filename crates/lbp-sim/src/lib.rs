@@ -278,20 +278,22 @@ pub fn drive_spins(
 #[derive(Component, Debug, Clone)]
 pub struct MoveTweaks(pub Vec<scene::MoveTweak>);
 
-/// D1111: the tags riding on a body (Thing, key, point in the body's frame, game units),
+/// D1111: the tags riding on a body (Thing, key, point in the body's frame, game units;
+/// D1168: then the world z),
 /// or, on the one entity [`spawn_scene`] makes for them, the tags on no body (world
 /// points).
 #[derive(Component, Debug, Clone)]
-pub struct TagMarks(pub Vec<(u32, u32, [f32; 2])>);
+pub struct TagMarks(pub Vec<(u32, u32, [f32; 2], f32)>);
 
 /// D1111: a tag where it is this tick: its Thing, its key, the body it rides (None: on no
-/// body) and its world position in game units.
+/// body) and its world position in game units. D1168: `z` is its world z.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct TagSpot {
     pub thing: u32,
     pub key: u32,
     pub body: Option<Entity>,
     pub at: [f32; 2],
+    pub z: f32,
 }
 
 /// D1111: every tag's [`TagSpot`] from the [`TagMarks`] entities, a body's with its
@@ -305,11 +307,12 @@ pub fn tag_spots<'a>(
             position: [p.0.x / UNIT_SCALE, p.0.y / UNIT_SCALE],
             angle: r.as_radians(),
         });
-        spots.extend(m.0.iter().map(|&(thing, key, at)| TagSpot {
+        spots.extend(m.0.iter().map(|&(thing, key, at, z)| TagSpot {
             thing,
             key,
             body: frame.map(|_| e),
             at: frame.map_or(at, |f| f.world(at)),
+            z,
         }));
     }
     spots
@@ -338,9 +341,11 @@ pub struct SyncSpot {
     pub radius: f32,
     pub min_radius: f32,
     pub scale: [f32; 2],
+    pub use_layers: bool,
     pub body: Option<Entity>,
     pub at: [f32; 2],
     pub axes: [[f32; 2]; 2],
+    pub z: f32,
 }
 
 /// D1157: every synchroniser's [`SyncSpot`] from the [`SyncMarks`] entities.
@@ -368,9 +373,11 @@ pub fn sync_spots<'a>(
                 radius: y.radius,
                 min_radius: y.min_radius,
                 scale: y.scale,
+                use_layers: y.use_layers,
                 body: frame.map(|_| e),
                 at: frame.map_or(y.at, |f| f.world(y.at)),
                 axes: [turn(y.axes[0]), turn(y.axes[1])],
+                z: y.z,
             }
         }));
     }
@@ -392,31 +399,36 @@ fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
 /// (its tag leaves the tag map, 0xd1b58). The tag has no input, so it is lit (0x12f6f4).
 /// D1167: the receiver's second source 0x2a8538 is the online one: it reads offsets that
 /// other consoles' senders packed (0x29ff3c) and returns nothing unless the network
-/// context has bit 0x4000, so offline a receiver needs a sender in the level. Not
-/// modelled: useLayers' z.
+/// context has bit 0x4000, so offline a receiver needs a sender in the level. D1168
+/// (0x13187c, 0x131f88 at 0x132190): the sent offset's z lane is the tag's world z, not
+/// a difference, and a receiver with useLayers (+0x2c) gives its tag that z; without it
+/// the tag keeps the receiver's own z.
 pub fn synced_tags(syncs: &[SyncSpot], tags: &[TagSpot]) -> Vec<TagSpot> {
-    let sent: Vec<(&SyncSpot, [f32; 2])> = syncs
+    let sent: Vec<(&SyncSpot, [f32; 2], f32)> = syncs
         .iter()
         .filter(|y| y.kind == 0)
         .filter_map(|y| {
             let (lo, hi) = (y.min_radius * y.min_radius, y.radius * y.radius);
             tags.iter()
                 .filter(|g| g.key == y.key && (g.body.is_none() || g.body != y.body))
-                .map(|g| [g.at[0] - y.at[0], g.at[1] - y.at[1]])
-                .map(|d| (d, dot(d, d)))
-                .filter(|&(_, d2)| y.radius < 0. || (lo <= d2 && d2 <= hi))
+                .map(|g| ([g.at[0] - y.at[0], g.at[1] - y.at[1]], g.z))
+                .map(|(d, z)| (d, dot(d, d), z))
+                .filter(|&(_, d2, _)| y.radius < 0. || (lo <= d2 && d2 <= hi))
                 .min_by(|a, b| a.1.total_cmp(&b.1))
-                .map(|(d, _)| (y, [dot(d, y.axes[0]), dot(d, y.axes[1])]))
+                .map(|(d, _, z)| (y, [dot(d, y.axes[0]), dot(d, y.axes[1])], z))
         })
         .collect();
     syncs
         .iter()
         .filter(|y| y.kind == 1)
         .filter_map(|y| {
-            let (_, off) = sent.iter().filter(|(s, _)| s.key == y.key).min_by(|a, b| {
-                let d = |s: &SyncSpot| (s.at[0] - y.at[0]).hypot(s.at[1] - y.at[1]);
-                d(a.0).total_cmp(&d(b.0))
-            })?;
+            let (_, off, z) = sent
+                .iter()
+                .filter(|(s, _, _)| s.key == y.key)
+                .min_by(|a, b| {
+                    let d = |s: &SyncSpot| (s.at[0] - y.at[0]).hypot(s.at[1] - y.at[1]);
+                    d(a.0).total_cmp(&d(b.0))
+                })?;
             let (u, v) = (off[0] * y.scale[0], off[1] * y.scale[1]);
             Some(TagSpot {
                 thing: y.thing,
@@ -426,6 +438,7 @@ pub fn synced_tags(syncs: &[SyncSpot], tags: &[TagSpot]) -> Vec<TagSpot> {
                     y.at[0] + u * y.axes[0][0] + v * y.axes[1][0],
                     y.at[1] + u * y.axes[0][1] + v * y.axes[1][1],
                 ],
+                z: if y.use_layers { *z } else { y.z },
             })
         })
         .collect()
@@ -720,7 +733,7 @@ pub fn spawn_scene(commands: &mut Commands, scene: &PhysicsScene) -> Spawned {
     // D1111: tags ride their bodies; tags on no body share one entity.
     let mut marks = vec![Vec::new(); bodies.len() + 1];
     for g in &scene.tags {
-        marks[g.body.unwrap_or(bodies.len())].push((g.thing as u32, g.key, g.at));
+        marks[g.body.unwrap_or(bodies.len())].push((g.thing as u32, g.key, g.at, g.z));
     }
     let loose = marks.pop().unwrap_or_default();
     for (b, m) in marks.into_iter().enumerate().filter(|(_, m)| !m.is_empty()) {
