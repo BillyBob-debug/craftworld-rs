@@ -23,7 +23,7 @@ FOUND, the clamps. The follower speed is clamped to ±velRange × |0xcbed4| at
 
 For comparison, the activation 0xcaf9c (behaviors 0 and 1) returns 0 with +0x7f set and,
 with slot 0 wired, the ternary +0x1c ≠ 0 for behavior 0 or |+0x18| for behavior 1, else 1.
-Not modelled: `tweak_activation` does not yet test +0x7f.
+D1162 models that test: `tweak_activation` returns 0 first of all on a deactivated Thing.
 
 Model: `SpinTweak::scale` and `MoveTweak::scale`, filled each tick by
 `World::tweak_input_scale` (lbp-runtime switches.rs) through `drive_spins` and
@@ -36,3 +36,11 @@ crates/lbp-sim/tests/sandbox.rs.
 Census (`level_physics --all` over the 01.33 catalog, new `chip.input_scaled` total and
 per-level `input_scaled`): 376 spin and move tweaks with behavior 2 in 41 levels. The
 Rookie Test has none, and the route is unchanged.
+
+## Addendum: a deactivated tweak reads no activation (D1162)
+
+FOUND, 0xcaf9c (EBOOT 01.33) tests the Thing's +0x7f before its input wire and returns 0
+when it is set, for every behavior. `World::tweak_activation` now does the same. Test:
+`d1162_a_deactivated_tweak_reads_no_activation` in crates/lbp-runtime/tests/level_world.rs.
+No census count: +0x7f is runtime state (a deactivated microchip or Thing), not level
+data. The route is unchanged.

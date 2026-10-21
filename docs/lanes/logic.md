@@ -73,10 +73,11 @@
   on the board, +0x220 and +0x224 from 0xcd2e0 (Part 61; corrects Part 50).
 - Merged: D1160 (PR 303, 2abbacc) a mirrored body negates its movers' localSpace
   angle and, XOR +0x224, their stick x (Part 62).
-- D1161 (branch `logic-d1161`, worktree `E:\Projects\wt-d324`): the input scale
-  0xcbed4 (the signed slot-0 activation for behavior 2, 0 when deactivated, else 1)
-  scales the mover target and caps followers and spins (docs/logic/part-63.md).
-- Decision numbers: D1100-D1199, next free D1162.
+- Merged: D1161 (PR 304, 48a8f07) the input scale 0xcbed4 scales movers and caps
+  followers and spins (Part 63).
+- D1162 (branch `logic-d1162`, worktree `E:\Projects\wt-d324`): a deactivated Thing
+  (+0x7f) reads activation 0 in `tweak_activation`, as 0xcaf9c does (Part 63 addendum).
+- Decision numbers: D1100-D1199, next free D1163.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -131,7 +132,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1161 unchanged (Parts 58-63).
+  After D1156 to D1162 unchanged (Parts 58-63).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -233,8 +234,7 @@ EBOOT rule and unit tests:
    Part 49); add `SpinTweak::lead` for a target with a body (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
    for followers, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
    for tag synchronisers, the receiver's online source 0x2a8538, the useLayers z and
-   the other 0x130c90 caller 0x29ff3c (Part 59); for stick movers, the 0x957df4 param_5 path; the +0x7f test in
-   `tweak_activation` (Part 63)
+   the other 0x130c90 caller 0x29ff3c (Part 59); for stick movers, the 0x957df4 param_5 path
    (Part 60);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
