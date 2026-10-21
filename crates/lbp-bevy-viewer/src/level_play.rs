@@ -2161,7 +2161,7 @@ fn follow_tweaks(
 fn drive_spins(
     play: NonSend<Play>,
     mut commands: Commands,
-    sackboy: Query<&lbp_sim::avian2d::prelude::Position, With<SackboyBody>>,
+    sackboy: Query<(&lbp_sim::avian2d::prelude::Position, &SackboyBody)>,
     marks: Query<(
         Entity,
         &lbp_sim::TagMarks,
@@ -2197,7 +2197,11 @@ fn drive_spins(
     >,
 ) {
     let world = &play.host.world;
-    let player = sackboy.iter().next().map(|p| p.0);
+    // D1165: Sackboy's velocity (game units per tick) for configuration 5's lead.
+    let player = sackboy
+        .iter()
+        .next()
+        .map(|(p, b)| (p.0, [b.controller.vx, b.controller.vy]));
     // D1164: every body's motion, for configuration 5's lead on a tag that rides one.
     let hz = lbp_sim::TICK_HZ as f32;
     let motion: std::collections::HashMap<_, _> = q

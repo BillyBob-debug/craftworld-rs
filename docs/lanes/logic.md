@@ -79,10 +79,11 @@
   Part 63 addendum).
 - Merged: D1163 (PR 306, 3d20237) a follower packs its cross row even when decel ×
   velRange is 0 (0x1c81a4; Part 64, corrects Part 12).
-- D1164 (branch `logic-d1164`, worktree `E:\Projects\wt-d324`): configuration 5 leads
-  a tag on a moving body and passes its lead rate to the shaper
-  (docs/logic/part-65.md).
-- Decision numbers: D1100-D1199, next free D1165.
+- Merged: D1164 (PR 307, cfd4edc) configuration 5 leads a tag on a moving body and
+  passes its lead rate to the shaper (Part 65).
+- D1165 (branch `logic-d1165`, worktree `E:\Projects\wt-d324`): configuration 5 leads
+  the player by Sackboy's velocity (docs/logic/part-66.md).
+- Decision numbers: D1100-D1199, next free D1166.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -137,8 +138,8 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1164 unchanged (Parts 58-65; D1163 changes 2 Rookie Test
-  followers, none on the route; D1164 changes no Rookie Test aimer).
+  After D1156 to D1165 unchanged (Parts 58-66; D1163 changes 2 Rookie Test
+  followers, none on the route; D1164 and D1165 change no Rookie Test aimer).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -179,6 +180,8 @@
   local-analysis/logic/d1161/census1.json the input-scaled tweaks (Part 63);
   local-analysis/logic/d1163/census1.json the followers with decel × velRange 0 (Part 64).
   local-analysis/logic/d1164/census1.json the aimers that lead a tag on a body (Part 65).
+  local-analysis/logic/d1165/census1.json `chip.aim_player`: 67 keyless aimers, which
+  lead the player (Part 66).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -205,6 +208,11 @@
   from their Thing's parent (+0x5c, else the Thing), its translation at
   `*(*(thing+0x2c)+0xc)+0x70` (0x957df4; spins 0x95fdc8 the same); 0x88f7dc ->
   0x550e70 is a player check on a global's +0x180 (Part 56).
+
+## Subagent models
+Owner rule (2026-10-21): subagents use haiku for browsing and narrow jobs, sonnet for
+contained edits, Opus only when needed. One line per PR: subagents, model, tokens, redone.
+- D1165: none (all steps ran in the thread).
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -239,7 +247,7 @@ EBOOT rule and unit tests:
    FOUND), call `PlaybackTweak::tick` each frame and drive the body towards
    `sample` at `frame` from its start pose (Part 48); for configuration 14, the
    gather around the camera and the SPU job's force (NOT FOUND, needs SPU code,
-   Part 49); configuration 5's lead on the player, which needs Sackboy's velocity (Part 65);
+   Part 49);
    for followers, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
    for tag synchronisers, the receiver's online source 0x2a8538, the useLayers z and
    the other 0x130c90 caller 0x29ff3c (Part 59);

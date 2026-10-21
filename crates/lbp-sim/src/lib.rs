@@ -201,7 +201,9 @@ pub struct SpinTweaks(pub Vec<scene::SpinTweak>);
 /// followKey a tag in `tags` with its key not on its own body, else `player`. D1164: a
 /// tag on a body leads by that body's point velocity ([`scene::SpinTweak::lead`]), from
 /// `motion`: the body's velocity and turn speed (game units and radians per tick) and its
-/// centre. The player is taken with no lead (INFERRED gap: the host passes no velocity).
+/// centre. D1165: the player is a Thing with a body too (+0x64), so `player` carries
+/// Sackboy's velocity (game units per tick) and he is led by it (INFERRED: his body does
+/// not turn and his u16 +0xe is 0).
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub fn drive_spins(
     commands: &mut Commands,
@@ -213,7 +215,7 @@ pub fn drive_spins(
         &LinearVelocity,
         &mut AngularVelocity,
     )>,
-    player: Option<Vec2>,
+    player: Option<(Vec2, [f32; 2])>,
     tags: &[TagSpot],
     activation: impl Fn(&scene::SpinTweak) -> f32,
     stick: impl Fn(&scene::SpinTweak) -> [f32; 2],
@@ -257,9 +259,9 @@ pub fn drive_spins(
                 }
                 None => (
                     player
-                        .map(|p| [p.x / UNIT_SCALE - me[0], p.y / UNIT_SCALE - me[1]])
+                        .map(|(p, _)| [p.x / UNIT_SCALE - me[0], p.y / UNIT_SCALE - me[1]])
                         .filter(|&d| t.sees(d, up)),
-                    [0., 0.],
+                    player.map_or([0., 0.], |(_, v)| v),
                 ),
             };
             let lead = if d.is_some() { lead } else { [0., 0.] };
