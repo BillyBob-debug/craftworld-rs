@@ -2506,6 +2506,49 @@ fn d1175_a_pattern_0_motor_joint_is_limited_to_its_sweep() {
 }
 
 #[test]
+fn d1177_a_pattern_2_motor_joint_is_limited_to_its_sweep() {
+    let limits = |range, phase| {
+        let params = JointParams {
+            animation_pattern: 2,
+            strength: 1.,
+            motion: [range, 30., phase, 0., 0., 0., 0., 0., 0., 0.],
+            ..Default::default()
+        };
+        let things = vec![
+            thing(
+                0,
+                matrix(0., 0., 0., 0., 1., 1.),
+                Some(rect(20., 20., 7)),
+                false,
+            ),
+            thing(
+                1,
+                matrix(0., 0., 0., 0., 1., 1.),
+                Some(rect(100., 100., 7)),
+                true,
+            ),
+            joint_with(2, 9, 0, [0.; 3], 1, [0.; 3], 0., params),
+        ];
+        let mut app = app(build_scene(&things));
+        app.update();
+        let mut q = app.world_mut().query::<&RevoluteJoint>();
+        let j = q.single(app.world()).expect("motor");
+        j.angle_limit.map(|l| (l.min, l.max))
+    };
+    // 0x1ca6f0: the centre to the centre + range. The ramp starts at the top of its sweep.
+    let (lo, hi) = limits(1., 0.).expect("limits");
+    assert!((lo + 1.).abs() < 1e-5 && hi.abs() < 1e-5, "{lo} {hi}");
+    // A third of the way down (phase 10 of time 30) it sits two thirds up the sweep.
+    let (lo, hi) = limits(1., 10.).expect("limits");
+    assert!(
+        (lo + 2. / 3.).abs() < 1e-5 && (hi - 1. / 3.).abs() < 1e-5,
+        "{lo} {hi}"
+    );
+    // A range of 2π or more turns freely.
+    assert_eq!(limits(7., 0.), None);
+}
+
+#[test]
 fn d1176_a_one_shot_piston_runs_its_pattern_once() {
     use lbp_sim::scene::SceneJoint;
     let mut params = JointParams {
