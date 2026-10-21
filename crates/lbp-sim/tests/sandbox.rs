@@ -2063,3 +2063,40 @@ fn d1163_a_follower_always_packs_its_cross_row() {
     let v = follower.push([3., 0.], up, d, 1.);
     assert!(v[0].abs() < 1e-4 && v[1] > 0., "{v:?}");
 }
+
+#[test]
+fn d1164_an_aimer_leads_a_moving_target_by_its_turn_per_tick() {
+    use lbp_sim::scene::SpinTweak;
+    let aimer = SpinTweak {
+        configuration: 5,
+        range: 0.2094394,
+        accel: 0.1,
+        ..Default::default()
+    };
+    // Lined up on a still target it wants no turn.
+    assert_eq!(aimer.target_led(0., 0., [0., 10.], [0., 0.]).0, 0.);
+    // A target 10 above moving 0.01 left a tick turns the aim 0.001 rad a tick
+    // anticlockwise, which the aimer takes on at once.
+    let (s, _, _) = aimer.target_led(0., 0., [0., 10.], [-0.01, 0.]);
+    assert!((s - (0.01f32).atan2(10.)).abs() < 1e-6, "{s}");
+    // Chasing a target that keeps moving, the lead leaves it nearer the aim.
+    let chase = |lead: bool| {
+        let (mut angle, mut w, mut at) = (0f32, 0f32, [0f32, 100.]);
+        let v = [-2f32, 0.];
+        for _ in 0..60 {
+            let l = if lead { v } else { [0., 0.] };
+            w = aimer.turn_led(angle, w, 1., at, l);
+            angle += w;
+            at = [at[0] + v[0], at[1] + v[1]];
+        }
+        ((-at[0]).atan2(at[1]) - angle).abs()
+    };
+    assert!(
+        chase(true) < chase(false),
+        "{} {}",
+        chase(true),
+        chase(false)
+    );
+    // The lead is the point velocity of the target's body.
+    assert_eq!(SpinTweak::lead([1., 0.], 0.5, [0., 2.]), [0., 0.]);
+}
