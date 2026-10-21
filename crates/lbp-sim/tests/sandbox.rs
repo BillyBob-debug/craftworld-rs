@@ -1630,6 +1630,7 @@ fn d1150_followers_ease_in_with_the_turn_shaper() {
         scale: 1.,
         mirror: false,
         flip: false,
+        in_out: false,
     };
     let up = [0., 1.];
     let v = follower.push([0., 0.], up, Some([1000., 0.]), 1.);
@@ -1734,6 +1735,7 @@ fn d1158_stick_movers_map_the_stick_onto_a_circle() {
         scale: 1.,
         mirror: false,
         flip: false,
+        in_out: false,
     };
     let up = [0., 1.];
     // A full diagonal stick wants range (10) along the diagonal, not range times root 2.
@@ -1933,6 +1935,7 @@ fn d1160_mirrored_movers_negate_their_local_turn_and_stick_x() {
         scale: 1.,
         mirror: false,
         flip: false,
+        in_out: false,
     };
     let up = [0., 1.];
     // localSpace turns the velocity by the chip's angle; mirrored, by minus it (0xcc6f0).
@@ -1991,6 +1994,7 @@ fn d1161_the_input_scale_scales_movers_and_caps_followers_and_spins() {
         scale: 1.,
         mirror: false,
         flip: false,
+        in_out: false,
     };
     let up = [0., 1.];
     assert_eq!(mover.push([0., 0.], up, None, 1.), [0., 4.]);
@@ -2049,6 +2053,7 @@ fn d1163_a_follower_always_packs_its_cross_row() {
         scale: 1.,
         mirror: false,
         flip: false,
+        in_out: false,
     };
     let up = [0., 1.];
     // decel × range 0: a mover packs row 1 only (0x1c804c, 0x1c81ac).
@@ -2160,4 +2165,48 @@ fn d1165_an_aimer_leads_the_player_by_his_velocity() {
     assert_eq!(turn([0., 0.]), 0.);
     let s = turn([-0.01, 0.]);
     assert!((s - (0.01f32).atan2(10.)).abs() < 1e-6, "{s}");
+}
+
+#[test]
+fn d1166_in_out_followers_move_to_their_targets_layer_or_as_near_as_fits() {
+    use lbp_sim::scene::{layer_of, MoveTweak};
+    // Layers are 200 deep, counted from the back at z -679.
+    assert_eq!((layer_of(-679.), layer_of(-480.), layer_of(0.)), (0, 0, 3));
+    let follower = MoveTweak {
+        thing: 1,
+        configuration: 11,
+        behavior: 0,
+        range: 1.,
+        accel: 1.,
+        decel: 1.,
+        vel: [0., 0.],
+        local: false,
+        min_range: 0.,
+        max_range: -1.,
+        angle_range: 360.,
+        flee: false,
+        up_down: true,
+        key: None,
+        angle: 0.,
+        at: [0., 0.],
+        stick: [0., 0.],
+        scale: 1.,
+        mirror: false,
+        flip: false,
+        in_out: true,
+    };
+    // Two layers in front of it the target pulls the group 400 forward when it fits.
+    assert_eq!(follower.in_out_step(-479., -79., |_| true), 400.);
+    // With room for only one layer it takes that; with none it stays.
+    assert_eq!(follower.in_out_step(-479., -79., |dz| dz < 300.), 200.);
+    assert_eq!(follower.in_out_step(-479., -79., |_| false), 0.);
+    // On the target's layer, or without allowInOut, nothing moves.
+    assert_eq!(follower.in_out_step(-479., -400., |_| true), 0.);
+    let plain = MoveTweak {
+        in_out: false,
+        ..follower
+    };
+    assert_eq!(plain.in_out_step(-479., -79., |_| true), 0.);
+    // A step that would leave the depth band is blocked.
+    assert_eq!(follower.in_out_step(79., 479., |_| true), 0.);
 }

@@ -266,7 +266,7 @@ impl LayerTweak {
         match self.z_behavior {
             0 => -n,
             1 => n,
-            d => d - 1 - ((z + 679.) / LAYER_DEPTH).trunc() as i32,
+            d => d - 1 - layer_of(z),
         }
     }
 
@@ -645,6 +645,15 @@ pub struct MoveTweak {
     /// D1160: [`Self::mirror`] XOR the chain's parity (+0x224, [`chip_turn`]); a stick mover
     /// then negates its stick x (0x957fb4-0x958058).
     pub flip: bool,
+    /// D1166: allowInOut (+0xe4): a follower also moves its body's group to its target's
+    /// layer ([`Self::in_out_step`]).
+    pub in_out: bool,
+}
+
+/// D1166: the layer of depth `z`, counted from the back: trunc((z + 679) / 200) (0xd983e4,
+/// 0xd98048 in 0x1c7ed0; the same rule as 0xce1f8's set layers).
+pub fn layer_of(z: f32) -> i32 {
+    ((z + 679.) / LAYER_DEPTH).trunc() as i32
 }
 
 /// D1110: `v` per unit length, or None for a zero vector.
@@ -658,6 +667,34 @@ fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
 }
 
 impl MoveTweak {
+    /// D1166: the depth step an allowInOut follower takes this tick for its body's group at
+    /// depth `z` towards a target at depth `target_z`; `fits(dz)` says whether the group
+    /// has room `dz` deeper. FOUND (0x1c7ed0, before the usual follower rows): with
+    /// allowInOut set, the Thing active (+0x7f 0) and its input unwired or nonzero, the
+    /// Thing's parent (+0x5c, else itself) with a body whose +0x140 is 0 searches as the
+    /// follower does (0x1c3e04); the step is [`layer_of`] the target's root (+0x5c) depth
+    /// (0x3becc +0x38) minus [`layer_of`] its own (world matrix +0x78). 0xcd770 tries it
+    /// with no mass limit (0.0, 0xd97fa8), as the layer switch does (D1145, including the
+    /// [`LAYER_Z_RANGE`] band); blocked, it tries one layer less, down to one, every tick.
+    pub fn in_out_step(&self, z: f32, target_z: f32, fits: impl Fn(f32) -> bool) -> f32 {
+        if !self.in_out || self.configuration != 11 {
+            return 0.;
+        }
+        let mut d = layer_of(target_z) - layer_of(z);
+        while d != 0 {
+            let dz = d as f32 * LAYER_DEPTH;
+            let to = z + dz;
+            if to >= LAYER_Z_RANGE.0 && to <= LAYER_Z_RANGE.1 && fits(dz) {
+                return dz;
+            }
+            if d.abs() < 2 {
+                break;
+            }
+            d -= d.signum();
+        }
+        0.
+    }
+
     /// D1110: whether a target at `d` (target minus body) is one this follower takes, for a
     /// body whose up axis is `up`. FOUND (0x1c3e04): min_range < |d| < max_range in x, y,
     /// max_range below 0 is 1e8, and a cone under 180 degrees. INFERRED: the cone is a
@@ -1584,6 +1621,7 @@ fn build_scene_inner(
                 scale: 1.,
                 mirror,
                 flip: mirror ^ parity,
+                in_out: tw.allow_in_out,
             });
         }
     }

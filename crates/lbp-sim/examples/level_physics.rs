@@ -310,6 +310,7 @@ fn run() -> Result<(), String> {
     let mut follow_cross = 0usize;
     let mut aim_lead = 0usize;
     let mut aim_player = 0usize;
+    let mut follow_in_out = 0usize;
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -493,6 +494,14 @@ fn run() -> Result<(), String> {
             .filter(|t| t.configuration == 5 && t.key.is_none())
             .count();
         aim_player += at_player;
+        // D1166: followers with allowInOut, which also move their group to the target's layer.
+        let in_out = scene
+            .bodies
+            .iter()
+            .flat_map(|b| &b.moves)
+            .filter(|m| m.configuration == 11 && m.in_out)
+            .count();
+        follow_in_out += in_out;
         move_flipped += move_flip;
         syncs_on_body += sync_body;
         let r = &scene.report;
@@ -618,7 +627,7 @@ fn run() -> Result<(), String> {
             "sticks": stick, "sticks_wired": stick_wired,
             "chip_turned": turned, "chip_flipped": flipped,
             "move_mirrored": mirrored, "move_flipped": move_flip,
-            "input_scaled": scaled, "follow_cross": cross, "aim_lead": led, "aim_player": at_player,
+            "input_scaled": scaled, "follow_cross": cross, "aim_lead": led, "aim_player": at_player, "follow_in_out": in_out,
         }));
     }
     let mut top: Vec<(&String, &usize)> = materials.iter().collect();
@@ -651,7 +660,7 @@ fn run() -> Result<(), String> {
         "chip": {
             "turned": chip_turned, "flipped": chip_flipped,
             "move_mirrored": move_mirrored, "move_flipped": move_flipped,
-            "input_scaled": input_scaled, "follow_cross": follow_cross, "aim_lead": aim_lead, "aim_player": aim_player,
+            "input_scaled": input_scaled, "follow_cross": follow_cross, "aim_lead": aim_lead, "aim_player": aim_player, "follow_in_out": follow_in_out,
         },
         "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
