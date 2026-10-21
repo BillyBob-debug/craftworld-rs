@@ -232,8 +232,8 @@ What the game does (EBOOT 01.33, FOUND unless marked; TOC base r2 = 0xd9a0f8):
   so the rope only pulls. The flag-clear caller at 0x1ca288 (lo = hi = `+0xf0`, strength
   FLT_MAX) looks like a rod.
 - The type 4 case 0x1c9988 (only when `+0x28` is set and `+0x29` clear) goes through
-  0x962590, which wraps an angle by 2π before the builder 0x962b9c; the type names may
-  be off by one there (open).
+  0x962590, which wraps an angle by 2π before the builder 0x962b9c; the type names are
+  not off by one (the solver's jump table, Part 70).
 - Type 9 (0x1c9eac): range 2π or more (or pattern 1) is unbounded; pattern 0 limits
   `+0xe0` ± range / 2; pattern 2 `+0xe0` to `+0xe0` + range; rows 0x95ae04 and 0x95f494
   with the strength as a cap. The turn rate is in Part 10.

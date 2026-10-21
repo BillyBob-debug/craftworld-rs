@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-69.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-70.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -87,9 +87,11 @@
   layer (Part 67).
 - Merged: D1167 (PR 310, 44c20da) a receiver's second source 0x2a8538 is online-only
   (Part 68).
-- D1168 (branch `logic-d1168`, worktree `E:\Projects\wt-d324`): useLayers puts a
-  received tag on the sent tag's z (docs/logic/part-69.md).
-- Decision numbers: D1100-D1199, next free D1169.
+- Merged: D1168 (PR 311, 64173b1) useLayers puts a received tag on the sent tag's z
+  (Part 69).
+- D1169 (branch `logic-d1169`, worktree `E:\Projects\wt-d324`): a piston holds its
+  start angle; the solver's type table confirms the type names (docs/logic/part-70.md).
+- Decision numbers: D1100-D1199, next free D1170.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -144,7 +146,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1168 unchanged (Parts 58-69; D1163 changes 2 Rookie Test
+  After D1156 to D1169 unchanged (Parts 58-70; D1163 changes 2 Rookie Test
   followers, none on the route; D1164 and D1165 change no Rookie Test aimer; D1166 is not hosted).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
@@ -236,6 +238,11 @@ when a later PR finds it), then the thread's own context at hand-off (ctx_audit)
 - D1168: haiku general-purpose (decompile sender 0x13187c and 0x131638, the offset's
   lanes), 90,238 tokens, 6 tool uses, 3.5 min, used as is; D1166's and D1167's results
   not redone; thread context 132k at hand-off.
+- D1169: haiku general-purpose (resolve 0x962590, 0x960988 and the type 4 case),
+  43,286 tokens, 12 tool uses, 1.1 min, FAILED: resolved none of the questions (the
+  Ghidra bridge cannot decompile or disassemble mid-function addresses), redone by hand
+  with read_bytes and capstone; earlier results not redone; thread context at hand-off
+  in the PR reply.
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -277,7 +284,8 @@ EBOOT rule and unit tests:
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
-   the type 4 / angle-wrap question at 0x962590, the switch type bucket in 0x900730.
+   the switch type bucket in 0x900730, and the piston's k term (5 × strength for
+   pattern 2) in row 0x96178c (Part 70).
 5. The creature brain (PEnemy reader NOT FOUND; leads: the TOC entry for string
    "PEnemy" 0xc79058, bit 0x1c tests); who puts a player in state 5 on contact (Part
    42 has the seat path) and sends the respawn (0x7feb8, Part 41); the controlinator's
