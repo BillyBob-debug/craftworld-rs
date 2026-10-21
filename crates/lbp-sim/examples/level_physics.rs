@@ -303,6 +303,8 @@ fn run() -> Result<(), String> {
     let (mut senders, mut receivers, mut syncs_on_body) = (0usize, 0usize, 0usize);
     // D1158: stick tweaks (spin 4, move 6 and 7) and those with input port 1 or 2 wired.
     let (mut sticks, mut sticks_wired) = (0usize, 0usize);
+    // D1159: spin and move tweaks with a turn on their microchip boards (+0x220), and flipped spins.
+    let (mut chip_turned, mut chip_flipped) = (0usize, 0usize);
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -427,6 +429,21 @@ fn run() -> Result<(), String> {
             .count();
         sticks += stick;
         sticks_wired += stick_wired;
+        let turned = scene
+            .bodies
+            .iter()
+            .map(|b| {
+                b.spins.iter().filter(|t| t.angle != 0.).count()
+                    + b.moves.iter().filter(|m| m.angle != 0.).count()
+            })
+            .sum::<usize>();
+        let flipped = scene
+            .bodies
+            .iter()
+            .map(|b| b.spins.iter().filter(|t| t.flip).count())
+            .sum::<usize>();
+        chip_turned += turned;
+        chip_flipped += flipped;
         syncs_on_body += sync_body;
         let r = &scene.report;
         fixed_bodies += r.fixed_bodies;
@@ -549,6 +566,7 @@ fn run() -> Result<(), String> {
             "aimers": aim, "aimers_offset": aim_offset,
             "senders": send, "receivers": receive, "syncs_on_body": sync_body,
             "sticks": stick, "sticks_wired": stick_wired,
+            "chip_turned": turned, "chip_flipped": flipped,
         }));
     }
     let mut top: Vec<(&String, &usize)> = materials.iter().collect();
@@ -578,6 +596,7 @@ fn run() -> Result<(), String> {
         "aimers": aimers, "aimers_offset": aimers_offset,
         "senders": senders, "receivers": receivers, "syncs_on_body": syncs_on_body,
         "sticks": sticks, "sticks_wired": sticks_wired,
+        "chip": { "turned": chip_turned, "flipped": chip_flipped },
         "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,

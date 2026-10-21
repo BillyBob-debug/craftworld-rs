@@ -372,6 +372,9 @@ pub struct SpinTweak {
     /// D1148: the mirror flip (0x95fd14): the tweak's mirror parity up its parent chain
     /// (byte +0x224, built by 0xcd2e0) XOR its body's basis determinant below 0.
     pub flip: bool,
+    /// D1159: the tweak's +0x220 angle (radians), its turn on the microchips it sits on
+    /// (0xcd2e0, [`chip_turn`]); 0 off a chip.
+    pub angle: f32,
     /// D1156: configuration 5's point, in its body's frame: the Thing's parent (Thing+0x5c,
     /// else the Thing itself), as the follower's (D1154). FOUND (0x95fb20): the search
     /// 0x1c3e04 gets that Thing and the aim is the target's translation less that Thing's.
@@ -403,7 +406,11 @@ impl SpinTweak {
     /// vector) instead of world up. FOUND (0x95fd0c, 0x95fd88): an aim with x² + y² under
     /// 0.1, or accel × range 0, wants speed 0 (still with ±accel × range, so it brakes).
     /// D1149 FOUND: the error is the wrapped [-π, π) term of 0x96059c (aim angle minus the
-    /// up axis's, minus the +0x220 parent angle); INFERRED: its sign, as here. The lead
+    /// up axis's, minus the +0x220 parent angle); INFERRED: its sign, as here.
+    /// D1159 FOUND (0x9604b8, 0x960560): the up axis's term gains f13 × [`Self::angle`],
+    /// f13 = 1 (0xd97fb0) unflipped and -1 (0xd98188) with [`Self::flip`]. INFERRED: the
+    /// sign, taken so that a tweak turned by θ on its chip aims its body's up axis turned
+    /// by θ (+0x220 is -θ), as a mover's up axis turns (D1151). The lead
     /// rate (the vrfim term at 0x960790) is 0 here; a host with a moving target can pass
     /// it to [`Self::speed`].
     pub fn target_along(&self, angle: f32, w: f32, aim: [f32; 2]) -> (f32, f32, f32) {
@@ -418,7 +425,8 @@ impl SpinTweak {
             _ if dot(aim, aim) < AIM_DEAD_ZONE || a == 0. => (0., -a, a),
             _ => {
                 // The aim's angle from world up, so world up itself gives exactly -angle.
-                let e = wrap_angle((-aim[0]).atan2(aim[1]) - angle);
+                let f13 = if self.flip { -1. } else { 1. };
+                let e = wrap_angle((-aim[0]).atan2(aim[1]) - angle + f13 * self.angle);
                 let s = Self::speed(0.5 * a, w, 0., e);
                 (s.clamp(-self.range, self.range), -a, a)
             }
@@ -457,8 +465,8 @@ impl SpinTweak {
     /// (0x95fd0c): 1 aims at world up; 3 along the body's velocity (state+0x10, x and y);
     /// 4 along stick slots 1 and 2 (0xcb02c, 0xcb074; D1148: [`Self::stick`], x negated
     /// by the flip); 5 at its target (0x1c3e04), 0 with none, with [`Self::lead`]
-    /// added by the caller for a moving target. Not modelled: the +0x220 parent angle
-    /// (0xcd2e0), which is 0 for a body with no parent chain.
+    /// added by the caller for a moving target. The +0x220 angle turns the up axis in
+    /// [`Self::target_along`] (D1159).
     pub fn aim(&self, vel: [f32; 2], d: Option<[f32; 2]>) -> [f32; 2] {
         match self.configuration {
             3 => vel,
@@ -561,8 +569,8 @@ pub struct MoveTweak {
     /// D1111: followKey: the follower follows the tags with this key ([`SceneTag`])
     /// instead of the players.
     pub key: Option<u32>,
-    /// D1151: the tweak's +0x220 angle (radians) turning its up axis; 0 until a host
-    /// fills it (the parent chain's angle, D1148).
+    /// D1151: the tweak's +0x220 angle (radians) turning its up axis; D1159: its turn on
+    /// the microchips it sits on (0xcd2e0, [`chip_turn`]), 0 off a chip.
     pub angle: f32,
     /// D1154: the point a follower looks and measures from, in its body's frame: its
     /// Thing's parent (Thing+0x5c, else the Thing itself; 0x957df4 passes it to the
@@ -902,6 +910,123 @@ fn placed(things: &[ThingRecord], mut i: usize) -> Option<&lbp_level::parts::Pos
     None
 }
 
+/// Each circuit board Thing's microchip Thing.
+fn chip_boards(things: &[ThingRecord]) -> BTreeMap<usize, usize> {
+    things
+        .iter()
+        .enumerate()
+        .filter_map(|(c, t)| Some((t.data.microchip.as_ref()?.circuit_board?, c)))
+        .collect()
+}
+
+/// D1159: a tweak's turn on the microchips it sits on, the +0x220 angle, and its mirror
+/// parity, the +0x224 byte (both built by 0xcd2e0, EBOOT 01.33).
+///
+/// FOUND: from the tweak's Thing up its parent chain while the Thing is on a chip, each
+/// Thing whose grandparent has the MICROCHIP part adds the inverse of its in-plane turn in
+/// its local matrix (atan2 of the local Y axis plus π/2, DAT_00d953a0) and, when that
+/// matrix is mirrored, negates the sum and flips the parity. A Thing without a PPos adds
+/// the angle of its entry in the chip's component table instead, with the entry's flipped
+/// byte as the mirror; one not in the table adds nothing. The sum is not wrapped. As the
+/// sensor cone's sum 0x110140 (D1143), which has the same walk. INFERRED: the local
+/// matrix is the parent's world inverse times the Thing's (the world matrix alone under
+/// a parent without a PPos), as the runtime derives it; table word 5 is `angle`.
+/// `boards` maps each circuit board Thing to its chip ([`chip_boards`]).
+fn chip_turn(things: &[ThingRecord], boards: &BTreeMap<usize, usize>, i: usize) -> (f32, bool) {
+    // The chip whose board is the Thing's parent, i.e. its grandparent.
+    let chip = |t: usize| boards.get(&things.get(t)?.parent?).copied();
+    // The outermost such chip (`LevelWorld::microchip_of`).
+    let outer = |t: usize| {
+        let mut c = chip(t)?;
+        for _ in 0..MAX_PARENT_DEPTH {
+            match chip(c) {
+                Some(o) if o != c => c = o,
+                _ => break,
+            }
+        }
+        Some(c)
+    };
+    let (mut angle, mut mirror) = (0f32, false);
+    let mut t = i;
+    for _ in 0..MAX_PARENT_DEPTH {
+        if outer(t).is_none_or(|c| c == t) {
+            break;
+        }
+        let thing = &things[t];
+        let flipped = if let Some(pos) = &thing.data.pos {
+            let parent = thing.parent.and_then(|p| things.get(p)?.data.pos.as_ref());
+            let l = parent.map_or(linear(&pos.world), |p| {
+                mul3(
+                    &inverse3(&linear(&p.world)).unwrap_or(IDENTITY3),
+                    &linear(&pos.world),
+                )
+            });
+            angle += l[1][0].atan2(l[1][1]);
+            det3(&l) < 0.
+        } else if let Some(c) = chip(t).and_then(|c| {
+            things[c]
+                .data
+                .microchip
+                .as_ref()?
+                .components
+                .iter()
+                .find(|e| e.thing == Some(t))
+        }) {
+            angle += c.values[2];
+            c.flag
+        } else {
+            false
+        };
+        if flipped {
+            angle = -angle;
+            mirror = !mirror;
+        }
+        let Some(p) = thing.parent.filter(|&p| p != t) else {
+            break;
+        };
+        t = p;
+    }
+    (angle, mirror)
+}
+
+const IDENTITY3: [[f32; 3]; 3] = [[1., 0., 0.], [0., 1., 0.], [0., 0., 1.]];
+
+/// The columns of a column-major 4x4 matrix's linear part.
+fn linear(m: &[f32; 16]) -> [[f32; 3]; 3] {
+    [0, 1, 2].map(|c| [m[4 * c], m[4 * c + 1], m[4 * c + 2]])
+}
+
+fn det3(m: &[[f32; 3]; 3]) -> f32 {
+    let [a, b, c] = m;
+    a[0] * (b[1] * c[2] - b[2] * c[1]) - b[0] * (a[1] * c[2] - a[2] * c[1])
+        + c[0] * (a[1] * b[2] - a[2] * b[1])
+}
+
+/// Column-major 3x3 product a × b.
+fn mul3(a: &[[f32; 3]; 3], b: &[[f32; 3]; 3]) -> [[f32; 3]; 3] {
+    b.map(|col| [0, 1, 2].map(|r| (0..3).map(|k| a[k][r] * col[k]).sum()))
+}
+
+/// Column-major 3x3 inverse; `None` for a singular matrix.
+fn inverse3(m: &[[f32; 3]; 3]) -> Option<[[f32; 3]; 3]> {
+    let d = det3(m);
+    if d.abs() < 1e-12 {
+        return None;
+    }
+    let [a, b, c] = m;
+    // Rows of the inverse are the cross products of the columns over the determinant.
+    let rows = [cross3(b, c), cross3(c, a), cross3(a, b)].map(|r| r.map(|v| v / d));
+    Some([0, 1, 2].map(|col| [rows[0][col], rows[1][col], rows[2][col]]))
+}
+
+fn cross3(a: &[f32; 3], b: &[f32; 3]) -> [f32; 3] {
+    [
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    ]
+}
+
 fn is_world(t: &ThingRecord) -> bool {
     t.data.world.is_some() || t.parts.contains(&"WORLD")
 }
@@ -955,6 +1080,7 @@ fn build_scene_inner(
     project_tilted: bool,
 ) -> PhysicsScene {
     let mut scene = PhysicsScene::default();
+    let boards = chip_boards(things);
     let mut body_of = BTreeMap::<usize, Option<usize>>::new();
     let mut nested = std::collections::BTreeSet::new();
     let mut fixed_shape = Vec::new();
@@ -1233,14 +1359,12 @@ fn build_scene_inner(
         };
         let owner = body_owner(things, i).0;
         let slot = owner.and_then(|b| body_of.get(&b).copied().flatten());
-        // INFERRED: the world basis carries the parent chain's mirrors; a tweak Thing
-        // with no matrix of its own takes its body's.
-        let flip = things[i]
-            .data
-            .pos
-            .as_ref()
-            .or_else(|| owner.and_then(|o| things[o].data.pos.as_ref()))
-            .is_some_and(|p| p.world[0] * p.world[5] - p.world[1] * p.world[4] < 0.);
+        // D1159: the chain's parity (+0x224) XOR the body's basis mirrored (0x95fcf8).
+        let (angle, mirror) = chip_turn(things, &boards, i);
+        let flip = mirror
+            ^ owner
+                .and_then(|o| things[o].data.pos.as_ref())
+                .is_some_and(|p| p.world[0] * p.world[5] - p.world[1] * p.world[4] < 0.);
         if let Some(b) = slot {
             // D1156: as the follower's point (D1154).
             let from = t.parent.filter(|&p| p != i).unwrap_or(i);
@@ -1262,6 +1386,7 @@ fn build_scene_inner(
                     .then(|| key_of(tw.color_index, &tw.name)),
                 stick: [0.; 2],
                 flip,
+                angle,
                 at,
             });
         }
@@ -1366,7 +1491,7 @@ fn build_scene_inner(
                 up_down: tw.allow_up_down,
                 key: (tw.configuration == 11 && tw.follow_key)
                     .then(|| key_of(tw.color_index, &tw.name)),
-                angle: 0.,
+                angle: chip_turn(things, &boards, i).0,
                 at,
                 stick: [0.; 2],
             });

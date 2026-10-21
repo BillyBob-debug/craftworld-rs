@@ -1836,3 +1836,66 @@ fn d1157_tag_synchronisers_send_a_tag_offset_and_receivers_place_a_tag() {
     let out = lbp_sim::synced_tags(&far, &[tag([0., 500.], None)]);
     assert!(near(out[0].at, [900., 300.]), "{:?}", out[0].at);
 }
+
+#[test]
+fn d1159_tweaks_on_a_chip_take_their_turn_on_the_board() {
+    use lbp_level::parts::{ChipComponent, Microchip};
+    use lbp_sim::scene::SpinTweak;
+    let build = |flagged: bool| {
+        let mut things = vec![
+            floor(),
+            thing(
+                1,
+                matrix(0., 300., 0., 0.3, 1., 1.),
+                Some(rect(100., 100., 7)),
+                true,
+            ),
+            thing(2, matrix(0., 300., 0., 0.3, 1., 1.), None, false),
+            thing(3, matrix(0., 300., 0., 0.3, 1., 1.), None, false),
+            // On the board, turned 0.4 further: a PPos, so its local matrix counts.
+            thing(4, matrix(0., 300., 0., 0.7, 1., 1.), None, false),
+            // No PPos: its entry in the chip's component table counts.
+            thing(5, matrix(0., 300., 0., 0., 1., 1.), None, false),
+        ];
+        things[5].data.pos = None;
+        for (k, p) in [(2, 1), (3, 2), (4, 3), (5, 3)] {
+            things[k].parent = Some(p);
+        }
+        things[2].data.microchip = Some(Microchip {
+            circuit_board: Some(3),
+            components: vec![ChipComponent {
+                thing: Some(5),
+                values: [0., 0., 0.5, 1., 1.],
+                flag: flagged,
+            }],
+            ..Default::default()
+        });
+        things[4].data.physics_tweak = Some(PhysicsTweak {
+            configuration: 1,
+            vel_range: 0.2,
+            accel_strength: 1.,
+            ..Default::default()
+        });
+        things[5].data.physics_tweak = Some(PhysicsTweak {
+            configuration: 8,
+            vel_range: 1.,
+            accel_strength: 1.,
+            ..Default::default()
+        });
+        let scene = build_scene(&things);
+        (scene.bodies[0].spins[0], scene.bodies[0].moves[0].angle)
+    };
+    let (spin, mover): (SpinTweak, f32) = build(false);
+    // +0x220 is the inverse of the board turn: -0.4 for the spin, +0.5 from the table.
+    assert!(
+        (spin.angle + 0.4).abs() < 1e-5 && !spin.flip,
+        "{}",
+        spin.angle
+    );
+    assert_eq!(mover, 0.5);
+    // A gyroscope turned 0.4 on its chip holds its body 0.4 clockwise of upright.
+    assert!(spin.target_along(-0.4, 0., [0., 1.]).0.abs() < 1e-5);
+    assert!(spin.target_along(0., 0., [0., 1.]).0 < 0.);
+    // A flipped entry negates the sum.
+    assert_eq!(build(true).1, -0.5);
+}
