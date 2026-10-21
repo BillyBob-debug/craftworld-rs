@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-57.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-60.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -65,10 +65,12 @@
 - Merged: D1154 (PR 297, baf0614) followers measure from their parent's point.
 - Merged: D1155 (PR 298, 5b298d1) a tag switched off by its input cannot be followed.
 - Merged: D1156 (PR 299, f0bacdd) aiming spins measure from their parent's point.
-- D1157 (branch `logic-d1157`, worktree `E:\Projects\wt-d324`): tag synchronisers
-  send a tag's offset and receivers place a tag (docs/logic/part-59.md; corrects
-  Parts 57-58: list +0x2b8 is the tag synchroniser, not the wormhole).
-- Decision numbers: D1100-D1199, next free D1158.
+- Merged: D1157 (PR 300, 69f4ca5) tag synchronisers send a tag's offset and receivers
+  place a tag (Part 59; corrects Parts 57-58: list +0x2b8 is the tag synchroniser).
+- D1158 (branch `logic-d1158`, worktree `E:\Projects\wt-d324`): aiming spins
+  (configuration 4) and stick movers (6, 7) read their stick from input ports 1 and 2
+  (docs/logic/part-60.md).
+- Decision numbers: D1100-D1199, next free D1159.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -123,7 +125,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 and D1157 unchanged (Parts 58 and 59).
+  After D1156, D1157 and D1158 unchanged (Parts 58-60).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -219,13 +221,14 @@ EBOOT rule and unit tests:
    FOUND), call `PlaybackTweak::tick` each frame and drive the body towards
    `sample` at `frame` from its start pose (Part 48); for configuration 14, the
    gather around the camera and the SPU job's force (NOT FOUND, needs SPU code,
-   Part 49); for configurations 3-5, fill `SpinTweak.stick` from the wired X and Y
-   inputs, add `SpinTweak::lead` for a target with a body, and the +0x220 parent
+   Part 49); add `SpinTweak::lead` for a target with a body, and the +0x220 parent
    angle (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
    for followers, a host filling `MoveTweak::angle`, the mirror negation of the
    localSpace angle, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
    for tag synchronisers, the receiver's online source 0x2a8538, the useLayers z and
-   the other 0x130c90 caller 0x29ff3c (Part 59);
+   the other 0x130c90 caller 0x29ff3c (Part 59); for stick movers, the mirror test
+   that negates stick x, the input scale 0xcbed4 and the 0x957df4 param_5 path
+   (Part 60);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).

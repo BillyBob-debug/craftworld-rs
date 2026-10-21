@@ -1490,6 +1490,20 @@ impl LevelWorld {
         wired(self, u32::try_from(thing).ok()?, 0).map(|(_, s)| s)
     }
 
+    /// D1158: the stick a PPhysicsTweak on `thing` reads from its input ports 1 and 2
+    /// (FOUND, 01.33, 0xcb02c and 0xcb074): the raw f32 activation (+0x18) of the signal
+    /// in input slot 1 when the input list has at least 2 slots, and in slot 2 with at
+    /// least 3; 0 for a missing or unwired slot. No deactivation test.
+    pub fn tweak_stick(&self, thing: usize) -> [f32; 2] {
+        let port = |p| {
+            u32::try_from(thing)
+                .ok()
+                .and_then(|t| wired(self, t, p))
+                .map_or(0., |(_, s)| s.activation)
+        };
+        [port(1), port(2)]
+    }
+
     /// D1101: the activation a PPhysicsTweak on `thing` sees (FOUND, 01.33, 0xcaf9c): 1 with
     /// no switch output wired to its input; with `behavior` 0 (digital) 1 when the signal's
     /// ternary is non-zero, else 0; with 1 (analog) the activation's magnitude; 1 otherwise.
@@ -1567,6 +1581,22 @@ mod tests {
         };
         w.wire_inputs();
         w
+    }
+
+    #[test]
+    fn d1158_tweak_stick_reads_raw_activations_on_ports_1_and_2() {
+        let mut w = world(vec![
+            switch(&[
+                (sig(-0.5, -1, -1), &[(1, 1)]),
+                (sig(0.25, 1, -1), &[(1, 2)]),
+            ]),
+            ThingState::default(),
+            ThingState::default(),
+        ]);
+        assert_eq!(w.tweak_stick(1), [-0.5, 0.25]);
+        assert_eq!(w.tweak_stick(2), [0., 0.]);
+        w.things[1].inputs.truncate(2);
+        assert_eq!(w.tweak_stick(1), [-0.5, 0.]);
     }
 
     #[test]

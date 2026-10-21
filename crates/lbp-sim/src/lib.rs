@@ -213,6 +213,7 @@ pub fn drive_spins(
     player: Option<Vec2>,
     tags: &[TagSpot],
     activation: impl Fn(&scene::SpinTweak) -> f32,
+    stick: impl Fn(&scene::SpinTweak) -> [f32; 2],
 ) {
     let hz = TICK_HZ as f32;
     let per_tick = 1. / (hz * UNIT_SCALE);
@@ -222,6 +223,11 @@ pub fn drive_spins(
         let vel = [v.0.x * per_tick, v.0.y * per_tick];
         let before = w.0 / hz;
         let after = tweaks.0.iter().fold(before, |s, t| {
+            // D1158: configuration 4 reads its stick this tick.
+            let t = &scene::SpinTweak {
+                stick: stick(t),
+                ..*t
+            };
             // D1156: measured from the tweak's parent point.
             let me = [
                 pos.0.x / UNIT_SCALE + rot.cos * t.at[0] - rot.sin * t.at[1],
@@ -419,6 +425,7 @@ pub fn drive_moves(
     player: Option<Vec2>,
     tags: &[TagSpot],
     activation: impl Fn(&scene::MoveTweak) -> f32,
+    stick: impl Fn(&scene::MoveTweak) -> [f32; 2],
 ) {
     // The rows are in game units per tick; the bodies move in sim units per second.
     let hz = TICK_HZ as f32;
@@ -427,6 +434,11 @@ pub fn drive_moves(
         let up = [-rot.sin, rot.cos];
         let before = [v.0.x * per_tick, v.0.y * per_tick];
         let after = tweaks.0.iter().fold(before, |vel, t| {
+            // D1158: stick movers read their stick this tick.
+            let t = &scene::MoveTweak {
+                stick: stick(t),
+                ..*t
+            };
             // D1154: from the follower's parent, carried by the body.
             let me = [
                 pos.0.x / UNIT_SCALE + rot.cos * t.at[0] - rot.sin * t.at[1],

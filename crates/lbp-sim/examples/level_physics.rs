@@ -301,6 +301,8 @@ fn run() -> Result<(), String> {
     let (mut aimers, mut aimers_offset) = (0usize, 0usize);
     // D1157: tag synchronisers: senders, receivers, and those riding a body.
     let (mut senders, mut receivers, mut syncs_on_body) = (0usize, 0usize, 0usize);
+    // D1158: stick tweaks (spin 4, move 6 and 7) and those with input port 1 or 2 wired.
+    let (mut sticks, mut sticks_wired) = (0usize, 0usize);
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -395,6 +397,36 @@ fn run() -> Result<(), String> {
         let sync_body = scene.syncs.iter().filter(|y| y.body.is_some()).count();
         senders += send;
         receivers += receive;
+        let ports: std::collections::BTreeSet<(usize, i32)> = report
+            .things
+            .iter()
+            .filter_map(|t| t.data.switch.as_ref())
+            .flat_map(|s| s.outputs.iter().flatten())
+            .flat_map(|o| o.targets.iter().filter_map(|&(t, p)| Some((t?, p))))
+            .collect();
+        let stick_things: Vec<usize> = scene
+            .bodies
+            .iter()
+            .flat_map(|b| {
+                b.spins
+                    .iter()
+                    .filter(|t| t.configuration == 4)
+                    .map(|t| t.thing)
+                    .chain(
+                        b.moves
+                            .iter()
+                            .filter(|m| matches!(m.configuration, 6 | 7))
+                            .map(|m| m.thing),
+                    )
+            })
+            .collect();
+        let stick = stick_things.len();
+        let stick_wired = stick_things
+            .iter()
+            .filter(|&&t| ports.contains(&(t, 1)) || ports.contains(&(t, 2)))
+            .count();
+        sticks += stick;
+        sticks_wired += stick_wired;
         syncs_on_body += sync_body;
         let r = &scene.report;
         fixed_bodies += r.fixed_bodies;
@@ -516,6 +548,7 @@ fn run() -> Result<(), String> {
             "followers": follow, "followers_offset": follow_offset,
             "aimers": aim, "aimers_offset": aim_offset,
             "senders": send, "receivers": receive, "syncs_on_body": sync_body,
+            "sticks": stick, "sticks_wired": stick_wired,
         }));
     }
     let mut top: Vec<(&String, &usize)> = materials.iter().collect();
@@ -544,6 +577,7 @@ fn run() -> Result<(), String> {
         "followers": followers, "followers_offset": followers_offset,
         "aimers": aimers, "aimers_offset": aimers_offset,
         "senders": senders, "receivers": receivers, "syncs_on_body": syncs_on_body,
+        "sticks": sticks, "sticks_wired": sticks_wired,
         "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,
