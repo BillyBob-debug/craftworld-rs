@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-67.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-68.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -83,9 +83,11 @@
   passes its lead rate to the shaper (Part 65).
 - Merged: D1165 (PR 308, 0560b46) configuration 5 leads the player by Sackboy's
   velocity (Part 66).
-- D1166 (branch `logic-d1166`, worktree `E:\Projects\wt-d324`): allowInOut followers
-  move their group to the target's layer (docs/logic/part-67.md).
-- Decision numbers: D1100-D1199, next free D1167.
+- Merged: D1166 (PR 309, 9b89c24) allowInOut followers move their group to the target's
+  layer (Part 67).
+- D1167 (branch `logic-d1167`, worktree `E:\Projects\wt-d324`): a receiver's second
+  source 0x2a8538 is online-only (docs/logic/part-68.md).
+- Decision numbers: D1100-D1199, next free D1168.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -140,7 +142,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1166 unchanged (Parts 58-67; D1163 changes 2 Rookie Test
+  After D1156 to D1167 unchanged (Parts 58-68; D1163 changes 2 Rookie Test
   followers, none on the route; D1164 and D1165 change no Rookie Test aimer; D1166 is not hosted).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
@@ -186,6 +188,8 @@
   lead the player (Part 66).
   local-analysis/logic/d1166/census1.json `chip.follow_in_out`: 149 allowInOut
   followers in 29 levels (Part 67).
+  local-analysis/logic/d1167/census1.json `receivers_unsent`: 79 of 82 receivers in 7
+  levels have no sender of their key in their level (Part 68).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -222,6 +226,9 @@ when a later PR finds it), then the thread's own context at hand-off (ctx_audit)
 - D1166: haiku general-purpose (disassembly of 0x1c8250), 39,849 tokens, 7 tool uses,
   0.7 min, used as is, not redone so far; thread context 99k at hand-off (after a
   compaction).
+- D1167: haiku general-purpose (decompile 0x29ff3c, 0x2a8538), 40,481 tokens, 9 tool
+  uses, 0.7 min, used as is, not redone so far; D1166's result still not redone; thread
+  context 89k at hand-off.
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -259,8 +266,7 @@ EBOOT rule and unit tests:
    Part 49);
    for followers, the 1/mass rate (Part 53), and a host calling
    `MoveTweak::in_out_step` and moving the group (Part 67);
-   for tag synchronisers, the receiver's online source 0x2a8538, the useLayers z and
-   the other 0x130c90 caller 0x29ff3c (Part 59);
+   for tag synchronisers, the useLayers z (byte +0x2c, Part 68);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).

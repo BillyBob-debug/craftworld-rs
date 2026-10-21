@@ -35,8 +35,8 @@ axes in its body's frame), `SyncMarks` on the body entities (or one loose entity
 `sync_spots` for their world pose, and `synced_tags(syncs, lit tags)`, which gives each
 receiver with a sender its tag as a `TagSpot`. The viewer adds those to the tags its
 followers and aiming spins search. INFERRED: "own root" is the sender's own body, and
-0x130c90 picks the sender nearest the receiver. Not modelled: the online source, the
-useLayers z and the other 0x130c90 caller 0x29ff3c. Test:
+0x130c90 picks the sender nearest the receiver. Not modelled: the useLayers z (the
+online source and the other 0x130c90 caller 0x29ff3c are resolved in Part 68). Test:
 `d1157_tag_synchronisers_send_a_tag_offset_and_receivers_place_a_tag` in
 crates/lbp-sim/tests/sandbox.rs.
 

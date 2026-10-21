@@ -2210,3 +2210,36 @@ fn d1166_in_out_followers_move_to_their_targets_layer_or_as_near_as_fits() {
     // A step that would leave the depth band is blocked.
     assert_eq!(follower.in_out_step(79., 479., |_| true), 0.);
 }
+
+#[test]
+fn d1167_offline_a_receiver_needs_a_sender_of_its_key_in_the_level() {
+    let spot = |thing, kind, key, at| lbp_sim::SyncSpot {
+        thing,
+        kind,
+        key,
+        radius: -1.,
+        min_radius: 0.,
+        scale: [1., 1.],
+        body: None,
+        at,
+        axes: [[1., 0.], [0., 1.]],
+    };
+    let tag = lbp_sim::TagSpot {
+        thing: 9,
+        key: 5,
+        body: None,
+        at: [10., 20.],
+    };
+    // A receiver of key 5 beside a tag of key 5 but no sender: the online source
+    // 0x2a8538 is absent offline, so it places nothing.
+    let alone = [spot(1, 1, 5, [100., 0.])];
+    assert!(lbp_sim::synced_tags(&alone, &[tag]).is_empty());
+    // A sender of another key does not feed it either.
+    let other = [spot(1, 1, 5, [100., 0.]), spot(2, 0, 6, [0., 0.])];
+    assert!(lbp_sim::synced_tags(&other, &[tag]).is_empty());
+    // With a sender of key 5 it places the tag at its own point plus the offset.
+    let sent = [spot(1, 1, 5, [100., 0.]), spot(2, 0, 5, [0., 0.])];
+    let out = lbp_sim::synced_tags(&sent, &[tag]);
+    assert_eq!(out.len(), 1);
+    assert_eq!(out[0].at, [110., 20.]);
+}
