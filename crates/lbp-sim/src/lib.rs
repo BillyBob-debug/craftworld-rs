@@ -513,19 +513,19 @@ pub struct PistonDrive {
 
 impl PistonDrive {
     /// D1103: at tick `now` sets the clock rate, 1 with no input, else from the `input`
-    /// signal (ternary, activation) by mode ([`scene::piston_scale`], D1104; mode 4
+    /// signal (ternary, activation, whether its source is signed, D1170) by mode ([`scene::piston_scale`], D1104; mode 4
     /// [`scene::SceneJoint::servo_scale`], D1106), and returns the length (in sim units)
     /// from the clock.
-    pub fn step(&mut self, now: f32, input: Option<(i32, f32)>) -> f32 {
+    pub fn step(&mut self, now: f32, input: Option<(i32, f32, bool)>) -> f32 {
         let p = self.joint.params;
         let s = match input {
             None => 1.,
             Some(_) if p.held => 0.,
-            Some((_, a)) if p.mode == 4 => {
+            Some((_, a, _)) if p.mode == 4 => {
                 let l = self.joint.length(self.clock.frame(now), true);
                 self.joint.servo_scale(a, l)
             }
-            Some((t, a)) => scene::piston_scale(p.mode, p.held, t, a),
+            Some((t, a, signed)) => scene::piston_scale(p.mode, p.held, t, a, signed),
         };
         self.clock.set_scale(now, s);
         self.joint.length(self.clock.frame(now), input.is_some()) * UNIT_SCALE
@@ -536,7 +536,7 @@ impl PistonDrive {
     /// frame of its clock, as the motor row builder 0x95f494 takes it (0xc99d0 at frame and
     /// frame + 1), times [`TICK_HZ`] (one game frame per tick). Pattern 1 gives speed (+0xd4,
     /// rad per frame) × clock rate, as 0xc7370 returns.
-    pub fn turn(&mut self, now: f32, input: Option<(i32, f32)>) -> f32 {
+    pub fn turn(&mut self, now: f32, input: Option<(i32, f32, bool)>) -> f32 {
         self.step(now, input);
         let wired = input.is_some();
         let f = self.clock.frame(now);
@@ -551,7 +551,7 @@ pub fn drive_pistons(
     commands: &mut Commands,
     q: &mut Query<(&mut PistonDrive, &mut PrismaticJoint)>,
     now: f32,
-    signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32)>,
+    signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32, bool)>,
 ) {
     for (mut drive, mut joint) in q.iter_mut() {
         let input = signal(&drive.joint);
@@ -573,7 +573,7 @@ pub fn drive_winches(
     commands: &mut Commands,
     q: &mut Query<(&mut PistonDrive, &mut DistanceJoint)>,
     now: f32,
-    signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32)>,
+    signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32, bool)>,
 ) {
     for (mut drive, mut joint) in q.iter_mut() {
         let input = signal(&drive.joint);
@@ -593,7 +593,7 @@ pub fn drive_motors(
     commands: &mut Commands,
     q: &mut Query<(&mut PistonDrive, &mut RevoluteJoint)>,
     now: f32,
-    signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32)>,
+    signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32, bool)>,
 ) {
     for (mut drive, mut joint) in q.iter_mut() {
         let input = signal(&drive.joint);

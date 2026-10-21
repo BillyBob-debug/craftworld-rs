@@ -1828,16 +1828,18 @@ impl SceneJoint {
 /// D1104: FOUND (01.33, the per-frame pass 0xcfedc, jump table 0xcffa4) the rate a wired
 /// piston's clock runs at, from its mode and the signal on its input (`ternary`,
 /// `activation`): held (`+0x1cc`) 0; mode 0 1 while the ternary is set, else 0; mode 1 the
-/// ternary (1 or -1), and with the ternary 0 -1 or 0 by the port test 0x900730 (read here
-/// as -1, INFERRED: an off switch sends the piston back); mode 2 1; mode 3 the activation;
+/// ternary (1 or -1), and with the ternary 0 0 when the source output is `signed` (D1170:
+/// the port test 0x900730 on the signal's switch +0x34 and port +0x38, at 0xd01a8), else
+/// -1 (an off switch sends the piston back); mode 2 1; mode 3 the activation;
 /// mode 4 (speed) is a servo on the length ([`SceneJoint::servo_scale`], D1106).
-pub fn piston_scale(mode: i32, held: bool, ternary: i32, activation: f32) -> f32 {
+pub fn piston_scale(mode: i32, held: bool, ternary: i32, activation: f32, signed: bool) -> f32 {
     if held {
         return 0.;
     }
     match mode {
         0 => f32::from(u8::from(ternary != 0)),
         1 if ternary != 0 => ternary as f32,
+        1 if signed => 0.,
         1 => -1.,
         3 => activation,
         _ => 1.,

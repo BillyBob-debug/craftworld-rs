@@ -159,8 +159,8 @@ and the wired type 9 joint; every other joint saves 0 and none is held.
 What a mode does (FOUND unless marked):
 - The rate (0xcfedc, jump table 0xcffa4): held 0; mode 0 1 while the ternary is set,
   else 0; mode 1 the ternary as a float (1 or -1), and with the ternary 0 either 0 or -1
-  by the port test 0x900730 (taken here as -1, INFERRED: an off switch sends a direction
-  piston back); mode 2 1; mode 3 the activation; mode 4 is 0xc9e80 (Part 8).
+  by the port test 0x900730 (0 when the source is signed, else -1; Part 71); mode 2 1;
+  mode 3 the activation; mode 4 is 0xc9e80 (Part 8).
 - The length (0xc9790's branch at 0xc993c, wired and mode 1 or 4): base + 2 × frame ×
   range / time, the base for time < 1, with no phase, pattern or wave. Other modes use
   the Part 4 rule on the clock.
@@ -185,7 +185,7 @@ What the game does (EBOOT 01.33, FOUND unless marked):
   until its clock has run back to frame time / 2 before it moves. Type 9 (angular) has
   its own limit row (0x95f494, INFERRED).
 - The port test 0x900730 gives 0 for an ordinary switch output, so an off switch runs a
-  direction piston back at -1 (INFERRED: the switch's type bucket is not mapped).
+  direction piston back at -1, and a signed one (a three-way switch) stops it (Part 71).
 
 lbp-sim: `SceneJoint::length` keeps every piston's length between base and base + range
 and the clock is no longer clamped (the D1104 `ramp_frames` and `PistonClock::clamp` are
@@ -208,8 +208,8 @@ What the game does (EBOOT 01.33, FOUND unless marked):
 - The other cases, confirmed: mode 0 the ternary set, mode 1 the ternary or 0 / -1 by
   0x900730, mode 2 1, mode 3 the analog value.
 - 0x900730 is a component validity test on the signal's type (table 0x900778: types 2,
-  10 and 20 always, 36-38, 44 and 55 by index), not a live-signal test. Which type a
-  switch output has is still not mapped, so mode 1's off rate stays -1 (INFERRED).
+  10 and 20 always, 36-38, 44 and 55 by index), not a live-signal test. It is
+  `output_signed` in lbp-runtime, which mode 1 now uses (Part 71).
 - Motors and winches (Toolkit names, INFERRED: type 3 winch, 9 motor) share the length
   function 0xc9790; a motor spins on pattern 1 (base + frame × Speed) inside angle limits
   about `+0xe0` (0x95f494; unbounded when range is 2π or more); strength is `+0xc0`

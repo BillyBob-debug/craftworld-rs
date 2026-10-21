@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-70.md (touching layers; pistons; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-71.md (touching layers; pistons and their mode rate; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -89,9 +89,11 @@
   (Part 68).
 - Merged: D1168 (PR 311, 64173b1) useLayers puts a received tag on the sent tag's z
   (Part 69).
-- D1169 (branch `logic-d1169`, worktree `E:\Projects\wt-d324`): a piston holds its
-  start angle; the solver's type table confirms the type names (docs/logic/part-70.md).
-- Decision numbers: D1100-D1199, next free D1170.
+- Merged: D1169 (PR 312, 423bbb6) a piston holds its start angle; the solver's type
+  table confirms the type names (Part 70).
+- D1170 (branch `logic-d1170`, worktree `E:\Projects\wt-d324`): a direction piston
+  stops when a signed source is off, by the port test 0x900730 (docs/logic/part-71.md).
+- Decision numbers: D1100-D1199, next free D1171.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -146,7 +148,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1169 unchanged (Parts 58-70; D1163 changes 2 Rookie Test
+  After D1156 to D1170 unchanged (Parts 58-71; D1163 changes 2 Rookie Test
   followers, none on the route; D1164 and D1165 change no Rookie Test aimer; D1166 is not hosted).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
@@ -196,6 +198,8 @@
   levels have no sender of their key in their level (Part 68).
   local-analysis/logic/d1168/census2.json `receivers_use_layers` 20 in 4 levels,
   `receivers_layered` 0 (useLayers with a sender in the level) (Part 69).
+  local-analysis/logic/d1170/census1.json `joint type T mode M input signed S`: 3 mode 1
+  pistons and 15 mode 1 motors have a signed source, none in the Rookie Test (Part 71).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -241,8 +245,10 @@ when a later PR finds it), then the thread's own context at hand-off (ctx_audit)
 - D1169: haiku general-purpose (resolve 0x962590, 0x960988 and the type 4 case),
   43,286 tokens, 12 tool uses, 1.1 min, FAILED: resolved none of the questions (the
   Ghidra bridge cannot decompile or disassemble mid-function addresses), redone by hand
-  with read_bytes and capstone; earlier results not redone; thread context at hand-off
-  in the PR reply.
+  with read_bytes and capstone; earlier results not redone; thread context 98k at
+  hand-off.
+- D1170: none (all steps ran in the thread); earlier results not redone; thread context
+  at hand-off in the PR reply.
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -284,7 +290,7 @@ EBOOT rule and unit tests:
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the position term and strength cap of row 0x95f494, the turn sign,
-   the switch type bucket in 0x900730, and the piston's k term (5 × strength for
+   and the piston's k term (5 × strength for
    pattern 2) in row 0x96178c (Part 70).
 5. The creature brain (PEnemy reader NOT FOUND; leads: the TOC entry for string
    "PEnemy" 0xc79058, bit 0x1c tests); who puts a player in state 5 on contact (Part

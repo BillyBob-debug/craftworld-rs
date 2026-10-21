@@ -1490,6 +1490,16 @@ impl LevelWorld {
         wired(self, u32::try_from(thing).ok()?, 0).map(|(_, s)| s)
     }
 
+    /// D1170: whether the output wired to `thing`'s input port 0 carries a signed signal
+    /// ([`output_signed`], the port test 0x900730), which a direction piston reads with
+    /// its ternary 0 (FOUND, 01.33, 0xd01a8: rate 0 when signed, else -1).
+    pub fn input_signed(&self, thing: usize) -> bool {
+        u32::try_from(thing)
+            .ok()
+            .and_then(|t| wired(self, t, 0))
+            .is_some_and(|(w, _)| output_signed(self, w, 0))
+    }
+
     /// D1158: the stick a PPhysicsTweak on `thing` reads from its input ports 1 and 2
     /// (FOUND, 01.33, 0xcb02c and 0xcb074): the raw f32 activation (+0x18) of the signal
     /// in input slot 1 when the input list has at least 2 slots, and in slot 2 with at
@@ -2627,5 +2637,33 @@ mod tests {
             })
             .collect();
         assert_eq!(seen, [(1, 1), (0, 0), (1, 1), (0, 0)]);
+    }
+
+    #[test]
+    fn d1170_a_piston_input_is_signed_from_a_three_way_switch_or_a_stick() {
+        let source = |switch_type| ThingState {
+            switch: Some(SwitchState {
+                switch_type,
+                outputs: vec![Some(SwitchOutputState::default()); 20],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let piston = |output| ThingState {
+            inputs: vec![Some(InputWire { switch: 0, output })],
+            ..Default::default()
+        };
+        let signed = |switch_type, output| {
+            let w = LevelWorld {
+                things: vec![source(switch_type), piston(output), ThingState::default()],
+                ..Default::default()
+            };
+            (w.input_signed(1), w.input_signed(2))
+        };
+        // A three-way switch, a button, a pad's stick (output 10) and its button (0).
+        assert_eq!(signed(2, 0), (true, false));
+        assert_eq!(signed(0, 0), (false, false));
+        assert_eq!(signed(38, 10), (true, false));
+        assert_eq!(signed(38, 0), (false, false));
     }
 }

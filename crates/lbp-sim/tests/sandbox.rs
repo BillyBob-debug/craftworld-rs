@@ -852,17 +852,22 @@ fn d1104_a_direction_piston_ramps_out_while_on_and_back_while_off() {
     // Rate by mode: on 1, a negative signal -1, off -1 (mode 1); mode 0 holds while off.
     assert_eq!(
         (
-            piston_scale(1, false, 1, 0.),
-            piston_scale(1, false, -1, 0.)
+            piston_scale(1, false, 1, 0., false),
+            piston_scale(1, false, -1, 0., false)
         ),
         (1., -1.)
     );
-    assert_eq!(piston_scale(1, false, 0, 0.), -1.);
+    assert_eq!(piston_scale(1, false, 0, 0., false), -1.);
+    // D1170: a signed source (a three-way switch at 0) stops the piston instead.
+    assert_eq!(piston_scale(1, false, 0, 0., true), 0.);
     assert_eq!(
-        (piston_scale(0, false, 0, 0.), piston_scale(1, true, 1, 0.)),
+        (
+            piston_scale(0, false, 0, 0., false),
+            piston_scale(1, true, 1, 0., false)
+        ),
         (0., 0.)
     );
-    assert_eq!(piston_scale(3, false, 1, 0.25), 0.25);
+    assert_eq!(piston_scale(3, false, 1, 0.25, false), 0.25);
     // The ramp: base + 2 × frame × range / time; D1105: the length is held between base
     // and base + range while the clock runs on.
     let mut c = PistonClock::default();
@@ -956,12 +961,12 @@ fn d1107_a_winch_follows_the_piston_rule() {
     };
     let u = lbp_sim::UNIT_SCALE;
     // Switched on (direction mode), it winds in over half its time and stops at 200.
-    assert!((d.step(15., Some((1, 1.))) / u - 300.).abs() < 1e-3);
-    assert!((d.step(60., Some((1, 1.))) / u - 200.).abs() < 1e-3);
+    assert!((d.step(15., Some((1, 1., false))) / u - 300.).abs() < 1e-3);
+    assert!((d.step(60., Some((1, 1., false))) / u - 200.).abs() < 1e-3);
     // Switched off, the clock (run on to 200 meanwhile) counts back down and the rope
     // pays out to its base length.
-    assert!((d.step(200., Some((0, 0.))) / u - 200.).abs() < 1e-3);
-    assert!((d.step(400., Some((0, 0.))) / u - 400.).abs() < 1e-3);
+    assert!((d.step(200., Some((0, 0., false))) / u - 200.).abs() < 1e-3);
+    assert!((d.step(400., Some((0, 0., false))) / u - 400.).abs() < 1e-3);
 }
 
 #[test]
@@ -994,8 +999,8 @@ fn d1108_a_motor_turns_at_its_speed_on_its_clock() {
     // Free running: 0.05 rad per frame, one frame a tick.
     assert!((d.turn(10., None) - 0.05 * hz).abs() < 1e-3);
     // Switched (mode 0, on/off): it turns while on and stops when off.
-    assert!((d.turn(20., Some((1, 1.))) - 0.05 * hz).abs() < 1e-3);
-    assert!(d.turn(30., Some((0, 0.))).abs() < 1e-6);
+    assert!((d.turn(20., Some((1, 1., false))) - 0.05 * hz).abs() < 1e-3);
+    assert!(d.turn(30., Some((0, 0., false))).abs() < 1e-6);
 }
 
 #[test]
