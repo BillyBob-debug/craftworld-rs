@@ -2302,7 +2302,7 @@ fn drive_pistons(
     lbp_sim::drive_pistons(&mut commands, &mut q, now, |j| {
         world
             .input_signal(j.thing)
-            .map(|s| (s.ternary, s.activation))
+            .map(|s| (s.ternary, s.activation, world.input_signed(j.thing)))
     });
 }
 
@@ -2320,7 +2320,7 @@ fn drive_winches(
     lbp_sim::drive_winches(&mut commands, &mut q, now, |j| {
         world
             .input_signal(j.thing)
-            .map(|s| (s.ternary, s.activation))
+            .map(|s| (s.ternary, s.activation, world.input_signed(j.thing)))
     });
 }
 
@@ -2339,7 +2339,7 @@ fn drive_motors(
     lbp_sim::drive_motors(&mut commands, &mut q, now, |j| {
         world
             .input_signal(j.thing)
-            .map(|s| (s.ternary, s.activation))
+            .map(|s| (s.ternary, s.activation, world.input_signed(j.thing)))
     });
 }
 

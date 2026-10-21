@@ -3454,6 +3454,22 @@ fn run() -> Result<(), String> {
                 *totals.switches.sensors.entry(k).or_default() += 1;
             }
         }
+        // D1170: wired winches, pistons and motors by mode and whether their input is
+        // signed (a direction piston with its ternary 0 then stops instead of running back).
+        for (i, t) in report.things.iter().enumerate() {
+            let Some(j) = &t.data.joint else {
+                continue;
+            };
+            if matches!(j.joint_type, 3 | 4 | 9) && world.input_signal(i).is_some() {
+                let k = format!(
+                    "joint type {} mode {} input signed {}",
+                    j.joint_type,
+                    j.params.mode,
+                    world.input_signed(i)
+                );
+                *totals.switches.sensors.entry(k).or_default() += 1;
+            }
+        }
         // D1152: followKey tweaks (configurations 5 and 11) by whether a tag in the level
         // has their exact (colour, name) pair, the key 0xceac0 compares; else whether a
         // tag has the name in another colour.
