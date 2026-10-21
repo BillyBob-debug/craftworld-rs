@@ -2100,3 +2100,64 @@ fn d1164_an_aimer_leads_a_moving_target_by_its_turn_per_tick() {
     // The lead is the point velocity of the target's body.
     assert_eq!(SpinTweak::lead([1., 0.], 0.5, [0., 2.]), [0., 0.]);
 }
+
+#[test]
+fn d1165_an_aimer_leads_the_player_by_his_velocity() {
+    use bevy::ecs::system::RunSystemOnce;
+    use lbp_sim::scene::SpinTweak;
+    let aimer = SpinTweak {
+        configuration: 5,
+        range: 0.2094394,
+        accel: 0.1,
+        min_range: 0.,
+        max_range: -1.,
+        angle_range: 180.,
+        ..Default::default()
+    };
+    // The aimer at the origin, lined up on Sackboy 10 above, moving `v` a tick.
+    let turn = |v: [f32; 2]| {
+        let mut w = World::new();
+        // No physics here, so the body cannot be woken.
+        w.insert_resource(bevy::ecs::error::FallbackErrorHandler(
+            bevy::ecs::error::ignore,
+        ));
+        let e = w
+            .spawn((
+                lbp_sim::SpinTweaks(vec![aimer]),
+                Position::new(Vec2::ZERO),
+                Rotation::radians(0.),
+                LinearVelocity::ZERO,
+                AngularVelocity(0.),
+            ))
+            .id();
+        w.run_system_once(
+            move |mut c: Commands,
+                  mut q: Query<(
+                Entity,
+                &lbp_sim::SpinTweaks,
+                &Position,
+                &Rotation,
+                &LinearVelocity,
+                &mut AngularVelocity,
+            )>| {
+                let player = Some((Vec2::new(0., 10. * lbp_sim::UNIT_SCALE), v));
+                lbp_sim::drive_spins(
+                    &mut c,
+                    &mut q,
+                    player,
+                    &[],
+                    |_| 1.,
+                    |t| t.stick,
+                    |t| t.scale,
+                    |_| None,
+                );
+            },
+        )
+        .unwrap();
+        w.get::<AngularVelocity>(e).unwrap().0 / TICK_HZ as f32
+    };
+    // Standing still he needs no turn; walking left a tick he is led anticlockwise.
+    assert_eq!(turn([0., 0.]), 0.);
+    let s = turn([-0.01, 0.]);
+    assert!((s - (0.01f32).atan2(10.)).abs() < 1e-6, "{s}");
+}

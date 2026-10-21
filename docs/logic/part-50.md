@@ -29,7 +29,7 @@ world basis, or its body's when it has none, mirrored; INFERRED to carry the par
 chain's parity); `aim` negates 4's x by the flip; `SpinTweak::lead(vel, ω, r)` gives the
 point velocity for a host to add to 5's aim. Not modelled: +0x220, which is 0 for a
 body with no parent chain. D1164 (Part 65) adds the lead in `drive_spins` for tags on
-bodies.
+bodies, and D1165 (Part 66) for the player.
 
 Census (census-all-36.json): mirrored aim tweaks are configuration 3 ×13 of 213 and
 5 ×31 of 577; none of the 80 configuration 4 tweaks is mirrored.
