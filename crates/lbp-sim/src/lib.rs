@@ -781,12 +781,17 @@ fn wrap_pi(x: f32) -> f32 {
     x - ((x + PI) / TAU).floor() * TAU
 }
 
-/// D1181: whether a piston is driven by its band ([`PistonDrive::slide_to`]) rather than
-/// held at its length: a piston that is not stiff and has a strength. INFERRED (the stiff
-/// flag's use in the solver is not decoded): a stiff piston, or one with strength 0 (no
-/// push from the strength cap), is held as before.
-pub fn slides(params: &lbp_level::parts::JointParams) -> bool {
-    !params.stiff && motor_damping(params) > 0.
+/// D1181/D1182: whether a piston is driven by its band ([`PistonDrive::slide_to`]) rather
+/// than held at its length. FOUND (01.33, D1182): the solver's piston case 0x1c9988 builds
+/// the prismatic row 0x962590 (the band of [`PistonDrive::slide_to`]) only for a stiff
+/// piston (PJoint +0x28, with the byte at +0x29 clear, 0x1c9998/0x1c99a4); any other
+/// piston gets row 0x960988 (0x1c9b08) and an extra block (0x1c90b8), not decoded, so it
+/// is held. Both rows take the strength cap 0xca760, clamp(strength, 0, 1) × a per-type
+/// scale, so strength 0 gives a cap of 0. INFERRED: a stiff piston also needs a k
+/// ([`motor_k`], pattern 2) to close the error from its saved length to its rule, which
+/// the band does not push inside; without one it is held.
+pub fn slides(params: &lbp_level::parts::JointParams, wired: bool) -> bool {
+    params.stiff && motor_damping(params) > 0. && motor_k(params, wired) > 0.
 }
 
 /// D1103: at tick `now` steps each piston with the `signal` on its input and holds its
@@ -802,7 +807,7 @@ pub fn drive_pistons(
 ) {
     for (mut drive, mut joint) in q.iter_mut() {
         let input = signal(&drive.joint);
-        if !slides(&drive.joint.params) {
+        if !slides(&drive.joint.params, input.is_some()) {
             let l = drive.step(now, input);
             if joint.limits.is_some_and(|d| d.min == l && d.max == l) {
                 continue;
