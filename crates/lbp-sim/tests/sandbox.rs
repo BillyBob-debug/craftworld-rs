@@ -2674,3 +2674,22 @@ fn d1179_a_motor_pushes_to_its_band_and_only_pattern_2_is_braked_past_it() {
         assert!((d - brake).abs() < 1e-5, "pattern {pattern}: {d} {brake}");
     }
 }
+
+#[test]
+fn d1180_a_piston_row_has_the_motor_band_with_a_floor_of_10() {
+    use lbp_sim::{motor_band, piston_band};
+    let near = |a: (f32, f32, f32), b: (f32, f32, f32)| {
+        assert!(
+            (a.0 - b.0).abs() < 1e-5 && (a.1 - b.1).abs() < 1e-5 && (a.2 - b.2).abs() < 1e-4,
+            "{a:?} vs {b:?}"
+        )
+    };
+    // The same cut `delta` and 1.5 × `err` edges as the motor row.
+    near(piston_band(4., 8., 5.), (4., 12., 50.));
+    near(piston_band(4., -8., 5.), (-12., 0., 50.));
+    // The cap's floor is 10 game units of length, not the motor's 0.1 rad.
+    near(piston_band(2., 30., 5.), (2., 45., 150.));
+    let (lo, hi, _) = motor_band(4., 8., 5.);
+    assert_eq!((lo, hi), (4., 12.));
+    assert_eq!(piston_band(4., 8., 0.).2, 0.);
+}
