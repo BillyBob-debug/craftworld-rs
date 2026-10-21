@@ -2446,16 +2446,61 @@ fn d1173_a_motor_pushes_by_its_strength_clamped_to_one() {
 fn d1174_a_pattern_0_motor_is_limited_to_half_its_range_either_side() {
     use lbp_sim::motor_angle_limits;
     let limits = |pattern, range| {
-        motor_angle_limits(&JointParams {
-            animation_pattern: pattern,
-            motion: [range, 30., 0., 0., 0., 0., 0., 0., 0., 0.],
-            ..Default::default()
-        })
+        motor_angle_limits(
+            &JointParams {
+                animation_pattern: pattern,
+                motion: [range, 30., 0., 0., 0., 0., 0., 0., 0., 0.],
+                ..Default::default()
+            },
+            0.,
+        )
     };
-    // 0x1c9eac: pattern 0 with a range under 2π is held to the centre ± range / 2.
-    assert_eq!(limits(0, 1.), Some((-0.5, 0.5)));
-    assert_eq!(limits(0, -1.), Some((-0.5, 0.5)));
+    // 0x1c9eac: pattern 0 with a range under 2π is held to the centre ± range / 2, which
+    // (D1175, 0xc95ec) is the sweep: from the start to the start + range.
+    assert_eq!(limits(0, 1.), Some((0., 1.)));
+    assert_eq!(limits(0, -1.), Some((-1., 0.)));
     // A range of 2π or more, and pattern 1, have no limits.
     assert_eq!(limits(0, 7.), None);
     assert_eq!(limits(1, 1.), None);
+}
+
+#[test]
+fn d1175_a_pattern_0_motor_joint_is_limited_to_its_sweep() {
+    let limits = |pattern, range, phase| {
+        let params = JointParams {
+            animation_pattern: pattern,
+            strength: 1.,
+            motion: [range, 30., phase, 0., 0., 0., 0., 0., 0., 0.],
+            ..Default::default()
+        };
+        let things = vec![
+            thing(
+                0,
+                matrix(0., 0., 0., 0., 1., 1.),
+                Some(rect(20., 20., 7)),
+                false,
+            ),
+            thing(
+                1,
+                matrix(0., 0., 0., 0., 1., 1.),
+                Some(rect(100., 100., 7)),
+                true,
+            ),
+            joint_with(2, 9, 0, [0.; 3], 1, [0.; 3], 0., params),
+        ];
+        let mut app = app(build_scene(&things));
+        app.update();
+        let mut q = app.world_mut().query::<&RevoluteJoint>();
+        let j = q.single(app.world()).expect("motor");
+        j.angle_limit.map(|l| (l.min, l.max))
+    };
+    assert_eq!(limits(0, 1., 0.), Some((0., 1.)));
+    // Started half way through its sweep (phase 7.5 of time 30), the limits sit either side.
+    let (lo, hi) = limits(0, 1., 7.5).expect("limits");
+    assert!(
+        (lo + 0.5).abs() < 1e-3 && (hi - 0.5).abs() < 1e-3,
+        "{lo} {hi}"
+    );
+    assert_eq!(limits(0, 7., 0.), None);
+    assert_eq!(limits(1, 1., 0.), None);
 }

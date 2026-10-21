@@ -104,18 +104,20 @@ pub fn motor_damping(params: &lbp_level::parts::JointParams) -> f32 {
 /// D1174: FOUND (01.33) the solver's motor case 0x1c9eac gives the motor row its angle
 /// limits: for pattern 0 with a range `+0xc8` under 2π, the centre `+0xe0` ± range / 2
 /// (sorted); for pattern 2 with a range under 2π, the centre to the centre + range;
-/// otherwise none (±FLT_MAX). The centre is the ends' relative angle when the motor first
-/// ran (0xc9af4, Part 70), which is where avian's joint counts its angle from. Pattern 2
-/// is left out while the turn sign is UNVERIFIED (Part 74), so this returns pattern 0's
-/// limits only, relative to the start angle. Not applied to the joint yet: our pattern-0
-/// sweep runs from the start to the start + range (D1108), so limits about the start
-/// would cut it in half; which of the two is centred differently is UNVERIFIED (Part 75).
-pub fn motor_angle_limits(params: &lbp_level::parts::JointParams) -> Option<(f32, f32)> {
+/// otherwise none (±FLT_MAX). Pattern 2 is left out while the turn sign is UNVERIFIED
+/// (Part 74).
+/// D1175: FOUND (01.33, 0xc95ec's motor branch 0xc9860 to 0xc996c) a motor's pattern-0
+/// rule is centred, the centre − range / 2 × cos(π s), so its sweep is exactly the limits.
+/// Our rule ([`scene::SceneJoint::motor_angle`]) is the game's + range / 2, which the sync
+/// cancels; avian counts the angle from the spawn, where ours is `start`, so the limits
+/// are -start to -start + range (sorted).
+pub fn motor_angle_limits(
+    params: &lbp_level::parts::JointParams,
+    start: f32,
+) -> Option<(f32, f32)> {
     let range = params.motion[0];
-    (params.animation_pattern == 0 && range < std::f32::consts::TAU).then(|| {
-        let half = range / 2.;
-        (half.min(-half), half.max(-half))
-    })
+    (params.animation_pattern == 0 && range < std::f32::consts::TAU)
+        .then(|| (-start + range.min(0.), -start + range.max(0.)))
 }
 /// Angular springs (SPRING_ANGULAR, wobble): avian spring-damper. PLACEHOLDER until
 /// PJoint.strength is calibrated.
@@ -912,8 +914,13 @@ fn spawn_joint(
                 sync: None,
             };
             let w = drive.turn(0., None);
+            let start = j.motor_angle(drive.clock.frame(0.), false);
+            let mut joint = pivot();
+            if let Some((min, max)) = motor_angle_limits(&j.params, start) {
+                joint = joint.with_angle_limits(min, max);
+            }
             e.insert(
-                pivot().with_motor(
+                joint.with_motor(
                     AngularMotor::new(MotorModel::AccelerationBased {
                         stiffness: 0.,
                         damping: motor_damping(&j.params),
