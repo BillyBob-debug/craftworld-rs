@@ -1791,7 +1791,8 @@ impl SceneJoint {
     /// D1104: FOUND (01.33, 0xc9790's branch at 0xc993c) the length of a piston at clock
     /// `frame`: a wired one in mode 1 (direction) or 4 (speed) ramps, base + 2 × frame ×
     /// range / time (the base for time < 1), with no phase, pattern or wave; every other
-    /// piston follows [`Self::free_length`].
+    /// piston follows [`Self::free_length`], but one wired in mode 2 [`Self::one_shot_length`]
+    /// (D1176).
     /// D1105: FOUND (01.33, the solver loop 0x1c89d4, limit rows 0x960988 and 0x962590)
     /// the joint is held between base and base + range (0xc7350 min, 0xc7330 max), so the
     /// length is kept there while the clock runs on unbounded.
@@ -1801,9 +1802,31 @@ impl SceneJoint {
         let l = match self.params.mode {
             1 | 4 if wired && time >= 1. => base + 2. * frame * range / time,
             1 | 4 if wired => base,
+            2 if wired => self.one_shot_length(frame),
             _ => self.free_length(frame),
         };
         l.clamp(base.min(base + range), base.max(base + range))
+    }
+
+    /// D1176: FOUND (01.33, 0xc9790's wired branch for mode 2 at 0xc97e0) a piston or
+    /// motor wired in mode 2 (one shot) runs its pattern once on the clock `frame`, with no
+    /// phase: pattern 0 the wave at min(frame, time + pause) (0xc998c), so it goes out and
+    /// back once and stops at the base; pattern 1 base + frame × speed until |frame ×
+    /// speed| reaches 2π, then the base (0xc99a4); pattern 2 base + range × (1 − frame /
+    /// time) until frame reaches time (time 1 or more), then the base (0xc9804); else the
+    /// base.
+    pub fn one_shot_length(&self, frame: f32) -> f32 {
+        let base = self.min_length;
+        let [range, time, _, speed, pause, ..] = self.params.motion;
+        match self.params.animation_pattern {
+            0 => {
+                let s = piston_wave(frame.min(time + pause), time, pause);
+                base + range * (0.5 - 0.5 * (std::f32::consts::PI * s).cos())
+            }
+            1 if (frame * speed.abs()) < std::f32::consts::TAU => base + frame * speed,
+            2 if time >= 1. && frame < time => base + range * (1. - frame / time),
+            _ => base,
+        }
     }
 
     /// D1108: FOUND (01.33, 0xc99d0 for types 7 and up) a motor's target angle (radians)
@@ -1818,7 +1841,7 @@ impl SceneJoint {
         let base = self.min_length;
         let range = self.params.motion[0];
         let l = match self.params.mode {
-            1 | 4 if wired => self.length(frame, true),
+            1 | 2 | 4 if wired => self.length(frame, true),
             _ => self.free_length(frame),
         };
         if self.params.animation_pattern == 1 || range.abs() >= std::f32::consts::TAU {

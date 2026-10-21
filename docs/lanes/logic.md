@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-76.md (touching layers; pistons and their mode rate; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-77.md (touching layers; pistons and their mode rate; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -101,10 +101,11 @@
   (Part 74).
 - Merged: D1174 (PR 317, 6904f3b) the solver's motor case 0x1c9eac gives k = 5 ×
   strength for pattern 2 only and angle limits (Part 75).
-- D1175 (branch `logic-d1175`, worktree `E:\Projects\wt-d324`): a pattern-0 motor's rule
-  is centred (0xc95ec at 0xc9860), so its limits are its sweep; the joint now gets them
-  (docs/logic/part-76.md).
-- Decision numbers: D1100-D1199, next free D1176.
+- Merged: D1175 (PR 318, dd6d102) a pattern-0 motor is held to its sweep, the game's
+  centred motor rule 0xc95ec (Part 76).
+- D1176 (branch `logic-d1176`, worktree `E:\Projects\wt-d324`): a piston or motor wired
+  in mode 2 runs its pattern once with no phase (0xc97e0, docs/logic/part-77.md).
+- Decision numbers: D1100-D1199, next free D1177.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -159,7 +160,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1175 unchanged (Parts 58-76; D1163 changes 2 Rookie Test
+  After D1156 to D1176 unchanged (Parts 58-77; D1163 changes 2 Rookie Test
   followers, none on the route; D1164 and D1165 change no Rookie Test aimer; D1166 is not hosted).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
@@ -270,6 +271,8 @@ when a later PR finds it), then the thread's own context at hand-off (ctx_audit)
   at hand-off in the PR reply.
 - D1175: sonnet, read 0xc95ec's pattern-0 branches (capstone over read_bytes), 49k
   tokens, 15 tools, 1.5 minutes, not redone; thread context 92k at hand-off.
+- D1176: none (read the D1175 disassembly in the thread); thread context at hand-off in
+  the PR reply.
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -311,9 +314,9 @@ EBOOT rule and unit tests:
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the turn sign (0xc9250 is an inlined atan2, matrix layout
-   UNVERIFIED, Part 74), then pattern 2's k = 5 × strength and its limits (Part 75); a
-   wired motor's ramp in 0xc9790 (centred or not, Part 76); and the
-   piston's k term (5 × strength for pattern 2) in row 0x96178c (Part 70).
+   UNVERIFIED, Part 74), then pattern 2's k = 5 × strength and its limits (Part 75); the
+   wired ramp's clock start against the centre sync (Part 77); and the piston's k term
+   (5 × strength for pattern 2) in row 0x96178c (Part 70).
 5. The creature brain (PEnemy reader NOT FOUND; leads: the TOC entry for string
    "PEnemy" 0xc79058, bit 0x1c tests); who puts a player in state 5 on contact (Part
    42 has the seat path) and sends the respawn (0x7feb8, Part 41); the controlinator's

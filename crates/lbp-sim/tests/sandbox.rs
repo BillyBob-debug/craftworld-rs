@@ -2504,3 +2504,40 @@ fn d1175_a_pattern_0_motor_joint_is_limited_to_its_sweep() {
     assert_eq!(limits(0, 7., 0.), None);
     assert_eq!(limits(1, 1., 0.), None);
 }
+
+#[test]
+fn d1176_a_one_shot_piston_runs_its_pattern_once() {
+    use lbp_sim::scene::SceneJoint;
+    let mut params = JointParams {
+        mode: 2,
+        ..Default::default()
+    };
+    // range 315, time 120, phase 30 (unused one shot), speed 0.02, pause 20.
+    params.motion[..5].copy_from_slice(&[315., 120., 30., 0.02, 20.]);
+    let mut j = SceneJoint {
+        thing: 0,
+        kind: JointKind::Piston,
+        a: Endpoint::Static(0),
+        b: Endpoint::Static(1),
+        world_a: [0.; 2],
+        world_b: [0.; 2],
+        local_a: [0.; 2],
+        local_b: [0.; 2],
+        length: 840.,
+        min_length: 840.,
+        max_length: 840.,
+        params,
+    };
+    // Pattern 0 (0xc998c): out and back once with no phase, then the base for good.
+    assert_eq!((j.length(0., true), j.length(70., true)), (840., 1155.));
+    assert_eq!((j.length(140., true), j.length(210., true)), (840., 840.));
+    assert!(j.length(210., false) > 840.);
+    // Pattern 2 (0xc9804): down from the top once, then the base.
+    j.params.animation_pattern = 2;
+    assert_eq!(j.length(60., true), 997.5);
+    assert_eq!(j.length(200., true), 840.);
+    // Pattern 1 (0xc99a4): base + frame × speed until a turn of 2π, then the base.
+    j.params.animation_pattern = 1;
+    assert!((j.length(100., true) - 842.).abs() < 1e-3);
+    assert_eq!(j.length(400., true), 840.);
+}
