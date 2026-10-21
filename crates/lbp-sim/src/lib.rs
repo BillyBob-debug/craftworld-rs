@@ -801,7 +801,10 @@ fn wrap_pi(x: f32) -> f32 {
 /// inside; without one it is held. D1185: FOUND the byte at +0x29 has one writer, the
 /// setter 0xcacec, called only by the joint-editing gadget (0x5a6bb4, 0x55d720), and the
 /// PJoint serialiser 0xb41850 never reads or writes it, so in play it is 0 and the stiff
-/// test is +0x28 alone.
+/// test is +0x28 alone. D1186: FOUND those rows come from pool solver+0x10 (filler
+/// 0x95ba80, 0x1c5e8c), frictionless (0x95bc58), with no strength term, bias 0.4 × the
+/// separation past a slop of 1 (0x95bef4): hard positional holds of each anchor along a
+/// direction turned by the saved angle, which the prismatic joint here matches.
 pub fn slides(params: &lbp_level::parts::JointParams, wired: bool) -> bool {
     motor_damping(params) > 0. && motor_k(params, wired) > 0.
 }
