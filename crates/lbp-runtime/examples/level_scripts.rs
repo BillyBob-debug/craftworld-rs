@@ -3470,6 +3470,22 @@ fn run() -> Result<(), String> {
                 *totals.switches.sensors.entry(k).or_default() += 1;
             }
         }
+        // D1171: motors by path: driven at their rate (pattern 1, or wired in mode 1 or 4)
+        // or cut so they never run past their target.
+        for (i, t) in report.things.iter().enumerate() {
+            let Some(j) = t.data.joint.as_ref().filter(|j| j.joint_type == 9) else {
+                continue;
+            };
+            let wired = world.input_signal(i).is_some();
+            let driven =
+                j.params.animation_pattern == 1 || (wired && matches!(j.params.mode, 1 | 4));
+            let k = format!(
+                "motor pattern {} wired {wired} {}",
+                j.params.animation_pattern,
+                if driven { "driven" } else { "clamped" }
+            );
+            *totals.switches.sensors.entry(k).or_default() += 1;
+        }
         // D1152: followKey tweaks (configurations 5 and 11) by whether a tag in the level
         // has their exact (colour, name) pair, the key 0xceac0 compares; else whether a
         // tag has the name in another colour.
