@@ -1535,6 +1535,7 @@ fn d1148_aim_tweaks_take_the_stick_inputs_mirror_and_lead_the_target() {
         range: 0.2094394,
         accel: 1.,
         stick: [1., 0.],
+        scale: 1.,
         ..Default::default()
     };
     let right = stick.aim([0., 0.], None);
@@ -1626,6 +1627,7 @@ fn d1150_followers_ease_in_with_the_turn_shaper() {
         angle: 0.,
         at: [0.; 2],
         stick: [0.; 2],
+        scale: 1.,
         mirror: false,
         flip: false,
     };
@@ -1729,6 +1731,7 @@ fn d1158_stick_movers_map_the_stick_onto_a_circle() {
         angle: 0.,
         at: [0.; 2],
         stick: [1., 1.],
+        scale: 1.,
         mirror: false,
         flip: false,
     };
@@ -1741,6 +1744,7 @@ fn d1158_stick_movers_map_the_stick_onto_a_circle() {
     let seven = lbp_sim::scene::MoveTweak {
         configuration: 7,
         stick: [-0.5, 0.],
+        scale: 1.,
         ..stick
     };
     let v = seven.push([0., 0.], up, None, 1.);
@@ -1749,12 +1753,14 @@ fn d1158_stick_movers_map_the_stick_onto_a_circle() {
     let local = lbp_sim::scene::MoveTweak {
         local: true,
         stick: [0., 1.],
+        scale: 1.,
         ..stick
     };
     let v = local.push([0., 0.], [1., 0.], None, 1.);
     assert!((v[0] - 10.).abs() < 1e-4 && v[1].abs() < 1e-4, "{v:?}");
     let idle = lbp_sim::scene::MoveTweak {
         stick: [0., 0.],
+        scale: 1.,
         ..stick
     };
     assert_eq!(idle.push([0., 30.], up, None, 1.), [0., 20.]);
@@ -1924,6 +1930,7 @@ fn d1160_mirrored_movers_negate_their_local_turn_and_stick_x() {
         angle: std::f32::consts::FRAC_PI_2,
         at: [0.; 2],
         stick: [0.; 2],
+        scale: 1.,
         mirror: false,
         flip: false,
     };
@@ -1946,6 +1953,7 @@ fn d1160_mirrored_movers_negate_their_local_turn_and_stick_x() {
         local: false,
         angle: 0.,
         stick: [1., 0.],
+        scale: 1.,
         ..base
     };
     let v = stick.push([0., 0.], up, None, 1.);
@@ -1958,4 +1966,62 @@ fn d1160_mirrored_movers_negate_their_local_turn_and_stick_x() {
         (v[0] - 10.).abs() < 1e-4 && (f[0] + 10.).abs() < 1e-4,
         "{v:?} {f:?}"
     );
+}
+
+#[test]
+fn d1161_the_input_scale_scales_movers_and_caps_followers_and_spins() {
+    let mover = lbp_sim::scene::MoveTweak {
+        thing: 0,
+        configuration: 8,
+        behavior: 2,
+        range: 10.,
+        accel: 1.,
+        decel: 1.,
+        vel: [0., 4.],
+        local: false,
+        min_range: 0.,
+        max_range: 0.,
+        angle_range: 360.,
+        flee: false,
+        up_down: true,
+        key: None,
+        angle: 0.,
+        at: [0.; 2],
+        stick: [0.; 2],
+        scale: 1.,
+        mirror: false,
+        flip: false,
+    };
+    let up = [0., 1.];
+    assert_eq!(mover.push([0., 0.], up, None, 1.), [0., 4.]);
+    // A movers' target times the signed scale (0x95816c): half, or backwards.
+    let half = lbp_sim::scene::MoveTweak {
+        scale: 0.5,
+        ..mover
+    };
+    assert_eq!(half.push([0., 0.], up, None, 1.), [0., 2.]);
+    let back = lbp_sim::scene::MoveTweak {
+        scale: -0.5,
+        ..mover
+    };
+    assert_eq!(back.push([0., 0.], up, None, 1.), [0., -2.]);
+    // A follower's speed is capped at ±range × |scale| (0x958724).
+    let follower = lbp_sim::scene::MoveTweak {
+        configuration: 11,
+        accel: 100.,
+        scale: -0.25,
+        ..mover
+    };
+    let v = follower.push([0., 0.], up, Some([0., 1000.]), 1.);
+    assert!((v[1] - 2.5).abs() < 1e-4 && v[0].abs() < 1e-4, "{v:?}");
+    // A gyroscope's wanted turn speed is capped at ±range × |scale| (0x9607ec).
+    let gyro = lbp_sim::scene::SpinTweak {
+        configuration: 1,
+        range: 0.2,
+        accel: 10.,
+        scale: 0.5,
+        ..Default::default()
+    };
+    let (s, _, _) = gyro.target(1., 0.);
+    assert!((s.abs() - 0.1).abs() < 1e-6, "{s}");
 }

@@ -306,6 +306,7 @@ fn run() -> Result<(), String> {
     // D1159: spin and move tweaks with a turn on their microchip boards (+0x220), and flipped spins.
     let (mut chip_turned, mut chip_flipped) = (0usize, 0usize);
     let (mut move_mirrored, mut move_flipped) = (0usize, 0usize);
+    let mut input_scaled = 0usize;
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -449,6 +450,16 @@ fn run() -> Result<(), String> {
         chip_turned += turned;
         chip_flipped += flipped;
         move_mirrored += mirrored;
+        // D1161: tweaks whose input scale 0xcbed4 follows their input (behavior 2).
+        let scaled = scene
+            .bodies
+            .iter()
+            .map(|b| {
+                b.spins.iter().filter(|t| t.behavior == 2).count()
+                    + b.moves.iter().filter(|m| m.behavior == 2).count()
+            })
+            .sum::<usize>();
+        input_scaled += scaled;
         move_flipped += move_flip;
         syncs_on_body += sync_body;
         let r = &scene.report;
@@ -574,6 +585,7 @@ fn run() -> Result<(), String> {
             "sticks": stick, "sticks_wired": stick_wired,
             "chip_turned": turned, "chip_flipped": flipped,
             "move_mirrored": mirrored, "move_flipped": move_flip,
+            "input_scaled": scaled,
         }));
     }
     let mut top: Vec<(&String, &usize)> = materials.iter().collect();
@@ -606,6 +618,7 @@ fn run() -> Result<(), String> {
         "chip": {
             "turned": chip_turned, "flipped": chip_flipped,
             "move_mirrored": move_mirrored, "move_flipped": move_flipped,
+            "input_scaled": input_scaled,
         },
         "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
