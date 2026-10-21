@@ -69,10 +69,12 @@
   place a tag (Part 59; corrects Parts 57-58: list +0x2b8 is the tag synchroniser).
 - Merged: D1158 (PR 301, 97fc7d2) aiming spins (configuration 4) and stick movers
   (6, 7) read their stick from input ports 1 and 2 (Part 60).
-- D1159 (branch `logic-d1159`, worktree `E:\Projects\wt-d324`): spin and move tweaks
-  on a microchip take their turn on the board, +0x220 and +0x224 from 0xcd2e0
-  (docs/logic/part-61.md; corrects Part 50's parent chain).
-- Decision numbers: D1100-D1199, next free D1160.
+- Merged: D1159 (PR 302, e512f30) spin and move tweaks on a microchip take their turn
+  on the board, +0x220 and +0x224 from 0xcd2e0 (Part 61; corrects Part 50).
+- D1160 (branch `logic-d1160`, worktree `E:\Projects\wt-d324`): a mirrored body
+  negates its movers' localSpace angle (0xcc484) and, XOR +0x224, their stick x
+  (docs/logic/part-62.md; corrects Part 60's wording).
+- Decision numbers: D1100-D1199, next free D1161.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -127,7 +129,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1159 unchanged (Parts 58-61).
+  After D1156 to D1160 unchanged (Parts 58-62).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -163,7 +165,8 @@
   local-analysis/logic/d1153/census-all.json (`level_physics --all`) the touching
   layer pairs (Part 55); local-analysis/logic/d1154/census-all.json the followers
   and their offset search points (Part 56); local-analysis/logic/d1159/census1.json
-  the tweaks turned or flipped on their chips (Part 61).
+  the tweaks turned or flipped on their chips (Part 61);
+  local-analysis/logic/d1160/census1.json the movers mirrored or flipped (Part 62).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -225,11 +228,9 @@ EBOOT rule and unit tests:
    `sample` at `frame` from its start pose (Part 48); for configuration 14, the
    gather around the camera and the SPU job's force (NOT FOUND, needs SPU code,
    Part 49); add `SpinTweak::lead` for a target with a body (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
-   for followers, a host filling `MoveTweak::angle`, the mirror negation of the
-   localSpace angle, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
+   for followers, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
    for tag synchronisers, the receiver's online source 0x2a8538, the useLayers z and
-   the other 0x130c90 caller 0x29ff3c (Part 59); for stick movers, the mirror test
-   that negates stick x, the input scale 0xcbed4 and the 0x957df4 param_5 path
+   the other 0x130c90 caller 0x29ff3c (Part 59); for stick movers, the input scale 0xcbed4 and the 0x957df4 param_5 path
    (Part 60);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
