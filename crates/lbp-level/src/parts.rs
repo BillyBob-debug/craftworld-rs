@@ -84,6 +84,9 @@
 //!   configuration == 0xe and v > 0x3e3 (f32, i32, f32, f32, i32, f32, f32, 4 u8).
 //! - SWITCH_KEY (PSwitchKey; colour and name kept as `PartData::switch_key`): colorIndex
 //!   s32, name wstr, hideInPlayMode bool (v < 0x3ed) or a u8 flag byte (v >= 0x3ed).
+//! - TAG_SYNCHRONIZER (PTagSynchroniser; kept as `PartData::tag_synchroniser`, D1157): type
+//!   s32, colorIndex s32, name wstr, radius, minRadius, scaleX, scaleY f32, useLayers bool,
+//!   visible bool.
 //! - GAMEPLAY_DATA (PGameplayData): fluffCost s32, eggLink ref EggLink, keyLink ref SlotID,
 //!   gameplayType i32. EggLink: plan res, shareable bool, hasPainting bool (> 0x3e0),
 //!   painting desc when set. SlotID: slotType i32, slotNumber u32.
@@ -354,6 +357,9 @@ pub struct PartData {
     /// PSwitchKey as stored: the tag a tag sensor looks for.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub switch_key: Option<SwitchKey>,
+    /// D1157: PTagSynchroniser as stored.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag_synchroniser: Option<TagSynchroniser>,
     /// PCheckpoint as stored, the spawn counts (D307: the checkpoint's light).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checkpoint: Option<Checkpoint>,
@@ -485,6 +491,22 @@ pub struct Checkpoint {
 pub struct SwitchKey {
     pub colour_index: i32,
     pub name: String,
+}
+
+/// D1157: PTagSynchroniser as stored. `kind` 0 is a sender, which finds the nearest lit
+/// tag of its key within its ring, and 1 a receiver, which places a tag of that key at
+/// its own point plus the sender's offset times `scale` (EBOOT 01.33: the world list
+/// +0x2b8 tick 0x132800, sender 0x13187c, receiver 0x131f88).
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+pub struct TagSynchroniser {
+    pub kind: i32,
+    pub colour_index: i32,
+    pub name: String,
+    pub radius: f32,
+    pub min_radius: f32,
+    pub scale: [f32; 2],
+    pub use_layers: bool,
+    pub visible: bool,
 }
 
 /// PMicrochip as stored, the fields kept: the Thing that is the chip's circuit board (the
@@ -1691,12 +1713,17 @@ fn part_body(
             }
         }
         "TAG_SYNCHRONIZER" => {
-            r.s32()?;
-            r.s32()?;
-            r.wstr()?;
-            r.skip_f32(4)?;
-            r.bool()?;
-            r.bool()?;
+            let sync = TagSynchroniser {
+                kind: r.s32()?,
+                colour_index: r.s32()?,
+                name: r.wstring()?,
+                radius: r.f32()?,
+                min_radius: r.f32()?,
+                scale: [r.f32()?, r.f32()?],
+                use_layers: r.bool()?,
+                visible: r.bool()?,
+            };
+            things.list[me].data.tag_synchroniser = Some(sync);
         }
         "MATERIAL_OVERRIDE" if v < 0x360 => {
             primitives(r)?;

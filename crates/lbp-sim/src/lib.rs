@@ -296,6 +296,111 @@ pub fn lit_tags(mut spots: Vec<TagSpot>, ternary: impl Fn(u32) -> i32) -> Vec<Ta
     spots
 }
 
+/// D1157: the tag synchronisers riding on a body ([`scene::SceneSync`], in the body's
+/// frame), or, on the one entity [`spawn_scene`] makes for them, those on no body.
+#[derive(Component, Debug, Clone)]
+pub struct SyncMarks(pub Vec<scene::SceneSync>);
+
+/// D1157: a tag synchroniser where it is this tick, as [`scene::SceneSync`] with `at` and
+/// `axes` in the world and `body` its body's entity.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SyncSpot {
+    pub thing: u32,
+    pub kind: i32,
+    pub key: u32,
+    pub radius: f32,
+    pub min_radius: f32,
+    pub scale: [f32; 2],
+    pub body: Option<Entity>,
+    pub at: [f32; 2],
+    pub axes: [[f32; 2]; 2],
+}
+
+/// D1157: every synchroniser's [`SyncSpot`] from the [`SyncMarks`] entities.
+pub fn sync_spots<'a>(
+    marks: impl IntoIterator<Item = (Entity, &'a SyncMarks, Option<(&'a Position, &'a Rotation)>)>,
+) -> Vec<SyncSpot> {
+    let mut spots = Vec::new();
+    for (e, m, body) in marks {
+        let frame = body.map(|(p, r)| scene::Frame {
+            position: [p.0.x / UNIT_SCALE, p.0.y / UNIT_SCALE],
+            angle: r.as_radians(),
+        });
+        spots.extend(m.0.iter().map(|y| {
+            let turn = |a: [f32; 2]| match frame {
+                Some(f) => {
+                    let (s, c) = f.angle.sin_cos();
+                    [c * a[0] - s * a[1], s * a[0] + c * a[1]]
+                }
+                None => a,
+            };
+            SyncSpot {
+                thing: y.thing as u32,
+                kind: y.kind,
+                key: y.key,
+                radius: y.radius,
+                min_radius: y.min_radius,
+                scale: y.scale,
+                body: frame.map(|_| e),
+                at: frame.map_or(y.at, |f| f.world(y.at)),
+                axes: [turn(y.axes[0]), turn(y.axes[1])],
+            }
+        }));
+    }
+    spots
+}
+
+fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
+    a[0] * b[0] + a[1] * b[1]
+}
+
+/// D1157: the tags the receivers place this tick, from the found tags `tags` (pass
+/// [`lit_tags`]). FOUND (EBOOT 01.33, the world list +0x2b8 tick 0x132800): a sender
+/// (kind 0, 0x13187c) takes the nearest tag of its key with minRadius² <= d² <= radius²
+/// (no distance test for a radius below 0.0, DAT_00d96820), passing over tags on its own
+/// root (INFERRED here: its own body) and the synchronisers' own tags, and keeps the tag's
+/// offset along its unit axes. A receiver (kind 1, 0x131f88) takes a sender of its key
+/// with an offset (0x130c90; the nearest, INFERRED) and places its tag at its point plus
+/// the offset times `scale` along its own unit axes; with no sender it places none
+/// (its tag leaves the tag map, 0xd1b58). The tag has no input, so it is lit (0x12f6f4).
+/// Not modelled: the online source 0x2a8538 and useLayers' z.
+pub fn synced_tags(syncs: &[SyncSpot], tags: &[TagSpot]) -> Vec<TagSpot> {
+    let sent: Vec<(&SyncSpot, [f32; 2])> = syncs
+        .iter()
+        .filter(|y| y.kind == 0)
+        .filter_map(|y| {
+            let (lo, hi) = (y.min_radius * y.min_radius, y.radius * y.radius);
+            tags.iter()
+                .filter(|g| g.key == y.key && (g.body.is_none() || g.body != y.body))
+                .map(|g| [g.at[0] - y.at[0], g.at[1] - y.at[1]])
+                .map(|d| (d, dot(d, d)))
+                .filter(|&(_, d2)| y.radius < 0. || (lo <= d2 && d2 <= hi))
+                .min_by(|a, b| a.1.total_cmp(&b.1))
+                .map(|(d, _)| (y, [dot(d, y.axes[0]), dot(d, y.axes[1])]))
+        })
+        .collect();
+    syncs
+        .iter()
+        .filter(|y| y.kind == 1)
+        .filter_map(|y| {
+            let (_, off) = sent.iter().filter(|(s, _)| s.key == y.key).min_by(|a, b| {
+                let d = |s: &SyncSpot| (s.at[0] - y.at[0]).hypot(s.at[1] - y.at[1]);
+                d(a.0).total_cmp(&d(b.0))
+            })?;
+            let (u, v) = (off[0] * y.scale[0], off[1] * y.scale[1]);
+            Some(TagSpot {
+                thing: y.thing,
+                key: y.key,
+                body: None,
+                at: [
+                    y.at[0] + u * y.axes[0][0] + v * y.axes[1][0],
+                    y.at[1] + u * y.axes[0][1] + v * y.axes[1][1],
+                ],
+            })
+        })
+        .collect()
+}
+
 /// D1110: each mover and follower moves its body's velocity towards its rows
 /// ([`scene::MoveTweak::push`], per tick, in order) with the tweak's current activation; a
 /// follower (configuration 11) follows `player` when it sees it. D1111: a follower with
@@ -585,6 +690,18 @@ pub fn spawn_scene(commands: &mut Commands, scene: &PhysicsScene) -> Spawned {
     }
     if !loose.is_empty() {
         commands.spawn(TagMarks(loose));
+    }
+    // D1157: synchronisers ride their bodies the same way.
+    let mut syncs = vec![Vec::new(); bodies.len() + 1];
+    for y in &scene.syncs {
+        syncs[y.body.unwrap_or(bodies.len())].push(*y);
+    }
+    let loose = syncs.pop().unwrap_or_default();
+    for (b, m) in syncs.into_iter().enumerate().filter(|(_, m)| !m.is_empty()) {
+        commands.entity(bodies[b]).insert(SyncMarks(m));
+    }
+    if !loose.is_empty() {
+        commands.spawn(SyncMarks(loose));
     }
     let mut colliders = Vec::with_capacity(scene.colliders.len());
     for c in &scene.colliders {

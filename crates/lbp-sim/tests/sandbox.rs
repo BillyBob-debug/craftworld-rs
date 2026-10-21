@@ -3,7 +3,9 @@
 use avian2d::prelude::*;
 use bevy::prelude::*;
 use bevy::time::TimeUpdateStrategy;
-use lbp_level::parts::{Body, Joint, JointParams, PhysicsTweak, Pos, Shape, ShapeColor, SwitchKey};
+use lbp_level::parts::{
+    Body, Joint, JointParams, PhysicsTweak, Pos, Shape, ShapeColor, SwitchKey, TagSynchroniser,
+};
 use lbp_level::serial::Descriptor;
 use lbp_level::thing::ThingRecord;
 use lbp_sim::scene::{
@@ -1702,4 +1704,85 @@ fn d1151_followers_turn_their_up_axis_and_keep_local_space() {
     assert!((v[0] - 3.5).abs() < 1e-5 && v[1].abs() < 1e-5, "{v:?}");
     let v = local.push([0., 0.], [1., 0.], d, 1.);
     assert!(v[0].abs() < 1e-5 && (v[1] + 3.5).abs() < 1e-5, "{v:?}");
+}
+
+#[test]
+fn d1157_tag_synchronisers_send_a_tag_offset_and_receivers_place_a_tag() {
+    // A red "A" sender at (0, 300) on a box turned a quarter (Things 1, 2) and a loose
+    // red "A" receiver at (500, 300) scaling the offset by (2, 1) (Thing 3).
+    let quarter = std::f32::consts::FRAC_PI_2;
+    let sync = |kind: i32, scale: [f32; 2]| TagSynchroniser {
+        kind,
+        colour_index: 1,
+        name: "A".into(),
+        radius: 100.,
+        min_radius: 0.,
+        scale,
+        ..Default::default()
+    };
+    let mut things = vec![
+        floor(),
+        thing(
+            1,
+            matrix(0., 300., 0., quarter, 1., 1.),
+            Some(rect(100., 100., 7)),
+            true,
+        ),
+        thing(2, matrix(0., 300., 0., quarter, 3., 3.), None, false),
+        thing(3, matrix(500., 300., 0., 0., 1., 1.), None, false),
+    ];
+    things[2].parent = Some(1);
+    things[2].data.tag_synchroniser = Some(sync(0, [1., 1.]));
+    things[3].data.tag_synchroniser = Some(sync(1, [2., 1.]));
+    let scene = build_scene(&things);
+    let [s, r] = [scene.syncs[0], scene.syncs[1]];
+    assert_eq!(
+        (s.thing, s.kind, s.body, r.kind, r.body),
+        (2, 0, Some(0), 1, None)
+    );
+    assert_eq!(s.key, r.key);
+    // The sender's axes are unit and in its box's frame (the box turns with it).
+    let near = |a: [f32; 2], b: [f32; 2]| (a[0] - b[0]).abs() < 1e-3 && (a[1] - b[1]).abs() < 1e-3;
+    assert!(
+        near(s.axes[0], [1., 0.]) && near(s.axes[1], [0., 1.]),
+        "{:?}",
+        s.axes
+    );
+    assert!(near(s.at, [0., 0.]) && near(r.at, [500., 300.]));
+    // Spots: the box at (0, 300) turned a quarter, so the sender's x axis points up.
+    let mut w = World::new();
+    let (a, b, c) = (
+        w.spawn_empty().id(),
+        w.spawn_empty().id(),
+        w.spawn_empty().id(),
+    );
+    let (p, q) = (
+        Position::new(Vec2::new(0., 300.) * lbp_sim::UNIT_SCALE),
+        Rotation::radians(quarter),
+    );
+    let on_box = lbp_sim::SyncMarks(vec![s]);
+    let loose = lbp_sim::SyncMarks(vec![r]);
+    let spots = lbp_sim::sync_spots([(a, &on_box, Some((&p, &q))), (b, &loose, None)]);
+    assert!(near(spots[0].at, [0., 300.]) && near(spots[0].axes[0], [0., 1.]));
+    let tag = |at: [f32; 2], body| lbp_sim::TagSpot {
+        thing: 9,
+        key: s.key,
+        body,
+        at,
+    };
+    // A tag 30 up and 10 left of the sender is (30, 10) along its axes: the receiver
+    // places its tag at (560, 310).
+    let out = lbp_sim::synced_tags(&spots, &[tag([-10., 330.], Some(c))]);
+    assert_eq!(out.len(), 1);
+    assert_eq!((out[0].thing, out[0].key, out[0].body), (3, s.key, None));
+    assert!(near(out[0].at, [560., 310.]), "{:?}", out[0].at);
+    // No tag, a tag out of the ring, or a tag on the sender's own box: no tag placed.
+    assert!(lbp_sim::synced_tags(&spots, &[]).is_empty());
+    assert!(lbp_sim::synced_tags(&spots, &[tag([0., 500.], Some(c))]).is_empty());
+    assert!(lbp_sim::synced_tags(&spots, &[tag([-10., 330.], Some(a))]).is_empty());
+    // A radius below 0 has no ring.
+    let mut far = spots.clone();
+    far[0].radius = -1.;
+    let out = lbp_sim::synced_tags(&far, &[tag([0., 500.], None)]);
+    assert!(near(out[0].at, [900., 300.]), "{:?}", out[0].at);
 }

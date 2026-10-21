@@ -2170,6 +2170,14 @@ fn drive_spins(
             &lbp_sim::avian2d::prelude::Rotation,
         )>,
     )>,
+    syncs: Query<(
+        Entity,
+        &lbp_sim::SyncMarks,
+        Option<(
+            &lbp_sim::avian2d::prelude::Position,
+            &lbp_sim::avian2d::prelude::Rotation,
+        )>,
+    )>,
     mut q: Query<(
         Entity,
         &lbp_sim::SpinTweaks,
@@ -2182,9 +2190,12 @@ fn drive_spins(
     let world = &play.host.world;
     let player = sackboy.iter().next().map(|p| p.0);
     // D1155: a tag switched off by its input is not found.
-    let tags = lbp_sim::lit_tags(lbp_sim::tag_spots(marks.iter()), |t| {
+    let mut tags = lbp_sim::lit_tags(lbp_sim::tag_spots(marks.iter()), |t| {
         world.tag_signal(t).ternary
     });
+    // D1157: the receivers' tags join them.
+    let synced = lbp_sim::synced_tags(&lbp_sim::sync_spots(syncs.iter()), &tags);
+    tags.extend(synced);
     lbp_sim::drive_spins(&mut commands, &mut q, player, &tags, |t| {
         world.tweak_activation(t.thing, t.behavior)
     });
@@ -2205,6 +2216,14 @@ fn drive_moves(
             &lbp_sim::avian2d::prelude::Rotation,
         )>,
     )>,
+    syncs: Query<(
+        Entity,
+        &lbp_sim::SyncMarks,
+        Option<(
+            &lbp_sim::avian2d::prelude::Position,
+            &lbp_sim::avian2d::prelude::Rotation,
+        )>,
+    )>,
     mut q: Query<(
         Entity,
         &lbp_sim::MoveTweaks,
@@ -2216,9 +2235,12 @@ fn drive_moves(
     let world = &play.host.world;
     let player = sackboy.iter().next().map(|p| p.0);
     // D1155: a tag switched off by its input is not found.
-    let tags = lbp_sim::lit_tags(lbp_sim::tag_spots(marks.iter()), |t| {
+    let mut tags = lbp_sim::lit_tags(lbp_sim::tag_spots(marks.iter()), |t| {
         world.tag_signal(t).ternary
     });
+    // D1157: the receivers' tags join them.
+    let synced = lbp_sim::synced_tags(&lbp_sim::sync_spots(syncs.iter()), &tags);
+    tags.extend(synced);
     lbp_sim::drive_moves(&mut commands, &mut q, player, &tags, |t| {
         world.tweak_activation(t.thing, t.behavior)
     });

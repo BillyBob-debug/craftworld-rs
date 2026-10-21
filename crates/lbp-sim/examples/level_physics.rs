@@ -299,6 +299,8 @@ fn run() -> Result<(), String> {
     let (mut followers, mut followers_offset) = (0usize, 0usize);
     // D1156: configuration-5 spin tweaks, and those off their body's origin.
     let (mut aimers, mut aimers_offset) = (0usize, 0usize);
+    // D1157: tag synchronisers: senders, receivers, and those riding a body.
+    let (mut senders, mut receivers, mut syncs_on_body) = (0usize, 0usize, 0usize);
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -388,6 +390,12 @@ fn run() -> Result<(), String> {
         }
         aimers += aim;
         aimers_offset += aim_offset;
+        let send = scene.syncs.iter().filter(|y| y.kind == 0).count();
+        let receive = scene.syncs.iter().filter(|y| y.kind == 1).count();
+        let sync_body = scene.syncs.iter().filter(|y| y.body.is_some()).count();
+        senders += send;
+        receivers += receive;
+        syncs_on_body += sync_body;
         let r = &scene.report;
         fixed_bodies += r.fixed_bodies;
         nested_bodies += r.nested_bodies;
@@ -507,6 +515,7 @@ fn run() -> Result<(), String> {
             "touching_pairs": touching, "touching_pairs_dynamic": touching_dynamic,
             "followers": follow, "followers_offset": follow_offset,
             "aimers": aim, "aimers_offset": aim_offset,
+            "senders": send, "receivers": receive, "syncs_on_body": sync_body,
         }));
     }
     let mut top: Vec<(&String, &usize)> = materials.iter().collect();
@@ -534,6 +543,7 @@ fn run() -> Result<(), String> {
         "touching_pairs": touching_pairs, "touching_pairs_dynamic": touching_pairs_dynamic,
         "followers": followers, "followers_offset": followers_offset,
         "aimers": aimers, "aimers_offset": aimers_offset,
+        "senders": senders, "receivers": receivers, "syncs_on_body": syncs_on_body,
         "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,

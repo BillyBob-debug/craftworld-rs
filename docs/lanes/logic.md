@@ -64,9 +64,11 @@
 - Merged: D1153 (PR 296, 3e16c77) touching layers do not collide.
 - Merged: D1154 (PR 297, baf0614) followers measure from their parent's point.
 - Merged: D1155 (PR 298, 5b298d1) a tag switched off by its input cannot be followed.
-- D1156 (branch `logic-d1156`, worktree `E:\Projects\wt-d324`): aiming spins
-  (configuration 5) measure from their parent's point (docs/logic/part-58.md).
-- Decision numbers: D1100-D1199, next free D1157.
+- Merged: D1156 (PR 299, f0bacdd) aiming spins measure from their parent's point.
+- D1157 (branch `logic-d1157`, worktree `E:\Projects\wt-d324`): tag synchronisers
+  send a tag's offset and receivers place a tag (docs/logic/part-59.md; corrects
+  Parts 57-58: list +0x2b8 is the tag synchroniser, not the wormhole).
+- Decision numbers: D1100-D1199, next free D1158.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -121,7 +123,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 unchanged (Part 58).
+  After D1156 and D1157 unchanged (Parts 58 and 59).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -222,8 +224,8 @@ EBOOT rule and unit tests:
    angle (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
    for followers, a host filling `MoveTweak::angle`, the mirror negation of the
    localSpace angle, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
-   the wormhole part (bit 0x30, world list +0x2b8, tick 0x132800) and the tag it
-   places for type 1 (0x131f88, Parts 57 and 58);
+   for tag synchronisers, the receiver's online source 0x2a8538, the useLayers z and
+   the other 0x130c90 caller 0x29ff3c (Part 59);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
