@@ -477,9 +477,10 @@ fn run() -> Result<(), String> {
             .flat_map(|b| &b.spins)
             .filter(|t| t.configuration == 5)
             .filter(|t| {
-                scene.tags.iter().any(|g| {
-                    Some(g.key) == t.key && g.body.is_some_and(|b| !scene.bodies[b].fixed)
-                })
+                scene
+                    .tags
+                    .iter()
+                    .any(|g| Some(g.key) == t.key && g.body.is_some_and(|b| !scene.bodies[b].fixed))
             })
             .count();
         aim_lead += led;
