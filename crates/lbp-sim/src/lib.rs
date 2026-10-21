@@ -715,6 +715,57 @@ impl PistonDrive {
     }
 }
 
+impl PistonDrive {
+    /// D1181: FOUND (01.33, the piston row 0x96178c) the row's band as the slider motor's
+    /// target rate (sim units/s) and push ([`MotorModel::AccelerationBased`] damping), for
+    /// ends `measured` game units apart along the slider (L, 0x961b30) moving apart at
+    /// `rate` game units/s. Its `delta` is the change of the length rule over the next frame
+    /// of the clock (0xc95ec at t and t + 1, 0x9619ac) and its `err` the length at the next
+    /// frame less L (0x961d80). The low edge is `delta` cut to between 0 and `err` (any
+    /// piston but one wired in mode 1 or 4, 0x961d88) and the other 1.5 × `err`, with a
+    /// cap of k × max(|err|, 10) ([`piston_band`], D1180). As [`Self::band_to`] does, below
+    /// the band it drives to the low edge and above it to the high edge, with the strength
+    /// cap ([`motor_damping`]) on the `delta` edge and MOTOR_DAMPING × the k cap (at most
+    /// MOTOR_DAMPING; INFERRED) on the `err` edge; inside the band it does not push.
+    pub fn slide_to(
+        &mut self,
+        now: f32,
+        input: Option<(i32, f32, bool)>,
+        measured: f32,
+        rate: f32,
+    ) -> (f32, f32) {
+        self.step(now, input);
+        let wired = input.is_some();
+        let p = self.joint.params;
+        let f = self.clock.frame(now);
+        let next = self.joint.length(f + self.clock.scale, wired);
+        let delta = next - self.joint.length(f, wired);
+        let err = next - measured;
+        let k = motor_k(&p, wired);
+        let (mut lo, mut hi, cap) = piston_band(delta, err, k);
+        let mut d = cut(delta, err);
+        if wired && matches!(p.mode, 1 | 4) {
+            d = delta;
+            (lo, hi) = (d.min(1.5 * err), d.max(1.5 * err));
+        }
+        let push = motor_damping(&p);
+        let brake = MOTOR_DAMPING * cap.min(1.);
+        let hz = TICK_HZ as f32;
+        let at = |edge: f32| {
+            let w = if edge == d { push } else { brake };
+            (edge * hz * UNIT_SCALE, w)
+        };
+        let r = rate / hz;
+        if r < lo {
+            at(lo)
+        } else if r > hi {
+            at(hi)
+        } else {
+            (d * hz * UNIT_SCALE, 0.)
+        }
+    }
+}
+
 /// D1171: `delta` cut to between 0 and `err` (0x95fa28, 0x95fb10).
 fn cut(delta: f32, err: f32) -> f32 {
     if delta > 0. {
@@ -730,21 +781,60 @@ fn wrap_pi(x: f32) -> f32 {
     x - ((x + PI) / TAU).floor() * TAU
 }
 
-/// D1103: at tick `now` steps each piston ([`PistonDrive::step`]) with the `signal` on its
-/// input and holds its slider at the length, waking both ends when it changed.
+/// D1181: whether a piston is driven by its band ([`PistonDrive::slide_to`]) rather than
+/// held at its length: a piston that is not stiff and has a strength. INFERRED (the stiff
+/// flag's use in the solver is not decoded): a stiff piston, or one with strength 0 (no
+/// push from the strength cap), is held as before.
+pub fn slides(params: &lbp_level::parts::JointParams) -> bool {
+    !params.stiff && motor_damping(params) > 0.
+}
+
+/// D1103: at tick `now` steps each piston with the `signal` on its input and holds its
+/// slider at the length, or (D1181, [`slides`]) drives its slider motor within the row's
+/// band ([`PistonDrive::slide_to`]) between the limits of its length rule, waking both
+/// ends when it changed. The ends' poses and velocities come from `bodies`.
 pub fn drive_pistons(
     commands: &mut Commands,
     q: &mut Query<(&mut PistonDrive, &mut PrismaticJoint)>,
+    bodies: &Query<(&Position, &Rotation, &LinearVelocity)>,
     now: f32,
     signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32, bool)>,
 ) {
     for (mut drive, mut joint) in q.iter_mut() {
         let input = signal(&drive.joint);
-        let l = drive.step(now, input);
-        if joint.limits.is_some_and(|d| d.min == l && d.max == l) {
+        if !slides(&drive.joint.params) {
+            let l = drive.step(now, input);
+            if joint.limits.is_some_and(|d| d.min == l && d.max == l) {
+                continue;
+            }
+            joint.limits = Some(DistanceLimit::new(l, l));
+            wake_ends(commands, joint.body1, joint.body2);
             continue;
         }
-        joint.limits = Some(DistanceLimit::new(l, l));
+        let at = |e| bodies.get(e).ok();
+        let (Some((p1, r1, v1)), Some((p2, r2, v2))) = (at(joint.body1), at(joint.body2)) else {
+            continue;
+        };
+        let a1 = *r1 * joint.local_anchor1().unwrap_or_default();
+        let a2 = *r2 * joint.local_anchor2().unwrap_or_default();
+        let axis = *r1 * joint.slider_axis;
+        let l = (p2.0 + a2 - p1.0 - a1).dot(axis) / UNIT_SCALE;
+        let rate = (v2.0 - v1.0).dot(axis) / UNIT_SCALE;
+        let (w, damping) = drive.slide_to(now, input, l, rate);
+        let model = MotorModel::AccelerationBased {
+            stiffness: 0.,
+            damping,
+        };
+        if joint.motor.enabled
+            && joint.motor.target_velocity == w
+            && joint.motor.motor_model == model
+        {
+            continue;
+        }
+        joint.limits = Some(drive.joint.range());
+        joint.motor.enabled = true;
+        joint.motor.target_velocity = w;
+        joint.motor.motor_model = model;
         wake_ends(commands, joint.body1, joint.body2);
     }
 }

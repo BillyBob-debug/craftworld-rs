@@ -1788,6 +1788,14 @@ impl SceneJoint {
 }
 
 impl SceneJoint {
+    /// D1181: the slider limits (sim units) of the length rule: base to base + range, as
+    /// [`Self::length`] clamps it.
+    pub fn range(&self) -> avian2d::prelude::DistanceLimit {
+        let (base, range) = (self.min_length, self.params.motion[0]);
+        let u = crate::UNIT_SCALE;
+        avian2d::prelude::DistanceLimit::new(base.min(base + range) * u, base.max(base + range) * u)
+    }
+
     /// D1104: FOUND (01.33, 0xc9790's branch at 0xc993c) the length of a piston at clock
     /// `frame`: a wired one in mode 1 (direction) or 4 (speed) ramps, base + 2 × frame ×
     /// range / time (the base for time < 1), with no phase, pattern or wave; every other
