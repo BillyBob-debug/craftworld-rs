@@ -1062,6 +1062,50 @@ fn d1171_a_motor_off_its_rate_path_never_runs_past_its_target() {
 }
 
 #[test]
+fn d1172_a_wired_speed_motor_in_mode_2_stops_after_one_turn() {
+    use lbp_sim::scene::{Endpoint, JointKind, PistonClock, SceneJoint};
+    let mut params = JointParams {
+        mode: 2,
+        animation_pattern: 1,
+        ..Default::default()
+    };
+    params.motion[3] = -0.1;
+    let joint = SceneJoint {
+        thing: 0,
+        kind: JointKind::Motor,
+        a: Endpoint::Static(0),
+        b: Endpoint::Static(1),
+        world_a: [0.; 2],
+        world_b: [0.; 2],
+        local_a: [0.; 2],
+        local_b: [0.; 2],
+        length: 0.,
+        min_length: 0.,
+        max_length: 0.,
+        params,
+    };
+    let mut d = lbp_sim::PistonDrive {
+        joint: joint.clone(),
+        clock: PistonClock::default(),
+        sync: None,
+    };
+    let hz = lbp_sim::TICK_HZ as f32;
+    let on = Some((1, 1., false));
+    // 0.1 rad a frame: it turns until frame 62 (6.2 rad), and stops at 63 (past 2π).
+    assert!((d.turn(62., on) + 0.1 * hz).abs() < 1e-3);
+    assert_eq!(d.turn(63., on), 0.);
+    // Free running, or wired in another mode, it keeps turning.
+    let mut free = lbp_sim::PistonDrive {
+        joint,
+        clock: PistonClock::default(),
+        sync: None,
+    };
+    assert!((free.turn(100., None) + 0.1 * hz).abs() < 1e-3);
+    d.joint.params.mode = 1;
+    assert!((d.turn(100., on) + 0.1 * hz).abs() < 1e-3);
+}
+
+#[test]
 fn d1109_gyroscopes_right_their_body_and_rotators_turn_at_their_speed() {
     // A box carrying a gyroscope (Thing 2) as saved in the Rookie Test: range π/15 per
     // tick, strength 1.

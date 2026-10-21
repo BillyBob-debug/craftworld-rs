@@ -538,11 +538,21 @@ impl PistonDrive {
     /// rad/s: the change of its angle ([`scene::SceneJoint::motor_angle`]) over the next
     /// frame of its clock, as the motor row builder 0x95f494 takes it (0xc99d0 at frame and
     /// frame + 1), times [`TICK_HZ`] (one game frame per tick). Pattern 1 gives speed (+0xd4,
-    /// rad per frame) × clock rate, as 0xc7370 returns.
+    /// rad per frame) × clock rate, as 0xc7370 returns, in every mode (D1172: wired in mode
+    /// 1 or 4 it no longer follows the length ramp); wired in mode 2, 0 once the clock's
+    /// frame × |speed| passes 2π (0xc73dc to 0xc7410), so it stops after one turn.
     pub fn turn(&mut self, now: f32, input: Option<(i32, f32, bool)>) -> f32 {
         self.step(now, input);
         let wired = input.is_some();
         let f = self.clock.frame(now);
+        let p = self.joint.params;
+        if p.animation_pattern == 1 {
+            let speed = p.motion[3];
+            if wired && p.mode == 2 && f * speed.abs() > std::f32::consts::TAU {
+                return 0.;
+            }
+            return speed * self.clock.scale * TICK_HZ as f32;
+        }
         let a = |f| self.joint.motor_angle(f, wired);
         (a(f + self.clock.scale) - a(f)) * TICK_HZ as f32
     }

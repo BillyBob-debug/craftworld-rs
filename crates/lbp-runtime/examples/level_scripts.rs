@@ -3485,6 +3485,12 @@ fn run() -> Result<(), String> {
                 if driven { "driven" } else { "clamped" }
             );
             *totals.switches.sensors.entry(k).or_default() += 1;
+            // D1172: wired speed motors by mode (mode 2 stops after one turn; 1 and 4 now
+            // turn at their speed).
+            if j.params.animation_pattern == 1 && wired {
+                let k = format!("motor pattern 1 wired mode {}", j.params.mode);
+                *totals.switches.sensors.entry(k).or_default() += 1;
+            }
         }
         // D1152: followKey tweaks (configurations 5 and 11) by whether a tag in the level
         // has their exact (colour, name) pair, the key 0xceac0 compares; else whether a
