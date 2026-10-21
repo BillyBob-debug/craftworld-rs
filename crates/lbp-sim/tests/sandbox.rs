@@ -2765,3 +2765,30 @@ fn d1183_a_pattern_2_piston_with_a_strength_slides_stiff_or_not() {
     };
     assert!(!lbp_sim::slides(&mode1, true));
 }
+
+#[test]
+fn d1187_a_piston_rule_starts_from_its_saved_length() {
+    use lbp_sim::scene::SceneJoint;
+    let mut params = JointParams::default();
+    params.motion[..5].copy_from_slice(&[315., 120., 0., 0.02, 20.]);
+    let j = SceneJoint {
+        thing: 0,
+        kind: JointKind::Piston,
+        a: Endpoint::Static(0),
+        b: Endpoint::Static(1),
+        world_a: [0.; 2],
+        world_b: [0.; 2],
+        local_a: [0.; 2],
+        local_b: [0.; 2],
+        length: 840.,
+        min_length: 100.,
+        max_length: 200.,
+        params,
+    };
+    // The base is the saved length (+0xf0), not the tweak minimum.
+    assert_eq!((j.free_length(0.), j.free_length(70.)), (840., 1155.));
+    assert_eq!(
+        (j.range().min, j.range().max),
+        (840. * lbp_sim::UNIT_SCALE, 1155. * lbp_sim::UNIT_SCALE)
+    );
+}

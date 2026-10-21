@@ -1765,7 +1765,7 @@ impl SceneJoint {
     /// INFERRED: the ease is a cosine (the call at 0x88f64c), the base length is the stored
     /// length. `frame` is the piston's retimed clock ([`PistonClock::frame`]).
     pub fn free_length(&self, frame: f32) -> f32 {
-        let base = self.min_length;
+        let base = self.length;
         let [range, time, phase, speed, pause, ..] = self.params.motion;
         let t = frame + phase;
         match self.params.animation_pattern {
@@ -1790,8 +1790,12 @@ impl SceneJoint {
 impl SceneJoint {
     /// D1181: the slider limits (sim units) of the length rule: base to base + range, as
     /// [`Self::length`] clamps it.
+    /// D1187: FOUND (01.33, the PJoint serialiser 0xb41850 at 0xb418fc) a piston's base
+    /// (+0xf0) is the saved `length`, the field after the contacts, not the tweak minimum;
+    /// the limits are base..base + range (0xc7330/0xc7350), and only script setters
+    /// (0xc7e68, 0xc83bc) move it.
     pub fn range(&self) -> avian2d::prelude::DistanceLimit {
-        let (base, range) = (self.min_length, self.params.motion[0]);
+        let (base, range) = (self.length, self.params.motion[0]);
         let u = crate::UNIT_SCALE;
         avian2d::prelude::DistanceLimit::new(base.min(base + range) * u, base.max(base + range) * u)
     }
@@ -1805,7 +1809,7 @@ impl SceneJoint {
     /// the joint is held between base and base + range (0xc7350 min, 0xc7330 max), so the
     /// length is kept there while the clock runs on unbounded.
     pub fn length(&self, frame: f32, wired: bool) -> f32 {
-        let base = self.min_length;
+        let base = self.length;
         let [range, time, ..] = self.params.motion;
         let l = match self.params.mode {
             1 | 4 if wired && time >= 1. => base + 2. * frame * range / time,
@@ -1824,7 +1828,7 @@ impl SceneJoint {
     /// time) until frame reaches time (time 1 or more), then the base (0xc9804); else the
     /// base.
     pub fn one_shot_length(&self, frame: f32) -> f32 {
-        let base = self.min_length;
+        let base = self.length;
         let [range, time, _, speed, pause, ..] = self.params.motion;
         match self.params.animation_pattern {
             0 => {
@@ -1846,7 +1850,7 @@ impl SceneJoint {
     /// the + 0.5, so it swings about the centre; it differs from this one by range / 2,
     /// which the sync cancels.
     pub fn motor_angle(&self, frame: f32, wired: bool) -> f32 {
-        let base = self.min_length;
+        let base = self.length;
         let range = self.params.motion[0];
         let l = match self.params.mode {
             1 | 2 | 4 if wired => self.length(frame, true),
@@ -1889,7 +1893,7 @@ impl SceneJoint {
     /// -1 below -0.1, else 10 × e. The game measures the joint's length (0xc9d38); `length`
     /// here is the commanded one (INFERRED stand-in).
     pub fn servo_scale(&self, activation: f32, length: f32) -> f32 {
-        let base = self.min_length;
+        let base = self.length;
         let range = self.params.motion[0];
         let (lo, hi) = (base.min(base + range), base.max(base + range));
         let mut s = activation.max(0.);
