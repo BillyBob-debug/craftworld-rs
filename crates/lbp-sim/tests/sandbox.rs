@@ -463,6 +463,7 @@ fn motor_turns_a_bolted_wheel_in_place() {
     // D1108: pattern 1 turns at speed (rad per frame) × 30 ticks a second: 0.1 is 3 rad/s.
     let params = JointParams {
         animation_pattern: 1,
+        strength: 1.,
         motion: [0., 0., 0., 0.1, 0., 0., 0., 0., 0., 0.],
         ..Default::default()
     };
@@ -976,6 +977,7 @@ fn d1108_a_motor_turns_at_its_speed_on_its_clock() {
     let mut params = JointParams {
         mode: 0,
         animation_pattern: 1,
+        strength: 1.,
         ..Default::default()
     };
     params.motion[3] = 0.05;
@@ -1013,6 +1015,7 @@ fn d1171_a_motor_off_its_rate_path_never_runs_past_its_target() {
     let mut params = JointParams {
         mode: 1,
         animation_pattern: 0,
+        strength: 1.,
         ..Default::default()
     };
     params.motion[0] = std::f32::consts::PI;
@@ -1067,6 +1070,7 @@ fn d1172_a_wired_speed_motor_in_mode_2_stops_after_one_turn() {
     let mut params = JointParams {
         mode: 2,
         animation_pattern: 1,
+        strength: 1.,
         ..Default::default()
     };
     params.motion[3] = -0.1;
@@ -2418,4 +2422,22 @@ fn d1169_a_piston_holds_the_relative_angle_its_bodies_start_at() {
         "keeps its start angle: {}",
         out[1].2
     );
+}
+
+#[test]
+fn d1173_a_motor_pushes_by_its_strength_clamped_to_one() {
+    use lbp_sim::{motor_damping, MOTOR_DAMPING};
+    let at = |strength| {
+        motor_damping(&JointParams {
+            strength,
+            ..Default::default()
+        })
+    };
+    // Strength 0 bounds the push to nothing (0x95fab8): the motor does not turn its ends.
+    assert_eq!(at(0.), 0.);
+    assert_eq!(at(-1.), 0.);
+    // 0xca760 clamps the strength to [0, 1].
+    assert!((at(0.5) - 0.5 * MOTOR_DAMPING).abs() < 1e-6);
+    assert_eq!(at(1.), MOTOR_DAMPING);
+    assert_eq!(at(3.), MOTOR_DAMPING);
 }
