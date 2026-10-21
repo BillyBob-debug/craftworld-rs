@@ -768,14 +768,14 @@ weight 1, so `STAND_BASE_WEIGHT` (D242) never changed the picture. Our dumped id
 18.5 units per breath (game 2.6); with the weight honoured 6.1 at 0.3 and about 4.6 at 0.25. `STAND_BASE_WEIGHT`
 = 0.25 (chest and head-top joint travel on the game's 2.2 / 2.9). docs/d242-idle-stretch.md. +0 / +0.
 
-## 2026-10-12 — D242 idle breathing at half weight
+## 2026-10-12 â€” D242 idle breathing at half weight
 
 Owner: the body stretches vertically too much in the idle animation. Game idle vertices vs our stand clip,
 per joint: same period, but head/chest move 2-3 units (ours 7-11) and sit 3-6 higher, fitting the stand
 clip at about 0.5 over the bind pose. `STAND_BASE_WEIGHT` = 0.5 (inferred weight, measured amplitude).
 docs/d242-idle-stretch.md. +0 / +0.
 
-## 2026-10-12 — D241 landing dip matched to the game's vertices
+## 2026-10-12 â€” D241 landing dip matched to the game's vertices
 
 Owner note: Sackboy "extra bouncy, stretching vertically". Game vs ours, same jump: the vertical arc matches
 within 3 units (centroid +234 apex both), but on landing our drawn figure sank 35 + 5.5 below rest for
