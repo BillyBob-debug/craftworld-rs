@@ -112,9 +112,12 @@
   for pattern 2 (Part 80).
 - Merged: D1180 (PR 323, e176509) the piston's length row 0x96178c has the motor's
   band, k cap floor 10 (Part 81).
-- D1181 (branch `logic-d1181`, worktree `E:\Projects\wt-d324`): a piston that is not
-  stiff and has a strength slides by its band, the rest are held (docs/logic/part-82.md).
-- Decision numbers: D1100-D1199, next free D1182.
+- Merged: D1181 (PR 324, 1d4dbdf) a piston slides by its band, limits from its rule's
+  range (Part 82).
+- D1182 (branch `logic-d1182`, worktree `E:\Projects\wt-d324`): the stiff flag (+0x28)
+  picks the band row 0x962590; only a stiff pattern-2 piston with a strength slides
+  (docs/logic/part-83.md).
+- Decision numbers: D1100-D1199, next free D1183.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -169,7 +172,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1181 unchanged (Parts 58-82; D1163 changes 2 Rookie Test
+  After D1156 to D1182 unchanged (Parts 58-83; D1163 changes 2 Rookie Test
   followers, none on the route; D1164 and D1165 change no Rookie Test aimer; D1166 is not hosted).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
@@ -290,8 +293,11 @@ when a later PR finds it), then the thread's own context at hand-off (ctx_audit)
 - D1180: general-purpose (thread model), decoded the piston row 0x96178c (capstone over
   read_bytes), 68k tokens, 17 tools, 3.7 minutes, one follow-up that corrected the
   `+0xc` gate; thread context 127k after PR 323.
-- D1181: none (avian's prismatic source and a temporary piston trace); thread context in
-  the PR reply.
+- D1181: none (avian's prismatic source and a temporary piston trace); thread context
+  133k after PR 324.
+- D1182: general-purpose (sonnet), found the stiff flag's offset and the piston case
+  0x1c9988 (capstone over read_bytes), 68k tokens, 31 tools, 3.8 minutes; thread
+  context in the PR reply.
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -335,9 +341,9 @@ EBOOT rule and unit tests:
 4. Motors' leftovers: the turn sign (0xc9250 is an inlined atan2, matrix layout
    UNVERIFIED, Part 74); the band's cap scale (INFERRED in Part 80, the row is solved off
    the PPU); the
-   wired ramp's clock start against the centre sync (Part 77); and, for pistons, where the
-   solver reads the stiff flag and whether a strength-0 piston is rigid (D1181 holds
-   both, INFERRED, Part 82).
+   wired ramp's clock start against the centre sync (Part 77); and, for pistons, the
+   non-stiff row 0x960988 with its block 0x1c90b8, the byte at +0x29, and how a stiff
+   pattern-0 piston closes the gap to its rule (D1182 holds them, Part 83).
 5. The creature brain (PEnemy reader NOT FOUND; leads: the TOC entry for string
    "PEnemy" 0xc79058, bit 0x1c tests); who puts a player in state 5 on contact (Part
    42 has the seat path) and sends the respawn (0x7feb8, Part 41); the controlinator's
