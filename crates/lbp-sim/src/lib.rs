@@ -798,7 +798,10 @@ fn wrap_pi(x: f32) -> f32 {
 /// a non-stiff piston near its saved angle on each body, so both kinds stay prismatic
 /// (angle locked). INFERRED: a piston also needs a k ([`motor_k`], pattern 2) to
 /// close the error from its saved length to its rule, which the band does not push
-/// inside; without one it is held.
+/// inside; without one it is held. D1185: FOUND the byte at +0x29 has one writer, the
+/// setter 0xcacec, called only by the joint-editing gadget (0x5a6bb4, 0x55d720), and the
+/// PJoint serialiser 0xb41850 never reads or writes it, so in play it is 0 and the stiff
+/// test is +0x28 alone.
 pub fn slides(params: &lbp_level::parts::JointParams, wired: bool) -> bool {
     motor_damping(params) > 0. && motor_k(params, wired) > 0.
 }
