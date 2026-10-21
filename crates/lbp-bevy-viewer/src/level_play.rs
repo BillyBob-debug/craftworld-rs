@@ -2196,9 +2196,14 @@ fn drive_spins(
     // D1157: the receivers' tags join them.
     let synced = lbp_sim::synced_tags(&lbp_sim::sync_spots(syncs.iter()), &tags);
     tags.extend(synced);
-    lbp_sim::drive_spins(&mut commands, &mut q, player, &tags, |t| {
-        world.tweak_activation(t.thing, t.behavior)
-    });
+    lbp_sim::drive_spins(
+        &mut commands,
+        &mut q,
+        player,
+        &tags,
+        |t| world.tweak_activation(t.thing, t.behavior),
+        |t| world.tweak_stick(t.thing),
+    );
 }
 
 /// D1110: every mover and follower pushes its body; a follower follows the play-mode
@@ -2241,9 +2246,14 @@ fn drive_moves(
     // D1157: the receivers' tags join them.
     let synced = lbp_sim::synced_tags(&lbp_sim::sync_spots(syncs.iter()), &tags);
     tags.extend(synced);
-    lbp_sim::drive_moves(&mut commands, &mut q, player, &tags, |t| {
-        world.tweak_activation(t.thing, t.behavior)
-    });
+    lbp_sim::drive_moves(
+        &mut commands,
+        &mut q,
+        player,
+        &tags,
+        |t| world.tweak_activation(t.thing, t.behavior),
+        |t| world.tweak_stick(t.thing),
+    );
 }
 
 /// D1102, D1103: every piston runs the game's length rule on its own clock; a piston with

@@ -568,6 +568,9 @@ pub struct MoveTweak {
     /// Thing's parent (Thing+0x5c, else the Thing itself; 0x957df4 passes it to the
     /// search 0x1c3e04 and subtracts its world translation from the target's).
     pub at: [f32; 2],
+    /// D1158: configurations 6 and 7's stick, the Thing's wired inputs in slots 1 and 2
+    /// (0xcb02c, 0xcb074); 0 until a host fills it each tick.
+    pub stick: [f32; 2],
 }
 
 /// D1110: `v` per unit length, or None for a zero vector.
@@ -607,7 +610,13 @@ impl MoveTweak {
     /// velocity of 8 and 11 alike is turned by it (0x9582c4). Followers with allowInOut
     /// are packed the same; the caller only moves their layer first (0x1c8250).
     /// INFERRED: the input scale 0xcbed4 read as 1; the mirror flag (which negates the
-    /// angle for localSpace) not modelled; stick movers see no stick.
+    /// angle for localSpace) not modelled.
+    /// D1158 FOUND (0x957f00-0x9584bc): a stick mover (any configuration but 8 and 11)
+    /// wants its stick ([`Self::stick`]) mapped from the square onto the circle (times
+    /// max(|x|, |y|) over its length), turned by the up axis with localSpace, and, for
+    /// configuration 6 only, times range; its rows are a mover's. Not modelled: the mirror
+    /// test that negates x (body determinant below 0 unlike byte +0x224) and the input
+    /// scale 0xcbed4 (the slot 0 activation when +0x10 is 2).
     pub fn rows(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>, act: f32) -> Vec<Row> {
         let (sin, cos) = self.angle.sin_cos();
         let up = [up[0] * cos + up[1] * sin, up[1] * cos - up[0] * sin];
@@ -638,7 +647,15 @@ impl MoveTweak {
                 }
                 off
             }),
-            _ => [0., 0.],
+            c => {
+                let [x, y] = self.stick;
+                let l = x.hypot(y);
+                let m = if l > 0. { x.abs().max(y.abs()) / l } else { 0. };
+                let v = [x * m, y * m];
+                let v = if self.local { turn(v) } else { v };
+                let r = if c == 6 { self.range } else { 1. };
+                [v[0] * r, v[1] * r]
+            }
         };
         let mut rows = Vec::with_capacity(2);
         let axis = match unit(want) {
@@ -1351,6 +1368,7 @@ fn build_scene_inner(
                     .then(|| key_of(tw.color_index, &tw.name)),
                 angle: 0.,
                 at,
+                stick: [0.; 2],
             });
         }
     }

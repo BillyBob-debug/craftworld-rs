@@ -1625,6 +1625,7 @@ fn d1150_followers_ease_in_with_the_turn_shaper() {
         key: None,
         angle: 0.,
         at: [0.; 2],
+        stick: [0.; 2],
     };
     let up = [0., 1.];
     let v = follower.push([0., 0.], up, Some([1000., 0.]), 1.);
@@ -1704,6 +1705,55 @@ fn d1151_followers_turn_their_up_axis_and_keep_local_space() {
     assert!((v[0] - 3.5).abs() < 1e-5 && v[1].abs() < 1e-5, "{v:?}");
     let v = local.push([0., 0.], [1., 0.], d, 1.);
     assert!(v[0].abs() < 1e-5 && (v[1] + 3.5).abs() < 1e-5, "{v:?}");
+}
+
+#[test]
+fn d1158_stick_movers_map_the_stick_onto_a_circle() {
+    let stick = lbp_sim::scene::MoveTweak {
+        thing: 0,
+        configuration: 6,
+        behavior: 0,
+        range: 10.,
+        accel: 1.,
+        decel: 1.,
+        vel: [0., 0.],
+        local: false,
+        min_range: 0.,
+        max_range: 0.,
+        angle_range: 360.,
+        flee: false,
+        up_down: true,
+        key: None,
+        angle: 0.,
+        at: [0.; 2],
+        stick: [1., 1.],
+    };
+    let up = [0., 1.];
+    // A full diagonal stick wants range (10) along the diagonal, not range times root 2.
+    let v = stick.push([0., 0.], up, None, 1.);
+    let h = 10. / 2f32.sqrt();
+    assert!((v[0] - h).abs() < 1e-4 && (v[1] - h).abs() < 1e-4, "{v:?}");
+    // Configuration 7 keeps the unscaled stick: at most 1 a tick.
+    let seven = lbp_sim::scene::MoveTweak {
+        configuration: 7,
+        stick: [-0.5, 0.],
+        ..stick
+    };
+    let v = seven.push([0., 0.], up, None, 1.);
+    assert!((v[0] + 0.5).abs() < 1e-5 && v[1].abs() < 1e-5, "{v:?}");
+    // localSpace turns it by the up axis; no stick brakes with ±decel × range.
+    let local = lbp_sim::scene::MoveTweak {
+        local: true,
+        stick: [0., 1.],
+        ..stick
+    };
+    let v = local.push([0., 0.], [1., 0.], None, 1.);
+    assert!((v[0] - 10.).abs() < 1e-4 && v[1].abs() < 1e-4, "{v:?}");
+    let idle = lbp_sim::scene::MoveTweak {
+        stick: [0., 0.],
+        ..stick
+    };
+    assert_eq!(idle.push([0., 30.], up, None, 1.), [0., 20.]);
 }
 
 #[test]
