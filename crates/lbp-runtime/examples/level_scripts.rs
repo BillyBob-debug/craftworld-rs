@@ -3491,6 +3491,18 @@ fn run() -> Result<(), String> {
                 let k = format!("motor pattern 1 wired mode {}", j.params.mode);
                 *totals.switches.sensors.entry(k).or_default() += 1;
             }
+            // D1173: motors by strength as 0xca760 clamps it to [0, 1].
+            let s = j.params.strength;
+            let b = match s {
+                s if s <= 0. => "0",
+                s if s < 0.25 => "below 0.25",
+                s if s < 0.5 => "below 0.5",
+                s if s < 1. => "below 1",
+                _ if s == 1. => "1",
+                _ => "above 1",
+            };
+            let k = format!("motor strength {b}");
+            *totals.switches.sensors.entry(k).or_default() += 1;
         }
         // D1152: followKey tweaks (configurations 5 and 11) by whether a tag in the level
         // has their exact (colour, name) pair, the key 0xceac0 compares; else whether a

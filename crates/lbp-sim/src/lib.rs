@@ -86,8 +86,20 @@ fn sv(p: [f32; 2]) -> Vector {
 }
 
 /// Joint motors: share of the speed error removed per substep (avian `AccelerationBased`
-/// damping; above 1 it overshoots). Our choice; the motor strength is not modelled.
+/// damping; above 1 it overshoots). Our choice, for a motor at full strength
+/// ([`motor_damping`]).
 pub const MOTOR_DAMPING: f32 = 0.5;
+
+/// D1173: FOUND (01.33) a motor's strength is PJoint strength `+0xc0` clamped to [0, 1]
+/// (0xca760), times max(1, 4 × its speed 0xc746c) over the sum of its moving ends'
+/// `*(body+0x110)+0x38` (0xca2a4, type 9). The motor row 0x95f494 bounds its push by the
+/// strength times the ends' speed error (0x95fab8, skipped only for a strength of
+/// FLT_MAX, which a motor never has), so a motor at strength 0 does not turn its ends.
+/// INFERRED: the clamped strength is the share of the speed error the motor can remove,
+/// so it scales [`MOTOR_DAMPING`].
+pub fn motor_damping(params: &lbp_level::parts::JointParams) -> f32 {
+    MOTOR_DAMPING * params.strength.clamp(0., 1.)
+}
 /// Angular springs (SPRING_ANGULAR, wobble): avian spring-damper. PLACEHOLDER until
 /// PJoint.strength is calibrated.
 pub const SPRING_FREQUENCY: f32 = 2.0;
@@ -564,9 +576,10 @@ impl PistonDrive {
     /// (`delta`) and the error from the measure to the angle at the next frame (`err`,
     /// both wrapped to [-π, π)), and turns by `delta` cut to between 0 and `err`
     /// (0x95fa28, 0x95fb10): it never runs past its target and never turns back. The
-    /// angle rule is synced to the measure when it first runs (0xc9af4). INFERRED: the
-    /// row's strength cap and its second bound, 1.5 × `err` with a cap of
-    /// k × max(|err|, 0.1) (k is 0 except for pattern 2, Part 70), are left out.
+    /// angle rule is synced to the measure when it first runs (0xc9af4). The row's
+    /// strength cap scales the motor's push ([`motor_damping`], D1173). INFERRED: its
+    /// second bound, 1.5 × `err` with a cap of k × max(|err|, 0.1) (k is 0 except for
+    /// pattern 2, Part 70), is left out.
     pub fn turn_to(&mut self, now: f32, input: Option<(i32, f32, bool)>, measured: f32) -> f32 {
         let w = self.turn(now, input);
         let wired = input.is_some();
@@ -886,7 +899,7 @@ fn spawn_joint(
                 pivot().with_motor(
                     AngularMotor::new(MotorModel::AccelerationBased {
                         stiffness: 0.,
-                        damping: MOTOR_DAMPING,
+                        damping: motor_damping(&j.params),
                     })
                     .with_target_velocity(w),
                 ),
