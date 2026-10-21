@@ -24,8 +24,7 @@ FOUND (EBOOT 01.33):
 
 So offline, a receiver needs a sender of its key in its own level, which is what
 `synced_tags` already does. Nothing changes in the model; the doc of `synced_tags`
-says why. Still not modelled: the useLayers z (byte +0x2c picks the z lane source; its
-meaning is not clear yet).
+says why. The useLayers z (byte +0x2c) is resolved in Part 69.
 
 Test: `d1167_offline_a_receiver_needs_a_sender_of_its_key_in_the_level` in
 crates/lbp-sim/tests/sandbox.rs.

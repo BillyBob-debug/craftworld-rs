@@ -1374,8 +1374,8 @@ fn d1111_keyed_followers_find_tags_with_their_colour_and_name() {
     // Spots: a body's tags move with it; loose tags keep their world point.
     let mut w = World::new();
     let (a, b) = (w.spawn_empty().id(), w.spawn_empty().id());
-    let on_body = lbp_sim::TagMarks(vec![(4, key, at)]);
-    let loose = lbp_sim::TagMarks(vec![(6, key, [-500., 300.])]);
+    let on_body = lbp_sim::TagMarks(vec![(4, key, at, 0.)]);
+    let loose = lbp_sim::TagMarks(vec![(6, key, [-500., 300.], 0.)]);
     let (p, r) = (
         Position::new(Vec2::new(10., 3.)),
         Rotation::radians(quarter),
@@ -1831,6 +1831,7 @@ fn d1157_tag_synchronisers_send_a_tag_offset_and_receivers_place_a_tag() {
         key: s.key,
         body,
         at,
+        z: 0.,
     };
     // A tag 30 up and 10 left of the sender is (30, 10) along its axes: the receiver
     // places its tag at (560, 310).
@@ -2220,15 +2221,18 @@ fn d1167_offline_a_receiver_needs_a_sender_of_its_key_in_the_level() {
         radius: -1.,
         min_radius: 0.,
         scale: [1., 1.],
+        use_layers: false,
         body: None,
         at,
         axes: [[1., 0.], [0., 1.]],
+        z: 0.,
     };
     let tag = lbp_sim::TagSpot {
         thing: 9,
         key: 5,
         body: None,
         at: [10., 20.],
+        z: 0.,
     };
     // A receiver of key 5 beside a tag of key 5 but no sender: the online source
     // 0x2a8538 is absent offline, so it places nothing.
@@ -2242,4 +2246,40 @@ fn d1167_offline_a_receiver_needs_a_sender_of_its_key_in_the_level() {
     let out = lbp_sim::synced_tags(&sent, &[tag]);
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].at, [110., 20.]);
+}
+
+#[test]
+fn d1168_a_receiver_with_use_layers_puts_its_tag_on_the_sent_tags_z() {
+    let spot = |thing, kind, use_layers, z| lbp_sim::SyncSpot {
+        thing,
+        kind,
+        key: 5,
+        radius: -1.,
+        min_radius: 0.,
+        scale: [1., 1.],
+        use_layers,
+        body: None,
+        at: [100. * thing as f32, 0.],
+        axes: [[1., 0.], [0., 1.]],
+        z,
+    };
+    let tag = lbp_sim::TagSpot {
+        thing: 9,
+        key: 5,
+        body: None,
+        at: [10., 20.],
+        z: 279.,
+    };
+    // The sender at z 79 sends the tag's world z 279 (0x13187c's z lane is not a
+    // difference). A receiver at z -121 without useLayers keeps its own z; with it, the
+    // tag goes to 279.
+    let syncs = [
+        spot(0, 0, false, 79.),
+        spot(1, 1, false, -121.),
+        spot(2, 1, true, -121.),
+    ];
+    let out = lbp_sim::synced_tags(&syncs, &[tag]);
+    assert_eq!(out.len(), 2);
+    assert_eq!((out[0].at, out[0].z), ([110., 20.], -121.));
+    assert_eq!((out[1].at, out[1].z), ([210., 20.], 279.));
 }
