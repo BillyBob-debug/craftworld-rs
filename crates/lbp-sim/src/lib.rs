@@ -104,19 +104,23 @@ pub fn motor_damping(params: &lbp_level::parts::JointParams) -> f32 {
 /// D1174: FOUND (01.33) the solver's motor case 0x1c9eac gives the motor row its angle
 /// limits: for pattern 0 with a range `+0xc8` under 2π, the centre `+0xe0` ± range / 2
 /// (sorted); for pattern 2 with a range under 2π, the centre to the centre + range;
-/// otherwise none (±FLT_MAX). Pattern 2 is left out while the turn sign is UNVERIFIED
-/// (Part 74).
+/// otherwise none (±FLT_MAX).
 /// D1175: FOUND (01.33, 0xc95ec's motor branch 0xc9860 to 0xc996c) a motor's pattern-0
 /// rule is centred, the centre − range / 2 × cos(π s), so its sweep is exactly the limits.
 /// Our rule ([`scene::SceneJoint::motor_angle`]) is the game's + range / 2, which the sync
 /// cancels; avian counts the angle from the spawn, where ours is `start`, so the limits
 /// are -start to -start + range (sorted).
+/// D1177: FOUND (01.33, 0xc98d0) a free-running pattern-2 motor has no motor branch: its
+/// target is the centre + range × (1 − u / time), u the clock fmod time + pause, so it
+/// sweeps the centre to the centre + range, which is 0x1ca6f0's limits. Our pattern-2
+/// rule sweeps the same [0, range] from `start`, so it takes the same limits as pattern 0;
+/// they hold in our own turn sign whatever Part 74's sign turns out to be.
 pub fn motor_angle_limits(
     params: &lbp_level::parts::JointParams,
     start: f32,
 ) -> Option<(f32, f32)> {
     let range = params.motion[0];
-    (params.animation_pattern == 0 && range < std::f32::consts::TAU)
+    (matches!(params.animation_pattern, 0 | 2) && range < std::f32::consts::TAU)
         .then(|| (-start + range.min(0.), -start + range.max(0.)))
 }
 /// Angular springs (SPRING_ANGULAR, wobble): avian spring-damper. PLACEHOLDER until
