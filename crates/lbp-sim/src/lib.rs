@@ -121,9 +121,29 @@ pub fn motor_k(params: &lbp_level::parts::JointParams, wired: bool) -> f32 {
 /// the 1.5 × `err` edge's cap). INFERRED: with k 0 (every motor but pattern 2) that edge
 /// has no force, so only a pattern-2 motor is braked once it turns past 1.5 × `err`.
 pub fn motor_band(delta: f32, err: f32, k: f32) -> (f32, f32, f32) {
+    row_band(delta, err, k, 0.1)
+}
+
+/// D1180: FOUND (01.33) the piston's length row 0x96178c (called first by the type-4 row
+/// 0x962590 with the same k, strength cap and limits) holds the length's change per frame
+/// to the motor row's band, in game units: `delta` = target(t + 1) − target(t) from the
+/// length rule 0xc95ec (0x961950, 0x961984, 0x9619ac), `err` = target(t + 1) − the
+/// measured anchor distance (0x961d80), `delta` cut to between 0 and `err` (0x961de4,
+/// 0x9624bc; skipped when wired in mode 1 or 4, and pattern 1 drives at 0xc7370), and
+/// 1.5 × `err` (TOC -0x1d88, 0x961d9c) with a cap of k × max(|err|, 10) (TOC -0x1cdc =
+/// 10, 0x961c84 to 0x961cc8), sorted (0x961df0) with the strength cap on the `delta`
+/// edge (row+0x40, unscaled for a joint with a type, 0x961cfc). Returns (lo, hi, the
+/// 1.5 × `err` edge's cap). The length limits sit in the same row (row+0x30, lo − L and
+/// hi − L), eased back by 0.2 × (past − 1) when the length is outside them (TOC -0x1fe0,
+/// 0x962390, 0x962408). Not applied: the piston is held at its length ([`drive_pistons`]).
+pub fn piston_band(delta: f32, err: f32, k: f32) -> (f32, f32, f32) {
+    row_band(delta, err, k, 10.)
+}
+
+fn row_band(delta: f32, err: f32, k: f32, floor: f32) -> (f32, f32, f32) {
     let d = cut(delta, err);
     let e = 1.5 * err;
-    (d.min(e), d.max(e), k * err.abs().max(0.1))
+    (d.min(e), d.max(e), k * err.abs().max(floor))
 }
 
 /// D1174: FOUND (01.33) the solver's motor case 0x1c9eac gives the motor row its angle
