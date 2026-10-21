@@ -509,6 +509,9 @@ pub fn drive_moves(
 pub struct PistonDrive {
     pub joint: scene::SceneJoint,
     pub clock: scene::PistonClock,
+    /// D1171: a motor's angle rule less the measured relative angle of its ends, taken
+    /// when it first runs ([`Self::turn_to`]; the game's centre sync 0xc9af4).
+    pub sync: Option<f32>,
 }
 
 impl PistonDrive {
@@ -543,6 +546,43 @@ impl PistonDrive {
         let a = |f| self.joint.motor_angle(f, wired);
         (a(f + self.clock.scale) - a(f)) * TICK_HZ as f32
     }
+
+    /// D1171: FOUND (01.33, the motor row 0x95f494) the turn rate as [`Self::turn`] gives
+    /// it, for a motor whose ends are at relative angle `measured` (body 2 less body 1,
+    /// 0xc9250). A motor with pattern 1, or wired with mode 1 or 4, is driven at its rate
+    /// (0x95fa44, 0xc7370). Any other takes the change of its angle over the next frame
+    /// (`delta`) and the error from the measure to the angle at the next frame (`err`,
+    /// both wrapped to [-π, π)), and turns by `delta` cut to between 0 and `err`
+    /// (0x95fa28, 0x95fb10): it never runs past its target and never turns back. The
+    /// angle rule is synced to the measure when it first runs (0xc9af4). INFERRED: the
+    /// row's strength cap and its second bound, 1.5 × `err` with a cap of
+    /// k × max(|err|, 0.1) (k is 0 except for pattern 2, Part 70), are left out.
+    pub fn turn_to(&mut self, now: f32, input: Option<(i32, f32, bool)>, measured: f32) -> f32 {
+        let w = self.turn(now, input);
+        let wired = input.is_some();
+        let p = self.joint.params;
+        if p.animation_pattern == 1 || (wired && matches!(p.mode, 1 | 4)) {
+            return w;
+        }
+        let hz = TICK_HZ as f32;
+        let f = self.clock.frame(now);
+        let a = |f| self.joint.motor_angle(f, wired);
+        let sync = *self.sync.get_or_insert(a(f) - measured);
+        let delta = wrap_pi(w / hz);
+        let err = wrap_pi(a(f + self.clock.scale) - sync - measured);
+        let v = if delta > 0. {
+            delta.min(err).max(0.)
+        } else {
+            delta.max(err).min(0.)
+        };
+        v * hz
+    }
+}
+
+/// D1171: `x` wrapped to [-π, π), as the motor row wraps its angles (0x95f688).
+fn wrap_pi(x: f32) -> f32 {
+    use std::f32::consts::{PI, TAU};
+    x - ((x + PI) / TAU).floor() * TAU
 }
 
 /// D1103: at tick `now` steps each piston ([`PistonDrive::step`]) with the `signal` on its
@@ -587,17 +627,19 @@ pub fn drive_winches(
 }
 
 /// D1108: at tick `now` sets each motor's (MOTOR, type 9) target turn rate from its clock
-/// and angle rule ([`PistonDrive::turn`]), waking both ends when it changed. INFERRED: the
-/// row's position term (error to the measure 0xc9250) and its strength cap are left out.
+/// and angle rule, cut so it never runs past its target ([`PistonDrive::turn_to`], D1171),
+/// waking both ends when it changed. The ends' relative angle comes from `rotations`.
 pub fn drive_motors(
     commands: &mut Commands,
     q: &mut Query<(&mut PistonDrive, &mut RevoluteJoint)>,
+    rotations: &Query<&Rotation>,
     now: f32,
     signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32, bool)>,
 ) {
     for (mut drive, mut joint) in q.iter_mut() {
         let input = signal(&drive.joint);
-        let w = drive.turn(now, input);
+        let angle = |e| rotations.get(e).map_or(0., |r: &Rotation| r.as_radians());
+        let w = drive.turn_to(now, input, angle(joint.body2) - angle(joint.body1));
         if joint.motor.target_velocity == w {
             continue;
         }
@@ -827,6 +869,7 @@ fn spawn_joint(
             let mut drive = PistonDrive {
                 joint: j.clone(),
                 clock: scene::PistonClock::default(),
+                sync: None,
             };
             let w = drive.turn(0., None);
             e.insert(
@@ -871,6 +914,7 @@ fn spawn_joint(
             .insert(PistonDrive {
                 joint: j.clone(),
                 clock: scene::PistonClock::default(),
+                sync: None,
             })
         }
         scene::JointKind::Rod => e.insert(distance(j.length, j.length, 0.)),
@@ -879,6 +923,7 @@ fn spawn_joint(
             e.insert(distance(0., l, 0.)).insert(PistonDrive {
                 joint: j.clone(),
                 clock: scene::PistonClock::default(),
+                sync: None,
             })
         }
         scene::JointKind::String => e.insert(distance(0., j.length, 0.)),

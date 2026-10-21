@@ -2324,8 +2324,8 @@ fn drive_winches(
     });
 }
 
-/// D1108: motors turn at the game's angle rule on the piston clock
-/// ([`lbp_sim::drive_motors`]).
+/// D1108: motors turn at the game's angle rule on the piston clock, never past their
+/// target (D1171, [`lbp_sim::drive_motors`]).
 fn drive_motors(
     play: NonSend<Play>,
     mut commands: Commands,
@@ -2333,10 +2333,11 @@ fn drive_motors(
         &mut lbp_sim::PistonDrive,
         &mut lbp_sim::avian2d::prelude::RevoluteJoint,
     )>,
+    rotations: Query<&lbp_sim::avian2d::prelude::Rotation>,
 ) {
     let world = &play.host.world;
     let now = play.scripts.ticks as f32;
-    lbp_sim::drive_motors(&mut commands, &mut q, now, |j| {
+    lbp_sim::drive_motors(&mut commands, &mut q, &rotations, now, |j| {
         world
             .input_signal(j.thing)
             .map(|s| (s.ternary, s.activation, world.input_signed(j.thing)))

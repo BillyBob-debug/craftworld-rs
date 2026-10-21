@@ -263,7 +263,8 @@ returns (angle(frame + rate) - angle(frame)) × TICK_HZ in rad/s, with
 `SceneJoint::motor_angle` the length rule less the base, clamped to the range except for
 pattern 1 or a range of 2π or more. `drive_motors` sets the motor's target velocity each
 tick. This replaces `MOTOR_SPEED_SCALE` (1, unverified) with the found unit (× 30).
-Left out: the position term and the strength cap. The sign (game angle against avian's
+The position term is resolved in Part 72 (a motor off its rate path never runs past
+its target); its strength cap is still left out. The sign (game angle against avian's
 counter-clockwise) is UNVERIFIED.
 
 The Rookie Test has one MOTOR joint (thing 58: mode 1, pattern 0, range π, time 180,

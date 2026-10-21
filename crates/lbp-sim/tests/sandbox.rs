@@ -958,6 +958,7 @@ fn d1107_a_winch_follows_the_piston_rule() {
             params,
         },
         clock: PistonClock::default(),
+        sync: None,
     };
     let u = lbp_sim::UNIT_SCALE;
     // Switched on (direction mode), it winds in over half its time and stops at 200.
@@ -994,6 +995,7 @@ fn d1108_a_motor_turns_at_its_speed_on_its_clock() {
             params,
         },
         clock: PistonClock::default(),
+        sync: None,
     };
     let hz = lbp_sim::TICK_HZ as f32;
     // Free running: 0.05 rad per frame, one frame a tick.
@@ -1001,6 +1003,62 @@ fn d1108_a_motor_turns_at_its_speed_on_its_clock() {
     // Switched (mode 0, on/off): it turns while on and stops when off.
     assert!((d.turn(20., Some((1, 1., false))) - 0.05 * hz).abs() < 1e-3);
     assert!(d.turn(30., Some((0, 0., false))).abs() < 1e-6);
+}
+
+#[test]
+fn d1171_a_motor_off_its_rate_path_never_runs_past_its_target() {
+    use lbp_sim::scene::{Endpoint, JointKind, PistonClock, SceneJoint};
+    // Pattern 0 and free running, as the Rookie Test's motor saves its timing: range π,
+    // time 180, pause 30.
+    let mut params = JointParams {
+        mode: 1,
+        animation_pattern: 0,
+        ..Default::default()
+    };
+    params.motion[0] = std::f32::consts::PI;
+    params.motion[1] = 180.;
+    params.motion[4] = 30.;
+    let joint = SceneJoint {
+        thing: 0,
+        kind: JointKind::Motor,
+        a: Endpoint::Static(0),
+        b: Endpoint::Static(1),
+        world_a: [0.; 2],
+        world_b: [0.; 2],
+        local_a: [0.; 2],
+        local_b: [0.; 2],
+        length: 0.,
+        min_length: 0.,
+        max_length: 0.,
+        params,
+    };
+    let drive = || lbp_sim::PistonDrive {
+        joint: joint.clone(),
+        clock: PistonClock::default(),
+        sync: None,
+    };
+    let a = |f: f32| joint.motor_angle(f, false);
+    let (mut d, mut free) = (drive(), drive());
+    // The first run syncs the angle rule to the measure (here 0.5 rad).
+    let w = free.turn(40., None);
+    assert!(w > 0.);
+    assert!((d.turn_to(40., None, 0.5) - w).abs() < 1e-4);
+    // On track one tick later, it turns at the rule's rate.
+    let w = free.turn(41., None);
+    let on = 0.5 + a(41.) - a(40.);
+    assert!((d.turn_to(41., None, on) - w).abs() < 1e-4);
+    // Halfway to the next frame's angle already, it turns only the rest of the way.
+    let half = 0.5 + a(42.) - a(40.) + 0.5 * (a(43.) - a(42.));
+    let w = free.turn(42., None);
+    assert!((d.turn_to(42., None, half) - 0.5 * w).abs() < 1e-3);
+    // Past it, it stops rather than turning back.
+    free.turn(43., None);
+    assert_eq!(d.turn_to(43., None, 0.5 + a(45.) - a(40.)), 0.);
+    // Pattern 1, or wired in mode 1 or 4, is driven at its rate whatever the measure.
+    let mut wired = drive();
+    let w = drive().turn(40., Some((1, 1., false)));
+    assert!((wired.turn_to(40., Some((1, 1., false)), 3.) - w).abs() < 1e-6);
+    assert!(wired.sync.is_none());
 }
 
 #[test]
