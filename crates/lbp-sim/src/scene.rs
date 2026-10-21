@@ -774,6 +774,8 @@ pub struct PhysicsScene {
     pub joints: Vec<SceneJoint>,
     /// D1111: every tag (PSwitchKey) a follower can follow.
     pub tags: Vec<SceneTag>,
+    /// D1157: every tag synchroniser (PTagSynchroniser).
+    pub syncs: Vec<SceneSync>,
     pub report: SceneReport,
 }
 
@@ -788,6 +790,23 @@ pub struct SceneTag {
     /// tag's world position.
     pub body: Option<usize>,
     pub at: [f32; 2],
+}
+
+/// D1157: a tag synchroniser where it is placed. `kind` 0 sends, 1 receives (other kinds
+/// do nothing, FOUND 0x132800); `key` numbers its colour and name as [`SceneTag::key`].
+/// `at` and the unit `axes` (its matrix's x and y axes over their lengths) are in its
+/// body's frame, or in the world with no body.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct SceneSync {
+    pub thing: usize,
+    pub kind: i32,
+    pub key: u32,
+    pub radius: f32,
+    pub min_radius: f32,
+    pub scale: [f32; 2],
+    pub body: Option<usize>,
+    pub at: [f32; 2],
+    pub axes: [[f32; 2]; 2],
 }
 
 impl PhysicsScene {
@@ -1140,6 +1159,50 @@ fn build_scene_inner(
             key: key_of(k.colour_index, &k.name),
             body,
             at,
+        });
+    }
+    for (i, t) in things.iter().enumerate() {
+        let Some(sy) = &t.data.tag_synchroniser else {
+            continue;
+        };
+        let Some(pos) = placed(things, i) else {
+            continue;
+        };
+        let m = &pos.world;
+        let unit = |v: [f32; 2]| {
+            let l = v[0].hypot(v[1]);
+            if l > 0. {
+                [v[0] / l, v[1] / l]
+            } else {
+                v
+            }
+        };
+        let world = [m[12], m[13]];
+        let mut axes = [unit([m[0], m[1]]), unit([m[4], m[5]])];
+        let body = body_owner(things, i)
+            .0
+            .and_then(|b| body_of.get(&b).copied().flatten());
+        let at = match body {
+            Some(b) => {
+                let f = scene.bodies[b].frame;
+                let (sn, c) = f.angle.sin_cos();
+                for a in &mut axes {
+                    *a = [c * a[0] + sn * a[1], c * a[1] - sn * a[0]];
+                }
+                f.local(world)
+            }
+            None => world,
+        };
+        scene.syncs.push(SceneSync {
+            thing: i,
+            kind: sy.kind,
+            key: key_of(sy.colour_index, &sy.name),
+            radius: sy.radius,
+            min_radius: sy.min_radius,
+            scale: sy.scale,
+            body,
+            at,
+            axes,
         });
     }
     for (i, t) in things.iter().enumerate() {
