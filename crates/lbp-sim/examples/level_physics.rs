@@ -12,6 +12,8 @@
 //! so the rule can be checked. Counting unit: SHAPE Thing (scene)
 //! and BODY Thing with a collider (motion). Counts only; no game bytes. Output: a NEW JSON
 //! file under ignored `local-analysis/`.
+// D1167: the summary json! has outgrown the default macro recursion limit.
+#![recursion_limit = "256"]
 use avian2d::prelude::*;
 use bevy::ecs::system::RunSystemOnce;
 use bevy::prelude::*;
@@ -301,6 +303,8 @@ fn run() -> Result<(), String> {
     let (mut aimers, mut aimers_offset) = (0usize, 0usize);
     // D1157: tag synchronisers: senders, receivers, and those riding a body.
     let (mut senders, mut receivers, mut syncs_on_body) = (0usize, 0usize, 0usize);
+    // D1167: receivers with no sender of their key in the level, which only work online.
+    let mut receivers_unsent = 0usize;
     // D1158: stick tweaks (spin 4, move 6 and 7) and those with input port 1 or 2 wired.
     let (mut sticks, mut sticks_wired) = (0usize, 0usize);
     // D1159: spin and move tweaks with a turn on their microchip boards (+0x220), and flipped spins.
@@ -403,6 +407,12 @@ fn run() -> Result<(), String> {
         let send = scene.syncs.iter().filter(|y| y.kind == 0).count();
         let receive = scene.syncs.iter().filter(|y| y.kind == 1).count();
         let sync_body = scene.syncs.iter().filter(|y| y.body.is_some()).count();
+        let unsent = scene
+            .syncs
+            .iter()
+            .filter(|y| y.kind == 1)
+            .filter(|y| !scene.syncs.iter().any(|s| s.kind == 0 && s.key == y.key))
+            .count();
         senders += send;
         receivers += receive;
         let ports: std::collections::BTreeSet<(usize, i32)> = report
@@ -504,6 +514,7 @@ fn run() -> Result<(), String> {
         follow_in_out += in_out;
         move_flipped += move_flip;
         syncs_on_body += sync_body;
+        receivers_unsent += unsent;
         let r = &scene.report;
         fixed_bodies += r.fixed_bodies;
         nested_bodies += r.nested_bodies;
@@ -623,7 +634,7 @@ fn run() -> Result<(), String> {
             "touching_pairs": touching, "touching_pairs_dynamic": touching_dynamic,
             "followers": follow, "followers_offset": follow_offset,
             "aimers": aim, "aimers_offset": aim_offset,
-            "senders": send, "receivers": receive, "syncs_on_body": sync_body,
+            "senders": send, "receivers": receive, "syncs_on_body": sync_body, "receivers_unsent": unsent,
             "sticks": stick, "sticks_wired": stick_wired,
             "chip_turned": turned, "chip_flipped": flipped,
             "move_mirrored": mirrored, "move_flipped": move_flip,
@@ -655,7 +666,7 @@ fn run() -> Result<(), String> {
         "touching_pairs": touching_pairs, "touching_pairs_dynamic": touching_pairs_dynamic,
         "followers": followers, "followers_offset": followers_offset,
         "aimers": aimers, "aimers_offset": aimers_offset,
-        "senders": senders, "receivers": receivers, "syncs_on_body": syncs_on_body,
+        "senders": senders, "receivers": receivers, "syncs_on_body": syncs_on_body, "receivers_unsent": receivers_unsent,
         "sticks": sticks, "sticks_wired": sticks_wired,
         "chip": {
             "turned": chip_turned, "flipped": chip_flipped,

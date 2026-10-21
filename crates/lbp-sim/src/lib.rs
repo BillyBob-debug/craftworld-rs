@@ -390,7 +390,10 @@ fn dot(a: [f32; 2], b: [f32; 2]) -> f32 {
 /// with an offset (0x130c90; the nearest, INFERRED) and places its tag at its point plus
 /// the offset times `scale` along its own unit axes; with no sender it places none
 /// (its tag leaves the tag map, 0xd1b58). The tag has no input, so it is lit (0x12f6f4).
-/// Not modelled: the online source 0x2a8538 and useLayers' z.
+/// D1167: the receiver's second source 0x2a8538 is the online one: it reads offsets that
+/// other consoles' senders packed (0x29ff3c) and returns nothing unless the network
+/// context has bit 0x4000, so offline a receiver needs a sender in the level. Not
+/// modelled: useLayers' z.
 pub fn synced_tags(syncs: &[SyncSpot], tags: &[TagSpot]) -> Vec<TagSpot> {
     let sent: Vec<(&SyncSpot, [f32; 2])> = syncs
         .iter()
