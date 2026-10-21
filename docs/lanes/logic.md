@@ -6,7 +6,7 @@
 2. crates/lbp-sim/src/scene.rs (`AntiGravity`, the tweak pass in `build_scene`) and
    lib.rs `spawn_scene`, `follow_tweaks`
 3. crates/lbp-runtime/src/switches.rs module doc (what the switch pass does not model)
-4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-78.md (touching layers; pistons and their mode rate; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
+4. docs/logic.md Parts 4-49 and docs/logic/part-50.md to part-79.md (touching layers; pistons and their mode rate; layer switch; recorded moves; attractors; aim stick and lead; winches; motors; gyroscopes and rotators;
    movers and followers; tags; every switch type; the random, impact, camera finished,
    magic mouth, projectile, paint and velocity switches)
 
@@ -105,9 +105,10 @@
   centred motor rule 0xc95ec (Part 76).
 - Merged: D1176 (PR 319, f5bedbe) a piston or motor wired in mode 2 runs its pattern
   once with no phase (Part 77).
-- D1177 (branch `logic-d1177`, worktree `E:\Projects\wt-d324`): a pattern-2 motor is
-  held to its sweep, the centre to the centre + range (0xc98d0, docs/logic/part-78.md).
-- Decision numbers: D1100-D1199, next free D1178.
+- Merged: D1177 (PR 320, 1d53363) a pattern-2 motor is held to its sweep (Part 78).
+- D1178 (branch `logic-d1178`, worktree `E:\Projects\wt-d324`): the motor row's second
+  edge, 1.5 × err capped by k × max(|err|, 0.1) (0x95f494, docs/logic/part-79.md).
+- Decision numbers: D1100-D1199, next free D1179.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -162,7 +163,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1177 unchanged (Parts 58-78; D1163 changes 2 Rookie Test
+  After D1156 to D1178 unchanged (Parts 58-79; D1163 changes 2 Rookie Test
   followers, none on the route; D1164 and D1165 change no Rookie Test aimer; D1166 is not hosted).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
@@ -274,8 +275,10 @@ when a later PR finds it), then the thread's own context at hand-off (ctx_audit)
 - D1175: sonnet, read 0xc95ec's pattern-0 branches (capstone over read_bytes), 49k
   tokens, 15 tools, 1.5 minutes, not redone; thread context 92k at hand-off.
 - D1176: none (read the D1175 disassembly in the thread); thread context 77k after PR 319.
-- D1177: none (read 0xc98d0 in the D1175 disassembly); thread context at hand-off in
-  the PR reply.
+- D1177: none (read 0xc98d0 in the D1175 disassembly); thread context 101k after PR 320.
+- D1178: general-purpose (thread model), decoded the motor row 0x95f494's k edge
+  (capstone over read_bytes), 58k tokens, 14 tools, 3.2 minutes, not redone; thread
+  context at hand-off in the PR reply.
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -317,7 +320,8 @@ EBOOT rule and unit tests:
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).
 4. Motors' leftovers: the turn sign (0xc9250 is an inlined atan2, matrix layout
-   UNVERIFIED, Part 74), then pattern 2's k = 5 × strength (Part 75; its limits since D1177, Part 78); the
+   UNVERIFIED, Part 74), then applying the motor row's band to the joint (one-sided edges with their own caps,
+   `motor_band` and `motor_k`, Part 79); the
    wired ramp's clock start against the centre sync (Part 77); and the piston's k term
    (5 × strength for pattern 2) in row 0x96178c (Part 70).
 5. The creature brain (PEnemy reader NOT FOUND; leads: the TOC entry for string
