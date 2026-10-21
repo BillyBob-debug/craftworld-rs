@@ -785,13 +785,19 @@ fn wrap_pi(x: f32) -> f32 {
 /// than held at its length. FOUND (01.33, D1182): the solver's piston case 0x1c9988 builds
 /// the prismatic row 0x962590 (the band of [`PistonDrive::slide_to`]) only for a stiff
 /// piston (PJoint +0x28, with the byte at +0x29 clear, 0x1c9998/0x1c99a4); any other
-/// piston gets row 0x960988 (0x1c9b08) and an extra block (0x1c90b8), not decoded, so it
-/// is held. Both rows take the strength cap 0xca760, clamp(strength, 0, 1) × a per-type
-/// scale, so strength 0 gives a cap of 0. INFERRED: a stiff piston also needs a k
-/// ([`motor_k`], pattern 2) to close the error from its saved length to its rule, which
-/// the band does not push inside; without one it is held.
+/// piston gets row 0x960988 (0x1c9b08) and an extra block (0x1c90b8). Both rows take the
+/// strength cap 0xca760, clamp(strength, 0, 1) × a per-type scale, so strength 0 gives a
+/// cap of 0. FOUND (D1183): row 0x960988 has the same band, edges `delta` and
+/// 1.5 × `err` (0x960f98) with the k cap k × max(|err|, 10) (0x960ec0) and the strength
+/// cap on `delta` (0x960f78); it adds the length limits f3..f4 eased by 0.2 past a slop
+/// of 1 (0x96158c/0x961604), as the slider's limits here. So the flag does not change
+/// the length drive. INFERRED: the block 0x1c90b8 adds angle rows (0x1c58d0, not
+/// decoded) from PJoint +0x50/+0x54, so a non-stiff piston's angle is not locked; here
+/// both stay prismatic. INFERRED: a piston also needs a k ([`motor_k`], pattern 2) to
+/// close the error from its saved length to its rule, which the band does not push
+/// inside; without one it is held.
 pub fn slides(params: &lbp_level::parts::JointParams, wired: bool) -> bool {
-    params.stiff && motor_damping(params) > 0. && motor_k(params, wired) > 0.
+    motor_damping(params) > 0. && motor_k(params, wired) > 0.
 }
 
 /// D1103: at tick `now` steps each piston with the `signal` on its input and holds its
