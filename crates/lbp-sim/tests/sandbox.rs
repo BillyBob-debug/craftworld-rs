@@ -1626,6 +1626,8 @@ fn d1150_followers_ease_in_with_the_turn_shaper() {
         angle: 0.,
         at: [0.; 2],
         stick: [0.; 2],
+        mirror: false,
+        flip: false,
     };
     let up = [0., 1.];
     let v = follower.push([0., 0.], up, Some([1000., 0.]), 1.);
@@ -1727,6 +1729,8 @@ fn d1158_stick_movers_map_the_stick_onto_a_circle() {
         angle: 0.,
         at: [0.; 2],
         stick: [1., 1.],
+        mirror: false,
+        flip: false,
     };
     let up = [0., 1.];
     // A full diagonal stick wants range (10) along the diagonal, not range times root 2.
@@ -1898,4 +1902,60 @@ fn d1159_tweaks_on_a_chip_take_their_turn_on_the_board() {
     assert!(spin.target_along(0., 0., [0., 1.]).0 < 0.);
     // A flipped entry negates the sum.
     assert_eq!(build(true).1, -0.5);
+}
+
+#[test]
+fn d1160_mirrored_movers_negate_their_local_turn_and_stick_x() {
+    let base = lbp_sim::scene::MoveTweak {
+        thing: 0,
+        configuration: 8,
+        behavior: 0,
+        range: 10.,
+        accel: 1.,
+        decel: 1.,
+        vel: [0., 1.],
+        local: true,
+        min_range: 0.,
+        max_range: 0.,
+        angle_range: 360.,
+        flee: false,
+        up_down: true,
+        key: None,
+        angle: std::f32::consts::FRAC_PI_2,
+        at: [0.; 2],
+        stick: [0.; 2],
+        mirror: false,
+        flip: false,
+    };
+    let up = [0., 1.];
+    // localSpace turns the velocity by the chip's angle; mirrored, by minus it (0xcc6f0).
+    let v = base.push([0., 0.], up, None, 1.);
+    let m = lbp_sim::scene::MoveTweak {
+        mirror: true,
+        ..base
+    }
+    .push([0., 0.], up, None, 1.);
+    assert!(
+        (v[0] + m[0]).abs() < 1e-4 && (v[1] - m[1]).abs() < 1e-4,
+        "{v:?} {m:?}"
+    );
+    assert!(v[0].abs() > 0.5, "{v:?}");
+    // A stick mover whose mirror differs from +0x224 negates stick x (0x958038).
+    let stick = lbp_sim::scene::MoveTweak {
+        configuration: 6,
+        local: false,
+        angle: 0.,
+        stick: [1., 0.],
+        ..base
+    };
+    let v = stick.push([0., 0.], up, None, 1.);
+    let f = lbp_sim::scene::MoveTweak {
+        flip: true,
+        ..stick
+    }
+    .push([0., 0.], up, None, 1.);
+    assert!(
+        (v[0] - 10.).abs() < 1e-4 && (f[0] + 10.).abs() < 1e-4,
+        "{v:?} {f:?}"
+    );
 }

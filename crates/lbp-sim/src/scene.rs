@@ -579,6 +579,12 @@ pub struct MoveTweak {
     /// D1158: configurations 6 and 7's stick, the Thing's wired inputs in slots 1 and 2
     /// (0xcb02c, 0xcb074); 0 until a host fills it each tick.
     pub stick: [f32; 2],
+    /// D1160: the basis of the tweak's parent Thing (Thing+0x5c, else its own) is mirrored
+    /// (determinant below 0); localSpace then turns by minus [`Self::angle`] (0xcc484).
+    pub mirror: bool,
+    /// D1160: [`Self::mirror`] XOR the chain's parity (+0x224, [`chip_turn`]); a stick mover
+    /// then negates its stick x (0x957fb4-0x958058).
+    pub flip: bool,
 }
 
 /// D1110: `v` per unit length, or None for a zero vector.
@@ -617,18 +623,25 @@ impl MoveTweak {
     /// follower drops its error along that axis (0x9587ac); with localSpace the wanted
     /// velocity of 8 and 11 alike is turned by it (0x9582c4). Followers with allowInOut
     /// are packed the same; the caller only moves their layer first (0x1c8250).
-    /// INFERRED: the input scale 0xcbed4 read as 1; the mirror flag (which negates the
-    /// angle for localSpace) not modelled.
+    /// INFERRED: the input scale 0xcbed4 read as 1.
+    /// D1160 FOUND (0xcc484): the localSpace turn is its own build from the body's up axis
+    /// with t = +0x220, or -t when the parent's basis is mirrored ([`Self::mirror`],
+    /// 0xcc540 to 0xcc6f0 `fneg`); the allowUpDown axis keeps +t.
     /// D1158 FOUND (0x957f00-0x9584bc): a stick mover (any configuration but 8 and 11)
     /// wants its stick ([`Self::stick`]) mapped from the square onto the circle (times
     /// max(|x|, |y|) over its length), turned by the up axis with localSpace, and, for
-    /// configuration 6 only, times range; its rows are a mover's. Not modelled: the mirror
-    /// test that negates x (body determinant below 0 unlike byte +0x224) and the input
-    /// scale 0xcbed4 (the slot 0 activation when +0x10 is 2).
+    /// configuration 6 only, times range; its rows are a mover's. D1160 FOUND: x is negated
+    /// first when the parent's basis mirror differs from byte +0x224 ([`Self::flip`],
+    /// 0x958038). Not modelled: the input scale 0xcbed4 (the slot 0 activation when +0x10
+    /// is 2).
     pub fn rows(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>, act: f32) -> Vec<Row> {
-        let (sin, cos) = self.angle.sin_cos();
-        let up = [up[0] * cos + up[1] * sin, up[1] * cos - up[0] * sin];
-        let turn = |v: [f32; 2]| [up[0] * v[1] + up[1] * v[0], up[1] * v[1] - up[0] * v[0]];
+        let by = |t: f32| {
+            let (sin, cos) = t.sin_cos();
+            [up[0] * cos + up[1] * sin, up[1] * cos - up[0] * sin]
+        };
+        let c = by(if self.mirror { -self.angle } else { self.angle });
+        let up = by(self.angle);
+        let turn = |v: [f32; 2]| [c[0] * v[1] + c[1] * v[0], c[1] * v[1] - c[0] * v[0]];
         let a = self.accel * self.range;
         let k = self.decel * self.range;
         let follow = self.configuration == 11;
@@ -657,6 +670,7 @@ impl MoveTweak {
             }),
             c => {
                 let [x, y] = self.stick;
+                let x = if self.flip { -x } else { x };
                 let l = x.hypot(y);
                 let m = if l > 0. { x.abs().max(y.abs()) / l } else { 0. };
                 let v = [x * m, y * m];
@@ -917,6 +931,13 @@ fn chip_boards(things: &[ThingRecord]) -> BTreeMap<usize, usize> {
         .enumerate()
         .filter_map(|(c, t)| Some((t.data.microchip.as_ref()?.circuit_board?, c)))
         .collect()
+}
+
+/// D1160: whether the body Thing's world basis is mirrored (2D determinant below 0).
+fn mirrored(things: &[ThingRecord], owner: Option<usize>) -> bool {
+    owner
+        .and_then(|o| things[o].data.pos.as_ref())
+        .is_some_and(|p| p.world[0] * p.world[5] - p.world[1] * p.world[4] < 0.)
 }
 
 /// D1159: a tweak's turn on the microchips it sits on, the +0x220 angle, and its mirror
@@ -1361,10 +1382,7 @@ fn build_scene_inner(
         let slot = owner.and_then(|b| body_of.get(&b).copied().flatten());
         // D1159: the chain's parity (+0x224) XOR the body's basis mirrored (0x95fcf8).
         let (angle, mirror) = chip_turn(things, &boards, i);
-        let flip = mirror
-            ^ owner
-                .and_then(|o| things[o].data.pos.as_ref())
-                .is_some_and(|p| p.world[0] * p.world[5] - p.world[1] * p.world[4] < 0.);
+        let flip = mirror ^ mirrored(things, owner);
         if let Some(b) = slot {
             // D1156: as the follower's point (D1154).
             let from = t.parent.filter(|&p| p != i).unwrap_or(i);
@@ -1465,10 +1483,12 @@ fn build_scene_inner(
         else {
             continue;
         };
-        let slot = body_owner(things, i)
-            .0
-            .and_then(|b| body_of.get(&b).copied().flatten());
+        let owner = body_owner(things, i).0;
+        let slot = owner.and_then(|b| body_of.get(&b).copied().flatten());
         if let Some(b) = slot {
+            // D1160: the parent Thing's world basis (0xcc540, 0x95802c), as D1159's spins.
+            let (angle, parity) = chip_turn(things, &boards, i);
+            let mirror = mirrored(things, owner);
             // D1154: the parent's position, or its nearest positioned parent's (INFERRED
             // for a parent with no matrix of its own, such as a chip's board).
             let from = t.parent.filter(|&p| p != i).unwrap_or(i);
@@ -1491,9 +1511,11 @@ fn build_scene_inner(
                 up_down: tw.allow_up_down,
                 key: (tw.configuration == 11 && tw.follow_key)
                     .then(|| key_of(tw.color_index, &tw.name)),
-                angle: chip_turn(things, &boards, i).0,
+                angle,
                 at,
                 stick: [0.; 2],
+                mirror,
+                flip: mirror ^ parity,
             });
         }
     }
