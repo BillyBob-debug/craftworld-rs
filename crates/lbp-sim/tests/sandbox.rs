@@ -2441,3 +2441,21 @@ fn d1173_a_motor_pushes_by_its_strength_clamped_to_one() {
     assert_eq!(at(1.), MOTOR_DAMPING);
     assert_eq!(at(3.), MOTOR_DAMPING);
 }
+
+#[test]
+fn d1174_a_pattern_0_motor_is_limited_to_half_its_range_either_side() {
+    use lbp_sim::motor_angle_limits;
+    let limits = |pattern, range| {
+        motor_angle_limits(&JointParams {
+            animation_pattern: pattern,
+            motion: [range, 30., 0., 0., 0., 0., 0., 0., 0., 0.],
+            ..Default::default()
+        })
+    };
+    // 0x1c9eac: pattern 0 with a range under 2π is held to the centre ± range / 2.
+    assert_eq!(limits(0, 1.), Some((-0.5, 0.5)));
+    assert_eq!(limits(0, -1.), Some((-0.5, 0.5)));
+    // A range of 2π or more, and pattern 1, have no limits.
+    assert_eq!(limits(0, 7.), None);
+    assert_eq!(limits(1, 1.), None);
+}

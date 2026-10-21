@@ -3503,6 +3503,16 @@ fn run() -> Result<(), String> {
             };
             let k = format!("motor strength {b}");
             *totals.switches.sensors.entry(k).or_default() += 1;
+            // D1174: motors the solver's motor case 0x1c9eac gives angle limits.
+            let tau = std::f32::consts::TAU;
+            let lim = match j.params.animation_pattern {
+                0 | 2 if j.params.motion[0] >= tau => "none (range 2π or more)",
+                0 => "centre ± range / 2",
+                2 => "centre to centre + range",
+                _ => "none (pattern)",
+            };
+            let k = format!("motor limits {lim}");
+            *totals.switches.sensors.entry(k).or_default() += 1;
         }
         // D1152: followKey tweaks (configurations 5 and 11) by whether a tag in the level
         // has their exact (colour, name) pair, the key 0xceac0 compares; else whether a
