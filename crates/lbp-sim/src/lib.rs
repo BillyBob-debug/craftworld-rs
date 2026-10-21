@@ -214,6 +214,7 @@ pub fn drive_spins(
     tags: &[TagSpot],
     activation: impl Fn(&scene::SpinTweak) -> f32,
     stick: impl Fn(&scene::SpinTweak) -> [f32; 2],
+    scale: impl Fn(&scene::SpinTweak) -> f32,
 ) {
     let hz = TICK_HZ as f32;
     let per_tick = 1. / (hz * UNIT_SCALE);
@@ -226,6 +227,7 @@ pub fn drive_spins(
             // D1158: configuration 4 reads its stick this tick.
             let t = &scene::SpinTweak {
                 stick: stick(t),
+                scale: scale(t),
                 ..*t
             };
             // D1156: measured from the tweak's parent point.
@@ -426,6 +428,7 @@ pub fn drive_moves(
     tags: &[TagSpot],
     activation: impl Fn(&scene::MoveTweak) -> f32,
     stick: impl Fn(&scene::MoveTweak) -> [f32; 2],
+    scale: impl Fn(&scene::MoveTweak) -> f32,
 ) {
     // The rows are in game units per tick; the bodies move in sim units per second.
     let hz = TICK_HZ as f32;
@@ -437,6 +440,7 @@ pub fn drive_moves(
             // D1158: stick movers read their stick this tick.
             let t = &scene::MoveTweak {
                 stick: stick(t),
+                scale: scale(t),
                 ..*t
             };
             // D1154: from the follower's parent, carried by the body.

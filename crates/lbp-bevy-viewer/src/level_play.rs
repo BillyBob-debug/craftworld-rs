@@ -2203,6 +2203,7 @@ fn drive_spins(
         &tags,
         |t| world.tweak_activation(t.thing, t.behavior),
         |t| world.tweak_stick(t.thing),
+        |t| world.tweak_input_scale(t.thing, t.behavior),
     );
 }
 
@@ -2253,6 +2254,7 @@ fn drive_moves(
         &tags,
         |t| world.tweak_activation(t.thing, t.behavior),
         |t| world.tweak_stick(t.thing),
+        |t| world.tweak_input_scale(t.thing, t.behavior),
     );
 }
 

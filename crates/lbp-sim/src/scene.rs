@@ -346,7 +346,7 @@ impl AntiGravity {
 /// towards world up) or 9 (the rotator, turning at a set speed). D1144: 3, 4 and 5 turn
 /// their body's up axis along its velocity, the stick or a found target. Read from the
 /// SPU row packer 0x95fb20 (EBOOT 01.33); angles in radians, speeds per game tick.
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct SpinTweak {
     /// The PPhysicsTweak's Thing index.
     pub thing: usize,
@@ -369,6 +369,10 @@ pub struct SpinTweak {
     /// D1148: configuration 4's stick, the Thing's wired inputs in slots 1 and 2
     /// (0xcb02c, 0xcb074; INFERRED: the PHYSICS_TWEAK_X and _Y inputs); 0 when unwired.
     pub stick: [f32; 2],
+    /// D1161: the input scale 0xcbed4, filled by a host each tick (1 until then): 0 on a
+    /// deactivated Thing (+0x7f), the signed activation (+0x18) of input slot 0 with
+    /// behavior (+0x10) 2, else 1 (0xd952c4).
+    pub scale: f32,
     /// D1148: the mirror flip (0x95fd14): the tweak's mirror parity up its parent chain
     /// (byte +0x224, built by 0xcd2e0) XOR its body's basis determinant below 0.
     pub flip: bool,
@@ -389,6 +393,29 @@ const AIM_DEAD_ZONE: f32 = 0.1;
 fn wrap_angle(angle: f32) -> f32 {
     use std::f32::consts::{PI, TAU};
     angle - TAU * ((angle + PI) / TAU).floor()
+}
+
+impl Default for SpinTweak {
+    fn default() -> Self {
+        Self {
+            thing: 0,
+            configuration: 0,
+            behavior: 0,
+            range: 0.,
+            accel: 0.,
+            decel: 0.,
+            speed: 0.,
+            min_range: 0.,
+            max_range: 0.,
+            angle_range: 0.,
+            key: None,
+            stick: [0.; 2],
+            scale: 1.,
+            flip: false,
+            angle: 0.,
+            at: [0.; 2],
+        }
+    }
 }
 
 impl SpinTweak {
@@ -428,7 +455,9 @@ impl SpinTweak {
                 let f13 = if self.flip { -1. } else { 1. };
                 let e = wrap_angle((-aim[0]).atan2(aim[1]) - angle + f13 * self.angle);
                 let s = Self::speed(0.5 * a, w, 0., e);
-                (s.clamp(-self.range, self.range), -a, a)
+                // D1161: ±velRange × |0xcbed4| (0x9607ec to 0x960868).
+                let r = self.range * self.scale.abs();
+                (s.clamp(-r, r), -a, a)
             }
         }
     }
@@ -579,6 +608,10 @@ pub struct MoveTweak {
     /// D1158: configurations 6 and 7's stick, the Thing's wired inputs in slots 1 and 2
     /// (0xcb02c, 0xcb074); 0 until a host fills it each tick.
     pub stick: [f32; 2],
+    /// D1161: the input scale 0xcbed4, filled by a host each tick (1 until then): 0 on a
+    /// deactivated Thing (+0x7f), the signed activation (+0x18) of input slot 0 with
+    /// behavior (+0x10) 2, else 1 (0xd952c4).
+    pub scale: f32,
     /// D1160: the basis of the tweak's parent Thing (Thing+0x5c, else its own) is mirrored
     /// (determinant below 0); localSpace then turns by minus [`Self::angle`] (0xcc484).
     pub mirror: bool,
@@ -623,7 +656,9 @@ impl MoveTweak {
     /// follower drops its error along that axis (0x9587ac); with localSpace the wanted
     /// velocity of 8 and 11 alike is turned by it (0x9582c4). Followers with allowInOut
     /// are packed the same; the caller only moves their layer first (0x1c8250).
-    /// INFERRED: the input scale 0xcbed4 read as 1.
+    /// D1161 FOUND: every configuration but 11 multiplies row 1's target by the signed
+    /// input scale [`Self::scale`] (0x95816c; 6 after its range, 0x9584b8); the
+    /// follower clamps its speed to ±range × |scale| (0x958724).
     /// D1160 FOUND (0xcc484): the localSpace turn is its own build from the body's up axis
     /// with t = +0x220, or -t when the parent's basis is mirrored ([`Self::mirror`],
     /// 0xcc540 to 0xcc6f0 `fneg`); the allowUpDown axis keeps +t.
@@ -632,8 +667,7 @@ impl MoveTweak {
     /// max(|x|, |y|) over its length), turned by the up axis with localSpace, and, for
     /// configuration 6 only, times range; its rows are a mover's. D1160 FOUND: x is negated
     /// first when the parent's basis mirror differs from byte +0x224 ([`Self::flip`],
-    /// 0x958038). Not modelled: the input scale 0xcbed4 (the slot 0 activation when +0x10
-    /// is 2).
+    /// 0x958038).
     pub fn rows(&self, vel: [f32; 2], up: [f32; 2], d: Option<[f32; 2]>, act: f32) -> Vec<Row> {
         let by = |t: f32| {
             let (sin, cos) = t.sin_cos();
@@ -684,13 +718,16 @@ impl MoveTweak {
             Some(dir) => {
                 let (axis, target) = if follow {
                     let half = 0.5 * a * act;
+                    // D1161: ±velRange × |0xcbed4| (0x958724 to 0x958738).
+                    let r = self.range * self.scale.abs();
                     let s = SpinTweak::speed(half, dot(vel, dir), 0., want[0].hypot(want[1]))
-                        .clamp(-self.range, self.range);
+                        .clamp(-r, r);
                     let v = [dir[0] * s, dir[1] * s];
                     let v = if self.local { turn(v) } else { v };
                     (unit(v).unwrap_or(dir), s.abs())
                 } else {
-                    (dir, want[0].hypot(want[1]))
+                    // D1161: the target × 0xcbed4, signed (0x95813c to 0x958170).
+                    (dir, want[0].hypot(want[1]) * self.scale)
                 };
                 let lo = if follow { -a } else { -k };
                 rows.push(Row {
@@ -1403,6 +1440,7 @@ fn build_scene_inner(
                 key: (tw.configuration == 5 && tw.follow_key)
                     .then(|| key_of(tw.color_index, &tw.name)),
                 stick: [0.; 2],
+                scale: 1.,
                 flip,
                 angle,
                 at,
@@ -1514,6 +1552,7 @@ fn build_scene_inner(
                 angle,
                 at,
                 stick: [0.; 2],
+                scale: 1.,
                 mirror,
                 flip: mirror ^ parity,
             });

@@ -1504,6 +1504,22 @@ impl LevelWorld {
         [port(1), port(2)]
     }
 
+    /// D1161: the input scale a PPhysicsTweak on `thing` sees (FOUND, 01.33, 0xcbed4): 0
+    /// on a deactivated Thing (+0x7f, 0xd952c8); with `behavior` 2 the signed activation
+    /// (+0x18) of the signal wired to input slot 0; 1 otherwise (0xd952c4).
+    pub fn tweak_input_scale(&self, thing: usize, behavior: i32) -> f32 {
+        let Some(t) = self.things.get(thing) else {
+            return 1.;
+        };
+        if t.deactivated {
+            return 0.;
+        }
+        let signal = (behavior == 2)
+            .then(|| wired(self, u32::try_from(thing).ok()?, 0))
+            .flatten();
+        signal.map_or(1., |(_, s)| s.activation)
+    }
+
     /// D1101: the activation a PPhysicsTweak on `thing` sees (FOUND, 01.33, 0xcaf9c): 1 with
     /// no switch output wired to its input; with `behavior` 0 (digital) 1 when the signal's
     /// ternary is non-zero, else 0; with 1 (analog) the activation's magnitude; 1 otherwise.
