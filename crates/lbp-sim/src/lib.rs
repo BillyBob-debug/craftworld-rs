@@ -791,9 +791,12 @@ fn wrap_pi(x: f32) -> f32 {
 /// 1.5 × `err` (0x960f98) with the k cap k × max(|err|, 10) (0x960ec0) and the strength
 /// cap on `delta` (0x960f78); it adds the length limits f3..f4 eased by 0.2 past a slop
 /// of 1 (0x96158c/0x961604), as the slider's limits here. So the flag does not change
-/// the length drive. INFERRED: the block 0x1c90b8 adds angle rows (0x1c58d0, not
-/// decoded) from PJoint +0x50/+0x54, so a non-stiff piston's angle is not locked; here
-/// both stay prismatic. INFERRED: a piston also needs a k ([`motor_k`], pattern 2) to
+/// the length drive. D1184: FOUND the block 0x1c90b8 builds, through the one-sided
+/// contact-row builder 0x1c58d0, a row at the end of each body's angle less its offset
+/// (+0x54 at 0x1c9510 always, +0x50 at 0x1c92ec unless it is 100, 0x1c96a8). INFERRED
+/// (+0x50/+0x54 are aAngleOffset/bAngleOffset, `motion[5]`/`motion[6]`): those rows hold
+/// a non-stiff piston near its saved angle on each body, so both kinds stay prismatic
+/// (angle locked). INFERRED: a piston also needs a k ([`motor_k`], pattern 2) to
 /// close the error from its saved length to its rule, which the band does not push
 /// inside; without one it is held.
 pub fn slides(params: &lbp_level::parts::JointParams, wired: bool) -> bool {

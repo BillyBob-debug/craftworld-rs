@@ -116,10 +116,11 @@
   range (Part 82).
 - Merged: D1182 (PR 325, 9963f58) the stiff flag (+0x28) picks the band row 0x962590
   (Part 83).
-- D1183 (branch `logic-d1183`, worktree `E:\Projects\wt-d324`): the non-stiff row
-  0x960988 has the same band, so any pattern-2 piston with a strength slides
-  (docs/logic/part-84.md).
-- Decision numbers: D1100-D1199, next free D1184.
+- Merged: D1183 (PR 326, 9055249) the non-stiff row 0x960988 has the same band
+  (Part 84).
+- D1184 (branch `logic-d1184`, worktree `E:\Projects\wt-d324`): a non-stiff piston's
+  extra rows hold its angle, so pistons stay prismatic (docs/logic/part-85.md).
+- Decision numbers: D1100-D1199, next free D1185.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -174,7 +175,7 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1183 unchanged (Parts 58-84; D1163 changes 2 Rookie Test
+  After D1156 to D1184 unchanged (Parts 58-85; D1163 changes 2 Rookie Test
   followers, none on the route; D1164 and D1165 change no Rookie Test aimer; D1166 is not hosted).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
@@ -301,7 +302,9 @@ when a later PR finds it), then the thread's own context at hand-off (ctx_audit)
   0x1c9988 (capstone over read_bytes), 68k tokens, 31 tools, 3.8 minutes; thread
   context 103k after PR 325.
 - D1183: general-purpose (sonnet), decoded row 0x960988 and block 0x1c90b8, 77k tokens,
-  14 tools, 3.0 minutes; thread context in the PR reply.
+  14 tools, 3.0 minutes; thread context 119k after PR 326.
+- D1184: general-purpose (sonnet), decoded block 0x1c90b8's calls and 0x1c58d0, 84k
+  tokens, 21 tools, 6.2 minutes; thread context in the PR reply.
 
 ## Next
 Logic as a whole, one component kind per PR, each with a census across all levels, the
@@ -346,9 +349,9 @@ EBOOT rule and unit tests:
    UNVERIFIED, Part 74); the band's cap scale (INFERRED in Part 80, the row is solved off
    the PPU); the
    wired ramp's clock start against the centre sync (Part 77); and, for pistons, the
-   non-stiff piston's angle rows 0x1c58d0 (block 0x1c90b8, PJoint +0x50/+0x54), the byte
-   at +0x29, and how a pattern-0 piston closes the gap to its rule (D1183 holds it,
-   Part 84).
+   non-stiff piston's angle hold (soft or hard: row 0x95ba80's bias and cap, Part 85),
+   the byte at +0x29, and how a pattern-0 piston closes the gap to its rule (D1183 holds
+   it, Part 84).
 5. The creature brain (PEnemy reader NOT FOUND; leads: the TOC entry for string
    "PEnemy" 0xc79058, bit 0x1c tests); who puts a player in state 5 on contact (Part
    42 has the seat path) and sends the respawn (0x7feb8, Part 41); the controlinator's
