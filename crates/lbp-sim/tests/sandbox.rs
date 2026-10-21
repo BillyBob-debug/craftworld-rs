@@ -2283,3 +2283,32 @@ fn d1168_a_receiver_with_use_layers_puts_its_tag_on_the_sent_tags_z() {
     assert_eq!((out[0].at, out[0].z), ([110., 20.], -121.));
     assert_eq!((out[1].at, out[1].z), ([210., 20.], 279.));
 }
+
+/// D1169: the solver row for a piston (0x962590) locks the relative angle its ends
+/// had when the joint first ran (synced by 0xcab7c/0xc9af4), wrapped to [-pi, pi).
+#[test]
+fn d1169_a_piston_holds_the_relative_angle_its_bodies_start_at() {
+    let params = JointParams {
+        tweak_target_min_length: 150.,
+        tweak_target_max_length: 150.,
+        ..Default::default()
+    };
+    let things = vec![
+        ceiling(),
+        thing(
+            1,
+            matrix(0., 850., 0., 0.5, 1., 1.),
+            Some(rect(50., 50., 7)),
+            true,
+        ),
+        joint_with(2, 4, 0, [0.; 3], 1, [0.; 3], 150., params),
+    ];
+    let out = run(&things, 120);
+    let p = out[1].1;
+    assert!((p[1] - 850.).abs() < 5. && p[0].abs() < 2., "{p:?}");
+    assert!(
+        (out[1].2 - 0.5).abs() < 0.01,
+        "keeps its start angle: {}",
+        out[1].2
+    );
+}

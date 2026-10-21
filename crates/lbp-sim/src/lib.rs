@@ -850,6 +850,9 @@ fn spawn_joint(
             ),
         ),
         scene::JointKind::Piston => {
+            // D1169: the game's piston row (0x96178c, 0x962590) also locks the relative
+            // angle its ends had when it first ran (0xcab7c syncs +0xe0). A global basis
+            // keeps the spawn relative angle, which matches it.
             let d = [j.world_b[0] - j.world_a[0], j.world_b[1] - j.world_a[1]];
             let len = (d[0] * d[0] + d[1] * d[1]).sqrt();
             let axis = if len > 1e-3 {

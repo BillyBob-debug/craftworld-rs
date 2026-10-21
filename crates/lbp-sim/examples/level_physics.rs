@@ -307,6 +307,8 @@ fn run() -> Result<(), String> {
     let mut receivers_unsent = 0usize;
     let mut receivers_layered = 0usize;
     let mut receivers_use_layers = 0usize;
+    // D1169: pistons, those whose ends start turned to each other, and pattern 2 ones.
+    let (mut pistons, mut pistons_turned, mut pistons_sawtooth) = (0usize, 0usize, 0usize);
     // D1158: stick tweaks (spin 4, move 6 and 7) and those with input port 1 or 2 wired.
     let (mut sticks, mut sticks_wired) = (0usize, 0usize);
     // D1159: spin and move tweaks with a turn on their microchip boards (+0x220), and flipped spins.
@@ -531,6 +533,31 @@ fn run() -> Result<(), String> {
         receivers_unsent += unsent;
         receivers_layered += layered;
         receivers_use_layers += use_layers;
+        let angle_of = |e: lbp_sim::scene::Endpoint| match e {
+            lbp_sim::scene::Endpoint::Body(i) => scene.bodies[i].frame.angle,
+            lbp_sim::scene::Endpoint::Static(i) => scene.colliders[i].frame.angle,
+            lbp_sim::scene::Endpoint::Anchor { frame, .. } => frame.angle,
+        };
+        let piston_joints: Vec<_> = scene
+            .joints
+            .iter()
+            .filter(|j| j.kind == lbp_sim::scene::JointKind::Piston)
+            .collect();
+        let piston = piston_joints.len();
+        let turned = piston_joints
+            .iter()
+            .filter(|j| {
+                let d = angle_of(j.b) - angle_of(j.a);
+                (d - std::f32::consts::TAU * (d / std::f32::consts::TAU).round()).abs() > 1e-3
+            })
+            .count();
+        let sawtooth = piston_joints
+            .iter()
+            .filter(|j| j.params.animation_pattern == 2)
+            .count();
+        pistons += piston;
+        pistons_turned += turned;
+        pistons_sawtooth += sawtooth;
         let r = &scene.report;
         fixed_bodies += r.fixed_bodies;
         nested_bodies += r.nested_bodies;
@@ -652,6 +679,7 @@ fn run() -> Result<(), String> {
             "aimers": aim, "aimers_offset": aim_offset,
             "senders": send, "receivers": receive, "syncs_on_body": sync_body, "receivers_unsent": unsent, "receivers_layered": layered,
             "receivers_use_layers": use_layers,
+            "pistons": piston, "pistons_turned": turned, "pistons_sawtooth": sawtooth,
             "sticks": stick, "sticks_wired": stick_wired,
             "chip_turned": turned, "chip_flipped": flipped,
             "move_mirrored": mirrored, "move_flipped": move_flip,
@@ -685,6 +713,7 @@ fn run() -> Result<(), String> {
         "aimers": aimers, "aimers_offset": aimers_offset,
         "senders": senders, "receivers": receivers, "syncs_on_body": syncs_on_body, "receivers_unsent": receivers_unsent, "receivers_layered": receivers_layered,
         "receivers_use_layers": receivers_use_layers,
+        "pistons": pistons, "pistons_turned": pistons_turned, "pistons_sawtooth": pistons_sawtooth,
         "sticks": sticks, "sticks_wired": sticks_wired,
         "chip": {
             "turned": chip_turned, "flipped": chip_flipped,
