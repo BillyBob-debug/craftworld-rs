@@ -644,7 +644,7 @@ impl MoveTweak {
     /// FOUND (0x957df4): row 1 runs along the wanted velocity v with limits -decel and
     /// +accel times range; a zero v brakes along the body's velocity (or world up) with
     /// ±decel × range; row 2 holds the cross axis at 0 with ±decel × range, only when that
-    /// is not 0. The follower aims at the point min_range (max_range when fleeing) short of
+    /// is not 0 (D1163: a follower always packs it, 0x1c81a4). The follower aims at the point min_range (max_range when fleeing) short of
     /// its target, with ±accel × range on both rows and its speed clamped to ±range.
     /// D1150 FOUND (0x9586cc, the only call of 0x1c21f4 outside the turning packer): the
     /// follower's speed is [`SpinTweak::speed`] with half = 0.5 × accel × range ×
@@ -749,7 +749,9 @@ impl MoveTweak {
                 axis
             }
         };
-        if k != 0. {
+        // D1163: the caller packs row 2 when decel × range is not 0 or for a follower
+        // (0x1c8038 to 0x1c81ac).
+        if k != 0. || follow {
             let cross = [axis[1], -axis[0]];
             rows.push(Row {
                 axis: cross,

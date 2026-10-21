@@ -75,9 +75,12 @@
   angle and, XOR +0x224, their stick x (Part 62).
 - Merged: D1161 (PR 304, 48a8f07) the input scale 0xcbed4 scales movers and caps
   followers and spins (Part 63).
-- D1162 (branch `logic-d1162`, worktree `E:\Projects\wt-d324`): a deactivated Thing
-  (+0x7f) reads activation 0 in `tweak_activation`, as 0xcaf9c does (Part 63 addendum).
-- Decision numbers: D1100-D1199, next free D1163.
+- Merged: D1162 (PR 305, 80d23f1) a deactivated tweak reads activation 0 (0xcaf9c,
+  Part 63 addendum).
+- D1163 (branch `logic-d1163`, worktree `E:\Projects\wt-d324`): a follower packs
+  its cross row even when decel × velRange is 0 (0x1c81a4); the 0x957df4 param_5 path
+  is that row (docs/logic/part-64.md; corrects Part 12).
+- Decision numbers: D1100-D1199, next free D1164.
 
 ## Facts
 - Route run: as docs/lanes/level1.md Facts, with `--native-scripts`; captures under
@@ -132,7 +135,8 @@
   tick 1,000, ending at x -2,450.6, y 1,725.8 on tick 2,007 (Part 56); after D1155
   lift 2643 no longer sees its switched-off tags and Sackboy no longer falls: x -2,870.3,
   y 5,188.6 to about tick 1,400, then x -2,440.6, y 5,400.9 to tick 2,007 (Part 57).
-  After D1156 to D1162 unchanged (Parts 58-63).
+  After D1156 to D1163 unchanged (Parts 58-64; D1163 changes 2 Rookie Test
+  followers, none on the route).
 - Switch census (Part 14): `level_scripts` example with `--all` over the 01.33 catalog
   into local-analysis/logic/census-all-1.json (378 levels, 358 read, 141,572 switches);
   census-all-2.json adds the grab counts (Part 20), census-all-4.json the pads
@@ -170,7 +174,8 @@
   and their offset search points (Part 56); local-analysis/logic/d1159/census1.json
   the tweaks turned or flipped on their chips (Part 61);
   local-analysis/logic/d1160/census1.json the movers mirrored or flipped (Part 62);
-  local-analysis/logic/d1161/census1.json the input-scaled tweaks (Part 63).
+  local-analysis/logic/d1161/census1.json the input-scaled tweaks (Part 63);
+  local-analysis/logic/d1163/census1.json the followers with decel × velRange 0 (Part 64).
 - Census: a scratch example (not committed) prints counts (`WIRED=1` lists switch
   targets by gadget); the PPhysicsTweak histogram by configuration is in docs/logic.md
   Part 2, the wiring in Part 3.
@@ -234,8 +239,7 @@ EBOOT rule and unit tests:
    Part 49); add `SpinTweak::lead` for a target with a body (Part 50); configuration 5's lead rate into `SpinTweak::speed` (Part 51);
    for followers, the allowInOut layer move 0x1c8250 and the 1/mass rate (Part 53);
    for tag synchronisers, the receiver's online source 0x2a8538, the useLayers z and
-   the other 0x130c90 caller 0x29ff3c (Part 59); for stick movers, the 0x957df4 param_5 path
-   (Part 60);
+   the other 0x130c90 caller 0x29ff3c (Part 59);
    the sackbot input, the
    stickiness-3 tweak, the emitter's lifetime and recycling, the
    sequencer's output, music and bit-4 boards (Part 37).

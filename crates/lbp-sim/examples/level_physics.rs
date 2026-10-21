@@ -307,6 +307,7 @@ fn run() -> Result<(), String> {
     let (mut chip_turned, mut chip_flipped) = (0usize, 0usize);
     let (mut move_mirrored, mut move_flipped) = (0usize, 0usize);
     let mut input_scaled = 0usize;
+    let mut follow_cross = 0usize;
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -460,6 +461,14 @@ fn run() -> Result<(), String> {
             })
             .sum::<usize>();
         input_scaled += scaled;
+        // D1163: followers with decel × range 0, which pack row 2 only as followers.
+        let cross = scene
+            .bodies
+            .iter()
+            .flat_map(|b| &b.moves)
+            .filter(|m| m.configuration == 11 && m.decel * m.range == 0.)
+            .count();
+        follow_cross += cross;
         move_flipped += move_flip;
         syncs_on_body += sync_body;
         let r = &scene.report;
@@ -585,7 +594,7 @@ fn run() -> Result<(), String> {
             "sticks": stick, "sticks_wired": stick_wired,
             "chip_turned": turned, "chip_flipped": flipped,
             "move_mirrored": mirrored, "move_flipped": move_flip,
-            "input_scaled": scaled,
+            "input_scaled": scaled, "follow_cross": cross,
         }));
     }
     let mut top: Vec<(&String, &usize)> = materials.iter().collect();
@@ -618,7 +627,7 @@ fn run() -> Result<(), String> {
         "chip": {
             "turned": chip_turned, "flipped": chip_flipped,
             "move_mirrored": move_mirrored, "move_flipped": move_flipped,
-            "input_scaled": input_scaled,
+            "input_scaled": input_scaled, "follow_cross": follow_cross,
         },
         "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
