@@ -220,9 +220,13 @@ pub fn drive_spins(
         let angle = rot.as_radians();
         let up = [-rot.sin, rot.cos];
         let vel = [v.0.x * per_tick, v.0.y * per_tick];
-        let me = [pos.0.x / UNIT_SCALE, pos.0.y / UNIT_SCALE];
         let before = w.0 / hz;
         let after = tweaks.0.iter().fold(before, |s, t| {
+            // D1156: measured from the tweak's parent point.
+            let me = [
+                pos.0.x / UNIT_SCALE + rot.cos * t.at[0] - rot.sin * t.at[1],
+                pos.0.y / UNIT_SCALE + rot.sin * t.at[0] + rot.cos * t.at[1],
+            ];
             let d = match t.key {
                 Some(k) => tags
                     .iter()

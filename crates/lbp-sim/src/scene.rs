@@ -372,6 +372,10 @@ pub struct SpinTweak {
     /// D1148: the mirror flip (0x95fd14): the tweak's mirror parity up its parent chain
     /// (byte +0x224, built by 0xcd2e0) XOR its body's basis determinant below 0.
     pub flip: bool,
+    /// D1156: configuration 5's point, in its body's frame: the Thing's parent (Thing+0x5c,
+    /// else the Thing itself), as the follower's (D1154). FOUND (0x95fb20): the search
+    /// 0x1c3e04 gets that Thing and the aim is the target's translation less that Thing's.
+    pub at: [f32; 2],
 }
 
 /// D1144: the dead zone of the turning packer (0xc46400, 0x95fd88): an aim shorter than
@@ -1158,6 +1162,11 @@ fn build_scene_inner(
             .or_else(|| owner.and_then(|o| things[o].data.pos.as_ref()))
             .is_some_and(|p| p.world[0] * p.world[5] - p.world[1] * p.world[4] < 0.);
         if let Some(b) = slot {
+            // D1156: as the follower's point (D1154).
+            let from = t.parent.filter(|&p| p != i).unwrap_or(i);
+            let at = placed(things, from).map_or([0.; 2], |p| {
+                scene.bodies[b].frame.local([p.world[12], p.world[13]])
+            });
             scene.bodies[b].spins.push(SpinTweak {
                 thing: i,
                 configuration: tw.configuration,
@@ -1173,6 +1182,7 @@ fn build_scene_inner(
                     .then(|| key_of(tw.color_index, &tw.name)),
                 stick: [0.; 2],
                 flip,
+                at,
             });
         }
     }

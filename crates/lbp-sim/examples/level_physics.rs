@@ -297,6 +297,8 @@ fn run() -> Result<(), String> {
     let (mut touching_pairs, mut touching_pairs_dynamic) = (0usize, 0usize);
     // D1154: followers, and those whose parent's point is off their body's origin.
     let (mut followers, mut followers_offset) = (0usize, 0usize);
+    // D1156: configuration-5 spin tweaks, and those off their body's origin.
+    let (mut aimers, mut aimers_offset) = (0usize, 0usize);
     let mut panicked = Vec::new();
     // Why bodies move: the same keys over every dynamic body and over those that moved >100.
     let mut why = BTreeMap::<&str, (BTreeMap<String, usize>, BTreeMap<String, usize>)>::new();
@@ -374,6 +376,18 @@ fn run() -> Result<(), String> {
         }
         followers += follow;
         followers_offset += follow_offset;
+        let (mut aim, mut aim_offset) = (0usize, 0usize);
+        for t in scene
+            .bodies
+            .iter()
+            .flat_map(|b| &b.spins)
+            .filter(|t| t.configuration == 5)
+        {
+            aim += 1;
+            aim_offset += usize::from(t.at[0].hypot(t.at[1]) > 1.);
+        }
+        aimers += aim;
+        aimers_offset += aim_offset;
         let r = &scene.report;
         fixed_bodies += r.fixed_bodies;
         nested_bodies += r.nested_bodies;
@@ -492,6 +506,7 @@ fn run() -> Result<(), String> {
             "non_finite": m.non_finite, "max_move": m.max_move,
             "touching_pairs": touching, "touching_pairs_dynamic": touching_dynamic,
             "followers": follow, "followers_offset": follow_offset,
+            "aimers": aim, "aimers_offset": aim_offset,
         }));
     }
     let mut top: Vec<(&String, &usize)> = materials.iter().collect();
@@ -518,6 +533,7 @@ fn run() -> Result<(), String> {
         "joints": joints, "rejected_joints": rejected_joints,
         "touching_pairs": touching_pairs, "touching_pairs_dynamic": touching_pairs_dynamic,
         "followers": followers, "followers_offset": followers_offset,
+        "aimers": aimers, "aimers_offset": aimers_offset,
         "anchored_joint_ends": anchored,
         "fixed_bodies": fixed_bodies, "nested_bodies": nested_bodies,
         "fixed_material_paths": fixed_paths,
