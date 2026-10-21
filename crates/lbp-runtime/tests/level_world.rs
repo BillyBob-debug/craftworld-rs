@@ -5926,3 +5926,18 @@ fn d1101_a_tweak_reads_its_input_digitally_or_by_magnitude() {
     assert_eq!((read(3, 0), read(3, 1)), (1., 0.5));
     assert_eq!((read(4, 0), read(4, 1)), (1., 1.));
 }
+
+#[test]
+fn d1162_a_deactivated_tweak_reads_no_activation() {
+    let t: Vec<ThingRecord> = (0..2)
+        .map(|index| ThingRecord {
+            index,
+            ..Default::default()
+        })
+        .collect();
+    let mut world = LevelWorld::from_things(&t);
+    world.things[1].deactivated = true;
+    let read = |thing, behavior| world.tweak_activation(thing, behavior);
+    assert_eq!((read(0, 0), read(0, 1), read(0, 2)), (1., 1., 1.));
+    assert_eq!((read(1, 0), read(1, 1), read(1, 2)), (0., 0., 0.));
+}
