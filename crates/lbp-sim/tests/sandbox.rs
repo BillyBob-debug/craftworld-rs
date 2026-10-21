@@ -2615,3 +2615,62 @@ fn d1178_only_a_pattern_2_motor_has_a_k_term() {
     near(motor_band(0.2, -0.4, 5.), (-0.6, 0., 2.));
     near(motor_band(-0.1, -0.02, 5.), (-0.03, -0.02, 0.5));
 }
+
+#[test]
+fn d1179_a_motor_pushes_to_its_band_and_only_pattern_2_is_braked_past_it() {
+    use lbp_sim::scene::{Endpoint, JointKind, PistonClock, SceneJoint};
+    use lbp_sim::{motor_damping, MOTOR_DAMPING};
+    let joint = |animation_pattern| {
+        let mut params = JointParams {
+            mode: 1,
+            animation_pattern,
+            strength: 1.,
+            ..Default::default()
+        };
+        params.motion[0] = std::f32::consts::PI;
+        params.motion[1] = 180.;
+        params.motion[4] = 30.;
+        SceneJoint {
+            thing: 0,
+            kind: JointKind::Motor,
+            a: Endpoint::Static(0),
+            b: Endpoint::Static(1),
+            world_a: [0.; 2],
+            world_b: [0.; 2],
+            local_a: [0.; 2],
+            local_b: [0.; 2],
+            length: 0.,
+            min_length: 0.,
+            max_length: 0.,
+            params,
+        }
+    };
+    for pattern in [0, 2] {
+        let drive = || lbp_sim::PistonDrive {
+            joint: joint(pattern),
+            clock: PistonClock::default(),
+            sync: None,
+        };
+        let band = |rate| drive().band_to(40., None, 0.5, rate);
+        let w = drive().turn_to(40., None, 0.5);
+        assert!(w.abs() > 1e-3, "pattern {pattern} turns: {w}");
+        let push = motor_damping(&joint(pattern).params);
+        // At rest it is driven to the cut `delta` edge with the strength cap.
+        let (v, d) = band(0.);
+        assert!(
+            (v - w).abs() < 1e-4 && d == push,
+            "pattern {pattern}: {v} {d}"
+        );
+        // On its edge it is inside the band and not pushed.
+        assert_eq!(band(w).1, 0.);
+        // Past 1.5 × `err` only a pattern-2 motor (k 5 × strength) is braked, to that edge.
+        let (v, d) = band(3. * w);
+        assert!((v - 1.5 * w).abs() < 1e-3, "pattern {pattern}: {v}");
+        let brake = if pattern == 2 {
+            MOTOR_DAMPING * (5. * (w / 30.).abs().max(0.1)).min(1.)
+        } else {
+            0.
+        };
+        assert!((d - brake).abs() < 1e-5, "pattern {pattern}: {d} {brake}");
+    }
+}

@@ -121,11 +121,7 @@ pub fn motor_k(params: &lbp_level::parts::JointParams, wired: bool) -> f32 {
 /// the 1.5 × `err` edge's cap). INFERRED: with k 0 (every motor but pattern 2) that edge
 /// has no force, so only a pattern-2 motor is braked once it turns past 1.5 × `err`.
 pub fn motor_band(delta: f32, err: f32, k: f32) -> (f32, f32, f32) {
-    let d = if delta > 0. {
-        delta.min(err).max(0.)
-    } else {
-        delta.max(err).min(0.)
-    };
+    let d = cut(delta, err);
     let e = 1.5 * err;
     (d.min(e), d.max(e), k * err.abs().max(0.1))
 }
@@ -631,26 +627,80 @@ impl PistonDrive {
     /// angle rule is synced to the measure when it first runs (0xc9af4). The row's
     /// strength cap scales the motor's push ([`motor_damping`], D1173). The row's second
     /// edge, 1.5 × `err` with a cap of k × max(|err|, 0.1) ([`motor_band`], [`motor_k`],
-    /// D1178), is not applied yet.
+    /// D1178), is applied by [`Self::band_to`] (D1179).
     pub fn turn_to(&mut self, now: f32, input: Option<(i32, f32, bool)>, measured: f32) -> f32 {
+        match self.edges(now, input, measured) {
+            Ok(w) => w,
+            Err((delta, err)) => cut(delta, err) * TICK_HZ as f32,
+        }
+    }
+
+    /// D1171: the motor's rate in rad/s as `Ok` when the row drives it at its rate
+    /// (pattern 1, or wired in mode 1 or 4), else as `Err` its `delta` and `err` per frame.
+    fn edges(
+        &mut self,
+        now: f32,
+        input: Option<(i32, f32, bool)>,
+        measured: f32,
+    ) -> Result<f32, (f32, f32)> {
         let w = self.turn(now, input);
         let wired = input.is_some();
         let p = self.joint.params;
         if p.animation_pattern == 1 || (wired && matches!(p.mode, 1 | 4)) {
-            return w;
+            return Ok(w);
         }
-        let hz = TICK_HZ as f32;
         let f = self.clock.frame(now);
         let a = |f| self.joint.motor_angle(f, wired);
         let sync = *self.sync.get_or_insert(a(f) - measured);
-        let delta = wrap_pi(w / hz);
-        let err = wrap_pi(a(f + self.clock.scale) - sync - measured);
-        let v = if delta > 0. {
-            delta.min(err).max(0.)
-        } else {
-            delta.max(err).min(0.)
+        let delta = wrap_pi(w / TICK_HZ as f32);
+        Err((delta, wrap_pi(a(f + self.clock.scale) - sync - measured)))
+    }
+
+    /// D1179: the row's band ([`motor_band`], D1178) as the joint motor's target turn rate
+    /// (rad/s) and push ([`MotorModel::AccelerationBased`] damping), for ends at relative
+    /// angle `measured` turning at `rate` rad/s. Below the band the motor drives to its low
+    /// edge, above it to its high edge, each with that edge's cap: the strength cap
+    /// ([`motor_damping`]) on the cut `delta` edge, and on the 1.5 × `err` edge the k cap
+    /// k × max(|err|, 0.1) scaled as the strength cap is (MOTOR_DAMPING × cap, at most
+    /// MOTOR_DAMPING; INFERRED, the row is solved off the PPU). Inside the band it does not
+    /// push. So a motor with k 0 (any pattern but 2) drives forward to its target but is
+    /// never braked, and a pattern-2 motor is braked once it turns past 1.5 × `err`. A
+    /// motor driven at its rate keeps [`motor_damping`] both ways.
+    pub fn band_to(
+        &mut self,
+        now: f32,
+        input: Option<(i32, f32, bool)>,
+        measured: f32,
+        rate: f32,
+    ) -> (f32, f32) {
+        let push = motor_damping(&self.joint.params);
+        let (delta, err) = match self.edges(now, input, measured) {
+            Ok(w) => return (w, push),
+            Err(e) => e,
         };
-        v * hz
+        let hz = TICK_HZ as f32;
+        let k = motor_k(&self.joint.params, input.is_some());
+        let (lo, hi, cap) = motor_band(delta, err, k);
+        let d = cut(delta, err);
+        let brake = MOTOR_DAMPING * cap.min(1.);
+        let at = |edge: f32| (edge * hz, if edge == d { push } else { brake });
+        let r = rate / hz;
+        if r < lo {
+            at(lo)
+        } else if r > hi {
+            at(hi)
+        } else {
+            (d * hz, 0.)
+        }
+    }
+}
+
+/// D1171: `delta` cut to between 0 and `err` (0x95fa28, 0x95fb10).
+fn cut(delta: f32, err: f32) -> f32 {
+    if delta > 0. {
+        delta.min(err).max(0.)
+    } else {
+        delta.max(err).min(0.)
     }
 }
 
@@ -703,22 +753,33 @@ pub fn drive_winches(
 
 /// D1108: at tick `now` sets each motor's (MOTOR, type 9) target turn rate from its clock
 /// and angle rule, cut so it never runs past its target ([`PistonDrive::turn_to`], D1171),
-/// waking both ends when it changed. The ends' relative angle comes from `rotations`.
+/// within the row's band ([`PistonDrive::band_to`], D1179), waking both ends when it
+/// changed. The ends' relative angle and turn rate come from `bodies`.
 pub fn drive_motors(
     commands: &mut Commands,
     q: &mut Query<(&mut PistonDrive, &mut RevoluteJoint)>,
-    rotations: &Query<&Rotation>,
+    bodies: &Query<(&Rotation, &AngularVelocity)>,
     now: f32,
     signal: impl Fn(&scene::SceneJoint) -> Option<(i32, f32, bool)>,
 ) {
     for (mut drive, mut joint) in q.iter_mut() {
         let input = signal(&drive.joint);
-        let angle = |e| rotations.get(e).map_or(0., |r: &Rotation| r.as_radians());
-        let w = drive.turn_to(now, input, angle(joint.body2) - angle(joint.body1));
-        if joint.motor.target_velocity == w {
+        let at = |e| {
+            bodies
+                .get(e)
+                .map_or((0., 0.), |(r, w)| (r.as_radians(), w.0))
+        };
+        let ((a1, w1), (a2, w2)) = (at(joint.body1), at(joint.body2));
+        let (w, damping) = drive.band_to(now, input, a2 - a1, w2 - w1);
+        let model = MotorModel::AccelerationBased {
+            stiffness: 0.,
+            damping,
+        };
+        if joint.motor.target_velocity == w && joint.motor.motor_model == model {
             continue;
         }
         joint.motor.target_velocity = w;
+        joint.motor.motor_model = model;
         wake_ends(commands, joint.body1, joint.body2);
     }
 }
