@@ -100,6 +100,23 @@ pub const MOTOR_DAMPING: f32 = 0.5;
 pub fn motor_damping(params: &lbp_level::parts::JointParams) -> f32 {
     MOTOR_DAMPING * params.strength.clamp(0., 1.)
 }
+
+/// D1174: FOUND (01.33) the solver's motor case 0x1c9eac gives the motor row its angle
+/// limits: for pattern 0 with a range `+0xc8` under 2π, the centre `+0xe0` ± range / 2
+/// (sorted); for pattern 2 with a range under 2π, the centre to the centre + range;
+/// otherwise none (±FLT_MAX). The centre is the ends' relative angle when the motor first
+/// ran (0xc9af4, Part 70), which is where avian's joint counts its angle from. Pattern 2
+/// is left out while the turn sign is UNVERIFIED (Part 74), so this returns pattern 0's
+/// limits only, relative to the start angle. Not applied to the joint yet: our pattern-0
+/// sweep runs from the start to the start + range (D1108), so limits about the start
+/// would cut it in half; which of the two is centred differently is UNVERIFIED (Part 75).
+pub fn motor_angle_limits(params: &lbp_level::parts::JointParams) -> Option<(f32, f32)> {
+    let range = params.motion[0];
+    (params.animation_pattern == 0 && range < std::f32::consts::TAU).then(|| {
+        let half = range / 2.;
+        (half.min(-half), half.max(-half))
+    })
+}
 /// Angular springs (SPRING_ANGULAR, wobble): avian spring-damper. PLACEHOLDER until
 /// PJoint.strength is calibrated.
 pub const SPRING_FREQUENCY: f32 = 2.0;
